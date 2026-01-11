@@ -1,0 +1,44 @@
+# PaST-SM PPO Training: P100 Smoke Test Config
+# ~30-60 minutes, catches late errors
+
+# Variant and identity
+variant_id: ppo_short_base
+seed: 0
+
+# Environment
+num_envs: 256
+rollout_length: 128
+
+# PPO hyperparameters
+gamma: 0.99
+gae_lambda: 0.95
+clip_eps: 0.2
+value_coef: 0.5
+entropy_coef: 0.01
+learning_rate: 0.0003
+max_grad_norm: 1.0
+ppo_epochs: 4
+num_minibatches: 8
+target_kl: 0.02
+normalize_advantages: true
+
+# Training budget (~6.5M steps = 200 updates)
+total_env_steps: 6553600  # 256 * 128 * 200
+
+# Evaluation
+eval_every_updates: 20
+num_eval_instances: 256
+
+# Checkpointing
+save_latest_every_updates: 20
+save_latest_every_minutes: 15.0
+num_milestone_checkpoints: 4
+
+# Logging
+log_every_updates: 1
+
+# Device
+device: cuda
+
+# Debug
+anomaly_check_every: 10

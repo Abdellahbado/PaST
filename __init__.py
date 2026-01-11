@@ -112,16 +112,32 @@ from .past_sm_model import (
 )
 
 # =============================================================================
-# Training (placeholder, structure only for now)
+# PPO Training
 # =============================================================================
 
-# Training modules will be imported when implemented
-# from .train import (
-#     Trainer,
-#     train_model,
-#     AsyncEpisodePrefetcher,
-#     TRAIN_VERSION,
-# )
+from .ppo_runner import (
+    PPOConfig,
+    RolloutBuffer,
+    PPORunner,
+)
+
+from .eval import (
+    EvalResult,
+    Evaluator,
+    compare_variants,
+)
+
+from .train_ppo import (
+    RunConfig,
+    MetricsLogger,
+    CheckpointManager,
+    TrainingEnv,
+    train,
+    get_p100_smoke_config,
+    get_a100_full_config,
+    set_seed,
+    TRAIN_VERSION,
+)
 
 # =============================================================================
 # Exports
@@ -186,4 +202,20 @@ __all__ = [
     "PeriodEmbedding",
     "ContextEmbedding",
     "GlobalHorizonEmbedding",
+    # PPO Training
+    "PPOConfig",
+    "RolloutBuffer",
+    "PPORunner",
+    "EvalResult",
+    "Evaluator",
+    "compare_variants",
+    "RunConfig",
+    "MetricsLogger",
+    "CheckpointManager",
+    "TrainingEnv",
+    "train",
+    "get_p100_smoke_config",
+    "get_a100_full_config",
+    "set_seed",
+    "TRAIN_VERSION",
 ]
