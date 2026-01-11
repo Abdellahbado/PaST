@@ -175,6 +175,11 @@ class RolloutBuffer:
             last_dones: Done flags for final state [B]
             gamma: Discount factor
             gae_lambda: GAE lambda parameter
+
+        Note on indexing:
+            - dones[t] indicates whether episode terminated AFTER taking action at step t
+            - So when computing δ_t = r_t + γ(1-done_t)V_{t+1} - V_t, we use dones[t]
+            - This is because if done_t=1, there is no V_{t+1} to bootstrap from
         """
         # Bootstrap from last value
         last_gae = torch.zeros(self.num_envs, device=self.device)
@@ -184,17 +189,19 @@ class RolloutBuffer:
                 next_non_terminal = 1.0 - last_dones.float()
                 next_values = last_values
             else:
-                next_non_terminal = 1.0 - self.dones[t + 1]
+                next_non_terminal = (
+                    1.0 - self.dones[t].float()
+                )  # Use dones[t], not dones[t+1]
                 next_values = self.values[t + 1]
 
-            # TD error: δ_t = r_t + γ(1-done)V_{t+1} - V_t
+            # TD error: δ_t = r_t + γ(1-done_t)V_{t+1} - V_t
             delta = (
                 self.rewards[t]
                 + gamma * next_non_terminal * next_values
                 - self.values[t]
             )
 
-            # GAE: A_t = δ_t + γλ(1-done)A_{t+1}
+            # GAE: A_t = δ_t + γλ(1-done_t)A_{t+1}
             last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
             self.advantages[t] = last_gae
 
@@ -414,12 +421,10 @@ class PPORunner:
                 period_full_mask=obs.get("period_full_mask"),
             )
 
-        # Get done flags from environment
-        final_dones = (
-            self.env.done_mask
-            if hasattr(self.env, "done_mask")
-            else torch.zeros(self.env.batch_size, dtype=torch.bool, device=self.device)
-        )
+        # Get done flags from the LAST step of the rollout buffer
+        # This is more reliable than env.done_mask which may have been reset
+        # by the training wrapper's auto-reset logic
+        final_dones = self.buffer.dones[self.rollout_length - 1].bool()
 
         # Compute GAE
         self.buffer.compute_gae(

@@ -439,6 +439,24 @@ class CheckpointManager:
             return torch.load(path, map_location=device)
         return None
 
+    def load_best_energy_from_checkpoint(self, device: torch.device):
+        """
+        Load best_energy from best.pt if it exists.
+
+        Call this after resume to ensure best.pt isn't overwritten
+        with worse results.
+        """
+        path = self.checkpoint_dir / "best.pt"
+        if path.exists():
+            checkpoint = torch.load(path, map_location=device)
+            if "eval_result" in checkpoint:
+                self.best_energy = checkpoint["eval_result"].get(
+                    "eval/energy_mean", float("inf")
+                )
+                print(
+                    f"  [Checkpoint] Restored best_energy={self.best_energy:.2f} from best.pt"
+                )
+
 
 # =============================================================================
 # GPU Environment Wrapper
@@ -483,8 +501,10 @@ class TrainingEnv:
             env_config.short_slack_spec = variant_config.env.short_slack_spec
         elif slack_type == SlackType.COARSE_TO_FINE:
             env_config.slack_variant = SlackVariant.COARSE_TO_FINE
+            env_config.c2f_slack_spec = variant_config.env.c2f_slack_spec
         elif slack_type == SlackType.FULL:
             env_config.slack_variant = SlackVariant.FULL_SLACK
+            env_config.full_slack_spec = variant_config.env.full_slack_spec
 
         self.env_config = env_config
 
@@ -520,29 +540,37 @@ class TrainingEnv:
         """
         Take a step in all environments with auto-reset.
 
+        CRITICAL: When ANY env is done, we reset the ENTIRE batch.
+        To maintain trajectory integrity, we mark ALL envs as done on that step
+        so PPO treats it as an episode boundary for EVERY env (not just the
+        ones that actually finished). This is wasteful but correct.
+
         Returns:
-            obs: Next observation
+            obs: Next observation (post-reset if any env finished)
             rewards: Rewards for this step
-            dones: Done flags
+            dones: Done flags - ALL TRUE if any env finished (episode boundary)
             info: Additional info
         """
         obs, rewards, dones, info = self.env.step(actions)
 
-        # Auto-reset completed episodes
+        # Track which envs just finished (before updating done_mask)
         newly_done = dones & ~self.done_mask
-        self.done_mask = self.done_mask | dones
 
-        # If any episode is done, generate new data for those
+        # Auto-reset when ANY episode is done to prevent all-masked action spaces
         if newly_done.any():
-            # For simplicity, reset all when any done (batched reset)
-            # A more sophisticated approach would reset only done envs
-            if dones.all():
-                obs = self.reset()
-                self.done_mask = torch.zeros(
-                    self.num_envs, dtype=torch.bool, device=self.device
-                )
-
-        return obs, rewards, dones, info
+            obs = self.reset()
+            # CRITICAL: Mark ALL envs as done so PPO treats this as episode boundary
+            # for the entire batch. This ensures obs (from new episodes) pairs with
+            # done=True, preventing invalid transitions where done=False but next_obs
+            # is from a different episode.
+            all_done = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+            self.done_mask = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            return obs, rewards, all_done, info
+        else:
+            self.done_mask = self.done_mask | dones
+            return obs, rewards, newly_done, info
 
     def get_obs_shapes(self) -> Dict[str, Tuple[int, ...]]:
         """Get observation tensor shapes (without batch dimension)."""
@@ -674,6 +702,8 @@ def train(
         runner.load_state_dict(checkpoint["runner"])
         set_rng_states(checkpoint["rng_states"])
         start_update = runner.update_count
+        # Restore best_energy to avoid overwriting best.pt with worse results
+        checkpoint_mgr.load_best_energy_from_checkpoint(device)
         print(f"Resumed at update {start_update}, step {runner.global_step}")
 
     # Initial reset
@@ -702,22 +732,19 @@ def train(
                 if param.grad is not None:
                     assert torch.isfinite(param.grad).all(), f"NaN/Inf in {name}.grad"
 
-        # Logging
-        if update % run_config.log_every_updates == 0:
-            logger.log(update, runner.global_step, metrics)
-
         # Evaluation
-        if update % run_config.eval_every_updates == 0 and update > 0:
+        is_eval_step = update % run_config.eval_every_updates == 0 and update > 0
+        if is_eval_step:
             print(f"\n  [Eval] Running evaluation...")
             eval_batch = generate_episode_batch(
                 batch_size=run_config.num_eval_instances,
                 config=variant_config.data,
                 seed=run_config.seed + update,  # Different seed for eval
             )
-            eval_result = evaluator.evaluate(eval_batch, deterministic=True)
-
+            eval_result, _ = evaluator.evaluate(eval_batch, deterministic=True)
             eval_metrics = eval_result.to_dict()
-            logger.log(update, runner.global_step, {**metrics, **eval_metrics})
+            # Merge eval metrics into main metrics (logged once below)
+            metrics.update(eval_metrics)
 
             print(
                 f"  [Eval] energy={eval_result.energy_mean:.2f}±{eval_result.energy_std:.2f} "
@@ -729,6 +756,10 @@ def train(
             checkpoint_mgr.save_best(
                 runner, rng_states, run_config, variant_config, eval_result
             )
+
+        # Logging (single log call per update, includes eval metrics if eval step)
+        if update % run_config.log_every_updates == 0:
+            logger.log(update, runner.global_step, metrics)
 
         # Save latest checkpoint
         if checkpoint_mgr.should_save_latest(
@@ -764,7 +795,7 @@ def train(
         config=variant_config.data,
         seed=run_config.seed + 999999,
     )
-    final_result = evaluator.evaluate(eval_batch, deterministic=True)
+    final_result, _ = evaluator.evaluate(eval_batch, deterministic=True)
     print(
         f"Final: energy={final_result.energy_mean:.2f}±{final_result.energy_std:.2f} "
         f"infeas={final_result.infeasible_rate*100:.1f}%"

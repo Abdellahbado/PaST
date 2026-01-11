@@ -89,7 +89,7 @@ class Evaluator:
         self,
         batch_data: Dict[str, np.ndarray],
         deterministic: bool = True,
-    ) -> EvalResult:
+    ) -> Tuple[EvalResult, Dict[str, np.ndarray]]:
         """
         Evaluate model on a batch of instances.
 
@@ -98,7 +98,8 @@ class Evaluator:
             deterministic: If True, use argmax actions; else sample
 
         Returns:
-            EvalResult with statistics
+            result: EvalResult with statistics
+            per_instance: Dictionary of per-instance arrays for aggregation
         """
         self.model.eval()
 
@@ -135,58 +136,104 @@ class Evaluator:
 
             # Check for infeasible states (all actions masked)
             all_masked = ~torch.isfinite(logits).any(dim=-1)
-            newly_infeasible = all_masked & ~done_mask
+            newly_infeasible = all_masked & ~done_mask & ~infeasible_mask
             infeasible_mask = infeasible_mask | newly_infeasible
 
-            # Select action
+            # For infeasible states, mark as done (cannot continue)
+            # and record current time as final time
+            if newly_infeasible.any() and hasattr(self.env, "t"):
+                final_times = torch.where(
+                    newly_infeasible,
+                    self.env.t.float(),
+                    final_times,
+                )
+            done_mask = done_mask | newly_infeasible
+
+            # CRITICAL: Propagate done_mask to env so it won't update done instances
+            # This prevents infeasible/done instances from being advanced by env.step()
+            if hasattr(self.env, "done_mask"):
+                self.env.done_mask = self.env.done_mask | done_mask
+
+            # Select action (only for non-done, non-infeasible instances)
             if deterministic:
                 actions = logits.argmax(dim=-1)
             else:
-                dist = torch.distributions.Categorical(logits=logits)
+                # Handle all-masked by using uniform over action space
+                safe_logits = torch.where(
+                    all_masked.unsqueeze(-1),
+                    torch.zeros_like(logits),
+                    logits,
+                )
+                dist = torch.distributions.Categorical(logits=safe_logits)
                 actions = dist.sample()
 
-            # For infeasible states, use action 0 (will be ignored)
-            actions = actions.masked_fill(all_masked, 0)
+            # Skip env step for instances that are done or infeasible
+            # Use action 0 as placeholder (won't affect done instances)
+            actions = actions.masked_fill(done_mask, 0)
 
             # Environment step
             next_obs, rewards, dones, info = self.env.step(actions)
 
-            # Update tracking (only for non-done instances)
+            # Track which envs just finished (BEFORE updating done_mask)
+            newly_done = dones & ~done_mask
+
+            # Update tracking (only for active, non-infeasible instances)
             active = ~done_mask
             total_energies[active] += -rewards[active]  # rewards are negative energy
             total_steps[active] += 1
 
-            # Update done mask
-            done_mask = done_mask | dones
-
-            # Track final times
+            # Track final times for newly done instances
             if hasattr(self.env, "t"):
                 final_times = torch.where(
-                    dones & ~done_mask,  # newly done
+                    newly_done,
                     self.env.t.float(),
                     final_times,
                 )
 
+            # Update done mask AFTER tracking newly_done
+            done_mask = done_mask | dones
+
             obs = next_obs
 
-        # Get final energies from environment if available
+        # For unfinished episodes, use current time as makespan
+        unfinished = ~done_mask
+        if unfinished.any() and hasattr(self.env, "t"):
+            final_times = torch.where(
+                unfinished,
+                self.env.t.float(),
+                final_times,
+            )
+
+        # Use env.total_energy as the source of truth for energy, but only for
+        # instances that weren't marked infeasible (infeasible ones may have been
+        # stepped with arbitrary actions before we could propagate done_mask)
         if hasattr(self.env, "total_energy"):
-            total_energies = self.env.total_energy
+            # Keep our accumulated energy for infeasible instances, use env's for others
+            total_energies = torch.where(
+                infeasible_mask,
+                total_energies,
+                self.env.total_energy,
+            )
 
         # Move to CPU for statistics
         energies_np = total_energies.cpu().numpy()
         steps_np = total_steps.cpu().numpy()
         infeasible_np = infeasible_mask.cpu().numpy()
-
-        # Handle makespans
-        if hasattr(self.env, "t"):
-            makespans_np = self.env.t.cpu().numpy().astype(float)
-        else:
-            makespans_np = np.zeros(batch_size)
+        makespans_np = final_times.cpu().numpy().astype(float)
+        done_np = done_mask.cpu().numpy()
 
         self.model.train()
 
-        return EvalResult(
+        # Per-instance data for proper multi-batch aggregation
+        per_instance = {
+            "energies": energies_np,
+            "makespans": makespans_np,
+            "steps": steps_np,
+            "infeasible": infeasible_np,
+            "done": done_np,
+        }
+
+        result = EvalResult(
             energy_mean=float(np.mean(energies_np)),
             energy_std=float(np.std(energies_np)),
             energy_min=float(np.min(energies_np)),
@@ -198,6 +245,8 @@ class Evaluator:
             num_episodes=batch_size,
             steps_mean=float(np.mean(steps_np)),
         )
+
+        return result, per_instance
 
     @torch.no_grad()
     def evaluate_multiple_batches(
@@ -215,30 +264,34 @@ class Evaluator:
             deterministic: If True, use argmax actions
 
         Returns:
-            Aggregated EvalResult
+            Aggregated EvalResult with correct statistics
         """
+        # Collect per-instance data from all batches
         all_energies = []
         all_makespans = []
         all_steps = []
-        total_infeasible = 0
-        total_episodes = 0
+        all_infeasible = []
 
         for _ in range(num_batches):
             batch_data = batch_generator()
-            result = self.evaluate(batch_data, deterministic=deterministic)
+            result, per_instance = self.evaluate(
+                batch_data, deterministic=deterministic
+            )
 
-            # Would need actual per-instance data for proper aggregation
-            # For now, use weighted statistics
-            n = result.num_episodes
-            all_energies.extend([result.energy_mean] * n)
-            all_makespans.extend([result.makespan_mean] * n)
-            all_steps.extend([result.steps_mean] * n)
-            total_infeasible += result.infeasible_count
-            total_episodes += n
+            # Collect actual per-instance arrays
+            all_energies.append(per_instance["energies"])
+            all_makespans.append(per_instance["makespans"])
+            all_steps.append(per_instance["steps"])
+            all_infeasible.append(per_instance["infeasible"])
 
-        energies_arr = np.array(all_energies)
-        makespans_arr = np.array(all_makespans)
-        steps_arr = np.array(all_steps)
+        # Concatenate all per-instance data
+        energies_arr = np.concatenate(all_energies)
+        makespans_arr = np.concatenate(all_makespans)
+        steps_arr = np.concatenate(all_steps)
+        infeasible_arr = np.concatenate(all_infeasible)
+
+        total_episodes = len(energies_arr)
+        total_infeasible = int(np.sum(infeasible_arr))
 
         return EvalResult(
             energy_mean=float(np.mean(energies_arr)),
@@ -247,7 +300,7 @@ class Evaluator:
             energy_max=float(np.max(energies_arr)),
             infeasible_count=total_infeasible,
             infeasible_rate=(
-                total_infeasible / total_episodes if total_episodes > 0 else 0.0
+                float(total_infeasible / total_episodes) if total_episodes > 0 else 0.0
             ),
             makespan_mean=float(np.mean(makespans_arr)),
             makespan_std=float(np.std(makespans_arr)),

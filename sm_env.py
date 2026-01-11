@@ -80,8 +80,31 @@ def slack_to_start_time(
             raise ValueError(
                 "SHORT_SLACK variant requires 'short_slack_spec' to be configured."
             )
-        slack_time = env_config.short_slack_spec.slack_id_to_time(slack_id)
-        return min(t_now + slack_time, T_limit)
+        # SHORT_SLACK uses period offsets, not slot offsets
+        # slack_id_to_period_offset returns the period offset from current period
+        period_offset = env_config.short_slack_spec.slack_id_to_period_offset(slack_id)
+
+        if period_offset == 0:
+            # Start now
+            return t_now
+
+        # Find the current period
+        current_period = 0
+        for k in range(K):
+            if period_starts[k] <= t_now < period_starts[k] + Tk[k]:
+                current_period = k
+                break
+            elif period_starts[k] > t_now:
+                current_period = max(0, k - 1)
+                break
+
+        # Target period is current + offset
+        target_period = current_period + period_offset
+        if target_period >= K:
+            return T_limit
+
+        target_start = period_starts[target_period]
+        return min(max(target_start, t_now), T_limit)
 
     elif variant == SlackVariant.PERIOD_ALIGNED:
         if env_config.period_aligned_spec is None:
@@ -112,14 +135,62 @@ def slack_to_start_time(
         return max(target_start, t_now)
 
     elif variant == SlackVariant.COARSE_TO_FINE:
-        raise NotImplementedError(
-            "COARSE_TO_FINE slack variant is not yet implemented. "
-            "Please use SHORT_SLACK or PERIOD_ALIGNED instead."
-        )
+        if env_config.c2f_slack_spec is None:
+            raise ValueError(
+                "COARSE_TO_FINE variant requires 'c2f_slack_spec' to be configured."
+            )
+
+        # Get period offset from the coarse-to-fine spec
+        period_offset = env_config.c2f_slack_spec.slack_id_to_period_offset(slack_id)
+
+        if period_offset == 0:
+            # Start now
+            return t_now
+
+        # Find the current period
+        current_period = 0
+        for k in range(K):
+            if period_starts[k] <= t_now < period_starts[k] + Tk[k]:
+                current_period = k
+                break
+            elif period_starts[k] > t_now:
+                current_period = max(0, k - 1)
+                break
+
+        # Target period is current + offset
+        target_period = current_period + period_offset
+        if target_period >= K:
+            # Beyond last period - start at T_limit
+            return T_limit
+
+        target_start = period_starts[target_period]
+        # Ensure we don't go back in time and don't exceed deadline
+        return min(max(target_start, t_now), T_limit)
 
     elif variant == SlackVariant.FULL_SLACK:
-        # slack_id directly represents the slack amount
-        return min(t_now + slack_id, T_limit)
+        # FULL_SLACK: slack_id is the period offset from current period
+        # (matching config.FullSlackSpec which defines K_full_max as period count)
+        period_offset = slack_id
+
+        if period_offset == 0:
+            return t_now
+
+        # Find the current period
+        current_period = 0
+        for k in range(K):
+            if period_starts[k] <= t_now < period_starts[k] + Tk[k]:
+                current_period = k
+                break
+            elif period_starts[k] > t_now:
+                current_period = max(0, k - 1)
+                break
+
+        target_period = current_period + period_offset
+        if target_period >= K:
+            return T_limit
+
+        target_start = period_starts[target_period]
+        return min(max(target_start, t_now), T_limit)
 
     elif variant == SlackVariant.LEARNED_SLACK:
         raise NotImplementedError("LEARNED_SLACK variant is not yet implemented.")
@@ -655,6 +726,288 @@ class GPUBatchSingleMachinePeriodEnv:
 
         return self._get_obs()
 
+    def _compute_current_period(self) -> torch.Tensor:
+        """
+        Compute the current period index for each instance.
+
+        Returns:
+            (B,) tensor of current period indices
+        """
+        B = self.batch_size
+        # For each instance, find which period contains current time t
+        # period_starts[k] <= t < period_starts[k] + Tk[k]
+        t_expanded = self.t.unsqueeze(1)  # (B, 1)
+        period_ends = self.period_starts + self.Tk  # (B, K_pad)
+
+        # Mask: True where t is within the period
+        in_period = (self.period_starts <= t_expanded) & (t_expanded < period_ends)
+
+        # Get first True index per row (current period)
+        # If t is beyond all periods, default to last valid period
+        current_period = torch.zeros(B, dtype=torch.int32, device=self.device)
+        for b in range(B):
+            indices = in_period[b].nonzero(as_tuple=True)[0]
+            if len(indices) > 0:
+                current_period[b] = indices[0].int()
+            else:
+                # t is beyond all periods, use K-1
+                current_period[b] = max(0, self.K[b].item() - 1)
+
+        return current_period
+
+    def _compute_c2f_period_offsets(self, slack_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Compute period offsets from coarse-to-fine slack_ids.
+
+        Uses the same per-bucket direct-vs-strided logic as _compute_c2f_period_offsets_batch()
+        to ensure consistency between action mask and step dynamics.
+
+        Args:
+            slack_ids: (B,) tensor of slack action indices
+
+        Returns:
+            (B,) tensor of period offsets
+        """
+        # Delegate to batch version with shape (B, 1) then squeeze
+        # This ensures mask and step use identical decoding logic
+        slack_ids_expanded = slack_ids.unsqueeze(1)  # (B, 1)
+        period_offsets = self._compute_c2f_period_offsets_batch(
+            slack_ids_expanded
+        )  # (B, 1)
+        return period_offsets.squeeze(1)  # (B,)
+
+    def _compute_period_aligned_starts(
+        self, period_offsets: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute start times from period offsets.
+
+        Args:
+            period_offsets: (B,) tensor of target period offsets from current period
+
+        Returns:
+            (B,) tensor of start times
+        """
+        B = self.batch_size
+        current_period = self._compute_current_period()  # (B,)
+
+        # Target period = current + offset
+        target_period = current_period + period_offsets.int()
+
+        # Clamp to valid range [0, K-1]
+        target_period = torch.clamp(target_period, 0, self.K - 1)
+
+        # Gather start time for target period
+        start_times = torch.gather(
+            self.period_starts, 1, target_period.unsqueeze(1).long()
+        ).squeeze(1)
+
+        # Ensure start >= current time and <= T_limit
+        start_times = torch.maximum(start_times, self.t)
+        start_times = torch.minimum(start_times, self.T_limit)
+
+        return start_times
+
+    def _compute_action_mask(self, job_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Compute deadline-aware action mask.
+
+        An action (job_id, slack_id) is valid if:
+        1. job_id refers to an available job (job_mask[job_id] == 1)
+        2. The job can finish by T_limit given the slack choice
+
+        Args:
+            job_mask: (B, N_job_pad) tensor of job availability
+
+        Returns:
+            (B, action_dim) tensor where 1 = valid, 0 = invalid
+        """
+        B = self.batch_size
+        N = self.N_job_pad
+        S = self.num_slack_choices
+
+        # Compute start times for each slack choice
+        # Shape: (B, S)
+        slack_start_times = self._compute_all_slack_start_times()
+
+        # Processing times for all jobs: (B, N)
+        p_all = self.p_subset.int()
+
+        # Expand for broadcasting: start_times (B, 1, S), p (B, N, 1)
+        start_expanded = slack_start_times.unsqueeze(1)  # (B, 1, S)
+        p_expanded = p_all.unsqueeze(2)  # (B, N, 1)
+
+        # End times for all (job, slack) combinations: (B, N, S)
+        end_times = start_expanded + p_expanded
+
+        # Check deadline feasibility: end_time <= T_limit
+        T_limit_expanded = self.T_limit.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
+        feasible = end_times <= T_limit_expanded  # (B, N, S)
+
+        # Combine with job availability
+        job_available = job_mask.unsqueeze(2).bool()  # (B, N, 1)
+        valid = feasible & job_available  # (B, N, S)
+
+        # Reshape to action_dim: action = job_id * S + slack_id
+        # So action_mask[b, j*S + s] = valid[b, j, s]
+        action_mask = valid.reshape(B, N * S).float()
+
+        return action_mask
+
+    def _compute_all_slack_start_times(self) -> torch.Tensor:
+        """
+        Compute start times for all slack choices.
+
+        Returns:
+            (B, num_slack_choices) tensor of start times
+        """
+        B = self.batch_size
+        S = self.num_slack_choices
+
+        if self.env_config.slack_variant == SlackVariant.NO_SLACK:
+            # Only one choice: start now
+            return self.t.unsqueeze(1)  # (B, 1)
+
+        elif self.env_config.slack_variant == SlackVariant.SHORT_SLACK:
+            if self.env_config.short_slack_spec is not None:
+                # SHORT_SLACK uses period offsets, not slot offsets
+                # slack_options are period offsets from current period
+                slack_options = torch.tensor(
+                    self.env_config.short_slack_spec.slack_options,
+                    dtype=torch.int32,
+                    device=self.device,
+                )  # (S,)
+
+                # Compute period-aligned start times
+                # period_offsets for all slack choices: (S,)
+                # Expand to (B, S) for batch processing
+                period_offsets = slack_options.unsqueeze(0).expand(B, S)  # (B, S)
+
+                # Use the same period-aligned computation as C2F
+                start_times = self._compute_period_aligned_starts_batch(period_offsets)
+                return start_times
+            else:
+                return self.t.unsqueeze(1).expand(B, S)
+
+        elif self.env_config.slack_variant == SlackVariant.COARSE_TO_FINE:
+            if self.env_config.c2f_slack_spec is not None:
+                # For each slack_id in [0, S), compute the start time
+                slack_ids = torch.arange(S, device=self.device)  # (S,)
+                slack_ids_expanded = slack_ids.unsqueeze(0).expand(B, S)  # (B, S)
+
+                # Compute period offsets for all slack choices
+                period_offsets = self._compute_c2f_period_offsets_batch(
+                    slack_ids_expanded
+                )
+
+                # Convert to start times
+                start_times = self._compute_period_aligned_starts_batch(period_offsets)
+                return start_times
+            else:
+                return self.t.unsqueeze(1).expand(B, S)
+
+        elif self.env_config.slack_variant == SlackVariant.FULL_SLACK:
+            # FULL_SLACK: slack_id is period offset from current period
+            # (matching config.FullSlackSpec which defines K_full_max as period count)
+            slack_ids = torch.arange(S, dtype=torch.int32, device=self.device)  # (S,)
+            period_offsets = slack_ids.unsqueeze(0).expand(B, S)  # (B, S)
+
+            # Use period-aligned computation
+            start_times = self._compute_period_aligned_starts_batch(period_offsets)
+            return start_times
+
+        else:
+            # Default: all start now
+            return self.t.unsqueeze(1).expand(B, S)
+
+    def _compute_c2f_period_offsets_batch(
+        self, slack_ids: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute period offsets for a batch of slack_ids.
+
+        Matches the logic in CoarseToFineSlackSpec.slack_id_to_period_offset():
+        - If fine_resolution >= bucket_size: direct mapping (fine_idx clamped to bucket)
+        - Else: strided mapping
+
+        Args:
+            slack_ids: (B, S) tensor
+
+        Returns:
+            (B, S) tensor of period offsets
+        """
+        spec = self.env_config.c2f_slack_spec
+        fine_resolution = spec.fine_resolution
+
+        coarse_idx = slack_ids // fine_resolution
+        fine_idx = slack_ids % fine_resolution
+
+        buckets = torch.tensor(
+            spec.coarse_buckets, dtype=torch.int32, device=self.device
+        )
+
+        coarse_idx = torch.clamp(coarse_idx.long(), 0, len(spec.coarse_buckets) - 1)
+
+        bucket_starts = buckets[coarse_idx, 0]
+        bucket_ends = buckets[coarse_idx, 1]
+        bucket_sizes = bucket_ends - bucket_starts + 1
+
+        # Match spec logic: direct mapping when fine_resolution >= bucket_size
+        # For each (b, s), choose between direct and strided mapping
+        use_direct = fine_resolution >= bucket_sizes  # (B, S) bool
+
+        # Direct mapping: period_in_bucket = min(fine_idx, bucket_size - 1)
+        direct_result = torch.minimum(fine_idx.int(), bucket_sizes - 1)
+
+        # Strided mapping: period_in_bucket = int(fine_idx * stride)
+        stride = bucket_sizes.float() / fine_resolution
+        strided_result = (fine_idx.float() * stride).int()
+        strided_result = torch.minimum(strided_result, bucket_sizes - 1)
+
+        period_in_bucket = torch.where(use_direct, direct_result, strided_result)
+
+        return bucket_starts + period_in_bucket
+
+    def _compute_period_aligned_starts_batch(
+        self, period_offsets: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute start times from period offsets (batched over slack choices).
+
+        Args:
+            period_offsets: (B, S) tensor
+
+        Returns:
+            (B, S) tensor of start times
+        """
+        B, S = period_offsets.shape
+        current_period = self._compute_current_period()  # (B,)
+
+        target_period = current_period.unsqueeze(1) + period_offsets.int()  # (B, S)
+        target_period = torch.clamp(target_period, 0, self.K.unsqueeze(1) - 1)
+
+        # Gather start times - need to handle (B, S) indices into (B, K_pad)
+        # Flatten, gather, reshape
+        target_flat = target_period.reshape(B * S)  # (B*S,)
+        period_starts_expanded = self.period_starts.unsqueeze(1).expand(
+            B, S, -1
+        )  # (B, S, K_pad)
+        period_starts_flat = period_starts_expanded.reshape(B * S, -1)  # (B*S, K_pad)
+
+        start_times_flat = torch.gather(
+            period_starts_flat, 1, target_flat.unsqueeze(1).long()
+        ).squeeze(
+            1
+        )  # (B*S,)
+
+        start_times = start_times_flat.reshape(B, S)  # (B, S)
+
+        # Clamp to [t, T_limit]
+        start_times = torch.maximum(start_times, self.t.unsqueeze(1))
+        start_times = torch.minimum(start_times, self.T_limit.unsqueeze(1))
+
+        return start_times
+
     def _get_obs(self) -> Dict[str, torch.Tensor]:
         """Build observation dictionary (GPU tensors)."""
         B = self.batch_size
@@ -698,12 +1051,8 @@ class GPUBatchSingleMachinePeriodEnv:
             dim=1,
         )
 
-        # Action mask (simplified for GPU - masks invalid jobs, all slacks valid if job valid)
-        action_mask = torch.zeros(
-            (B, self.action_dim), dtype=torch.float32, device=self.device
-        )
-        for s in range(self.num_slack_choices):
-            action_mask[:, s :: self.num_slack_choices] = job_mask
+        # Action mask: check deadline feasibility for each (job, slack) pair
+        action_mask = self._compute_action_mask(job_mask)
 
         return {
             "jobs": jobs,
@@ -734,61 +1083,119 @@ class GPUBatchSingleMachinePeriodEnv:
         job_ids = actions // self.num_slack_choices
         slack_ids = actions % self.num_slack_choices
 
+        # Validate actions: check job_ids refer to available jobs
+        # Gather job availability for selected jobs
+        job_available_selected = torch.gather(
+            self.job_available, 1, job_ids.unsqueeze(1).long()
+        ).squeeze(1)
+
+        # For active (non-done) envs, selected job must be available
+        active = ~self.done_mask
+        invalid_action = active & (job_available_selected < 0.5)
+
+        if invalid_action.any():
+            # Log warning but don't crash - clamp to safe behavior
+            # This can happen if action mask has a bug or policy samples invalid action
+            import warnings
+
+            warnings.warn(
+                f"Invalid actions detected: {invalid_action.sum().item()} envs selected unavailable jobs. "
+                "Clamping to job 0 with no slack."
+            )
+            # For invalid actions, use job 0 and slack 0 (will be masked by active anyway if done)
+            job_ids = torch.where(invalid_action, torch.zeros_like(job_ids), job_ids)
+            slack_ids = torch.where(
+                invalid_action, torch.zeros_like(slack_ids), slack_ids
+            )
+
         # Get processing times for selected jobs
         # Use gather to get p[job_id] for each instance
         p = torch.gather(self.p_subset, 1, job_ids.unsqueeze(1).long()).squeeze(1)
 
-        # Compute start times (simplified - just use t + slack for SHORT_SLACK/NO_SLACK)
+        # Compute start times based on slack variant
         if self.env_config.slack_variant == SlackVariant.NO_SLACK:
             start_times = self.t.clone()
         elif self.env_config.slack_variant == SlackVariant.SHORT_SLACK:
             if self.env_config.short_slack_spec is not None:
+                # SHORT_SLACK uses period offsets, not slot offsets
+                # Get the period offset for each instance's slack_id
                 slack_options = torch.tensor(
                     self.env_config.short_slack_spec.slack_options,
                     dtype=torch.int32,
                     device=self.device,
                 )
-                slack_times = slack_options[slack_ids.long()]
-                start_times = self.t + slack_times
+                period_offsets = slack_options[slack_ids.long()]  # (B,)
+                # Use period-aligned computation
+                start_times = self._compute_period_aligned_starts(period_offsets)
             else:
                 start_times = self.t.clone()
+        elif self.env_config.slack_variant == SlackVariant.COARSE_TO_FINE:
+            # Coarse-to-fine: decode slack_id to period offset, then to start time
+            if self.env_config.c2f_slack_spec is not None:
+                # Vectorized computation of period offsets
+                period_offsets = self._compute_c2f_period_offsets(slack_ids)
+                # Find current period for each instance and compute target start
+                start_times = self._compute_period_aligned_starts(period_offsets)
+            else:
+                start_times = self.t.clone()
+        elif self.env_config.slack_variant == SlackVariant.FULL_SLACK:
+            # FULL_SLACK: slack_id is period offset from current period
+            # (matching config.FullSlackSpec which defines K_full_max as period count)
+            period_offsets = slack_ids.int()  # (B,)
+            start_times = self._compute_period_aligned_starts(period_offsets)
         else:
             # Default: no slack
             start_times = self.t.clone()
 
         end_times = start_times + p
+        # Clamp end_times to T_limit (actions should be masked, but safety clamp)
+        end_times = torch.minimum(end_times, self.T_limit)
 
-        # Compute energy for each instance
-        # This is trickier on GPU - need to sum ct[start:end] for variable ranges
-        # Simplified: assume all slots have same price (would need scatter/gather for full impl)
-        energies = torch.zeros(B, dtype=torch.float32, device=self.device)
+        # Compute active mask (envs that haven't finished yet)
+        active = ~self.done_mask  # (B,)
 
-        for b in range(B):
-            if not self.done_mask[b]:
-                s = start_times[b].item()
-                e = end_times[b].item()
-                if e <= self.T_max_pad:
-                    energies[b] = (
-                        self.e_single[b].float() * self.ct[b, s:e].float().sum()
-                    )
+        # Compute energy for each instance using cumulative sum for vectorized range sums
+        # Build cumsum: cumsum[i] = sum(ct[0:i]), so sum(ct[s:e]) = cumsum[e] - cumsum[s]
+        ct_float = self.ct.float()  # (B, T_max_pad)
+        ct_cumsum = torch.zeros(
+            (B, self.T_max_pad + 1), dtype=torch.float32, device=self.device
+        )
+        ct_cumsum[:, 1:] = torch.cumsum(ct_float, dim=1)
+
+        # Clamp indices to valid range
+        s_clamped = torch.clamp(start_times.long(), 0, self.T_max_pad)
+        e_clamped = torch.clamp(end_times.long(), 0, self.T_max_pad)
+
+        # Gather cumsum values at start and end indices
+        cumsum_at_end = torch.gather(ct_cumsum, 1, e_clamped.unsqueeze(1)).squeeze(1)
+        cumsum_at_start = torch.gather(ct_cumsum, 1, s_clamped.unsqueeze(1)).squeeze(1)
+        energy_sums = cumsum_at_end - cumsum_at_start  # (B,)
+
+        # Compute energies (only for active envs)
+        energies = self.e_single.float() * energy_sums
+        energies = energies * active.float()  # Zero out done envs
 
         self.total_energy += energies
 
-        # Update time
-        self.t = end_times.int()
+        # Update time ONLY for active environments (done envs keep their final time)
+        self.t = torch.where(active, end_times.int(), self.t)
 
-        # Mark jobs as done
+        # Mark jobs as done ONLY for active environments
         # Create a one-hot mask for the selected jobs and subtract from availability
         job_one_hot = torch.zeros(
             (B, self.N_job_pad), dtype=torch.float32, device=self.device
         )
         job_one_hot.scatter_(1, job_ids.unsqueeze(1).long(), 1.0)
+        # Only update job_available for active envs
+        job_one_hot = job_one_hot * active.float().unsqueeze(1)
         self.job_available = self.job_available - job_one_hot
         self.job_available = torch.clamp(self.job_available, 0, 1)
 
         # Check if done (no more jobs available)
         n_remaining = self.job_available.sum(dim=1)
-        newly_done = (n_remaining == 0) & (~self.done_mask)
+        newly_done = (
+            n_remaining == 0
+        ) & active  # Only active envs can become newly done
         self.done_mask = self.done_mask | newly_done
 
         # Rewards
