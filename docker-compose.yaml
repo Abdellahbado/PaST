@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  past:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: past:latest
+    # Requires NVIDIA Container Toolkit on the host
+    gpus: all
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Persist results/checkpoints outside the container
+      - ./runs:/workspace/runs
+    working_dir: /workspace
+    # Long runs: restart unless explicitly stopped
+    restart: unless-stopped
+    # If you hit shared-memory issues, increase this
+    shm_size: "2gb"
+    command: >
+      python -m PaST.run_experiments
+      --variants all
+      --seeds 0
+      --config PaST/configs/a100_full.yaml
+      --output_dir runs
+      --device cuda
+      --eval_seed 1337
+      --eval_seed_mode per_update

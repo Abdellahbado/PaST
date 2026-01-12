@@ -48,6 +48,21 @@ def parse_args():
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default="runs")
 
+    # Evaluation seeding (for fair cross-variant comparison)
+    parser.add_argument(
+        "--eval_seed",
+        type=int,
+        default=None,
+        help="Base seed for evaluation instance generation (overrides training-seed-derived eval seeds)",
+    )
+    parser.add_argument(
+        "--eval_seed_mode",
+        type=str,
+        default=None,
+        choices=["fixed", "per_update"],
+        help="How to vary evaluation seeds across eval calls when --eval_seed is set",
+    )
+
     parser.add_argument("--num_envs", type=int, default=256)
     parser.add_argument("--rollout_length", type=int, default=128)
     parser.add_argument("--total_env_steps", type=int, default=10_000_000)
@@ -59,25 +74,35 @@ def parse_args():
 def main():
     args = parse_args()
 
-    device = torch.device(args.device)
-    set_seed(args.seed)
+    # Load or create run config (align behavior with train_ppo)
+    if args.config:
+        run_config = RunConfig.from_yaml(args.config)
+    else:
+        run_config = RunConfig()
 
-    variant_id = VariantID(args.variant_id)
-    variant_config = get_variant_config(variant_id, seed=args.seed)
+    # Apply CLI overrides
+    run_config.variant_id = args.variant_id
+    run_config.seed = args.seed
+    run_config.num_envs = args.num_envs
+    run_config.rollout_length = args.rollout_length
+    run_config.total_env_steps = args.total_env_steps
+    run_config.learning_rate = args.learning_rate
+    run_config.device = args.device
+    run_config.output_dir = args.output_dir
+
+    if args.eval_seed is not None:
+        run_config.eval_seed = int(args.eval_seed)
+    if args.eval_seed_mode is not None:
+        run_config.eval_seed_mode = str(args.eval_seed_mode)
+
+    device = torch.device(run_config.device)
+    set_seed(run_config.seed)
+
+    variant_id = VariantID(run_config.variant_id)
+    variant_config = get_variant_config(variant_id, seed=run_config.seed)
     assert (
         variant_config.training.algorithm == RLAlgorithm.REINFORCE
     ), f"Variant {variant_id.value} is not REINFORCE"
-
-    run_config = RunConfig(
-        variant_id=variant_id.value,
-        seed=args.seed,
-        num_envs=args.num_envs,
-        rollout_length=args.rollout_length,
-        total_env_steps=args.total_env_steps,
-        learning_rate=args.learning_rate,
-        device=args.device,
-        output_dir=args.output_dir,
-    )
 
     run_dir = (
         Path(run_config.output_dir) / run_config.variant_id / f"seed_{run_config.seed}"
@@ -173,10 +198,22 @@ def main():
 
         # Optional eval using evaluator (deterministic)
         if update % run_config.eval_every_updates == 0 and update > 0:
+            if run_config.eval_seed is None:
+                eval_seed = run_config.seed + update + 12345
+            else:
+                if run_config.eval_seed_mode == "fixed":
+                    eval_seed = run_config.eval_seed
+                elif run_config.eval_seed_mode == "per_update":
+                    eval_seed = run_config.eval_seed + update
+                else:
+                    raise ValueError(
+                        f"Unknown eval_seed_mode: {run_config.eval_seed_mode}"
+                    )
+
             eval_batch = generate_episode_batch(
                 batch_size=run_config.num_eval_instances,
                 config=variant_config.data,
-                seed=run_config.seed + update + 12345,
+                seed=eval_seed,
             )
             eval_result, _ = evaluator.evaluate(eval_batch, deterministic=True)
             metrics.update(eval_result.to_dict())

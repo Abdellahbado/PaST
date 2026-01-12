@@ -97,6 +97,15 @@ class RunConfig:
     eval_every_updates: int = 20
     num_eval_instances: int = 256
 
+    # Evaluation determinism / fairness across variants.
+    # If set, evaluation instances are generated from this seed (or derived from it)
+    # rather than the training seed.
+    eval_seed: Optional[int] = None
+    # How to derive per-eval seeds from eval_seed:
+    # - "fixed": always use eval_seed
+    # - "per_update": use eval_seed + update
+    eval_seed_mode: str = "per_update"
+
     # Checkpointing
     save_latest_every_updates: int = 10
     save_latest_every_minutes: float = 15.0
@@ -788,10 +797,21 @@ def train(
         is_eval_step = update % run_config.eval_every_updates == 0 and update > 0
         if is_eval_step:
             print(f"\n  [Eval] Running evaluation...")
+            if run_config.eval_seed is None:
+                eval_seed = run_config.seed + update
+            else:
+                if run_config.eval_seed_mode == "fixed":
+                    eval_seed = run_config.eval_seed
+                elif run_config.eval_seed_mode == "per_update":
+                    eval_seed = run_config.eval_seed + update
+                else:
+                    raise ValueError(
+                        f"Unknown eval_seed_mode: {run_config.eval_seed_mode}"
+                    )
             eval_batch = generate_episode_batch(
                 batch_size=run_config.num_eval_instances,
                 config=variant_config.data,
-                seed=run_config.seed + update,  # Different seed for eval
+                seed=eval_seed,
             )
             eval_result, _ = evaluator.evaluate(eval_batch, deterministic=True)
             eval_metrics = eval_result.to_dict()
@@ -842,10 +862,15 @@ def train(
 
     # Final evaluation
     print("\nFinal evaluation...")
+    if run_config.eval_seed is None:
+        final_eval_seed = run_config.seed + 999999
+    else:
+        # Keep final eval stable across variants/runs by using a large offset.
+        final_eval_seed = run_config.eval_seed + 999999
     eval_batch = generate_episode_batch(
         batch_size=run_config.num_eval_instances,
         config=variant_config.data,
-        seed=run_config.seed + 999999,
+        seed=final_eval_seed,
     )
     final_result, _ = evaluator.evaluate(eval_batch, deterministic=True)
     print(
@@ -945,6 +970,21 @@ def parse_args():
         help="Output directory for runs",
     )
 
+    # Evaluation seeding (for fair cross-variant comparison)
+    parser.add_argument(
+        "--eval_seed",
+        type=int,
+        default=None,
+        help="Base seed for evaluation instance generation (overrides training-seed-derived eval seeds)",
+    )
+    parser.add_argument(
+        "--eval_seed_mode",
+        type=str,
+        default=None,
+        choices=["fixed", "per_update"],
+        help="How to vary evaluation seeds across eval calls when --eval_seed is set",
+    )
+
     # Override hyperparameters
     parser.add_argument("--num_envs", type=int, default=None)
     parser.add_argument("--rollout_length", type=int, default=None)
@@ -989,6 +1029,11 @@ def main():
     run_config.variant_id = args.variant_id
     run_config.device = args.device
     run_config.output_dir = args.output_dir
+
+    if args.eval_seed is not None:
+        run_config.eval_seed = int(args.eval_seed)
+    if args.eval_seed_mode is not None:
+        run_config.eval_seed_mode = str(args.eval_seed_mode)
 
     if args.num_envs is not None:
         run_config.num_envs = args.num_envs
