@@ -118,15 +118,31 @@ class Evaluator:
             if done_mask.all():
                 break
 
+            job_mask = obs.get("job_mask")
+            period_mask = obs.get("period_mask")
+            period_full_mask = obs.get("period_full_mask")
+
+            # Model expects boolean masks where True means INVALID/masked-out.
+            # Env obs may contain float 0/1 with 1 meaning valid.
+            if job_mask is not None and job_mask.dtype is not torch.bool:
+                job_mask = job_mask < 0.5
+            if period_mask is not None and period_mask.dtype is not torch.bool:
+                period_mask = period_mask < 0.5
+            if (
+                period_full_mask is not None
+                and period_full_mask.dtype is not torch.bool
+            ):
+                period_full_mask = period_full_mask < 0.5
+
             # Get action logits from model
             logits, _ = self.model(
                 jobs=obs["jobs"],
                 periods_local=obs["periods"],
                 ctx=obs["ctx"],
-                job_mask=obs.get("job_mask"),
-                period_mask=obs.get("period_mask"),
+                job_mask=job_mask,
+                period_mask=period_mask,
                 periods_full=obs.get("periods_full"),
-                period_full_mask=obs.get("period_full_mask"),
+                period_full_mask=period_full_mask,
             )
 
             # Apply action mask

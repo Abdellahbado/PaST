@@ -110,6 +110,11 @@ class RolloutBuffer:
             (rollout_length, num_envs), dtype=torch.float32, device=device
         )
 
+        # Transition validity mask (1.0 = real transition, 0.0 = placeholder/ignore)
+        self.valid = torch.ones(
+            (rollout_length, num_envs), dtype=torch.float32, device=device
+        )
+
         # Computed after rollout
         self.advantages = torch.zeros(
             (rollout_length, num_envs), dtype=torch.float32, device=device
@@ -135,6 +140,7 @@ class RolloutBuffer:
         rewards: Tensor,
         dones: Tensor,
         values: Tensor,
+        valid: Optional[Tensor] = None,
     ):
         """
         Add a transition to the buffer.
@@ -155,6 +161,10 @@ class RolloutBuffer:
         self.rewards[self.pos] = rewards
         self.dones[self.pos] = dones.float()
         self.values[self.pos] = values
+        if valid is None:
+            self.valid[self.pos] = 1.0
+        else:
+            self.valid[self.pos] = valid.float()
 
         self.pos += 1
         if self.pos == self.rollout_length:
@@ -185,13 +195,14 @@ class RolloutBuffer:
         last_gae = torch.zeros(self.num_envs, device=self.device)
 
         for t in reversed(range(self.rollout_length)):
+            valid_t = (self.valid[t] > 0.5).float()
             if t == self.rollout_length - 1:
-                next_non_terminal = 1.0 - last_dones.float()
+                next_non_terminal = (1.0 - last_dones.float()) * valid_t
                 next_values = last_values
             else:
                 next_non_terminal = (
                     1.0 - self.dones[t].float()
-                )  # Use dones[t], not dones[t+1]
+                ) * valid_t  # Use dones[t], not dones[t+1]
                 next_values = self.values[t + 1]
 
             # TD error: δ_t = r_t + γ(1-done_t)V_{t+1} - V_t
@@ -199,10 +210,12 @@ class RolloutBuffer:
                 self.rewards[t]
                 + gamma * next_non_terminal * next_values
                 - self.values[t]
-            )
+            ) * valid_t
 
             # GAE: A_t = δ_t + γλ(1-done_t)A_{t+1}
             last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
+            # For invalid/placeholder transitions, force advantage to 0 and break propagation.
+            last_gae = torch.where(valid_t > 0.5, last_gae, torch.zeros_like(last_gae))
             self.advantages[t] = last_gae
 
         # Returns = advantages + values
@@ -224,7 +237,12 @@ class RolloutBuffer:
             Dictionary of batched tensors for each minibatch
         """
         batch_size = self.num_envs * self.rollout_length
-        minibatch_size = batch_size // num_minibatches
+        if batch_size <= 0:
+            return
+
+        # Clamp to avoid minibatch_size==0 and to ensure we yield <= num_minibatches.
+        # We will yield exactly actual_num_minibatches minibatches.
+        actual_num_minibatches = int(min(max(1, num_minibatches), batch_size))
 
         # Flatten time and env dimensions
         flat_obs = {
@@ -236,13 +254,15 @@ class RolloutBuffer:
         flat_values = self.values.reshape(batch_size)
         flat_advantages = self.advantages.reshape(batch_size)
         flat_returns = self.returns.reshape(batch_size)
+        flat_valid = self.valid.reshape(batch_size)
 
         # Random permutation for each epoch
         indices = torch.randperm(batch_size, device=self.device)
+        index_chunks = torch.chunk(indices, actual_num_minibatches)
 
-        for start in range(0, batch_size, minibatch_size):
-            end = start + minibatch_size
-            mb_indices = indices[start:end]
+        for mb_indices in index_chunks:
+            if mb_indices.numel() == 0:
+                continue
 
             mb_obs = {name: tensor[mb_indices] for name, tensor in flat_obs.items()}
             mb_actions = flat_actions[mb_indices]
@@ -250,12 +270,20 @@ class RolloutBuffer:
             mb_values = flat_values[mb_indices]
             mb_advantages = flat_advantages[mb_indices]
             mb_returns = flat_returns[mb_indices]
+            mb_valid = flat_valid[mb_indices]
 
             # Normalize advantages per minibatch
             if normalize_advantages:
-                mb_advantages = (mb_advantages - mb_advantages.mean()) / (
-                    mb_advantages.std() + 1e-8
-                )
+                valid_rows = mb_valid > 0.5
+                if valid_rows.any():
+                    v = mb_advantages[valid_rows]
+                    v_mean = v.mean()
+                    v_std = v.std(unbiased=False)
+                    mb_advantages = torch.where(
+                        valid_rows,
+                        (mb_advantages - v_mean) / (v_std + 1e-8),
+                        mb_advantages,
+                    )
 
             yield {
                 "obs": mb_obs,
@@ -264,6 +292,7 @@ class RolloutBuffer:
                 "values_old": mb_values,
                 "advantages": mb_advantages,
                 "returns": mb_returns,
+                "valid": mb_valid,
             }
 
 
@@ -344,17 +373,49 @@ class PPORunner:
         current_ep_rewards = torch.zeros(self.env.batch_size, device=self.device)
         current_ep_lengths = torch.zeros(self.env.batch_size, device=self.device)
 
+        # For environments that return cumulative dones (done_mask), we must only count
+        # newly done envs once. We detect cumulative behavior per step.
+        prev_cumulative_done = torch.zeros(
+            self.env.batch_size, dtype=torch.bool, device=self.device
+        )
+
+        # Track persistent all-masked condition so we don't repeatedly count a forced terminal
+        # state when using pulse-style dones.
+        prev_all_masked = torch.zeros(
+            self.env.batch_size, dtype=torch.bool, device=self.device
+        )
+
+        # Diagnostics: how often a wrapper's returned dones disagree with an exposed done_mask.
+        # Count per-(step, env) disagreements (not just per-step).
+        dones_done_mask_disagree = 0
+
         with torch.no_grad():
             for step in range(self.rollout_length):
+                job_mask = obs.get("job_mask")
+                period_mask = obs.get("period_mask")
+                period_full_mask = obs.get("period_full_mask")
+
+                # Model expects boolean masks where True means INVALID/masked-out.
+                # Env obs may contain float 0/1 with 1 meaning valid.
+                if job_mask is not None and job_mask.dtype is not torch.bool:
+                    job_mask = job_mask < 0.5
+                if period_mask is not None and period_mask.dtype is not torch.bool:
+                    period_mask = period_mask < 0.5
+                if (
+                    period_full_mask is not None
+                    and period_full_mask.dtype is not torch.bool
+                ):
+                    period_full_mask = period_full_mask < 0.5
+
                 # Get action and value from model
                 logits, values = self.model(
                     jobs=obs["jobs"],
                     periods_local=obs["periods"],
                     ctx=obs["ctx"],
-                    job_mask=obs.get("job_mask"),
-                    period_mask=obs.get("period_mask"),
+                    job_mask=job_mask,
+                    period_mask=period_mask,
                     periods_full=obs.get("periods_full"),
-                    period_full_mask=obs.get("period_full_mask"),
+                    period_full_mask=period_full_mask,
                 )
 
                 # Apply action mask (set invalid to -inf)
@@ -363,15 +424,45 @@ class PPORunner:
                     # action_mask: 1 for valid, 0 for invalid
                     logits = logits.masked_fill(action_mask == 0, float("-inf"))
 
-                # ASSERTION: at least one valid action per env
-                assert (
-                    torch.isfinite(logits).any(dim=-1).all()
-                ), "All actions masked for some environment!"
+                # Handle infeasible/all-masked states robustly.
+                # These can occur if an env is done and not reset, or if the deadline makes
+                # every (job, slack) action invalid. Treat as terminal for PPO bookkeeping.
+                all_masked = ~torch.isfinite(logits).any(dim=-1)  # (B,)
+                if all_masked.any():
+                    import warnings
+
+                    warnings.warn(
+                        f"All actions masked for {all_masked.sum().item()} envs in rollout step {step}; "
+                        "treating as terminal to keep PPO stable."
+                    )
+                    # Best-effort: prevent stepping those envs if we can reach an underlying env.done_mask.
+                    # Avoid mutating a wrapper's own done_mask bookkeeping when it exposes an inner env.
+                    if hasattr(self.env, "env") and hasattr(self.env.env, "done_mask"):
+                        self.env.env.done_mask = self.env.env.done_mask | all_masked
+                    elif hasattr(self.env, "done_mask"):
+                        self.env.done_mask = self.env.done_mask | all_masked
+
+                # Sample action safely
+                safe_logits = torch.where(
+                    all_masked.unsqueeze(-1),
+                    torch.zeros_like(logits),
+                    logits,
+                )
 
                 # Sample action
-                dist = torch.distributions.Categorical(logits=logits)
+                dist = torch.distributions.Categorical(logits=safe_logits)
                 actions = dist.sample()
+                # For all-masked envs, force a placeholder action (won't affect done envs)
+                actions = actions.masked_fill(all_masked, 0)
                 log_probs = dist.log_prob(actions)
+                # Placeholder transitions should not contribute policy data
+                log_probs = torch.where(
+                    all_masked, torch.zeros_like(log_probs), log_probs
+                )
+
+                # Valid transition mask: ignore placeholder rows in update/normalization
+                valid = (~all_masked).float()
+                valid_bool = valid > 0.5
 
                 # Store transition
                 self.buffer.add(
@@ -382,43 +473,127 @@ class PPORunner:
                         self.env.batch_size, device=self.device
                     ),  # Placeholder
                     dones=torch.zeros(self.env.batch_size, device=self.device),
-                    values=values.squeeze(-1),
+                    values=values.squeeze(-1) * valid,
+                    valid=valid,
                 )
 
                 # Environment step
-                next_obs, rewards, dones, info = self.env.step(actions)
+                next_obs, rewards, dones_step, info = self.env.step(actions)
+
+                # Dones used for PPO/GAE termination. Ensure all-masked rows terminate even if
+                # wrappers don't report done for them.
+                dones_for_gae = dones_step | all_masked
+
+                # Prefer a real cumulative done signal if the env exposes done_mask.
+                # This avoids heuristic equality checks and lets us detect resets (done clearing).
+                cumulative_dones = None
+                if (
+                    hasattr(self.env, "done_mask")
+                    and isinstance(self.env.done_mask, torch.Tensor)
+                    and self.env.done_mask.shape == dones_step.shape
+                ):
+                    cumulative_dones = self.env.done_mask
+                elif (
+                    hasattr(self.env, "env")
+                    and hasattr(self.env.env, "done_mask")
+                    and isinstance(self.env.env.done_mask, torch.Tensor)
+                    and self.env.env.done_mask.shape == dones_step.shape
+                ):
+                    cumulative_dones = self.env.env.done_mask
+
+                if cumulative_dones is not None:
+                    # Compare against dones_step (before OR-ing all_masked) as suggested.
+                    dones_done_mask_disagree += int(
+                        (dones_step ^ cumulative_dones).sum().item()
+                    )
+
+                # Decide whether to use cumulative done_mask semantics for episode counting.
+                # Some wrappers (e.g. full-batch auto-reset) expose a done_mask that resets/clears
+                # and may not match the dones returned to PPO.
+                use_cumulative = False
+                if cumulative_dones is not None:
+                    # Cumulative done_mask should be monotone non-decreasing during an episode.
+                    nondecreasing = (
+                        cumulative_dones | prev_cumulative_done
+                    ) == cumulative_dones
+                    consistent = torch.equal(dones_for_gae, cumulative_dones)
+                    use_cumulative = bool(nondecreasing.all().item() and consistent)
+
+                if use_cumulative:
+                    active_before = ~prev_cumulative_done
+                    newly_done_base = cumulative_dones & ~prev_cumulative_done
+                    prev_cumulative_done.copy_(cumulative_dones)
+                else:
+                    newly_done_base = dones_step
+                    active_before = torch.ones_like(dones_step, dtype=torch.bool)
+
+                # Detect wrappers that reset/clear done_mask before returning (done pulse but done_mask is False).
+                # In that case, the next observation is already from a new episode, so we must break
+                # the all-masked contiguous-run latch.
+                reset_like = torch.zeros_like(dones_step, dtype=torch.bool)
+                if cumulative_dones is not None:
+                    reset_like = dones_step & (~cumulative_dones)
+
+                # If dones are pulse-style (or wrapper-dependent), all_masked could otherwise be
+                # re-counted every step. Only count an all-masked terminal once per contiguous run.
+                forced_newly_done = all_masked & active_before & ~prev_all_masked
+                newly_done = newly_done_base | forced_newly_done
+
+                # Exclude placeholder (all_masked) steps from episode reward/length stats.
+                track_mask = active_before & valid_bool
 
                 # Update buffer with actual rewards and dones
-                self.buffer.rewards[step] = rewards
-                self.buffer.dones[step] = dones.float()
+                self.buffer.rewards[step] = torch.where(
+                    valid_bool, rewards, torch.zeros_like(rewards)
+                )
+                self.buffer.dones[step] = dones_for_gae.float()
 
                 # Track episode statistics
-                current_ep_rewards += rewards
-                current_ep_lengths += 1
+                current_ep_rewards[track_mask] += rewards[track_mask]
+                current_ep_lengths[track_mask] += 1
 
                 # Record completed episodes
-                done_indices = dones.nonzero(as_tuple=True)[0]
+                done_indices = newly_done.nonzero(as_tuple=True)[0]
                 for idx in done_indices:
                     episode_rewards.append(current_ep_rewards[idx].item())
                     episode_lengths.append(current_ep_lengths[idx].item())
 
                 # Reset tracking for done environments
-                current_ep_rewards = current_ep_rewards * (~dones).float()
-                current_ep_lengths = current_ep_lengths * (~dones).float()
+                current_ep_rewards = current_ep_rewards * (~newly_done).float()
+                current_ep_lengths = current_ep_lengths * (~newly_done).float()
+
+                # Update all-masked run tracker.
+                # - Keep it True after a forced terminal so we don't recount on the next step.
+                # - Break it when a wrapper has already reset the episode in this step.
+                prev_all_masked = all_masked & ~reset_like
 
                 obs = next_obs
                 self.global_step += self.env.batch_size
 
         # Compute final values for GAE bootstrap
         with torch.no_grad():
+            job_mask = obs.get("job_mask")
+            period_mask = obs.get("period_mask")
+            period_full_mask = obs.get("period_full_mask")
+
+            if job_mask is not None and job_mask.dtype is not torch.bool:
+                job_mask = job_mask < 0.5
+            if period_mask is not None and period_mask.dtype is not torch.bool:
+                period_mask = period_mask < 0.5
+            if (
+                period_full_mask is not None
+                and period_full_mask.dtype is not torch.bool
+            ):
+                period_full_mask = period_full_mask < 0.5
+
             final_logits, final_values = self.model(
                 jobs=obs["jobs"],
                 periods_local=obs["periods"],
                 ctx=obs["ctx"],
-                job_mask=obs.get("job_mask"),
-                period_mask=obs.get("period_mask"),
+                job_mask=job_mask,
+                period_mask=period_mask,
                 periods_full=obs.get("periods_full"),
-                period_full_mask=obs.get("period_full_mask"),
+                period_full_mask=period_full_mask,
             )
 
         # Get done flags from the LAST step of the rollout buffer
@@ -442,6 +617,7 @@ class PPORunner:
             "rollout/rewards_std": np.std(episode_rewards) if episode_rewards else 0.0,
             "rollout/ep_len_mean": np.mean(episode_lengths) if episode_lengths else 0.0,
             "rollout/num_episodes": len(episode_rewards),
+            "rollout/dones_done_mask_disagree": float(dones_done_mask_disagree),
         }
 
         return obs, metrics
@@ -460,35 +636,55 @@ class PPORunner:
         approx_kls = []
         clip_fracs = []
 
+        prev_epoch_minibatches = self.config.num_minibatches
+
         for epoch in range(self.config.ppo_epochs):
             # Check for early stopping on KL
             if self.config.target_kl is not None and len(approx_kls) > 0:
-                if (
-                    np.mean(approx_kls[-self.config.num_minibatches :])
-                    > self.config.target_kl
+                window = min(int(prev_epoch_minibatches), len(approx_kls))
+                if window > 0 and (
+                    np.mean(approx_kls[-window:]) > self.config.target_kl
                 ):
                     break
+
+            minibatches_this_epoch = 0
 
             for batch in self.buffer.get_batches(
                 num_minibatches=self.config.num_minibatches,
                 normalize_advantages=self.config.normalize_advantages,
             ):
+                minibatches_this_epoch += 1
                 obs = batch["obs"]
                 actions = batch["actions"]
                 log_probs_old = batch["log_probs_old"]
                 values_old = batch["values_old"]
                 advantages = batch["advantages"]
                 returns = batch["returns"]
+                valid = batch.get("valid", None)
+
+                job_mask = obs.get("job_mask")
+                period_mask = obs.get("period_mask")
+                period_full_mask = obs.get("period_full_mask")
+
+                if job_mask is not None and job_mask.dtype is not torch.bool:
+                    job_mask = job_mask < 0.5
+                if period_mask is not None and period_mask.dtype is not torch.bool:
+                    period_mask = period_mask < 0.5
+                if (
+                    period_full_mask is not None
+                    and period_full_mask.dtype is not torch.bool
+                ):
+                    period_full_mask = period_full_mask < 0.5
 
                 # Forward pass
                 logits, values = self.model(
                     jobs=obs["jobs"],
                     periods_local=obs["periods"],
                     ctx=obs["ctx"],
-                    job_mask=obs.get("job_mask"),
-                    period_mask=obs.get("period_mask"),
+                    job_mask=job_mask,
+                    period_mask=period_mask,
                     periods_full=obs.get("periods_full"),
-                    period_full_mask=obs.get("period_full_mask"),
+                    period_full_mask=period_full_mask,
                 )
 
                 # Apply action mask
@@ -496,10 +692,25 @@ class PPORunner:
                     action_mask = obs["action_mask"]
                     logits = logits.masked_fill(action_mask == 0, float("-inf"))
 
-                # ASSERTION: logits should be finite (except -inf for masked)
-                assert (
-                    torch.isfinite(logits).any(dim=-1).all()
-                ), "All actions masked in minibatch!"
+                # Determine which rows are usable for learning.
+                # 1) Must not be a placeholder transition from rollout
+                # 2) Must have at least one valid action under the current mask
+                has_any_action = torch.isfinite(logits).any(dim=-1)
+                if valid is not None:
+                    usable = (valid > 0.5) & has_any_action
+                else:
+                    usable = has_any_action
+
+                if usable.sum().item() == 0:
+                    continue
+
+                logits = logits[usable]
+                values = values[usable]
+                actions = actions[usable]
+                log_probs_old = log_probs_old[usable]
+                values_old = values_old[usable]
+                advantages = advantages[usable]
+                returns = returns[usable]
 
                 # Compute new log probs and entropy
                 dist = torch.distributions.Categorical(logits=logits)
@@ -575,9 +786,22 @@ class PPORunner:
                 approx_kls.append(approx_kl.detach())
                 clip_fracs.append(clip_frac.detach())
 
+            prev_epoch_minibatches = max(1, minibatches_this_epoch)
+
         self.update_count += 1
 
         # Compute metrics (single sync point)
+        if len(policy_losses) == 0:
+            return {
+                "train/policy_loss": 0.0,
+                "train/value_loss": 0.0,
+                "train/entropy": 0.0,
+                "train/approx_kl": 0.0,
+                "train/clip_frac": 0.0,
+                "train/grad_norm": 0.0,
+                "train/ppo_epochs_actual": 0,
+            }
+
         metrics = {
             "train/policy_loss": torch.stack(policy_losses).mean().item(),
             "train/value_loss": torch.stack(value_losses).mean().item(),

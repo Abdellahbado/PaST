@@ -329,6 +329,28 @@ class EnvConfig:
         """Total action space size = M_job_bins * K_slack."""
         return self.M_job_bins * self.get_num_slack_choices()
 
+    # ---------------------------------------------------------------------
+    # Backward-compatible aliases (sm_env.py expects these names)
+    # ---------------------------------------------------------------------
+
+    @property
+    def N_job_pad(self) -> int:
+        """Legacy alias for M_job_bins."""
+        return self.M_job_bins
+
+    @N_job_pad.setter
+    def N_job_pad(self, value: int):
+        self.M_job_bins = int(value)
+
+    @property
+    def K_period_lookahead(self) -> int:
+        """Legacy alias for K_period_local."""
+        return self.K_period_local
+
+    @K_period_lookahead.setter
+    def K_period_lookahead(self, value: int):
+        self.K_period_local = int(value)
+
 
 # =============================================================================
 # Data Configuration

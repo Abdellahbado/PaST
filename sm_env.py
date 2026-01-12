@@ -733,25 +733,27 @@ class GPUBatchSingleMachinePeriodEnv:
         Returns:
             (B,) tensor of current period indices
         """
-        B = self.batch_size
-        # For each instance, find which period contains current time t
+        # For each instance, find which period contains current time t:
         # period_starts[k] <= t < period_starts[k] + Tk[k]
+        B = self.batch_size
         t_expanded = self.t.unsqueeze(1)  # (B, 1)
         period_ends = self.period_starts + self.Tk  # (B, K_pad)
 
-        # Mask: True where t is within the period
-        in_period = (self.period_starts <= t_expanded) & (t_expanded < period_ends)
+        # Mask out padding periods beyond each instance's K
+        idx = torch.arange(self.K_pad, device=self.device).unsqueeze(0)  # (1, K_pad)
+        valid = idx < self.K.unsqueeze(1)  # (B, K_pad)
 
-        # Get first True index per row (current period)
-        # If t is beyond all periods, default to last valid period
-        current_period = torch.zeros(B, dtype=torch.int32, device=self.device)
-        for b in range(B):
-            indices = in_period[b].nonzero(as_tuple=True)[0]
-            if len(indices) > 0:
-                current_period[b] = indices[0].int()
-            else:
-                # t is beyond all periods, use K-1
-                current_period[b] = max(0, self.K[b].item() - 1)
+        in_period = (
+            valid & (self.period_starts <= t_expanded) & (t_expanded < period_ends)
+        )
+
+        any_in = in_period.any(dim=1)  # (B,)
+        # argmax on float gives the first occurrence of max (i.e., first True)
+        first_idx = in_period.float().argmax(dim=1).to(torch.int32)  # (B,)
+
+        # If t is beyond all periods, default to last valid period (K-1)
+        fallback = torch.clamp(self.K - 1, min=0).to(torch.int32)
+        current_period = torch.where(any_in, first_idx, fallback)
 
         return current_period
 
@@ -794,8 +796,11 @@ class GPUBatchSingleMachinePeriodEnv:
         # Target period = current + offset
         target_period = current_period + period_offsets.int()
 
-        # Clamp to valid range [0, K-1]
-        target_period = torch.clamp(target_period, 0, self.K - 1)
+        # Clamp to valid range [0, K-1] (avoid torch.clamp mixed scalar/tensor args)
+        zero = torch.zeros_like(target_period)
+        k_minus_1 = torch.clamp(self.K - 1, min=0).to(target_period.dtype)
+        target_period = torch.maximum(target_period, zero)
+        target_period = torch.minimum(target_period, k_minus_1)
 
         # Gather start time for target period
         start_times = torch.gather(
@@ -984,7 +989,12 @@ class GPUBatchSingleMachinePeriodEnv:
         current_period = self._compute_current_period()  # (B,)
 
         target_period = current_period.unsqueeze(1) + period_offsets.int()  # (B, S)
-        target_period = torch.clamp(target_period, 0, self.K.unsqueeze(1) - 1)
+
+        # Clamp to valid range [0, K-1] (avoid torch.clamp mixed scalar/tensor args)
+        zero = torch.zeros_like(target_period)
+        k_minus_1 = torch.clamp(self.K - 1, min=0).to(target_period.dtype).unsqueeze(1)
+        target_period = torch.maximum(target_period, zero)
+        target_period = torch.minimum(target_period, k_minus_1)
 
         # Gather start times - need to handle (B, S) indices into (B, K_pad)
         # Flatten, gather, reshape
@@ -1015,25 +1025,83 @@ class GPUBatchSingleMachinePeriodEnv:
         # Jobs tensor
         jobs = self.p_subset.float().unsqueeze(-1)  # (B, N_job_pad, 1)
 
-        # Job mask
+        # Job availability/mask (float 0/1 where 1 means valid/available)
+        # Note: PPO runner/eval convert this to the model's bool-invalid convention.
         job_mask = self.job_available.clone()
+        job_available = job_mask
 
-        # Periods tensor - simplified for GPU (would need more complex logic for full lookahead)
-        # For now, use the full period info
+        # Periods tensor: current-period lookahead window
+        # periods[..., :] = [duration, price, start_slot, is_current]
+        K_local = self.K_period_lookahead
         periods = torch.zeros(
-            (B, self.K_period_lookahead, self.F_period),
+            (B, K_local, self.F_period),
             dtype=torch.float32,
             device=self.device,
         )
 
-        # Fill period data (simplified - not tracking current period dynamically on GPU)
-        for i in range(min(self.K_period_lookahead, self.K_pad)):
-            periods[:, i, 0] = self.Tk[:, i].float()
-            periods[:, i, 1] = self.ck[:, i].float()
-            periods[:, i, 2] = self.period_starts[:, i].float()
+        # Compute per-instance current period and gather a lookahead window
+        current_period = self._compute_current_period().long()  # (B,)
+        offsets = torch.arange(K_local, device=self.device).long()  # (K_local,)
+        target_period = current_period.unsqueeze(1) + offsets.unsqueeze(
+            0
+        )  # (B, K_local)
+
+        # Valid token if it points to an actual period for that instance
+        # K is per-instance number of periods.
+        valid_period = target_period < self.K.unsqueeze(1)  # (B, K_local) bool
+
+        # Clamp gather indices to avoid OOB even for invalid tokens
+        target_clamped = torch.clamp(target_period, 0, self.K_pad - 1)
+
+        durations = torch.gather(self.Tk, 1, target_clamped).float()  # (B, K_local)
+        prices = torch.gather(self.ck, 1, target_clamped).float()  # (B, K_local)
+        starts = torch.gather(
+            self.period_starts, 1, target_clamped
+        ).float()  # (B, K_local)
+
+        valid_f = valid_period.float()
+        periods[:, :, 0] = durations * valid_f
+        periods[:, :, 1] = prices * valid_f
+        periods[:, :, 2] = starts * valid_f
+        # is_current for the first token (only if valid)
+        periods[:, 0, 3] = valid_period[:, 0].float()
+
+        # Period mask in env convention: float 0/1 where 1 means valid token
+        # Runner/eval convert to bool-invalid convention for the model.
+        period_mask = valid_period.float()
 
         # Context
-        remaining_work = (self.p_subset.float() * self.job_available).sum(dim=1)
+        remaining_work = (self.p_subset.float() * job_available).sum(dim=1)
+
+        # Match CPU semantics for ctx[4]/ctx[5]: price stats beyond lookahead window
+        # window_end = min(current_period + K_period_lookahead, K)
+        window_end = torch.minimum(
+            (current_period + K_local).to(torch.int32), self.K
+        ).to(
+            torch.int32
+        )  # (B,)
+        idx = torch.arange(self.K_pad, device=self.device).unsqueeze(0)  # (1, K_pad)
+        beyond = (idx >= window_end.unsqueeze(1)) & (idx < self.K.unsqueeze(1))
+
+        Tk_f = self.Tk.float()
+        ck_f = self.ck.float()
+        dur_beyond = Tk_f * beyond.float()
+        total_dur = dur_beyond.sum(dim=1)
+        weighted = (dur_beyond * ck_f).sum(dim=1)
+        avg_price_after = torch.where(
+            total_dur > 0,
+            weighted / (total_dur + 1e-8),
+            torch.zeros_like(total_dur),
+        )
+
+        any_beyond = beyond.any(dim=1)
+        masked_ck = ck_f.masked_fill(~beyond, float("inf"))
+        min_price_after = masked_ck.min(dim=1).values
+        min_price_after = torch.where(
+            any_beyond,
+            min_price_after,
+            torch.zeros_like(min_price_after),
+        )
 
         ctx = torch.stack(
             [
@@ -1041,24 +1109,24 @@ class GPUBatchSingleMachinePeriodEnv:
                 self.T_limit.float(),
                 remaining_work,
                 self.e_single.float(),
-                torch.zeros(
-                    B, device=self.device
-                ),  # avg_price_after_window (simplified)
-                torch.zeros(
-                    B, device=self.device
-                ),  # min_price_after_window (simplified)
+                avg_price_after,
+                min_price_after,
             ],
             dim=1,
         )
 
         # Action mask: check deadline feasibility for each (job, slack) pair
-        action_mask = self._compute_action_mask(job_mask)
+        # Env's action feasibility uses availability (1 = available)
+        action_mask = self._compute_action_mask(job_available)
+        # Done envs must have no valid actions
+        action_mask = action_mask * (~self.done_mask).float().unsqueeze(1)
 
         return {
             "jobs": jobs,
             "periods": periods,
             "ctx": ctx,
             "job_mask": job_mask,
+            "period_mask": period_mask,
             "action_mask": action_mask,
         }
 
@@ -1094,19 +1162,19 @@ class GPUBatchSingleMachinePeriodEnv:
         invalid_action = active & (job_available_selected < 0.5)
 
         if invalid_action.any():
-            # Log warning but don't crash - clamp to safe behavior
-            # This can happen if action mask has a bug or policy samples invalid action
+            # Invalid actions indicate a policy/mask bug.
+            # Safer than clamping (which changes the MDP) is to terminate those envs
+            # without applying any state transition.
             import warnings
 
             warnings.warn(
                 f"Invalid actions detected: {invalid_action.sum().item()} envs selected unavailable jobs. "
-                "Clamping to job 0 with no slack."
+                "Marking them done with zero reward and no state update."
             )
-            # For invalid actions, use job 0 and slack 0 (will be masked by active anyway if done)
-            job_ids = torch.where(invalid_action, torch.zeros_like(job_ids), job_ids)
-            slack_ids = torch.where(
-                invalid_action, torch.zeros_like(slack_ids), slack_ids
-            )
+            self.done_mask = self.done_mask | invalid_action
+            # Make them terminal with no available jobs/actions
+            self.job_available[invalid_action] = 0.0
+            active = ~self.done_mask
 
         # Get processing times for selected jobs
         # Use gather to get p[job_id] for each instance
