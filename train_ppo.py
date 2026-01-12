@@ -585,6 +585,10 @@ class TrainingEnv:
             self.env_config.F_period,
         )
 
+        # Period mask: (K_period_lookahead,)
+        # 1.0 = valid period token, 0.0 = invalid/padding
+        shapes["period_mask"] = (self.env_config.K_period_lookahead,)
+
         # Context: (F_ctx,)
         shapes["ctx"] = (self.env_config.F_ctx,)
 

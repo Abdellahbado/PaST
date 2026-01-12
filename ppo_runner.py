@@ -153,8 +153,11 @@ class RolloutBuffer:
             dones: Done flags [B]
             values: Value estimates [B]
         """
-        for name, tensor in obs.items():
-            self.obs_buffers[name][self.pos] = tensor
+        # Store only the observation keys the buffer was configured for.
+        # This makes the rollout code robust to extra keys in the env obs dict
+        # without silently changing training inputs.
+        for name, buffer in self.obs_buffers.items():
+            buffer[self.pos] = obs[name]
 
         self.actions[self.pos] = actions
         self.log_probs[self.pos] = log_probs
