@@ -111,14 +111,15 @@ class GlobalHorizonEmbedding(nn.Module):
         Args:
             periods_full_emb: [batch, K, d_model]
             periods_full_raw: [batch, K, F_period] - we need duration from index 0
-            period_mask: [batch, K] - True for valid periods
+            period_mask: [batch, K] - True for invalid periods (masked out)
         """
         # Extract durations from raw features (index 0)
         durations = periods_full_raw[:, :, 0]  # [batch, K]
 
         # Apply mask if provided
+        # Convention in this codebase: masks are boolean with True meaning INVALID / masked out.
         if period_mask is not None:
-            durations = durations * period_mask.float()
+            durations = durations * (~period_mask).float()
 
         # Normalize durations to get weights
         dur_sum = durations.sum(dim=-1, keepdim=True).clamp(min=1e-8)  # [batch, 1]
@@ -440,10 +441,22 @@ class PaSTEncoder(nn.Module):
 
         # Compute global horizon embedding if enabled
         global_emb = None
-        if self.use_global_horizon and periods_full is not None:
-            periods_full_emb = self.period_full_embed(periods_full)
+        if self.use_global_horizon:
+            # FULL_GLOBAL is intended to use a full-horizon token sequence.
+            # In practice, some callers/environments may only provide `periods_local`.
+            # For robustness (and because many variants set K_local == K_full), we fall back
+            # to computing the global summary from local periods when `periods_full` is absent.
+            periods_for_global = (
+                periods_full if periods_full is not None else periods_local
+            )
+            mask_for_global = (
+                period_full_mask if period_full_mask is not None else period_mask
+            )
+            periods_for_global_emb = self.period_full_embed(periods_for_global)
             global_emb = self.global_horizon_embed(
-                periods_full_emb, periods_full, period_full_mask
+                periods_for_global_emb,
+                periods_for_global,
+                mask_for_global,
             )
 
         # Convert masks to attention format

@@ -353,7 +353,7 @@ class CheckpointManager:
 
     def save_latest(
         self,
-        runner: PPORunner,
+        runner,
         rng_states: Dict[str, Any],
         run_config: RunConfig,
         variant_config: VariantConfig,
@@ -378,7 +378,7 @@ class CheckpointManager:
 
     def save_best(
         self,
-        runner: PPORunner,
+        runner,
         rng_states: Dict[str, Any],
         run_config: RunConfig,
         variant_config: VariantConfig,
@@ -406,7 +406,7 @@ class CheckpointManager:
 
     def save_milestone(
         self,
-        runner: PPORunner,
+        runner,
         rng_states: Dict[str, Any],
         run_config: RunConfig,
         variant_config: VariantConfig,
