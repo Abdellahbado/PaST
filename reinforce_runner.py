@@ -286,7 +286,9 @@ class ReinforceRunner:
         adv = rtg
         if baseline_rtg is not None:
             # Stochastic and greedy rollouts can have different lengths (early termination).
-            # Pad the shorter RTG tensor with zeros so they can be subtracted.
+            # We can only learn from the stochastic trajectory we collected, so:
+            # - If baseline is shorter, pad it with zeros.
+            # - If baseline is longer, truncate it to match stochastic length.
             T_stoch = rtg.shape[0]
             T_base = baseline_rtg.shape[0]
             B = rtg.shape[1]
@@ -296,15 +298,8 @@ class ReinforceRunner:
                 )
                 baseline_rtg = torch.cat([baseline_rtg, pad], dim=0)
             elif T_base > T_stoch:
-                pad = torch.zeros(
-                    (T_base - T_stoch, B), device=rtg.device, dtype=rtg.dtype
-                )
-                rtg = torch.cat([rtg, pad], dim=0)
-                # Extend alive mask as well (those extra steps are not alive for stochastic)
-                alive_pad = torch.zeros(
-                    (T_base - T_stoch, B), dtype=torch.bool, device=self.device
-                )
-                alive = torch.cat([alive, alive_pad], dim=0)
+                # Truncate baseline to match stochastic trajectory length
+                baseline_rtg = baseline_rtg[:T_stoch]
             adv = rtg - baseline_rtg
 
         if traj is None:
