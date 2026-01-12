@@ -1023,12 +1023,21 @@ class GPUBatchSingleMachinePeriodEnv:
         B = self.batch_size
 
         # Jobs tensor
-        jobs = self.p_subset.float().unsqueeze(-1)  # (B, N_job_pad, 1)
+        # Model expects jobs[..., F_job] where F_job comes from EnvConfig.
+        # Backward-compatible behavior: feature 0 is processing time; feature 1 (if present)
+        # is availability (0/1), which is a useful signal and matches the model's 2D job inputs.
+        jobs = torch.zeros(
+            (B, self.N_job_pad, self.F_job), dtype=torch.float32, device=self.device
+        )
+        jobs[..., 0] = self.p_subset.float()
 
         # Job availability/mask (float 0/1 where 1 means valid/available)
         # Note: PPO runner/eval convert this to the model's bool-invalid convention.
         job_mask = self.job_available.clone()
         job_available = job_mask
+
+        if self.F_job >= 2:
+            jobs[..., 1] = job_available
 
         # Periods tensor: current-period lookahead window
         # periods[..., :] = [duration, price, start_slot, is_current]
