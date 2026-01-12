@@ -18,6 +18,10 @@ From the repo root:
 
 - `docker build -t past:latest -f PaST/Dockerfile PaST`
 
+Apple Silicon note (M1/M2/M3 Macs): the base image is `linux/amd64`, so you may see a platform warning. You can either:
+- Build on the A100 server (recommended; it will be `linux/amd64`), or
+- Force an amd64 build on your Mac (will be slower): `docker build --platform linux/amd64 -t past:latest -f PaST/Dockerfile PaST`
+
 This uses `PaST/` as the build context (so other folders aren’t copied).
 
 ## Run all variants (recommended)

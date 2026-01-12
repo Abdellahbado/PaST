@@ -1,0 +1,22 @@
+# Keep the Docker build context small and stable
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Outputs / artifacts
+runs/
+checkpoints/
+logs/
+
+# Local dev files
+.venv/
+.ipynb_checkpoints/
+.DS_Store
+
+# Git
+.git/
+.gitignore
+
+# Optional: if you generate large datasets under PaST
+Dataset/
