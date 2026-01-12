@@ -84,8 +84,11 @@ class ShortSlackSpec:
 
     def __post_init__(self):
         if self.slack_options is None:
-            # Default: Fibonacci-like spacing for good coverage
-            self.slack_options = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+            # Default: dense short-range offsets.
+            # We keep all integers to avoid "missed optimal offset" edge cases,
+            # while the policy can still be biased toward small offsets via a
+            # learned/external prior.
+            self.slack_options = list(range(31))  # 0..30
         if not all(isinstance(s, int) and s >= 0 for s in self.slack_options):
             raise ValueError("All slack_options must be non-negative integers")
         if 0 not in self.slack_options:
@@ -235,6 +238,14 @@ class ModelConfig:
     # Action head configuration
     use_factored_head: bool = True  # job_logits + slack_logits -> joint
     slack_head_hidden: int = 64  # Hidden dim for slack MLP
+
+    # Optional exponential prior over SHORT slack offsets.
+    # If enabled, the model adds a fixed bias to slack logits:
+    #   bias(s) = -strength * (offset(s) / tau)
+    # where offset(s) is the period offset value from ShortSlackSpec.
+    # Set tau to something like 10-20 for a mild bias.
+    short_slack_prior_tau: Optional[float] = None
+    short_slack_prior_strength: float = 1.0
 
     # Global horizon embedding (only for FULL_GLOBAL variant)
     use_global_horizon: bool = False  # Add duration-weighted pooling of full periods
@@ -507,6 +518,9 @@ def get_ppo_short_base() -> VariantConfig:
     """
     model = ModelConfig.base()
     model.use_global_horizon = False
+    # Mild exponential bias toward small SHORT offsets (can still choose 21, 27, etc.).
+    model.short_slack_prior_tau = 12.0
+    model.short_slack_prior_strength = 1.0
 
     env = EnvConfig()
     env.K_period_local = 48
@@ -532,6 +546,8 @@ def get_ppo_short_large() -> VariantConfig:
     """
     model = ModelConfig.large()
     model.use_global_horizon = False
+    model.short_slack_prior_tau = 12.0
+    model.short_slack_prior_strength = 1.0
 
     env = EnvConfig()
     env.K_period_local = 150  # Larger local window
@@ -633,6 +649,8 @@ def get_reinforce_short_sc() -> VariantConfig:
     """
     model = ModelConfig.base()
     model.use_global_horizon = False
+    model.short_slack_prior_tau = 12.0
+    model.short_slack_prior_strength = 1.0
 
     env = EnvConfig()
     env.K_period_local = 48

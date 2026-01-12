@@ -527,12 +527,22 @@ class FactoredActionHead(nn.Module):
         K_slack: int,
         slack_head_hidden: int = 64,
         use_global_horizon: bool = False,
+        slack_prior_bias: Optional[Tensor] = None,  # [K_slack]
     ):
         super().__init__()
 
         self.M_job_bins = M_job_bins
         self.K_slack = K_slack
         self.use_global_horizon = use_global_horizon
+
+        if slack_prior_bias is not None:
+            if slack_prior_bias.ndim != 1 or slack_prior_bias.shape[0] != K_slack:
+                raise ValueError(
+                    f"slack_prior_bias must have shape [K_slack]={K_slack}, got {tuple(slack_prior_bias.shape)}"
+                )
+            self.register_buffer("slack_prior_bias", slack_prior_bias.float())
+        else:
+            self.slack_prior_bias = None
 
         # Job head: single linear projection
         self.job_head = nn.Linear(d_model, 1)
@@ -582,6 +592,10 @@ class FactoredActionHead(nn.Module):
 
         # Slack logits: [batch, M, K_slack]
         slack_logits = self.slack_head(slack_input)
+
+        # Optional: add fixed slack prior bias (broadcast over batch and jobs)
+        if self.slack_prior_bias is not None:
+            slack_logits = slack_logits + self.slack_prior_bias.view(1, 1, -1)
 
         # Joint logits: broadcasting addition
         # job_logits: [batch, M] -> [batch, M, 1]
@@ -764,6 +778,23 @@ class PaSTSMNet(nn.Module):
         M = self.env_config.M_job_bins
         K_slack = self.env_config.get_num_slack_choices()
 
+        slack_prior_bias = None
+        if (
+            self.env_config.slack_type == SlackType.SHORT
+            and self.model_config.short_slack_prior_tau is not None
+            and self.model_config.short_slack_prior_tau > 0
+            and self.model_config.short_slack_prior_strength != 0
+        ):
+            # Bias is based on actual SHORT slack offsets (period offsets).
+            offsets = torch.tensor(
+                self.env_config.short_slack_spec.slack_options,
+                dtype=torch.float32,
+            )
+            tau = float(self.model_config.short_slack_prior_tau)
+            strength = float(self.model_config.short_slack_prior_strength)
+            # offset 0 gets bias 0; larger offsets get negative bias.
+            slack_prior_bias = -(strength * (offsets / tau))
+
         # Encoder
         self.encoder = PaSTEncoder(self.model_config, self.env_config)
 
@@ -775,6 +806,7 @@ class PaSTSMNet(nn.Module):
                 K_slack=K_slack,
                 slack_head_hidden=self.model_config.slack_head_hidden,
                 use_global_horizon=self.model_config.use_global_horizon,
+                slack_prior_bias=slack_prior_bias,
             )
         else:
             self.action_head = SimpleActionHead(
