@@ -645,10 +645,14 @@ class PPORunner:
             # Check for early stopping on KL
             if self.config.target_kl is not None and len(approx_kls) > 0:
                 window = min(int(prev_epoch_minibatches), len(approx_kls))
-                if window > 0 and (
-                    np.mean(approx_kls[-window:]) > self.config.target_kl
-                ):
-                    break
+                if window > 0:
+                    recent = approx_kls[-window:]
+                    if isinstance(recent[0], Tensor):
+                        recent_mean = torch.stack(recent).mean().item()
+                    else:
+                        recent_mean = float(np.mean(recent))
+                    if recent_mean > self.config.target_kl:
+                        break
 
             minibatches_this_epoch = 0
 
