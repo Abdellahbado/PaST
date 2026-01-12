@@ -78,22 +78,35 @@ class ReinforceRunner:
         batch_data,
         deterministic: bool,
         max_steps: int,
-    ) -> Tuple[Dict[str, Tensor], Tensor, Tensor, Tensor]:
+        collect_trajectories: bool = False,
+    ) -> Tuple[Optional[Dict[str, Tensor]], Tensor, Tensor]:
         """Run one rollout.
 
+        Notes:
+            This rollout runs under no-grad. For learning, we collect (obs, actions)
+            and later recompute log-probs with gradients in a single batched forward
+            pass. This avoids storing a massive autograd graph across time.
+
         Returns:
+            traj: Optional dict of stacked tensors with leading time dim (T, B, ...)
             rewards_t: (T, B)
-            dones_t: (T, B)
-            log_probs_t: (T, B)  (zeros if deterministic)
-            entropy_t: (T, B)
+            dones_t: (T, B) float 0/1, where 1 indicates termination after that step
         """
         obs = env.reset(batch_data)
         B = env.batch_size
 
         rewards_t = []
         dones_t = []
-        log_probs_t = []
-        entropy_t = []
+        actions_t = []
+
+        jobs_t = []
+        periods_t = []
+        ctx_t = []
+        job_mask_t = []
+        period_mask_t = []
+        periods_full_t = []
+        period_full_mask_t = []
+        action_mask_t = []
 
         done_mask = torch.zeros(B, dtype=torch.bool, device=self.device)
 
@@ -137,8 +150,8 @@ class ReinforceRunner:
                 period_full_mask=period_full_mask,
             )
 
-            if "action_mask" in obs:
-                action_mask = obs["action_mask"]
+            action_mask = obs.get("action_mask")
+            if action_mask is not None:
                 logits = logits.masked_fill(action_mask == 0, float("-inf"))
 
             all_masked = ~torch.isfinite(logits).any(dim=-1)
@@ -151,29 +164,30 @@ class ReinforceRunner:
             safe_logits = torch.where(
                 all_masked.unsqueeze(-1), torch.zeros_like(logits), logits
             )
-            dist = torch.distributions.Categorical(logits=safe_logits)
 
             if deterministic:
                 actions = safe_logits.argmax(dim=-1)
-                logp = torch.zeros(B, device=self.device)
             else:
+                dist = torch.distributions.Categorical(logits=safe_logits)
                 actions = dist.sample()
-                logp = dist.log_prob(actions)
-
-            ent = dist.entropy()
 
             actions = actions.masked_fill(done_mask, 0)
-            logp = logp.masked_fill(done_mask, 0.0)
-            ent = ent.masked_fill(done_mask, 0.0)
-
             next_obs, rewards, dones, _ = env.step(actions)
 
-            # record
+            if collect_trajectories:
+                jobs_t.append(obs["jobs"])
+                periods_t.append(obs["periods"])
+                ctx_t.append(obs["ctx"])
+                job_mask_t.append(job_mask)
+                period_mask_t.append(period_mask)
+                periods_full_t.append(periods_full)
+                period_full_mask_t.append(period_full_mask)
+                action_mask_t.append(action_mask)
+                actions_t.append(actions)
+
             rewards_t.append(rewards)
             dones_step = (dones | newly_infeasible).bool()
             dones_t.append(dones_step.float())
-            log_probs_t.append(logp)
-            entropy_t.append(ent)
 
             done_mask = done_mask | dones
             if hasattr(env, "done_mask"):
@@ -184,15 +198,32 @@ class ReinforceRunner:
         T = len(rewards_t)
         if T == 0:
             zeros = torch.zeros((0, B), device=self.device)
-            return obs, zeros, zeros, zeros
+            return None, zeros, zeros
 
-        return (
-            obs,
-            torch.stack(rewards_t, dim=0),
-            torch.stack(dones_t, dim=0),
-            torch.stack(log_probs_t, dim=0),
-            torch.stack(entropy_t, dim=0),
-        )
+        traj = None
+        if collect_trajectories:
+            # Helper: stack optional masks. If a key is missing everywhere, return None.
+            def _stack_optional(xs):
+                if len(xs) == 0 or all(x is None for x in xs):
+                    return None
+                # Replace None entries with zeros of the right shape/dtype (rare; but makes stacking safe)
+                x0 = next(x for x in xs if x is not None)
+                filled = [x if x is not None else torch.zeros_like(x0) for x in xs]
+                return torch.stack(filled, dim=0)
+
+            traj = {
+                "jobs": torch.stack(jobs_t, dim=0),
+                "periods": torch.stack(periods_t, dim=0),
+                "ctx": torch.stack(ctx_t, dim=0),
+                "job_mask": _stack_optional(job_mask_t),
+                "period_mask": _stack_optional(period_mask_t),
+                "periods_full": _stack_optional(periods_full_t),
+                "period_full_mask": _stack_optional(period_full_mask_t),
+                "action_mask": _stack_optional(action_mask_t),
+                "actions": torch.stack(actions_t, dim=0),
+            }
+
+        return traj, torch.stack(rewards_t, dim=0), torch.stack(dones_t, dim=0)
 
     def _returns_to_go(self, rewards: Tensor, dones: Tensor) -> Tensor:
         """Compute discounted return-to-go per step.
@@ -220,12 +251,13 @@ class ReinforceRunner:
         """Run REINFORCE update on one batch."""
         self.model.train()
 
-        # Stochastic rollout for gradient
-        _, rewards, dones, log_probs, entropy = self._rollout(
+        # Rollout under no-grad, but collect (obs, actions) so we can recompute log-probs with grad.
+        traj, rewards, dones = self._rollout(
             env=self.env,
             batch_data=batch_data,
             deterministic=False,
             max_steps=max_steps,
+            collect_trajectories=True,
         )
 
         # Optional self-critic: greedy rollout baseline on same batch
@@ -233,7 +265,7 @@ class ReinforceRunner:
         if self.config.use_self_critic:
             if self.baseline_env is None:
                 raise ValueError("use_self_critic=True requires baseline_env")
-            _, b_rewards, b_dones, _, _ = self._rollout(
+            _, b_rewards, b_dones = self._rollout(
                 env=self.baseline_env,
                 batch_data=batch_data,
                 deterministic=True,
@@ -255,16 +287,78 @@ class ReinforceRunner:
         if baseline_rtg is not None:
             adv = rtg - baseline_rtg
 
-        adv = adv.detach()
+        if traj is None:
+            # Nothing happened; skip update.
+            return {
+                "train/policy_loss": 0.0,
+                "train/entropy": 0.0,
+                "train/grad_norm": 0.0,
+                "rollout/rewards_mean": 0.0,
+                "rollout/rewards_std": 0.0,
+                "rollout/steps": 0.0,
+                "train/self_critic": 1.0 if baseline_rtg is not None else 0.0,
+            }
+
+        # Recompute log-probs and entropy with autograd enabled (single batched forward pass)
+        T, B = rewards.shape
+        TB = T * B
+
+        def _flat(x: Optional[Tensor]) -> Optional[Tensor]:
+            if x is None:
+                return None
+            return x.reshape((TB,) + x.shape[2:])
+
+        jobs = traj["jobs"].reshape((TB,) + traj["jobs"].shape[2:])
+        periods = traj["periods"].reshape((TB,) + traj["periods"].shape[2:])
+        ctx = traj["ctx"].reshape((TB,) + traj["ctx"].shape[2:])
+        actions = traj["actions"].reshape((TB,))
+
+        job_mask = _flat(traj.get("job_mask"))
+        period_mask = _flat(traj.get("period_mask"))
+        periods_full = _flat(traj.get("periods_full"))
+        period_full_mask = _flat(traj.get("period_full_mask"))
+
+        logits, _ = self.model(
+            jobs=jobs,
+            periods_local=periods,
+            ctx=ctx,
+            job_mask=job_mask,
+            period_mask=period_mask,
+            periods_full=periods_full,
+            period_full_mask=period_full_mask,
+        )
+
+        action_mask = _flat(traj.get("action_mask"))
+        if action_mask is not None:
+            logits = logits.masked_fill(action_mask == 0, float("-inf"))
+
+        all_masked = ~torch.isfinite(logits).any(dim=-1)
+        safe_logits = torch.where(
+            all_masked.unsqueeze(-1), torch.zeros_like(logits), logits
+        )
+        dist = torch.distributions.Categorical(logits=safe_logits)
+        log_probs = dist.log_prob(actions)
+        entropy = dist.entropy()
+
+        alive_flat = alive.reshape((TB,))
+        adv_flat = adv.reshape((TB,)).detach()
 
         # Policy gradient loss
-        pg = -(adv * log_probs)
-        pg = pg.masked_fill(~alive, 0.0)
-        policy_loss = pg.sum() / max(1, alive.sum().item())
+        pg = -(adv_flat * log_probs)
+        pg = pg.masked_fill(~alive_flat, 0.0)
+        denom = max(1, int(alive_flat.sum().item()))
+        policy_loss = pg.sum() / denom
 
-        ent = entropy.masked_fill(~alive, 0.0)
-        ent_mean = ent.sum() / max(1, alive.sum().item())
+        ent = entropy.masked_fill(~alive_flat, 0.0)
+        ent_mean = ent.sum() / denom
         loss = policy_loss - self.config.entropy_coef * ent_mean
+
+        if not loss.requires_grad:
+            raise RuntimeError(
+                "REINFORCE loss does not require grad. "
+                "This usually means log-probs were computed under no-grad or detached; "
+                "ensure log-probs are recomputed from a grad-enabled forward pass."
+            )
 
         self.optimizer.zero_grad()
         loss.backward()
