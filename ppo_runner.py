@@ -410,6 +410,18 @@ class PPORunner:
                 ):
                     period_full_mask = period_full_mask < 0.5
 
+                periods_full = obs.get("periods_full")
+                if (
+                    getattr(
+                        getattr(self.model, "model_config", None),
+                        "use_global_horizon",
+                        False,
+                    )
+                    and periods_full is None
+                ):
+                    periods_full = obs["periods"]
+                    period_full_mask = period_mask
+
                 # Get action and value from model
                 logits, values = self.model(
                     jobs=obs["jobs"],
@@ -417,7 +429,7 @@ class PPORunner:
                     ctx=obs["ctx"],
                     job_mask=job_mask,
                     period_mask=period_mask,
-                    periods_full=obs.get("periods_full"),
+                    periods_full=periods_full,
                     period_full_mask=period_full_mask,
                 )
 
@@ -589,13 +601,27 @@ class PPORunner:
             ):
                 period_full_mask = period_full_mask < 0.5
 
+            periods_full = obs.get("periods_full")
+            # FULL_GLOBAL expects periods_full for global horizon embedding.
+            # In our env, "periods" may already contain the full horizon (K=K_full_max).
+            if (
+                getattr(
+                    getattr(self.model, "model_config", None),
+                    "use_global_horizon",
+                    False,
+                )
+                and periods_full is None
+            ):
+                periods_full = obs["periods"]
+                period_full_mask = period_mask
+
             final_logits, final_values = self.model(
                 jobs=obs["jobs"],
                 periods_local=obs["periods"],
                 ctx=obs["ctx"],
                 job_mask=job_mask,
                 period_mask=period_mask,
-                periods_full=obs.get("periods_full"),
+                periods_full=periods_full,
                 period_full_mask=period_full_mask,
             )
 

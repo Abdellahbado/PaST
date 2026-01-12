@@ -22,6 +22,7 @@ import random
 import shutil
 import sys
 import time
+import copy
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -86,6 +87,11 @@ class RunConfig:
 
     # Training budget
     total_env_steps: int = 10_000_000
+
+    # Curriculum learning (opt-in): start with easier instances, anneal to target.
+    # Implemented by increasing deadline slack early (larger T_limit).
+    curriculum: bool = False
+    curriculum_fraction: float = 0.3  # fraction of updates used for annealing
 
     # Evaluation
     eval_every_updates: int = 20
@@ -484,27 +490,26 @@ class TrainingEnv:
         self.device = device
 
         # Create data config
-        self.data_config = variant_config.data
+        # Keep a private copy so training-time tweaks (e.g., curriculum) do not
+        # mutate variant_config.data (which is also used for evaluation batches).
+        self.base_data_config = copy.deepcopy(variant_config.data)
+        self.data_config = copy.deepcopy(variant_config.data)
 
-        # Create environment config (use legacy fields for sm_env compatibility)
-        from PaST.config import SlackVariant, ShortSlackSpec, PeriodAlignedSlackSpec
+        # Create environment config from the variant env config.
+        # This is critical so action dimensions match across variants
+        # (slack_type determines K_slack via EnvConfig.get_num_slack_choices()).
+        from PaST.config import SlackVariant
 
-        env_config = EnvConfig()
-        env_config.M_job_bins = variant_config.env.M_job_bins
-        env_config.K_period_local = variant_config.env.K_period_local
-        env_config.K_period_full_max = variant_config.env.K_period_full_max
+        env_config = copy.deepcopy(variant_config.env)
 
-        # Map new SlackType to legacy SlackVariant for sm_env
-        slack_type = variant_config.env.slack_type
-        if slack_type == SlackType.SHORT:
+        # sm_env uses legacy slack_variant in its slack timing logic.
+        # Keep it consistent with the new slack_type to avoid shape mismatches.
+        if env_config.slack_type == SlackType.SHORT:
             env_config.slack_variant = SlackVariant.SHORT_SLACK
-            env_config.short_slack_spec = variant_config.env.short_slack_spec
-        elif slack_type == SlackType.COARSE_TO_FINE:
+        elif env_config.slack_type == SlackType.COARSE_TO_FINE:
             env_config.slack_variant = SlackVariant.COARSE_TO_FINE
-            env_config.c2f_slack_spec = variant_config.env.c2f_slack_spec
-        elif slack_type == SlackType.FULL:
+        elif env_config.slack_type == SlackType.FULL:
             env_config.slack_variant = SlackVariant.FULL_SLACK
-            env_config.full_slack_spec = variant_config.env.full_slack_spec
 
         self.env_config = env_config
 
@@ -519,6 +524,19 @@ class TrainingEnv:
 
         # Track done mask for auto-reset
         self.done_mask = torch.zeros(num_envs, dtype=torch.bool, device=device)
+
+    def set_deadline_slack_ratio_range(self, ratio_min: float, ratio_max: float):
+        """Update data generation difficulty via deadline slack ratio range."""
+        ratio_min_f = float(ratio_min)
+        ratio_max_f = float(ratio_max)
+        # Keep in [0, 1] and ordered.
+        ratio_min_f = max(0.0, min(1.0, ratio_min_f))
+        ratio_max_f = max(0.0, min(1.0, ratio_max_f))
+        if ratio_min_f > ratio_max_f:
+            ratio_min_f, ratio_max_f = ratio_max_f, ratio_min_f
+
+        self.data_config.deadline_slack_ratio_min = ratio_min_f
+        self.data_config.deadline_slack_ratio_max = ratio_max_f
 
     def reset(self, seed: Optional[int] = None) -> Dict[str, torch.Tensor]:
         """Reset all environments with new data."""
@@ -710,13 +728,40 @@ def train(
         checkpoint_mgr.load_best_energy_from_checkpoint(device)
         print(f"Resumed at update {start_update}, step {runner.global_step}")
 
+    # Curriculum: start with easier instances (looser deadlines) and anneal.
+    base_slack_min = float(variant_config.data.deadline_slack_ratio_min)
+    base_slack_max = float(variant_config.data.deadline_slack_ratio_max)
+
+    def _curriculum_progress(update_idx: int) -> float:
+        if not run_config.curriculum:
+            return 1.0
+        frac = float(run_config.curriculum_fraction)
+        frac = max(0.0, min(1.0, frac))
+        denom = max(1, int(round(frac * max(1, run_config.num_updates))))
+        return min(1.0, float(update_idx) / float(denom))
+
+    def _apply_curriculum(update_idx: int) -> Tuple[float, float]:
+        p = _curriculum_progress(update_idx)
+        # Start at the easiest setting: fixed slack_ratio = base_slack_max.
+        start_min = base_slack_max
+        start_max = base_slack_max
+
+        slack_min = start_min + (base_slack_min - start_min) * p
+        slack_max = start_max + (base_slack_max - start_max) * p
+        env.set_deadline_slack_ratio_range(slack_min, slack_max)
+        return slack_min, slack_max
+
     # Initial reset
     print("\nStarting training...")
+    cur_slack_min, cur_slack_max = _apply_curriculum(start_update)
     obs = env.reset(seed=run_config.seed)
 
     # Training loop
     for update in range(start_update, run_config.num_updates):
         update_start = time.time()
+
+        # Update curriculum before collecting the next rollout.
+        cur_slack_min, cur_slack_max = _apply_curriculum(update)
 
         # Collect rollout
         obs, rollout_metrics = runner.collect_rollout(obs)
@@ -727,6 +772,9 @@ def train(
         # Combine metrics
         metrics = {**rollout_metrics, **train_metrics}
         metrics["train/lr"] = runner.get_learning_rate()
+        metrics["curriculum/enabled"] = float(run_config.curriculum)
+        metrics["curriculum/deadline_slack_ratio_min"] = float(cur_slack_min)
+        metrics["curriculum/deadline_slack_ratio_max"] = float(cur_slack_max)
 
         # Anomaly checking
         if update % run_config.anomaly_check_every == 0:
@@ -904,6 +952,19 @@ def parse_args():
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--ppo_epochs", type=int, default=None)
 
+    # Curriculum learning (easier instances early)
+    parser.add_argument(
+        "--curriculum",
+        action="store_true",
+        help="Enable curriculum learning by starting with looser deadlines and annealing to the target distribution.",
+    )
+    parser.add_argument(
+        "--curriculum_fraction",
+        type=float,
+        default=None,
+        help="Fraction of total updates used to anneal from easy to target (e.g., 0.3).",
+    )
+
     return parser.parse_args()
 
 
@@ -939,6 +1000,12 @@ def main():
         run_config.learning_rate = args.learning_rate
     if args.ppo_epochs is not None:
         run_config.ppo_epochs = args.ppo_epochs
+
+    # Curriculum overrides
+    if args.curriculum:
+        run_config.curriculum = True
+    if args.curriculum_fraction is not None:
+        run_config.curriculum_fraction = args.curriculum_fraction
 
     # Get variant config
     variant_id = VariantID(args.variant_id)

@@ -134,6 +134,19 @@ class Evaluator:
             ):
                 period_full_mask = period_full_mask < 0.5
 
+            periods_full = obs.get("periods_full")
+            # For FULL_GLOBAL, allow using local periods as full horizon when local K==full K.
+            if (
+                getattr(
+                    getattr(self.model, "model_config", None),
+                    "use_global_horizon",
+                    False,
+                )
+                and periods_full is None
+            ):
+                periods_full = obs["periods"]
+                period_full_mask = period_mask
+
             # Get action logits from model
             logits, _ = self.model(
                 jobs=obs["jobs"],
@@ -141,7 +154,7 @@ class Evaluator:
                 ctx=obs["ctx"],
                 job_mask=job_mask,
                 period_mask=period_mask,
-                periods_full=obs.get("periods_full"),
+                periods_full=periods_full,
                 period_full_mask=period_full_mask,
             )
 
