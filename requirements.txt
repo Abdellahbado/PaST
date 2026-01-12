@@ -1,0 +1,14 @@
+# Runtime requirements for the PaST (PPO) codepath.
+#
+# Note on PyTorch:
+# - Install an appropriate build for your machine (CPU/GPU) and platform.
+# - See https://pytorch.org/get-started/locally/
+
+numpy>=1.24
+PyYAML>=6.0
+tqdm>=4.66
+
+gymnasium>=0.29
+
+# Torch is intentionally unpinned (platform-specific wheels)
+torch
