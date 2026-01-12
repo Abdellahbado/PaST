@@ -361,10 +361,41 @@ class ReinforceRunner:
             )
 
         self.optimizer.zero_grad()
+
+        if not torch.isfinite(loss).item():
+            # Do not backprop/step on NaN/Inf; it will permanently corrupt parameters.
+            ep_returns = (rewards * alive.float()).sum(dim=0)
+            return {
+                "train/policy_loss": float(policy_loss.detach().item()),
+                "train/entropy": float(ent_mean.detach().item()),
+                "train/grad_norm": float("nan"),
+                "train/loss_nonfinite": 1.0,
+                "rollout/rewards_mean": float(ep_returns.mean().item()),
+                "rollout/rewards_std": float(ep_returns.std(unbiased=False).item()),
+                "rollout/steps": float(rewards.shape[0]),
+                "train/self_critic": 1.0 if baseline_rtg is not None else 0.0,
+            }
+
         loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm_(
             self.model.parameters(), self.config.max_grad_norm
         )
+
+        if isinstance(grad_norm, Tensor) and not torch.isfinite(grad_norm).item():
+            # Skip the step if grads are non-finite.
+            self.optimizer.zero_grad(set_to_none=True)
+            ep_returns = (rewards * alive.float()).sum(dim=0)
+            return {
+                "train/policy_loss": float(policy_loss.detach().item()),
+                "train/entropy": float(ent_mean.detach().item()),
+                "train/grad_norm": float("nan"),
+                "train/grad_nonfinite": 1.0,
+                "rollout/rewards_mean": float(ep_returns.mean().item()),
+                "rollout/rewards_std": float(ep_returns.std(unbiased=False).item()),
+                "rollout/steps": float(rewards.shape[0]),
+                "train/self_critic": 1.0 if baseline_rtg is not None else 0.0,
+            }
+
         self.optimizer.step()
 
         # Episode returns (undiscounted) for reporting: sum rewards until done.

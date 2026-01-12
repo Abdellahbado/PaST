@@ -190,8 +190,19 @@ class MultiHeadAttention(nn.Module):
                 mask = mask.unsqueeze(1)  # [batch, 1, L_q, L_k]
             scores = scores.masked_fill(mask, float("-inf"))
 
+        # If a query row is fully masked, softmax would produce NaNs.
+        # We zero those rows so attention output becomes zeros.
+        fully_masked = None
+        if mask is not None:
+            fully_masked = mask.all(dim=-1, keepdim=True)  # [batch, 1, L_q, 1]
+            scores = torch.where(fully_masked, torch.zeros_like(scores), scores)
+
         # Softmax and apply to values
         attn_weights = F.softmax(scores, dim=-1)
+        if fully_masked is not None:
+            attn_weights = torch.where(
+                fully_masked, torch.zeros_like(attn_weights), attn_weights
+            )
         attn_weights = self.dropout(attn_weights)
 
         out = torch.matmul(attn_weights, V)  # [batch, heads, L_q, d_k]

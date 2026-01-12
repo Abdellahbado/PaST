@@ -137,7 +137,12 @@ def main():
         ),
     )
 
-    evaluator = Evaluator(model=model, env=train_env, device=device)
+    eval_env = GPUBatchSingleMachinePeriodEnv(
+        batch_size=run_config.num_eval_instances,
+        env_config=env_config,
+        device=device,
+    )
+    evaluator = Evaluator(model=model, env=eval_env, device=device)
 
     start_update = 0
     if args.resume:
