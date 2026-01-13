@@ -1,5 +1,5 @@
 # PaST-SM PPO Training: A100 Full Training Config
-# Full production training run
+# Full production training run - designed for long training without early convergence
 
 # Variant and identity
 variant_id: ppo_short_base
@@ -21,6 +21,20 @@ ppo_epochs: 4
 num_minibatches: 16
 target_kl: 0.02
 normalize_advantages: true
+
+# Learning rate schedule (decay to 10% by end of training)
+lr_schedule: "cosine"
+lr_end_factor: 0.1
+
+# Entropy schedule (start high, decay gradually to maintain exploration)
+entropy_schedule: "cosine"
+entropy_coef_start: 0.05       # Start 5x higher for exploration
+entropy_coef_end: 0.001        # End low for exploitation
+entropy_decay_fraction: 0.7    # Decay over 70% of training
+
+# Curriculum learning (start with easier instances)
+curriculum: true
+curriculum_fraction: 0.25      # Anneal difficulty over first 25% of training
 
 # Training budget (100M steps)
 total_env_steps: 100000000
