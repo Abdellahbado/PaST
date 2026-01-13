@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import random
 import shutil
@@ -84,6 +85,17 @@ class RunConfig:
     num_minibatches: int = 8
     target_kl: Optional[float] = 0.02
     normalize_advantages: bool = True
+
+    # Learning rate schedule: "constant", "linear", "cosine"
+    lr_schedule: str = "constant"
+    lr_end_factor: float = 0.1  # Final LR = learning_rate * lr_end_factor (for linear/cosine)
+
+    # Entropy schedule: "constant", "linear", "cosine"
+    # Starts at entropy_coef, decays to entropy_coef_end over entropy_decay_fraction of training
+    entropy_schedule: str = "constant"
+    entropy_coef_start: Optional[float] = None  # If set, overrides entropy_coef as start value
+    entropy_coef_end: float = 0.001  # Final entropy coefficient
+    entropy_decay_fraction: float = 0.8  # Fraction of training over which to decay entropy
 
     # Training budget
     total_env_steps: int = 10_000_000
@@ -187,6 +199,74 @@ def get_a100_full_config() -> RunConfig:
         save_latest_every_minutes=15.0,
         anomaly_check_every=100,
     )
+
+
+# =============================================================================
+# Learning Rate and Entropy Scheduling
+# =============================================================================
+
+
+def get_schedule_value(
+    schedule_type: str,
+    progress: float,
+    start_value: float,
+    end_value: float,
+) -> float:
+    """
+    Compute scheduled value based on training progress.
+
+    Args:
+        schedule_type: "constant", "linear", or "cosine"
+        progress: Training progress in [0, 1]
+        start_value: Initial value
+        end_value: Final value
+
+    Returns:
+        Scheduled value for current progress
+    """
+    progress = max(0.0, min(1.0, progress))
+
+    if schedule_type == "constant":
+        return start_value
+    elif schedule_type == "linear":
+        return start_value + (end_value - start_value) * progress
+    elif schedule_type == "cosine":
+        # Cosine annealing: smooth decay from start to end
+        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return end_value + (start_value - end_value) * cosine_decay
+    else:
+        raise ValueError(f"Unknown schedule type: {schedule_type}")
+
+
+def get_lr_for_update(run_config: "RunConfig", update: int) -> float:
+    """Get learning rate for given update based on schedule."""
+    progress = update / max(1, run_config.num_updates - 1)
+    lr_end = run_config.learning_rate * run_config.lr_end_factor
+    return get_schedule_value(
+        run_config.lr_schedule,
+        progress,
+        run_config.learning_rate,
+        lr_end,
+    )
+
+
+def get_entropy_coef_for_update(run_config: "RunConfig", update: int) -> float:
+    """Get entropy coefficient for given update based on schedule."""
+    # Use entropy_coef_start if set, otherwise entropy_coef
+    start = (
+        run_config.entropy_coef_start
+        if run_config.entropy_coef_start is not None
+        else run_config.entropy_coef
+    )
+    end = run_config.entropy_coef_end
+
+    # Decay over entropy_decay_fraction of training
+    decay_updates = int(run_config.entropy_decay_fraction * run_config.num_updates)
+    if decay_updates <= 0:
+        return start
+
+    progress = min(1.0, update / decay_updates)
+    return get_schedule_value(run_config.entropy_schedule, progress, start, end)
 
 
 # =============================================================================
@@ -772,6 +852,14 @@ def train(
         # Update curriculum before collecting the next rollout.
         cur_slack_min, cur_slack_max = _apply_curriculum(update)
 
+        # Apply learning rate schedule
+        current_lr = get_lr_for_update(run_config, update)
+        runner.set_learning_rate(current_lr)
+
+        # Apply entropy coefficient schedule
+        current_entropy_coef = get_entropy_coef_for_update(run_config, update)
+        runner.config.entropy_coef = current_entropy_coef
+
         # Collect rollout
         obs, rollout_metrics = runner.collect_rollout(obs)
 
@@ -781,6 +869,7 @@ def train(
         # Combine metrics
         metrics = {**rollout_metrics, **train_metrics}
         metrics["train/lr"] = runner.get_learning_rate()
+        metrics["train/entropy_coef"] = current_entropy_coef
         metrics["curriculum/enabled"] = float(run_config.curriculum)
         metrics["curriculum/deadline_slack_ratio_min"] = float(cur_slack_min)
         metrics["curriculum/deadline_slack_ratio_max"] = float(cur_slack_max)
@@ -1005,6 +1094,48 @@ def parse_args():
         help="Fraction of total updates used to anneal from easy to target (e.g., 0.3).",
     )
 
+    # Learning rate schedule
+    parser.add_argument(
+        "--lr_schedule",
+        type=str,
+        default=None,
+        choices=["constant", "linear", "cosine"],
+        help="Learning rate schedule type.",
+    )
+    parser.add_argument(
+        "--lr_end_factor",
+        type=float,
+        default=None,
+        help="Final LR = learning_rate * lr_end_factor (for linear/cosine schedules).",
+    )
+
+    # Entropy schedule
+    parser.add_argument(
+        "--entropy_schedule",
+        type=str,
+        default=None,
+        choices=["constant", "linear", "cosine"],
+        help="Entropy coefficient schedule type.",
+    )
+    parser.add_argument(
+        "--entropy_coef_start",
+        type=float,
+        default=None,
+        help="Starting entropy coefficient (overrides --entropy_coef if set).",
+    )
+    parser.add_argument(
+        "--entropy_coef_end",
+        type=float,
+        default=None,
+        help="Final entropy coefficient for scheduled decay.",
+    )
+    parser.add_argument(
+        "--entropy_decay_fraction",
+        type=float,
+        default=None,
+        help="Fraction of training over which entropy decays (e.g., 0.8).",
+    )
+
     return parser.parse_args()
 
 
@@ -1051,6 +1182,22 @@ def main():
         run_config.curriculum = True
     if args.curriculum_fraction is not None:
         run_config.curriculum_fraction = args.curriculum_fraction
+
+    # LR schedule overrides
+    if args.lr_schedule is not None:
+        run_config.lr_schedule = args.lr_schedule
+    if args.lr_end_factor is not None:
+        run_config.lr_end_factor = args.lr_end_factor
+
+    # Entropy schedule overrides
+    if args.entropy_schedule is not None:
+        run_config.entropy_schedule = args.entropy_schedule
+    if args.entropy_coef_start is not None:
+        run_config.entropy_coef_start = args.entropy_coef_start
+    if args.entropy_coef_end is not None:
+        run_config.entropy_coef_end = args.entropy_coef_end
+    if args.entropy_decay_fraction is not None:
+        run_config.entropy_decay_fraction = args.entropy_decay_fraction
 
     # Get variant config
     variant_id = VariantID(args.variant_id)
