@@ -664,6 +664,7 @@ class PPORunner:
         entropy_losses = []
         approx_kls = []
         clip_fracs = []
+        grad_norms = []
 
         prev_epoch_minibatches = self.config.num_minibatches
 
@@ -803,6 +804,10 @@ class PPORunner:
                     self.config.max_grad_norm,
                 )
 
+                # Track grad norm (returned value is the pre-clip total norm)
+                if isinstance(grad_norm, Tensor):
+                    grad_norms.append(grad_norm.detach())
+
                 self.optimizer.step()
 
                 # Track metrics (no .item() here, will do batch at end)
@@ -832,8 +837,22 @@ class PPORunner:
                 "train/approx_kl": 0.0,
                 "train/clip_frac": 0.0,
                 "train/grad_norm": 0.0,
+                "train/grad_norm_max": 0.0,
+                "train/grad_clip_frac": 0.0,
                 "train/ppo_epochs_actual": 0,
             }
+
+        if len(grad_norms) > 0:
+            grad_norm_t = torch.stack(grad_norms)
+            grad_norm_mean = grad_norm_t.mean().item()
+            grad_norm_max = grad_norm_t.max().item()
+            grad_clip_frac = (
+                (grad_norm_t > float(self.config.max_grad_norm)).float().mean().item()
+            )
+        else:
+            grad_norm_mean = 0.0
+            grad_norm_max = 0.0
+            grad_clip_frac = 0.0
 
         metrics = {
             "train/policy_loss": torch.stack(policy_losses).mean().item(),
@@ -841,9 +860,9 @@ class PPORunner:
             "train/entropy": torch.stack(entropy_losses).mean().item(),
             "train/approx_kl": torch.stack(approx_kls).mean().item(),
             "train/clip_frac": torch.stack(clip_fracs).mean().item(),
-            "train/grad_norm": (
-                grad_norm.item() if isinstance(grad_norm, Tensor) else grad_norm
-            ),
+            "train/grad_norm": grad_norm_mean,
+            "train/grad_norm_max": grad_norm_max,
+            "train/grad_clip_frac": grad_clip_frac,
             "train/ppo_epochs_actual": epoch + 1,
         }
 
