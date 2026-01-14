@@ -1472,6 +1472,16 @@ class GPUBatchSingleMachinePeriodEnv:
         # Action mask: check deadline feasibility for each (job, slack) pair
         # Env's action feasibility uses availability (1 = available)
         action_mask = self._compute_action_mask(job_available)
+
+        # If an active env has no valid actions, it's a dead-end under the current
+        # (job, slack/family) action space. Mark it done so the training wrapper can
+        # reset it (prevents repeated all-masked warnings in PPO).
+        dead_end = (~self.done_mask) & (action_mask.sum(dim=1) == 0)
+        if dead_end.any():
+            self.done_mask = self.done_mask | dead_end
+            # Make the terminal state explicit
+            self.job_available[dead_end] = 0.0
+
         # Done envs must have no valid actions
         action_mask = action_mask * (~self.done_mask).float().unsqueeze(1)
 
