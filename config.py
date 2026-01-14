@@ -64,6 +64,9 @@ class VariantID(Enum):
     PPO_FULL_GLOBAL = "ppo_full_global"
     REINFORCE_SHORT_SC = "reinforce_short_sc"
     PPO_FAMILY_Q4 = "ppo_family_q4"  # Job × price-family (4 quartiles)
+    PPO_FAMILY_Q4_CTX13 = (
+        "ppo_family_q4_ctx13"  # Price-family + identified ctx (q's + next-slot deltas)
+    )
 
 
 # =============================================================================
@@ -714,6 +717,27 @@ def get_ppo_family_q4() -> VariantConfig:
     )
 
 
+def get_ppo_family_q4_ctx13() -> VariantConfig:
+    """Enhanced PPO family variant with identified family semantics in ctx.
+
+    Extends ctx from 6 -> 13 by appending:
+        - price quantiles [q25, q50, q75]
+        - delta_to_next_slot_in_family[0..3]
+
+    This keeps the same action space as `ppo_family_q4` (job × family), but makes
+    family IDs identifiable per episode and improves stability/search guidance.
+    """
+    cfg = get_ppo_family_q4()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_CTX13
+
+    # Observation dims
+    cfg.env.F_ctx = 13
+    # Keep ModelConfig consistent (even though the model uses env.F_ctx).
+    cfg.model.ctx_input_dim = 13
+
+    return cfg
+
+
 # Mapping from variant ID to factory function
 VARIANT_FACTORIES = {
     VariantID.PPO_SHORT_BASE: get_ppo_short_base,
@@ -723,6 +747,7 @@ VARIANT_FACTORIES = {
     VariantID.PPO_FULL_GLOBAL: get_ppo_full_global,
     VariantID.REINFORCE_SHORT_SC: get_reinforce_short_sc,
     VariantID.PPO_FAMILY_Q4: get_ppo_family_q4,
+    VariantID.PPO_FAMILY_Q4_CTX13: get_ppo_family_q4_ctx13,
 }
 
 

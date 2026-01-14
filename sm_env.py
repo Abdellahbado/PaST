@@ -398,7 +398,7 @@ class SingleMachinePeriodEnv(gym.Env):
             periods[i, 3] = 1.0 if i == 0 else 0.0  # Is current period
 
         # Context tensor: (F_ctx,)
-        # F_ctx = 6: [t, T_limit, remaining_work, e_single, avg_price_after_window, min_price_after_window]
+        # Base (6): [t, T_limit, remaining_work, e_single, avg_price_after_window, min_price_after_window]
         ctx = np.zeros(self.F_ctx, dtype=np.float32)
         ctx[0] = self.t
         ctx[1] = ep.T_limit
@@ -426,6 +426,45 @@ class SingleMachinePeriodEnv(gym.Env):
         else:
             ctx[4] = 0.0
             ctx[5] = 0.0
+
+        # Optional: price-family identification features for enhanced variants.
+        # If enabled, append:
+        #  - q25,q50,q75 (3)
+        #  - delta_to_next_slot_in_family[0..3] (4)
+        # Total F_ctx = 13.
+        if self.env_config.use_price_families and self.F_ctx >= 13:
+            # Compute per-episode quantiles over valid horizon.
+            ct_valid = np.asarray(ep.ct[: int(ep.T_max)], dtype=np.float32)
+            if ct_valid.size > 0:
+                q25, q50, q75 = np.quantile(ct_valid, [0.25, 0.5, 0.75]).astype(
+                    np.float32
+                )
+            else:
+                q25 = q50 = q75 = np.float32(0.0)
+
+            ctx[6] = q25
+            ctx[7] = q50
+            ctx[8] = q75
+
+            # Compute family assignment per slot and delta to next slot of each family.
+            # Valid search region: [t, min(T_limit, T_max)).
+            t_now = int(self.t)
+            t_end = int(min(ep.T_limit, ep.T_max))
+            slot_idx = np.arange(int(ep.T_max), dtype=np.int32)
+            valid = (slot_idx >= t_now) & (slot_idx < t_end)
+
+            family = np.zeros_like(ct_valid, dtype=np.int32)
+            family = np.where(ct_valid > q75, 3, family)
+            family = np.where((ct_valid > q50) & (ct_valid <= q75), 2, family)
+            family = np.where((ct_valid > q25) & (ct_valid <= q50), 1, family)
+
+            large = np.float32(ep.T_max) if int(ep.T_max) > 0 else np.float32(0.0)
+            for f in range(4):
+                cand = np.where(valid & (family == f))[0]
+                if cand.size == 0:
+                    ctx[9 + f] = large
+                else:
+                    ctx[9 + f] = np.float32(cand[0] - t_now)
 
         # Action mask: (action_dim,)
         action_mask = self.get_action_mask()
@@ -1457,7 +1496,7 @@ class GPUBatchSingleMachinePeriodEnv:
             torch.zeros_like(min_price_after),
         )
 
-        ctx = torch.stack(
+        ctx6 = torch.stack(
             [
                 self.t.float(),
                 self.T_limit.float(),
@@ -1468,6 +1507,48 @@ class GPUBatchSingleMachinePeriodEnv:
             ],
             dim=1,
         )
+
+        # Optional: price-family identification features for enhanced variants.
+        # Append:
+        #  - q25,q50,q75 (3)
+        #  - delta_to_next_slot_in_family[0..3] (4)
+        # Total F_ctx = 13.
+        if self.env_config.use_price_families and self.F_ctx >= 13:
+            slot_families = self._compute_slot_families()  # (B, T_max_pad)
+            slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(0)
+
+            # Valid region: [t, min(T_limit, T_max))
+            valid = slot_indices >= self.t.unsqueeze(1)
+            valid = valid & (slot_indices < self.T_limit.unsqueeze(1))
+            valid = valid & (slot_indices < self.T_max.unsqueeze(1))
+
+            large_val = self.T_max_pad + 1
+            deltas = torch.full(
+                (B, self.num_slack_choices),
+                float(self.T_max_pad),
+                dtype=torch.float32,
+                device=self.device,
+            )
+
+            for f in range(self.num_slack_choices):
+                candidates = valid & (slot_families == f)
+                masked = torch.where(
+                    candidates,
+                    slot_indices.expand(B, -1),
+                    torch.full((B, self.T_max_pad), large_val, device=self.device),
+                )
+                next_slot = masked.min(dim=1).values  # (B,)
+                delta_f = (next_slot - self.t).clamp(min=0).float()
+                delta_f = torch.where(
+                    next_slot > self.T_max_pad,
+                    torch.full_like(delta_f, float(self.T_max_pad)),
+                    delta_f,
+                )
+                deltas[:, f] = delta_f
+
+            ctx = torch.cat([ctx6, self.price_q.float(), deltas], dim=1)
+        else:
+            ctx = ctx6
 
         # Action mask: check deadline feasibility for each (job, slack) pair
         # Env's action feasibility uses availability (1 = available)
