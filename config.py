@@ -63,6 +63,7 @@ class VariantID(Enum):
     PPO_FULL_TOKENS = "ppo_full_tokens"
     PPO_FULL_GLOBAL = "ppo_full_global"
     REINFORCE_SHORT_SC = "reinforce_short_sc"
+    PPO_FAMILY_Q4 = "ppo_family_q4"  # Job × price-family (4 quartiles)
 
 
 # =============================================================================
@@ -311,6 +312,11 @@ class EnvConfig:
     # Whether to include full period tokens (for FULL variants)
     use_periods_full: bool = False
 
+    # Price-family variant: predict (job, family) instead of (job, slack)
+    # Families are computed per-episode from price quantiles
+    use_price_families: bool = False
+    num_price_families: int = 4  # Number of price families (quartiles by default)
+
     # LEGACY: Fields for backward compatibility with sm_env.py
     slack_variant: SlackVariant = SlackVariant.SHORT_SLACK
     period_aligned_spec: Optional[PeriodAlignedSlackSpec] = None
@@ -325,7 +331,11 @@ class EnvConfig:
             self.full_slack_spec = FullSlackSpec(K_full_max=self.K_period_full_max)
 
     def get_num_slack_choices(self) -> int:
-        """Get K_slack based on slack type."""
+        """Get K_slack based on slack type (or num_price_families if using price families)."""
+        # Price-family variant overrides slack choices
+        if self.use_price_families:
+            return self.num_price_families
+
         if self.slack_type == SlackType.SHORT:
             return self.short_slack_spec.K_short
         elif self.slack_type == SlackType.COARSE_TO_FINE:
@@ -494,6 +504,8 @@ class VariantConfig:
                 "K_period_full_max": self.env.K_period_full_max,
                 "slack_type": self.env.slack_type.value,
                 "use_periods_full": self.env.use_periods_full,
+                "use_price_families": self.env.use_price_families,
+                "num_price_families": self.env.num_price_families,
                 "K_slack": self.env.get_num_slack_choices(),
                 "action_dim": self.env.action_dim,
             },
@@ -669,6 +681,39 @@ def get_reinforce_short_sc() -> VariantConfig:
     )
 
 
+def get_ppo_family_q4() -> VariantConfig:
+    """
+    PPO + Price-family (4 quartiles) + Local periods (K=48) + Base model.
+
+    Action = (job_id, family_id) where family_id ∈ {0,1,2,3} based on
+    per-episode price quantiles. Decoding: earliest feasible start time
+    whose starting slot price belongs to the chosen family.
+
+    This variant is agnostic to interval structure and focuses on price levels.
+    """
+    model = ModelConfig.base()
+    model.use_global_horizon = False
+    # No slack prior needed - we're predicting price families, not offsets
+
+    env = EnvConfig()
+    env.K_period_local = 48
+    env.slack_type = SlackType.SHORT  # Keep SHORT for shape compatibility
+    # Override slack choices to use price families
+    env.use_price_families = True
+    env.num_price_families = 4  # 4 quartiles
+    env.use_periods_full = False
+
+    training = TrainingConfig()
+    training.algorithm = RLAlgorithm.PPO
+
+    return VariantConfig(
+        variant_id=VariantID.PPO_FAMILY_Q4,
+        model=model,
+        env=env,
+        training=training,
+    )
+
+
 # Mapping from variant ID to factory function
 VARIANT_FACTORIES = {
     VariantID.PPO_SHORT_BASE: get_ppo_short_base,
@@ -677,6 +722,7 @@ VARIANT_FACTORIES = {
     VariantID.PPO_FULL_TOKENS: get_ppo_full_tokens,
     VariantID.PPO_FULL_GLOBAL: get_ppo_full_global,
     VariantID.REINFORCE_SHORT_SC: get_reinforce_short_sc,
+    VariantID.PPO_FAMILY_Q4: get_ppo_family_q4,
 }
 
 
@@ -720,6 +766,8 @@ if __name__ == "__main__":
         print(f"  Algorithm: {config.training.algorithm.value}")
         if config.training.use_self_critic:
             print(f"  Self-critic baseline: True")
+        if config.env.use_price_families:
+            print(f"  Price families: {config.env.num_price_families} (quartile-based)")
 
     print("\n" + "=" * 70)
     print("All variants validated!")

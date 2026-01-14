@@ -88,14 +88,20 @@ class RunConfig:
 
     # Learning rate schedule: "constant", "linear", "cosine"
     lr_schedule: str = "constant"
-    lr_end_factor: float = 0.1  # Final LR = learning_rate * lr_end_factor (for linear/cosine)
+    lr_end_factor: float = (
+        0.1  # Final LR = learning_rate * lr_end_factor (for linear/cosine)
+    )
 
     # Entropy schedule: "constant", "linear", "cosine"
     # Starts at entropy_coef, decays to entropy_coef_end over entropy_decay_fraction of training
     entropy_schedule: str = "constant"
-    entropy_coef_start: Optional[float] = None  # If set, overrides entropy_coef as start value
+    entropy_coef_start: Optional[float] = (
+        None  # If set, overrides entropy_coef as start value
+    )
     entropy_coef_end: float = 0.001  # Final entropy coefficient
-    entropy_decay_fraction: float = 0.8  # Fraction of training over which to decay entropy
+    entropy_decay_fraction: float = (
+        0.8  # Fraction of training over which to decay entropy
+    )
 
     # Training budget
     total_env_steps: int = 10_000_000
@@ -647,10 +653,9 @@ class TrainingEnv:
         """
         Take a step in all environments with auto-reset.
 
-        CRITICAL: When ANY env is done, we reset the ENTIRE batch.
-        To maintain trajectory integrity, we mark ALL envs as done on that step
-        so PPO treats it as an episode boundary for EVERY env (not just the
-        ones that actually finished). This is wasteful but correct.
+        Auto-resets only the envs that finished (standard vectorized RL behavior).
+        Done flags are returned per-env; observations for done envs are from the
+        reset episode (matching common VecEnv semantics).
 
         Returns:
             obs: Next observation (post-reset if any env finished)
@@ -663,21 +668,28 @@ class TrainingEnv:
         # Track which envs just finished (before updating done_mask)
         newly_done = dones & ~self.done_mask
 
-        # Auto-reset when ANY episode is done to prevent all-masked action spaces
+        # Auto-reset only the newly done indices.
         if newly_done.any():
-            obs = self.reset()
-            # CRITICAL: Mark ALL envs as done so PPO treats this as episode boundary
-            # for the entire batch. This ensures obs (from new episodes) pairs with
-            # done=True, preventing invalid transitions where done=False but next_obs
-            # is from a different episode.
-            all_done = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
-            self.done_mask = torch.zeros(
-                self.num_envs, dtype=torch.bool, device=self.device
+            reset_idx = torch.nonzero(newly_done, as_tuple=False).squeeze(1)
+            batch_data = generate_episode_batch(
+                batch_size=int(reset_idx.numel()),
+                config=self.data_config,
+                seed=None,
             )
-            return obs, rewards, all_done, info
+            obs = self.env.reset_indices(batch_data, reset_idx)
+
+        # Keep wrapper done_mask in sync with the underlying env (after any resets).
+        # Note: env.step returns cumulative done_mask; PPO should receive per-step terminals.
+        if hasattr(self.env, "done_mask") and isinstance(
+            self.env.done_mask, torch.Tensor
+        ):
+            self.done_mask = self.env.done_mask.clone()
         else:
+            # Fallback: track cumulatively ourselves
             self.done_mask = self.done_mask | dones
-            return obs, rewards, newly_done, info
+
+        # PPO terminal signal: only newly finished envs.
+        return obs, rewards, newly_done, info
 
     def get_obs_shapes(self) -> Dict[str, Tuple[int, ...]]:
         """Get observation tensor shapes (without batch dimension)."""

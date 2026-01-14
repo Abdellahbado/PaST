@@ -436,6 +436,8 @@ def generate_episode_batch(
         "K": np.zeros((batch_size,), dtype=np.int32),
         "period_mask": np.zeros((batch_size, K_period_pad), dtype=np.float32),
         "e_single": np.zeros((batch_size,), dtype=np.int32),
+        # Price quantiles for price-family variant: [q25, q50, q75]
+        "price_q": np.zeros((batch_size, 3), dtype=np.float32),
     }
 
     for i in range(batch_size):
@@ -469,6 +471,10 @@ def generate_episode_batch(
         # Per-slot prices (padded)
         if t_max > 0:
             batch["ct"][i, :t_max] = episode.ct[:t_max]
+            # Compute price quantiles for this episode (for price-family variant)
+            ct_valid = episode.ct[:t_max]
+            q25, q50, q75 = np.quantile(ct_valid, [0.25, 0.5, 0.75])
+            batch["price_q"][i] = [q25, q50, q75]
 
     return batch
 

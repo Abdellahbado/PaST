@@ -39,7 +39,7 @@ from .sm_benchmark_data import (
 )
 
 # Version identifier
-ENV_VERSION = "1.0-SM"
+ENV_VERSION = "1.1-SM"  # Updated for price-family variant
 print(
     f"[SingleMachinePeriodEnv v{ENV_VERSION}] Loading single-machine period-aware environment..."
 )
@@ -660,6 +660,9 @@ class GPUBatchSingleMachinePeriodEnv:
         )
         self.K = torch.zeros((B,), dtype=torch.int32, device=self.device)
 
+        # Price quantiles for price-family variant: [q25, q50, q75]
+        self.price_q = torch.zeros((B, 3), dtype=torch.float32, device=self.device)
+
         # Dynamic state
         self.t = torch.zeros((B,), dtype=torch.int32, device=self.device)
         self.job_available = torch.zeros(
@@ -714,6 +717,29 @@ class GPUBatchSingleMachinePeriodEnv:
 
         self.K[:] = to_tensor(batch_data["K"], torch.int32)
 
+        # Price quantiles for price-family variant
+        if "price_q" in batch_data:
+            self.price_q[:] = to_tensor(batch_data["price_q"], torch.float32)
+        else:
+            # Compute quantiles on the fly if not provided
+            ct_np = (
+                batch_data["ct"]
+                if isinstance(batch_data["ct"], np.ndarray)
+                else batch_data["ct"].cpu().numpy()
+            )
+            t_max_np = (
+                batch_data["T_max"]
+                if isinstance(batch_data["T_max"], np.ndarray)
+                else batch_data["T_max"].cpu().numpy()
+            )
+            price_q = np.zeros((B, 3), dtype=np.float32)
+            for i in range(B):
+                t_max_i = int(t_max_np[i])
+                if t_max_i > 0:
+                    ct_valid = ct_np[i, :t_max_i]
+                    price_q[i] = np.quantile(ct_valid, [0.25, 0.5, 0.75])
+            self.price_q[:] = to_tensor(price_q, torch.float32)
+
         # Initialize dynamic state
         self.t.zero_()
         self.total_energy.zero_()
@@ -723,6 +749,109 @@ class GPUBatchSingleMachinePeriodEnv:
 
         # Done mask
         self.done_mask = torch.zeros((B,), dtype=torch.bool, device=self.device)
+
+        return self._get_obs()
+
+    def reset_indices(
+        self,
+        batch_data: Dict[str, Union[np.ndarray, torch.Tensor]],
+        indices: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Reset only a subset of environments (vectorized env semantics).
+
+        This replaces episode data and clears dynamic state for the specified
+        batch indices, leaving other indices untouched.
+
+        Args:
+            batch_data: Batch dictionary (same schema as reset()) with batch_size == len(indices)
+            indices: 1D int tensor of batch indices to reset (on any device)
+
+        Returns:
+            Current observation dictionary after applying the partial reset.
+        """
+        if indices.numel() == 0:
+            return self._get_obs()
+
+        # Ensure indices are on-device and long
+        idx = indices.to(device=self.device, dtype=torch.long)
+        sub_B = int(idx.numel())
+
+        # Helper to convert to tensor on device
+        def to_tensor(x, dtype=torch.float32):
+            if isinstance(x, torch.Tensor):
+                return x.to(device=self.device, dtype=dtype)
+            return torch.tensor(x, dtype=dtype, device=self.device)
+
+        # --- Episode/static data ---
+        self.p_subset.index_copy_(
+            0, idx, to_tensor(batch_data["p_subset"], torch.int32)
+        )
+        self.n_jobs.index_copy_(0, idx, to_tensor(batch_data["n_jobs"], torch.int32))
+        self.T_max.index_copy_(0, idx, to_tensor(batch_data["T_max"], torch.int32))
+        self.T_limit.index_copy_(0, idx, to_tensor(batch_data["T_limit"], torch.int32))
+        self.e_single.index_copy_(
+            0, idx, to_tensor(batch_data["e_single"], torch.int32)
+        )
+
+        # Price/period data
+        ct = batch_data["ct"]
+        ct_t = to_tensor(ct, torch.int32)
+        L_ct = int(min(ct_t.shape[1], self.T_max_pad))
+        # Clear then copy (avoid leaving stale tail when ct shorter)
+        self.ct.index_fill_(0, idx, 0)
+        self.ct[idx, :L_ct] = ct_t[:, :L_ct]
+
+        Tk_t = to_tensor(batch_data["Tk"], torch.int32)
+        ck_t = to_tensor(batch_data["ck"], torch.int32)
+        ps_t = to_tensor(batch_data["period_starts"], torch.int32)
+        L_k = int(min(Tk_t.shape[1], self.K_pad))
+        self.Tk.index_fill_(0, idx, 0)
+        self.ck.index_fill_(0, idx, 0)
+        self.period_starts.index_fill_(0, idx, 0)
+        self.Tk[idx, :L_k] = Tk_t[:, :L_k]
+        self.ck[idx, :L_k] = ck_t[:, :L_k]
+        self.period_starts[idx, :L_k] = ps_t[:, :L_k]
+        self.K.index_copy_(0, idx, to_tensor(batch_data["K"], torch.int32))
+
+        # Price quantiles for price-family variant
+        if "price_q" in batch_data:
+            pq_t = to_tensor(batch_data["price_q"], torch.float32)
+            if pq_t.shape[0] != sub_B:
+                raise ValueError(
+                    f"batch_data['price_q'] batch dim {pq_t.shape[0]} != len(indices) {sub_B}"
+                )
+            self.price_q.index_copy_(0, idx, pq_t)
+        else:
+            # Keep existing reset() fallback behavior (CPU numpy quantiles), but do it only
+            # for the subset. This path should be avoided in training.
+            ct_np = ct if isinstance(ct, np.ndarray) else ct.cpu().numpy()
+            t_max_np = (
+                batch_data["T_max"]
+                if isinstance(batch_data["T_max"], np.ndarray)
+                else batch_data["T_max"].cpu().numpy()
+            )
+            price_q = np.zeros((sub_B, 3), dtype=np.float32)
+            for i in range(sub_B):
+                t_max_i = int(t_max_np[i])
+                if t_max_i > 0:
+                    ct_valid = ct_np[i, :t_max_i]
+                    price_q[i] = np.quantile(ct_valid, [0.25, 0.5, 0.75])
+            self.price_q.index_copy_(0, idx, to_tensor(price_q, torch.float32))
+
+        # --- Dynamic state ---
+        # Reset time, energy, availability, and done flag for those indices.
+        self.t.index_fill_(0, idx, 0)
+        self.total_energy.index_fill_(0, idx, 0)
+        self.job_available.index_fill_(0, idx, 0.0)
+        self.job_available.index_copy_(
+            0, idx, to_tensor(batch_data["job_mask"], torch.float32)
+        )
+        if self.done_mask is None:
+            self.done_mask = torch.zeros(
+                (self.batch_size,), dtype=torch.bool, device=self.device
+            )
+        self.done_mask.index_fill_(0, idx, False)
 
         return self._get_obs()
 
@@ -813,6 +942,215 @@ class GPUBatchSingleMachinePeriodEnv:
 
         return start_times
 
+    # =========================================================================
+    # Price-Family Variant Helpers
+    # =========================================================================
+
+    def _compute_slot_families(self) -> torch.Tensor:
+        """
+        Compute price family for each time slot based on per-episode quantiles.
+
+        Family assignment using quartiles [q25, q50, q75]:
+        - Family 0: price <= q25 (cheapest)
+        - Family 1: q25 < price <= q50
+        - Family 2: q50 < price <= q75
+        - Family 3: price > q75 (most expensive)
+
+        Returns:
+            (B, T_max_pad) tensor of family indices (0-3)
+        """
+        ct_float = self.ct.float()  # (B, T_max_pad)
+        q25 = self.price_q[:, 0:1]  # (B, 1)
+        q50 = self.price_q[:, 1:2]  # (B, 1)
+        q75 = self.price_q[:, 2:3]  # (B, 1)
+
+        # Assign families based on quantile thresholds
+        # Note: we use <= for lower thresholds to handle ties properly
+        family = torch.zeros_like(self.ct, dtype=torch.int32)
+        family = torch.where(
+            ct_float > q75, torch.tensor(3, device=self.device), family
+        )
+        family = torch.where(
+            (ct_float > q50) & (ct_float <= q75),
+            torch.tensor(2, device=self.device),
+            family,
+        )
+        family = torch.where(
+            (ct_float > q25) & (ct_float <= q50),
+            torch.tensor(1, device=self.device),
+            family,
+        )
+        # Family 0 is default (price <= q25)
+
+        return family
+
+    def _compute_family_action_mask(self, job_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Compute action mask for price-family variant.
+
+        An action (job_id, family_id) is valid if:
+        1. job_id refers to an available job
+        2. There exists at least one feasible start time whose slot is in family_id
+
+        Args:
+            job_mask: (B, N_job_pad) tensor of job availability
+
+        Returns:
+            (B, action_dim) tensor where 1 = valid, 0 = invalid
+        """
+        B = self.batch_size
+        N = self.N_job_pad
+        F = self.num_slack_choices  # num_price_families
+
+        # Compute slot families
+        slot_families = self._compute_slot_families()  # (B, T_max_pad)
+
+        # Processing times for all jobs: (B, N)
+        p_all = self.p_subset.int()
+
+        # For each (job, family), check if there's any feasible start time in that family
+        # A start time s is feasible if: s >= t_now AND s + p <= T_limit AND slot_family[s] == family
+
+        # Create mask for valid slots: (B, T_max_pad)
+        slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(
+            0
+        )  # (1, T_max_pad)
+        valid_start_slots = slot_indices >= self.t.unsqueeze(
+            1
+        )  # (B, T_max_pad) - slot >= t_now
+
+        # For each job and slot, check if job can finish by deadline
+        # end_time[b, j, s] = s + p[b, j]
+        # (B, N, T_max_pad)
+        slot_indices_expanded = slot_indices.unsqueeze(1)  # (1, 1, T_max_pad)
+        p_expanded = p_all.unsqueeze(2)  # (B, N, 1)
+        end_times = slot_indices_expanded + p_expanded  # (B, N, T_max_pad)
+
+        # Feasibility mask: end_time <= T_limit AND start >= t_now
+        T_limit_expanded = self.T_limit.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
+        feasible = (end_times <= T_limit_expanded) & valid_start_slots.unsqueeze(
+            1
+        )  # (B, N, T_max_pad)
+
+        # For each family, check if there's a feasible slot in that family
+        # Shape: (B, N, F)
+        action_mask = torch.zeros((B, N, F), dtype=torch.float32, device=self.device)
+
+        for f in range(F):
+            # Slots in this family: (B, T_max_pad)
+            in_family = slot_families == f
+            # Feasible slots in this family for each job: (B, N, T_max_pad)
+            feasible_in_family = feasible & in_family.unsqueeze(1)
+            # Any feasible slot in this family: (B, N)
+            has_feasible = feasible_in_family.any(dim=2)
+            action_mask[:, :, f] = has_feasible.float()
+
+        # Combine with job availability
+        job_available = job_mask.unsqueeze(2)  # (B, N, 1)
+        action_mask = action_mask * job_available
+
+        # Reshape to action_dim: action = job_id * F + family_id
+        action_mask = action_mask.reshape(B, N * F)
+
+        return action_mask
+
+    def _compute_family_start_times(self, family_ids: torch.Tensor) -> torch.Tensor:
+        """
+        Compute earliest feasible start time for each instance given family choice.
+
+        Args:
+            family_ids: (B,) tensor of chosen family indices
+
+        Returns:
+            (B,) tensor of start times (earliest feasible in chosen family)
+        """
+        B = self.batch_size
+
+        # Compute slot families
+        slot_families = self._compute_slot_families()  # (B, T_max_pad)
+
+        # Slot indices
+        slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(
+            0
+        )  # (1, T_max_pad)
+
+        # Valid start slots (>= t_now)
+        valid_slots = slot_indices >= self.t.unsqueeze(1)  # (B, T_max_pad)
+
+        # Slots in chosen family
+        family_ids_expanded = family_ids.unsqueeze(1)  # (B, 1)
+        in_family = slot_families == family_ids_expanded  # (B, T_max_pad)
+
+        # Candidate slots: valid AND in family
+        candidates = valid_slots & in_family  # (B, T_max_pad)
+
+        # Find earliest slot (argmax on bool finds first True)
+        # Use masked_fill to set non-candidates to a large value, then argmin
+        large_val = self.T_max_pad + 1
+        slot_indices_masked = torch.where(
+            candidates,
+            slot_indices.expand(B, -1),
+            torch.full((B, self.T_max_pad), large_val, device=self.device),
+        )
+        start_times = slot_indices_masked.min(dim=1).values  # (B,)
+
+        # Clamp to T_limit (safety, shouldn't happen if mask is correct)
+        start_times = torch.minimum(start_times, self.T_limit)
+
+        return start_times
+
+    def _compute_family_start_times_for_job(
+        self, job_ids: torch.Tensor, family_ids: torch.Tensor, p: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute earliest feasible start time for specific jobs and families.
+
+        Args:
+            job_ids: (B,) tensor of chosen job indices
+            family_ids: (B,) tensor of chosen family indices
+            p: (B,) tensor of job processing times
+
+        Returns:
+            (B,) tensor of start times (earliest feasible in chosen family for that job)
+        """
+        B = self.batch_size
+
+        # Compute slot families
+        slot_families = self._compute_slot_families()  # (B, T_max_pad)
+
+        # Slot indices
+        slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(
+            0
+        )  # (1, T_max_pad)
+
+        # Valid start slots (>= t_now)
+        valid_slots = slot_indices >= self.t.unsqueeze(1)  # (B, T_max_pad)
+
+        # Slots in chosen family
+        family_ids_expanded = family_ids.unsqueeze(1)  # (B, 1)
+        in_family = slot_families == family_ids_expanded  # (B, T_max_pad)
+
+        # Deadline feasibility: slot + p <= T_limit
+        end_times = slot_indices + p.unsqueeze(1)  # (B, T_max_pad)
+        deadline_ok = end_times <= self.T_limit.unsqueeze(1)  # (B, T_max_pad)
+
+        # Candidate slots: valid AND in family AND meets deadline
+        candidates = valid_slots & in_family & deadline_ok  # (B, T_max_pad)
+
+        # Find earliest slot
+        large_val = self.T_max_pad + 1
+        slot_indices_masked = torch.where(
+            candidates,
+            slot_indices.expand(B, -1),
+            torch.full((B, self.T_max_pad), large_val, device=self.device),
+        )
+        start_times = slot_indices_masked.min(dim=1).values  # (B,)
+
+        # Clamp to T_limit (safety)
+        start_times = torch.minimum(start_times, self.T_limit)
+
+        return start_times
+
     def _compute_action_mask(self, job_mask: torch.Tensor) -> torch.Tensor:
         """
         Compute deadline-aware action mask.
@@ -821,12 +1159,19 @@ class GPUBatchSingleMachinePeriodEnv:
         1. job_id refers to an available job (job_mask[job_id] == 1)
         2. The job can finish by T_limit given the slack choice
 
+        For price-family variant: slack_id is family_id, and validity depends
+        on whether there's any feasible start time in that family.
+
         Args:
             job_mask: (B, N_job_pad) tensor of job availability
 
         Returns:
             (B, action_dim) tensor where 1 = valid, 0 = invalid
         """
+        # Use family-based mask if price-family variant is enabled
+        if self.env_config.use_price_families:
+            return self._compute_family_action_mask(job_mask)
+
         B = self.batch_size
         N = self.N_job_pad
         S = self.num_slack_choices
@@ -1189,8 +1534,15 @@ class GPUBatchSingleMachinePeriodEnv:
         # Use gather to get p[job_id] for each instance
         p = torch.gather(self.p_subset, 1, job_ids.unsqueeze(1).long()).squeeze(1)
 
-        # Compute start times based on slack variant
-        if self.env_config.slack_variant == SlackVariant.NO_SLACK:
+        # Compute start times based on variant
+        if self.env_config.use_price_families:
+            # Price-family variant: slack_id is family_id
+            # Find earliest feasible start time in that family
+            family_ids = slack_ids  # (B,)
+            start_times = self._compute_family_start_times_for_job(
+                job_ids, family_ids, p
+            )
+        elif self.env_config.slack_variant == SlackVariant.NO_SLACK:
             start_times = self.t.clone()
         elif self.env_config.slack_variant == SlackVariant.SHORT_SLACK:
             if self.env_config.short_slack_spec is not None:
