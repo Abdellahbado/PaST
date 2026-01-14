@@ -1,0 +1,15 @@
+{
+  "eval/energy_mean": 28.5625,
+  "eval/energy_std": 30.36065673828125,
+  "eval/energy_min": 1.0,
+  "eval/energy_max": 165.0,
+  "eval/infeasible_count": 0,
+  "eval/infeasible_rate": 0.0,
+  "eval/makespan_mean": 19.59375,
+  "eval/makespan_std": 18.060634635513228,
+  "eval/num_episodes": 256,
+  "eval/steps_mean": 3.69921875,
+  "eval/seed": 1337,
+  "eval/checkpoint": "best",
+  "eval/variant_id": "ppo_family_q4"
+}

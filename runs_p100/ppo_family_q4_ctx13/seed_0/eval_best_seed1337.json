@@ -1,0 +1,15 @@
+{
+  "eval/energy_mean": 28.23046875,
+  "eval/energy_std": 30.521596908569336,
+  "eval/energy_min": 1.0,
+  "eval/energy_max": 171.0,
+  "eval/infeasible_count": 0,
+  "eval/infeasible_rate": 0.0,
+  "eval/makespan_mean": 20.078125,
+  "eval/makespan_std": 18.157776129922272,
+  "eval/num_episodes": 256,
+  "eval/steps_mean": 3.70703125,
+  "eval/seed": 1337,
+  "eval/checkpoint": "best",
+  "eval/variant_id": "ppo_family_q4_ctx13"
+}

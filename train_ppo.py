@@ -857,6 +857,10 @@ def train(
     cur_slack_min, cur_slack_max = _apply_curriculum(start_update)
     obs = env.reset(seed=run_config.seed)
 
+    # Track the most recently used eval seed so the final evaluation can be
+    # comparable to the eval curve (especially when eval_seed_mode="fixed").
+    last_eval_seed: Optional[int] = None
+
     # Training loop
     for update in range(start_update, run_config.num_updates):
         update_start = time.time()
@@ -909,6 +913,7 @@ def train(
                     raise ValueError(
                         f"Unknown eval_seed_mode: {run_config.eval_seed_mode}"
                     )
+            last_eval_seed = int(eval_seed)
             eval_batch = generate_episode_batch(
                 batch_size=run_config.num_eval_instances,
                 config=variant_config.data,
@@ -963,28 +968,84 @@ def train(
 
     # Final evaluation
     print("\nFinal evaluation...")
-    if run_config.eval_seed is None:
-        final_eval_seed = run_config.seed + 999999
+
+    # 1) Evaluate on the SAME eval distribution as the eval curve.
+    # If eval_seed_mode is fixed, this is always the same eval set.
+    # If eval_seed_mode is per_update, this evaluates on the most recent eval seed.
+    if last_eval_seed is not None:
+        final_eval_seed = int(last_eval_seed)
     else:
-        # Keep final eval stable across variants/runs by using a large offset.
-        final_eval_seed = run_config.eval_seed + 999999
-    eval_batch = generate_episode_batch(
+        # No eval ever ran (e.g., eval_every_updates > num_updates). Fall back.
+        if run_config.eval_seed is None:
+            final_eval_seed = int(run_config.seed)
+        else:
+            final_eval_seed = int(run_config.eval_seed)
+
+    eval_batch_main = generate_episode_batch(
         batch_size=run_config.num_eval_instances,
         config=variant_config.data,
         seed=final_eval_seed,
     )
-    final_result, _ = evaluator.evaluate(eval_batch, deterministic=True)
+    final_latest_main, _ = evaluator.evaluate(eval_batch_main, deterministic=True)
     print(
-        f"Final: energy={final_result.energy_mean:.2f}±{final_result.energy_std:.2f} "
-        f"infeas={final_result.infeasible_rate*100:.1f}%"
+        f"Final (latest, eval_seed={final_eval_seed}): "
+        f"energy={final_latest_main.energy_mean:.2f}±{final_latest_main.energy_std:.2f} "
+        f"infeas={final_latest_main.infeasible_rate*100:.1f}%"
     )
 
-    # Save final result
+    # Write the legacy file name as the comparable-to-curve result.
     with open(run_dir / "final_result.json", "w") as f:
-        json.dump(final_result.to_dict(), f, indent=2)
+        payload = final_latest_main.to_dict()
+        payload["eval/seed"] = int(final_eval_seed)
+        payload["eval/kind"] = "latest_on_eval_seed"
+        json.dump(payload, f, indent=2)
+
+    # 2) Also evaluate BEST checkpoint on the same eval batch (if it exists).
+    best_path = run_dir / "checkpoints" / "best.pt"
+    if best_path.exists():
+        best_checkpoint = torch.load(best_path, map_location=device)
+        runner.load_state_dict(best_checkpoint["runner"])
+        best_main, _ = evaluator.evaluate(eval_batch_main, deterministic=True)
+        print(
+            f"Final (best,   eval_seed={final_eval_seed}): "
+            f"energy={best_main.energy_mean:.2f}±{best_main.energy_std:.2f} "
+            f"infeas={best_main.infeasible_rate*100:.1f}%"
+        )
+        with open(run_dir / "final_best_on_eval_seed.json", "w") as f:
+            payload = best_main.to_dict()
+            payload["eval/seed"] = int(final_eval_seed)
+            payload["eval/kind"] = "best_on_eval_seed"
+            json.dump(payload, f, indent=2)
+
+        # Restore latest weights to avoid surprising state for any downstream code.
+        latest_checkpoint = checkpoint_mgr.load_latest(device)
+        if latest_checkpoint is not None:
+            runner.load_state_dict(latest_checkpoint["runner"])
+
+    # 3) Optional generalization eval on a held-out seed (stable across variants).
+    if run_config.eval_seed is None:
+        generalization_seed = int(run_config.seed) + 999999
+    else:
+        generalization_seed = int(run_config.eval_seed) + 999999
+    eval_batch_gen = generate_episode_batch(
+        batch_size=run_config.num_eval_instances,
+        config=variant_config.data,
+        seed=generalization_seed,
+    )
+    final_latest_gen, _ = evaluator.evaluate(eval_batch_gen, deterministic=True)
+    print(
+        f"Final (latest, gen_seed={generalization_seed}): "
+        f"energy={final_latest_gen.energy_mean:.2f}±{final_latest_gen.energy_std:.2f} "
+        f"infeas={final_latest_gen.infeasible_rate*100:.1f}%"
+    )
+    with open(run_dir / "final_latest_generalization.json", "w") as f:
+        payload = final_latest_gen.to_dict()
+        payload["eval/seed"] = int(generalization_seed)
+        payload["eval/kind"] = "latest_generalization"
+        json.dump(payload, f, indent=2)
 
     print("=" * 80)
-    return runner, final_result
+    return runner, final_latest_main
 
 
 # =============================================================================

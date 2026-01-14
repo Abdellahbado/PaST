@@ -1,0 +1,12 @@
+{
+  "eval/energy_mean": 34.359375,
+  "eval/energy_std": 33.33359146118164,
+  "eval/energy_min": 1.0,
+  "eval/energy_max": 201.0,
+  "eval/infeasible_count": 0,
+  "eval/infeasible_rate": 0.0,
+  "eval/makespan_mean": 20.11328125,
+  "eval/makespan_std": 16.820713008323946,
+  "eval/num_episodes": 256,
+  "eval/steps_mean": 4.03125
+}

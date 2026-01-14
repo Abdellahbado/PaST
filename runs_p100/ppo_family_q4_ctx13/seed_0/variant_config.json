@@ -1,0 +1,27 @@
+{
+  "variant_id": "ppo_family_q4_ctx13",
+  "model": {
+    "d_model": 128,
+    "num_heads": 8,
+    "num_blocks": 2,
+    "d_ff": 512,
+    "use_pre_ln": true,
+    "use_global_horizon": false
+  },
+  "env": {
+    "M_job_bins": 50,
+    "K_period_local": 48,
+    "K_period_full_max": 250,
+    "slack_type": "short",
+    "use_periods_full": false,
+    "use_price_families": true,
+    "num_price_families": 4,
+    "K_slack": 4,
+    "action_dim": 200
+  },
+  "training": {
+    "algorithm": "ppo",
+    "use_self_critic": false
+  },
+  "seed": 42
+}
