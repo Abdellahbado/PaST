@@ -364,7 +364,10 @@ class MetricsLogger:
         approx_kl = metrics.get("train/approx_kl", 0)
         clip_frac = metrics.get("train/clip_frac", 0)
         grad_norm = metrics.get("train/grad_norm", 0)
+        grad_clip_frac = metrics.get("train/grad_clip_frac", 0)
         lr = metrics.get("train/lr", 0)
+        entropy_coef = metrics.get("train/entropy_coef", 0)
+        ppo_epochs_actual = metrics.get("train/ppo_epochs_actual", 0)
 
         # Rollout metrics
         reward_mean = metrics.get("rollout/rewards_mean", 0)
@@ -378,7 +381,8 @@ class MetricsLogger:
             f"ret={reward_mean:>8.2f}±{reward_std:<6.2f} | "
             f"π={policy_loss:>7.4f} V={value_loss:>7.4f} H={entropy:>6.3f} | "
             f"kl={approx_kl:.4f} clip={clip_frac:.3f} | "
-            f"∇={grad_norm:>6.3f} lr={lr:.2e} | "
+            f"∇={grad_norm:>6.3f} gclip={grad_clip_frac:.2f} e={ppo_epochs_actual:>2.0f} | "
+            f"lr={lr:.2e} entc={entropy_coef:.2e} | "
             f"mem={gpu_mem:>6.0f}MB | "
             f"sps={sps:>6.0f} t={elapsed/60:>5.1f}m"
         )

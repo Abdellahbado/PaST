@@ -1,0 +1,65 @@
+# PaST-SM PPO Training: P100 Long-Run Config
+# Designed for multi-day runs with sustained exploration and stable updates.
+#
+# Notes:
+# - Keeps entropy high early via cosine schedule.
+# - Uses cosine LR decay to reduce late-stage instability.
+# - Relaxes gradient clipping (PPO logs show very large pre-clip norms).
+# - Enables curriculum so the policy learns a strong baseline before harder instances.
+
+# Variant and identity
+variant_id: ppo_short_base
+seed: 0
+
+# Environment
+num_envs: 256
+rollout_length: 128
+
+# PPO hyperparameters
+gamma: 0.99
+gae_lambda: 0.95
+clip_eps: 0.2
+value_coef: 0.25
+entropy_coef: 0.01
+learning_rate: 0.0003
+max_grad_norm: 5.0
+ppo_epochs: 4
+num_minibatches: 8
+target_kl: 0.02
+normalize_advantages: true
+
+# Learning rate schedule
+lr_schedule: "cosine"
+lr_end_factor: 0.1
+
+# Entropy schedule
+entropy_schedule: "cosine"
+entropy_coef_start: 0.05
+entropy_coef_end: 0.002
+entropy_decay_fraction: 0.7
+
+# Curriculum learning
+curriculum: true
+curriculum_fraction: 0.25
+
+# Training budget
+# Adjust upward for multi-day runs (e.g., 600_000_000 like your Kaggle run).
+total_env_steps: 200000000
+
+# Evaluation
+eval_every_updates: 50
+num_eval_instances: 512
+
+# Checkpointing
+save_latest_every_updates: 10
+save_latest_every_minutes: 15.0
+num_milestone_checkpoints: 4
+
+# Logging
+log_every_updates: 1
+
+# Device
+device: cuda
+
+# Debug
+anomaly_check_every: 200

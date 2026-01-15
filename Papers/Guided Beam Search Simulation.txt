@@ -1,0 +1,901 @@
+﻿Simulation-guided Beam Search
+for Neural Combinatorial Optimization
+
+Jinho Choo∗1 Yeong-Dae Kwon∗1 Jihoon Kim1 Jeongwoo Jae1
+
+André Hottung2 Kevin Tierney2 Youngjune Gwon1
+
+1Samsung SDS, Korea 2Bielefeld University, Germany
+
+Abstract
+
+Neural approaches for combinatorial optimization (CO) equip a learning mech-
+anism to discover powerful heuristics for solving complex real-world problems.
+While neural approaches capable of high-quality solutions in a single shot are
+emerging, state-of-the-art approaches are often unable to take full advantage of
+the solving time available to them. In contrast, hand-crafted heuristics perform
+highly effective search well and exploit the computation time given to them, but
+contain heuristics that are difficult to adapt to a dataset being solved. With the
+goal of providing a powerful search procedure to neural CO approaches, we pro-
+pose simulation-guided beam search (SGBS), which examines candidate solutions
+within a fixed-width tree search that both a neural net-learned policy and a sim-
+ulation (rollout) identify as promising. We further hybridize SGBS with efficient
+active search (EAS) [1], where SGBS enhances the quality of solutions backprop-
+agated in EAS, and EAS improves the quality of the policy used in SGBS. We
+evaluate our methods on well-known CO benchmarks and show that SGBS sig-
+nificantly improves the quality of the solutions found under reasonable runtime
+assumptions.
+
+1 Introduction
+Combinatorial optimization (CO) problems arise in a wide variety of real-world settings in which
+finding high-quality solutions quickly is an important, challenging task. Efficient methods for solv-
+ing CO problems have attracted significant attention, and the literature now contains vastly different
+styles of solution approaches. The majority relies on human-designed tricks and insights. However,
+neural approaches have recently begun to offer a means for data-driven optimization. Through re-
+inforcement learning (RL), a deep neural net can automatically learn to generate heuristics that are
+customized to a specific context for a given dataset, without the intervention of a domain expert or
+the need for a pre-existing optimization approach [2].
+Using a construction paradigm for neural CO methods, solutions to a CO problem can be built in
+a step-by-step manner following the policy calculated by the neural network. Previous work in this
+area tends to focus on building a good policy network model and bringing the quality of its solution
+generated in a single shot as close to the optimal as possible. However, research for an effective
+inference method for neural CO has been rare. An effective inference strategy to maximize the
+quality of the solution found within a given time budget is just as important, because practitioners of
+many industrial CO tasks are generally willing to wait even up to multiple days to find high-quality
+solutions to their problems.
+A well-known search strategy for neural construction methods is to sample solutions from the out-
+put probability distributions calculated by the neural network (e.g., [3, 4]). While this has better
+
+36th Conference on Neural Information Processing Systems (NeurIPS 2022).
+∗Equal contribution. Address: jinho12.choo@samsung.com, y.d.kwon@samsung.com.
+
+
+
+performance than single shot (greedy) solution construction, its lack of search guidance results in
+quickly diminishing improvements in solution quality. An alternative to sampling is Monte-Carlo
+tree search (MCTS) [5, 6], which completes partial solutions in the tree with rollouts. MCTS is re-
+source intensive, potentially requiring long run times due to a multitude of rollouts and the size of
+the search tree. Another popular search method is beam search, which is a low-memory, heuristic
+version of tree search. Beam search only expands a constant number of nodes at any level of the tree
+search, and has been applied by several neural CO techniques [7, 8, 9, 10]. However, beam search is
+a greedy algorithm that blindly follows the prediction of the neural network, good or bad.
+In this paper, we present simulation-guided beam search (SGBS), which combines MCTS with
+beam search2 specifically for solving CO problems. SGBS performs rollouts for nodes identified as
+promising by the neural network, which acts as a recourse mechanism to rectify incorrect decisions
+by the network. Only a select number of nodes identified as promising by the rollouts are expanded,
+and this process repeats. The implementation of SGBS is straightforward, requiring very little modi-
+fication from the basic sampling inference algorithm of any existing neural CO algorithm. Moreover,
+it maintains the high throughput efficiency that is the hallmark of neural network based sampling, as
+there is no complicated backpropagation that would prohibit batch parallelization of the search.
+SGBS can be further partnered with efficient active search (EAS) [1] to achieve even better per-
+formance over longer time spans. EAS updates a small subset of model parameters at test time to
+“guide” the sampling towards promising regions of the search space. SGBS and EAS have a syn-
+ergistic relationship when being run in alternation. The exploration-focused solution generation of
+SGBS can help EAS avoid local optima, while EAS provides increasingly better models for SGBS
+to apply during search. Thus, the contribution of this paper is two-fold: (1) we introduce the novel
+beam-search method SGBS, and (2) we provide a hybridized scheme using SGBS and EAS.
+We show the effectiveness both of SGBS and the SGBS+EAS hybrid on a standard benchmark of the
+traveling salesperson problem (TSP), capacitated vehicle routing problem (CVRP), and the flexible
+flow shop problem (FFSP). SGBS outperforms sampling in all cases, and combining SGBS with
+EAS results in solutions to the TSP that have roughly two thirds the optimality gap of the previous
+state-of-the-art neural CO solutions, and on the CVRP roughly half the gap. On the FFSP, SGBS
+provides solutions roughly equivalent to the state-of-the-art in an order of magnitude less time.
+
+2 Related work
+Neural combinatorial optimization The first application of modern deep learning methods to-
+wards a CO problem is offered by Vinyals et al. [7], who use their newly proposed pointer network
+to generate solutions to the TSP in an autoregressive manner. Their method has been improved by
+reinforcement learning [3] and different network architectures [11, 12, 4, 13]. Applications to other
+CO problems like the CVRP [8, 4] have also been proposed. More recently, the POMO method [14]
+has achieved state-of-the-art performance on the autoregressive construction of TSP and CVRP so-
+lutions, using a new RL method that generates diverse CO solutions that compete with each other.
+For these TSP-like CO problems, transformer-based neural models, which are highly specialized
+for fully-connected graphs, (but are more computationally expensive) are better suited and generally
+produce better quality solutions than the ordinary graph neural network (GNN), which are developed
+for universal graph topology.
+Machine learning based improvement methods have also gained significant attention in the last
+years. Neural large neighborhood search (NLNS) [15] iteratively destroys a large part of a solu-
+tion and then repairs it. Iterative local search methods [16, 17, 18, 19], however, focus more on
+accumulating small changes (e.g., 2-opt) to a solution for improvement. The learning collaborative
+policies (LCP) approach [20] first generates a diverse set of candidate solutions and then improves
+each solution using a second policy model.
+While most works focus on small to medium scale problems, large scale approaches [21, 22] have
+also been proposed that can solve the CVRP with up to 2000 nodes by integrating a learning method
+with powerful operations research solvers. Neural approaches have been made for other various
+
+2Note that in the ML community, especially for natural language processing (NLP), the term “beam search”
+almost exclusively refers to beam search in which the sampling probability of each node (i.e. the product of all
+probability values encountered when moving from the root to a particular node) plays the role of the ranking
+function. Throughout this paper, we use “beam search” to mostly refer to this NLP-type beam search method.
+
+2
+
+
+
+types of CO problems, including routing problems [23, 24, 25], scheduling problems [16, 26, 27, 13],
+the satisfiability problems [28, 29], the graph problems [11, 30, 31], and electronic circuit design
+automation [32, 33].
+
+Post-hoc tree searches used by neural CO methods Many neural CO methods use tree search or
+its variants (e.g., beam search and MCTS) for selecting the final solution at test time. Autoregressive
+construction methods [7, 8] use beam search as an optional post-hoc method to boost the solution
+quality. Many neural approaches for routing problems rely on a predicted “heat map” that describes
+which edges will likely be part of an optimal solution. To generate the final solution, the heatmap is
+explored by, for example, a beam search [34, 9] or by MCTS [35, 36]. While strictly not considered
+as CO problems, many successful neural approaches on turn-based games have exploited MCTS in
+their inference tactics (e.g., [37]).
+
+Other similar works Tree search algorithms can benefit from utilizing deep neural networks
+in their branching and bounding mechanisms, as in learning-approaches to beam search [38, 39],
+MCTS [40], or branch and bound [41, 42]. MCTS variants that include a beam width, bearing resem-
+blance to our work, have been proposed. However, unlike our method, they use random rollouts and
+do not require a policy for guidance [43, 44] or lack the pre-selection mechanism we propose [45].
+Extensions of these variants have been successful at solving CO problems [46].
+
+3 SGBS algorithm
+
+3.1 Preliminaries
+
+Consider a CO problem withN decision variables a0, a1, · · · , aN−1, where one can assign ai with a
+value from a finite domainXi for 0≤ i≤N−1. Our goal is to find a solution that maximizes the real-
+valued reward R : S 7→ R. The space S contains all possible solutions sN = (a0, a1, · · · , aN−1).
+Constraints on the decision variables can be embedded in R by mapping infeasible solutions to
+negative infinity. In this sense, the reward functionR directly represents the problem instances.
+We construct a neural net πθ parameterized by θ and use it to generate a solution one step at a
+time. Defining the most effective order in which to construct a solution requires a good architect,
+but here we assume a numerical order without loss of generality. For a partially completed (d < N )
+solution sd = (a0, a1, · · · , ad−1), one can choose a value for ad sampled from Xd following the
+probability distribution πθ(ad|sd). Starting from an empty tuple s0 = (), this procedure repeats until
+a complete solution sN = (a0, a1, · · · , aN−1) is generated, which we denote as sN ∼ πθ.
+In policy-based reinforcement learning, πθ, sd, ad, and R(sN ) correspond to a policy, state, action,
+and reward, respectively. Note that the reward is given only for the final state sN in this case, and
+is thus equivalent to what is commonly referred to as the ‘return (total cumulative rewards)’ of
+the episode. We train θ, the parameter of the policy neural network, with a reinforcement learning
+method such that θ is gradually updated by gradient ascent to increase the expected reward:
+
+θ −t−ra−in−b−y−R→L argmaxθ ER′∼PE ′
+sN∼π [R (s ] . 1)
+
+θ N ) (
+
+Here, P refers to a (presumed) distribution of the target problem instances, from which we sample
+different reward functionsR′ used for training. This enables the neural net to exploit the limited size
+of the distribution P rather than having to train for the entire problem space. As long as the given
+target instanceR is indeed a part of the distribution P , the policy network should perform well even
+though it has never encountered an identical problem instance before.
+
+3.2 The algorithm and its three phases
+
+The CO problem above can be viewed as a search problem in a decision tree where each node at
+depth d represents a partially completed solution sd, and branches from this node represent different
+assignments to the (d+1)th decision variable, ad. The goal now is to find a terminal node sN (or,
+equivalently, a path from the root to a leaf) maximizing the objective function.
+The SGBS algorithm starts from the root node and builds its search tree one depth level at a time
+(breadth-first). At each depth level, its search procedure is carried out in three phases: expansion,
+
+3
+
+
+
+Expansion Simulation Pruning
+
+Figure 1: Three phases of SGBS, illustrated with beam width β = 3 and expansion factor γ = 2.
+In the ‘Expansion’ figure we show an example of a tree consisting of β number of blue trajectories
+that represents a beam extended to depth 2. Of all its the possible child nodes, only γ candidates
+(colored red) per each leaf node are selected. Wavy arrows in the ‘Simulation’ figure complete the
+rollouts, each earning a different reward value. In the ‘Pruning’ figure, the beam grows by another
+depth, keeping its width size to β after pruning out the candidate nodes with poor performances.
+
+simulation, and pruning (see Figure 1). It leaves at most the “beam width (β)” number of nodes for
+that depth level and moves on to the next. The algorithm finishes when it reaches a level in which all
+the selected nodes are terminal. (A terminal node expands to itself, when not all nodes in the level
+are terminal.) Pseudocode for the SGBS algorithm is presented in Algorithm 1.
+
+Expansion (pre-pruning) The expansion phase of SGBS is a combination of the expansion step
+of the regular beam search (to all child nodes) and a pre-pruning step. Given an expansion factor γ,
+a total of β × γ child nodes are selected, while the rest are (pre-)pruned from the search tree. That
+is, for each node sd contained in the beam, the top γ of its child nodes with the largest πθ(·|sd) are
+selected.3 The total search time of SGBS increases (almost) linearly with β and γ, so a user can
+control the balance between the performance and the speed of SGBS by adjusting these parameters.
+
+Simulation During this phase, the potential of each expanded child node is measured by a rollout,
+similarly to the simulation phase of MCTS. We create β× γ different CO solutions (simultaneously
+via parallel batch processing, if applicable) using greedy rollouts, and the rewards are tagged to
+the corresponding child nodes. Strictly speaking, a child node’s potential can be evaluated more
+accurately if multiple rollouts are used (e.g., repeated sampling, beam search or MCTS starting
+from the given node), but the use of single greedy rollout is good enough and more time efficient.
+
+Algorithm 1 Simulation-guided Beam Search (SGBS)
+1: procedure SGBS(trained model πθ , beam width β, expansion factor γ, reward functionR)
+2: B ← {s0} . s0 is the root node
+3: while ∃sd ∈ B that is not a terminal node do
+4: E, S ← {}, {}
+5: for sd ∈ B do . Expansion
+6: add at most γ child nodes sd+1 with highest probabilities πθ(·|sd) to E
+7: end for
+8: for sd+1 ∈ E do . Simulation
+9: sN ← GreedyRollout(sd+1, πθ)
+
+10: add (sd+1,R(sN )) to S
+11: end for
+12: B ← at most β nodes sd+1 with highest rewardsR in S . Pruning
+13: end while
+14: return sN in B of highestR(sN )
+15: end procedure
+
+3As an alternative, one could group all child nodes together and use the sampling probability (accumulated
+from the root as is used by the NLP beam search) to select the top β× γ child nodes. This exploitation-focused
+approach, however, leads to worse search performance in our tests. The exploration (increased diversity from
+treating all nodes in the beam as equals) seems to play a more important role than the exploitation at this stage.
+
+4
+
+
+
+(a) Pre-trained model (b) Low-accuracy model (c) Fine-tuned model
+1.8 23.7 0.8
+
+12.7
+
+1.6 7.0
+
+1.4 6.0 0.7
+
+1.2
+5.0
+
+1.0 0.6
+
+0.8 4.0
+
+Gree
+dy
+
+Sam
+pli
+
+ng
+Gree
+
+dy
+
+Sam
+pli
+
+ng
+
+Beam
+ Sear
+
+ch
+
+Acti
+ve
+
+ Sear
+ch
+
+EAS
+MCTS
+
+SGBS
+
+Beam
+ Sear
+
+ch
+
+Acti
+ve
+
+ Sear
+ch
+
+EAS
+MCTS
+
+SGBS
+Gree
+
+dy
+
+Sam
+pli
+
+ng
+
+Beam
+ Sear
+
+ch
+
+Acti
+ve
+
+ Sear
+ch
+
+EAS
+MCTS
+
+SGBS
+
+Figure 2: Performance of different search methods for the CVRP in three (a)–(c) scenarios. All
+methods evaluate the same number of candidate solutions per problem instance (1.2K candidates for
+(a) and (c), 2.4K for (b)). See Appendix C for implementation details. The gap is calculated with
+respect to solutions found with HGS [47, 48].
+
+Pruning We select the β nodes with the highest simulation scores and register them as the new
+beam front. Note that in SGBS, no complicated backpropagation processes follow the simulation
+phase, keeping the algorithm simple and efficient.
+
+3.3 Strengths
+
+The implementation of the SGBS algorithm is a straightforward modification of the sampling
+method. It is also batch-process friendly, as the simulation phase involves parallel greedy rollouts.
+Despite its simplicity, SGBS can provide good search results not easily accessible to other inference
+methods in most settings. In the following, we discuss three different, hypothetical environments
+encountered by a policy network solving a CO problem and analyze how SGBS helps in each case.
+
+A default setting (pre-trained to a target distribution) Even if we assume a perfect training as
+prescribed in Eq. 1, the gap between the target distribution P and a single problem instance R will
+cause the neural network (limited by its finite capacity) to suggest incorrect decisions from time to
+time. SGBS is designed to correct these mistakes on the fly. When a child node of a partial solution
+sd is given a relatively low score πθ(ad|sd) by the policy network but is in fact an ideal choice, the
+simulation step of SGBS can prevent premature pruning of this child node.
+In Figure 2 (a), we display the results of different search algorithms solving a classic benchmark CO
+problem, the CVRP with 100 nodes. Greedy, sampling, and beam search methods generate solutions
+strictly based on the probability distributions calculated by the neural network. Active search [3],
+EAS, MCTS, and SGBS are adaptive search methods that react to their past search results. All search
+methods use the output of an identical policy network and, for proper comparison, each method
+(except for greedy) returns its incumbent solution after investigating the same number (1.2K) of
+candidate solutions. We find that SGBS (β = 4, γ = 4) shows high search efficiency, outperforming
+most other inference methods, except for EAS4.
+
+A model with low accuracy (distribution shifts) The power of SGBS to find good solutions re-
+ally stands out when the policy network suffers from low accuracy. Dropping accuracy on a model’s
+prediction is a common issue for many industry CO applications, where a sharp change in the dis-
+tribution of the target problems are expected regularly. Without an inference method with good
+generalizability, these models have to be re-trained frequently, which is difficult and expensive.
+In Figure 2 (b), we illustrate this case by trying to solve the CVRP with n= 200 instances using
+the neural model from (a), which was trained with n= 100 instances only. Now with the model
+
+4Hottung et al. [1] provide three types of EAS methods in their paper: EAS-Emb, EAS-Lay, and EAS-Tab.
+For the sake of simplicity, throughout this paper we only use EAS-Lay and refer to it as just “EAS.” EAS-Lay is
+the easiest to implement, and it generally shows better performance among the three, especially for the CVRP.
+
+5
+
+Gap (%)
+
+Gap (%)
+
+Gap (%)
+
+
+
+having relatively low accuracy, we find that sampling and beam search methods output solutions
+that are even worse than the greedy one (a surprising result, in fact), exposing their vulnerability on
+distribution shifts. The adaptive search methods (Active Search, EAS, MCTS and SGBS), however,
+work well, with SGBS performing the best. Note that while MCTS shows similar search quality
+as SGBS, it is difficult to implement MCTS to utilize the parallel computing capacity of the GPU,
+making it very slow (∼hours) compared to other methods (∼minutes) in our implementations.
+
+Fine-tuned model (trapped at a local maximum) The quality of the CO solution can be en-
+hanced at test time [3, 1] by fine-tuning the parameters of the neural network to the target instance:
+
+pre-trained θ −fi−ne−-t−un−in→g argmaxθ EsN∼π [R(sN )] , (2)
+θ
+
+where R is specific to each target instance. Figure 2 (c) shows the results of the same search pro-
+cedures used in (a), with the only change being that the neural network is fine-tuned toward each
+target problem before conducting the search. As expected, all search methods now produce much
+better solutions than they do without fine-tuning. The fine-tuned model, however, is overconfident in
+its first choices, and the good exploratory behavior of the model is lost as it is now trapped in a local
+optimum. SGBS is less affected by this confidence calibration issue [49] as its exploration range is
+firmly secured by the parameters β and γ. This also explains why the hybridization of SGBS with
+EAS (described in the next section) leads to such a significant performance boost.
+
+4 SGBS + EAS
+Despite being a very efficient inference method for neural CO tasks in the short run, the capability
+of SGBS in making the full use of a given time budget is rather limited. First of all, SGBS is
+deterministic, so running it more than once offers no benefit. Its hyperparameters β and γ can be
+increased, but the gain quickly becomes marginal (see Appendix D). In this section, we introduce
+the second neural CO inference method, a combination of SGBS and EAS, which can fully exploit
+the given computation time while still utilizing the powerful search mechanism of SGBS.
+EAS adjusts a small set of new parameters ψ in extra layers inserted into the original neural net
+(with the pre-trained parameters θ) using a loss function consisting of two components. The first,
+JRL, aims at reducing the expected costs of the generated solutions (as in active search [3]) while
+the second loss, JIL, encourages the model to output the incumbent solution with higher probability.
+We combine SGBS with EAS by running both methods in alternation (see Algorithm 2) with the
+incumbent solution and the model parameters being shared between both methods. SGBS is often
+able to improve the incumbent solution, helping EAS escape local optima while EAS constantly
+updates the model parameters, allowing SGBS to keep on growing new, non-overlapping search
+trees moving towards the more promising areas of the search space.
+Within the inner loop of Algorithm 2, SGBS (line Obj.
+5) represents the majority of the computation, oc- EAS LKH3 (15.646)
+
+15.675 SGBS + EAS HGS   (15.563)
+cupying more than 75% of the overall runtime in
+most of our SGBS+EAS experiments. However, 15.650
+
+we find that the enhanced search guidance from 15.625 0.35%
+SGBS solutions is more than enough to compen-
+sate for this. Figure 3 plots the averaged costs 15.600 0.20% 0.23%
+
+0.11%
+of the incumbent solutions found by EAS and 15.575
+SGBS+EAS over their runtime solving 10, 000 15.550
+instances of CVRP with n= 100. During the 30 0 10 20 30
+hours plotted in the figure, EAS and SGBS+EAS Hours
+update the policy networks 600 and 150 times, Figure 3: Performance of SGBS+EAS and EAS
+respectively, for each problem instance. In spite on 10, 000 instances of CVRP with n= 100,
+of the large difference in the backpropagation compared to LKH3 and HGS results. Percent-
+counts, the quality of the solution more than dou- age gaps are displayed with respect to the HGS
+bles when EAS gets help from SGBS. result at the runtimes of 6 and 30 hours.
+
+Saving time on pre-training The parameters θ and ψ of the policy network π̃θ,ψ used by
+SGBS+EAS are trained in a two-step process: (1) θ is “pre-trained” before the target problem is
+presented, using the known (or estimated) problem distribution (Eq. 1). (2) ψ is “fine-tuned” at test
+
+6
+
+
+
+time, working with the given target instance (Algorithm 2). One might expect that pre-training θ
+as much as possible before fine-tuning ψ would lead to the best results. To our surprise, however,
+an over-trained θ leads to a worse performing SGBS+EAS, invoking the need for an early stop
+(see Appendix I). All SGBS+EAS experiments presented in this paper use pre-trained models with
+such early stops applied. This calls for interesting follow-up research topics, such as incorporating
+entropy regularization to enhance SGBS+EAS.
+We also find the implication of the reduced dependency on the pre-training stage noteworthy. One
+major drawback of using a deep learning approach for real-world CO tasks is its need for constant
+re-training of the base model whenever a large domain shift occurs. Regardless of how short the
+inference time is, a neural CO approach is not viable if pre-training takes too long and cannot adapt
+to a changing environment. However, combining SGBS and EAS makes intensive pre-training of
+the policy network less crucial. For example, it takes only two hours to pre-train θ from scratch to
+prepare a neural model for SGBS+EAS, which then produces solutions for the CVRP with n = 100
+within a reasonable runtime and similar quality to those of LKH3 (see Appendix H).
+
+5 Experiments
+
+We evaluate SGBS on various sizes of the TSP, CVRP, and FFSP instance sets with and without
+EAS. Our experiments are carried out on A100 GPUs (Nvidia) with 80 GB memory. We report the
+adjusted runtime under the premise that a single GPU has been used for each experiment.
+
+TSP & CVRP Table 1 presents the SGBS(+EAS) results on two NP-hard routing problems, the
+TSP and CVRP. These two benchmarks are considered the most popular in the neural CO literature.
+In the TSP, given a instance consisting of n nodes (cities), one needs to find the shortest tour visiting
+every node exactly once. In the CVRP, the nodes are assigned an integer demand that must be
+delivered from a depot (starting node). The goal is to find the shortest-length tours that, together,
+visit all nodes exactly once and the sum of the demands on each tour do not exceed the capacity of
+the vehicle. For our experiments, we use n= 100 with 10,000 instances from Kool et al. [4]. We also
+perform generalization (domain shift) experiments using n= 150, 200 test sets of 1,000 instances
+from Hottung et al. [1]. We further explore the CVRP on a real-world like dataset in Appendix A.
+We have followed Concorde [50] and HGS [47, 48] as the baseline for calculating the perfor-
+mance gaps in our TSP and CVRP experiments, respectively. Both are highly optimized, handcrafted
+solvers that produce (near-)optimal solutions to each problem type. We also compare with the re-
+sults of LKH3, a well-known heuristic solver for hard routing problems. These non-neural solvers
+are CPU-bound and run on a single CPU only, so the wall-clock times we report in the table are not
+meant for direct comparison with GPU-computed numbers. Our results are compared against those
+of latest neural methods as well: DACT [19], NLNS [15], and DPDP [9].
+We apply the SGBS methods on Transformer-like policy networks (attention model [4]) that have
+been pre-trained by the POMO [14] RL technique (MIT license). We perform ablation tests using the
+
+Algorithm 2 SGBS+EAS
+1: procedure SGBS+EAS(pre-trained model πθ , reward functionR)
+2: s∗N ← greedy solution generated from πθ . s∗N is the incumbent solution
+3: π̃θ,ψ ← combine πθ and Lψ with randomly initialized ψ . Lψ is insertion layers for EAS
+4: repeat
+5: s0N ← SGBS(π̃θ,ψ, β, γ,R) . Algorithm 1
+6: siN ∼ π̃θ,ψ for i = 1, 2, ...,M
+7: s∗N ← sN in {s∗N ,∑s0N , s1N , ..., sMN } of hig
+
+M [ ]
+i ∑hestR(sN )
+
+8: ∇ψJRL(ψ)← 1
+
+∑ i=1 (R(sN )− b N−1
+M ◦) d=0 ∇ log π̃θ,ψ(a
+
+i
+d|siψ d)
+. b◦ is a baseline for REINFORCE
+
+9: ∇ψJIL(ψ)←[ N−1
+d=0 ∇ψ log π̃θ,ψ(a
+
+∗
+d|s∗d)]
+
+10: ψ ← ψ + α ∇ψJRL(ψ) + λ · ∇ψJIL(ψ) . Policy gradient ascent
+11: until ψ has converged or timeout
+12: return s∗N
+13: end procedure
+
+7
+
+
+
+Table 1: Experiment results on routing problems (TSP & CVRP)
+
+Test (10K instances) Generalization (1K instances)
+Method n = 100 n = 150 n = 200
+
+Obj. Gap Time Obj. Gap Time Obj. Gap Time
+
+Concorde 7.765 - (82m) 9.346 - (17m) 10.687 - (31m)
+LKH3 7.765 0.000% (8h) 9.346 0.000% (99m) 10.687 0.000% (3h)
+DACT [19] 7.771 0.089% (8h)
+DPDP [9] 7.765 0.004% (2h) 9.434 0.937% (44m) 11.154 4.370% (74m)
+POMO [14] greedy 7.776 0.144% (1m) 9.397 0.544% (<1m) 10.843 1.459% (1m)
+
+sampling 7.771 0.078% (3h) 9.378 0.335% (1h) 10.838 1.417% (3h)
+EAS [1] 7.769 0.053% (3h) 9.363 0.172% (1h) 10.731 0.413% (3h)
+
+7.768 0.044% (15h) 9.358 0.127% (10h) 10.719 0.302% (30h)
+SGBS (10,10) 7.769 0.058% (9m) 9.367 0.220% (8m) 10.753 0.619% (14m)
+SGBS+EAS 7.767 0.035% (3h) 9.359 0.136% (1h) 10.727 0.378% (3h)
+
+7.766 0.024% (15h) 9.354 0.085% (10h) 10.708 0.196% (30h)
+
+HGS 15.563 - (54h) 19.055 - (9h) 21.766 - (17h)
+LKH3 15.646 0.53% (6d) 19.222 0.88% (20h) 22.003 1.09% (25h)
+DACT [19] 15.747 1.18% (22h) 19.594 2.83% (16h) 23.297 7.03% (18h)
+NLNS [15] 15.994 2.77% (1h) 19.962 4.76% (12m) 23.021 5.76% (24m)
+DPDP [9] 15.627 0.41% (23h) 19.312 1.35% (5h) 22.263 2.28% (9h)
+POMO [14] greedy 15.763 1.29% (2m) 19.636 3.05% (1m) 22.896 5.19% (1m)
+
+sampling 15.663 0.64% (6h) 19.478 2.22% (2h) 23.176 6.48% (5h)
+EAS [1] 15.618 0.35% (6h) 19.205 0.79% (2h) 22.023 1.18% (5h)
+
+15.599 0.23% (30h) 19.157 0.54% (20h) 21.980 0.98% (50h)
+SGBS (4,4) 15.659 0.62% (10m) 19.426 1.95% (4m) 22.567 3.68% (9m)
+SGBS+EAS 15.594 0.20% (6h) 19.168 0.60% (2h) 21.988 1.02% (5h)
+
+15.580 0.11% (30h) 19.101 0.24% (20h) 21.853 0.40% (50h)
+
+same models for greedy solution construction, sampling, and EAS. For all POMO-based methods
+we employ the ×8 instance augmentation technique [14] to boost the solution quality. SGBS hyper-
+parameters are set to (β, γ) = (10, 10) and (4, 4) for the TSP and CVRP, respectively. These values
+have been chosen based on several trial runs of SGBS+EAS with some hand-picked sets of different
+choices. The overall search efficiency of SGBS+EAS (per unit runtime), however, is not that sen-
+sitive to the changes of these hyperparameters as long as they are within a reasonable range (see
+Appendix E). We report the results of SGBS+EAS (and EAS alone) at two different points of their
+runtimes; one at an intermediate point and the other when the algorithm seems to have converged.
+Overall, SGBS+EAS significantly outperforms all learned heuristics. On the three TSP instance sets,
+SGBS+EAS reduces the optimality gaps by 45%, 33%, and 35% from those of EAS, respectively. On
+the CVRP instances, SGBS+EAS not only outperforms EAS (52%, 56%, and 59% reduction in the
+gap), but also the well-known heuristic solver LKH3 by a large margin. With a gap of only 0.11% to
+HGS on the CVRP instances with n= 100, we further observe that SGBS+EAS is competitive with
+state-of-the-art handcrafted techniques in terms of quality, albeit not in runtime.
+
+FFSP To highlight the fact that SGBS is a general inference method for any construction-type
+neural approaches for a CO task, not just for routing problems, we demonstrate its application on
+the flexible flow shop problem (FFSP), a scheduling problem that can arise (e.g.) in factory assembly
+lines. In the FFSP, jobs are processed by multiple stages in series, where each stage consists of a
+group of machines that perform the same task but possibly at different speeds. Each machine can
+handle only one job at a time so that a scheduling method is needed to decide which jobs to be
+processed on which machine at what time to achieve the shortest possible makespan.
+We apply SGBS on the MatNet [13] based neural FFSP solver (MIT license) and experiment on the
+datasets of 1, 000 FFSP instances each for n= 20, 50 and 100 jobs. These instances [13] are based
+on three-stage configurations where each stage contains four different machines. The details of our
+SGBS experiments on the FFSP are described in Appendix G. Results of our SGBS experiments
+and the ablation studies are summarized in Table 2 along with the results [13] by CPLEX [51] with
+mixed-integer programming models and meta-heuristic solvers.
+
+8
+
+CVRP TSP
+
+
+
+Table 2: Experiment results on 1, 000 instances of FFSP
+
+Method FFSP20 FFSP50 FFSP100
+Obj. Gap Time Obj. Gap Time Obj. Gap Time
+
+CPLEX (60s) 46.37 22.07 (17h) × ×
+CPLEX (600s) 36.56 12.26 (167h)
+Genetic Algorithm 30.57 6.27 (56h) 56.37 8.02 (128h) 98.69 10.46 (232h)
+Particle Swarm Opt. 29.07 4.77 (104h) 55.11 6.76 (208h) 97.32 9.09 (384h)
+MatNet [13] greedy 25.38 1.08 (3m) 49.63 1.28 (8m) 89.70 1.47 (23m)
+
+sampling 24.60 0.30 (10h) 48.78 0.43 (20h) 88.95 0.72 (40h)
+EAS 24.60 0.30 (10h) 48.91 0.56 (20h) 88.94 0.71 (40h)
+
+24.44 0.14 (50h) 48.56 0.21 (100h) 88.57 0.34 (200h)
+SGBS (5,6) 24.96 0.66 (12m) 49.13 0.78 (47m) 89.21 0.98 (3h)
+SGBS+EAS 24.52 0.22 (10h) 48.60 0.25 (20h) 88.56 0.33 (40h)
+
+24.30 - (50h) 48.35 - (100h) 88.23 - (200h)
+
+As shown in the table, SGBS+EAS significantly outperforms the baseline traditional CO methods.
+While we do not claim that our approach is the state-of-the-art over all existing (neural or not)
+methods for the FFSP, this result shows that, at the very least, without careful design by a domain
+expert, non-neural approaches do not yield satisfactory solutions to many complicated CO problems.
+MatNet-based solvers, on the other hand, are able to produce solutions of extremely high quality,
+highlighting the advantage of neural CO approaches, that are automatic and purely data-driven. We
+have also shown that a simple change on the inference technique to SGBS+EBS empowers the
+existing neural solver to produce solutions that have been unattainable within a reasonable runtime.
+
+6 Conclusion
+We have presented Simulation-guided Beam Search (SGBS) and combined it with EAS to solve CO
+problems. SGBS enables neural CO methods to effectively search for high-quality solutions to CO
+problems and can be implemented easily in existing approaches. Furthermore, we show that com-
+bining SGBS with EAS allows for even better performance as the two techniques share information
+about finding solutions. Our experiments on three different CO problem settings, the TSP, CVRP
+and FFSP, further reduce the gap of neural CO methods to state-of-the-art handcrafted heuristics
+and in some cases beat methods that were state-of-the-art only a few years ago. For future work, we
+plan to explore setting up dynamically the parameters of SGBS and investigate the integration of
+SGBS and EAS more deeply.
+Our code for the experiments described in the paper is publicly available at https://github.com/
+yd-kwon/SGBS.
+
+Acknowledgments and Disclosure of Funding
+Some of the computational experiments in this work have been performed using the Bielefeld GPU
+Cluster. We thank the Bielefeld HPC.NRW team for their support. Furthermore, the authors grate-
+fully acknowledge the funding of this project by computing time provided by the Paderborn Center
+for Parallel Computing (PC2).
+
+9
+
+
+
+References
+[1] André Hottung, Yeong-Dae Kwon, and Kevin Tierney. Efficient active search for combinatorial optimiza-
+
+tion problems. International Conference on Learning Representations, 2022.
+
+[2] Yoshua Bengio, Andrea Lodi, and Antoine Prouvost. Machine learning for combinatorial optimization: a
+methodological tour d’ horizon. European Journal of Operational Research, 2020.
+
+[3] Irwan Bello, Hieu Pham, Quoc V. Le, Mohammad Norouzi, and Samy Bengio. Neural combinatorial
+optimization with reinforcement learning. ICLR (Workshop), 2017.
+
+[4] Wouter Kool, Herke van Hoof, and Max Welling. Attention, learn to solve routing problems! International
+Conference on Learning Representations, 2019.
+
+[5] Levente Kocsis and Csaba Szepesvári. Bandit based monte-carlo planning. In Machine Learning: ECML
+2006, pages 282–293, Berlin, Heidelberg, 2006. Springer Berlin Heidelberg.
+
+[6] Rémi Coulom. Efficient selectivity and backup operators in monte-carlo tree search. In Computers and
+Games, pages 72–83, Berlin, Heidelberg, 2007. Springer Berlin Heidelberg.
+
+[7] Oriol Vinyals, Meire Fortunato, and Navdeep Jaitly. Pointer networks. Advances in Neural Information
+Processing Systems 28, 2015.
+
+[8] Mohammadreza Nazari, Afshin Oroojlooy, Lawrence Snyder, and Martin Takac. Reinforcement learning
+for solving the vehicle routing problem. Advances in Neural Information Processing Systems 31, 2018.
+
+[9] Wouter Kool, Herke van Hoof, Joaquim Gromicho, and Max Welling. Deep policy dynamic programming
+for vehicle routing problems. arXiv preprint arXiv:2102.11756, 2021.
+
+[10] Chaitanya K Joshi, Quentin Cappart, Louis-Martin Rousseau, and Thomas Laurent. Learning the travel-
+ling salesperson problem requires rethinking generalization. Constraints, pages 1–29, 2022.
+
+[11] Elias Khalil, Hanjun Dai, Yuyu Zhang, Bistra Dilkina, and Le Song. Learning combinatorial optimization
+algorithms over graphs. Advances in Neural Information Processing Systems 30, 2017.
+
+[12] Michel Deudon, Pierre Cournut, Alexandre Lacoste, Yossiri Adulyasak, and Louis-Martin Rousseau.
+Learning heuristics for the TSP by policy gradient. In International Conference on the Integration of Con-
+straint Programming, Artificial Intelligence, and Operations Research, pages 170–181. Springer, 2018.
+
+[13] Yeong-Dae Kwon, Jinho Choo, Iljoo Yoon, Minah Park, Duwon Park, and Youngjune Gwon. Matrix
+encoding networks for neural combinatorial optimization. Advances in Neural Information Processing
+Systems 34, 2021.
+
+[14] Yeong-Dae Kwon, Jinho Choo, Byoungjip Kim, Iljoo Yoon, Youngjune Gwon, and Seungjai Min. Pomo:
+Policy optimization with multiple optima for reinforcement learning. Advances in Neural Information
+Processing Systems 33, 2020.
+
+[15] André Hottung and Kevin Tierney. Neural large neighborhood search for the capacitated vehicle routing
+problem. European Conference on Artificial Intelligence, pages 443–450, 2020.
+
+[16] Xinyun Chen and Yuandong Tian. Learning to perform local rewriting for combinatorial optimization.
+Advances in Neural Information Processing Systems 32, 2019.
+
+[17] Paulo R. de O. da Costa, Jason Rhuggenaath, Yingqian Zhang, and Alp Akcay. Learning 2-opt heuristics
+for the traveling salesman problem via deep reinforcement learning. ACML, pages 465–480, 2020.
+
+[18] Yaoxin Wu, Wen Song, Zhiguang Cao, Jie Zhang, and Andrew Lim. Learning improvement heuristics for
+solving routing problems. IEEE Transactions on Neural Networks, 2021.
+
+[19] Yining Ma, Jingwen Li, Zhiguang Cao, Wen Song, Le Zhang, Zhenghua Chen, and Jing Tang. Learning
+to iteratively solve routing problems with dual-aspect collaborative transformer. Advances in Neural
+Information Processing Systems 34, pages 11096–11107, 2021.
+
+[20] Minsu Kim, Jinkyoo Park, and Joungho Kim. Learning collaborative policies to solve np-hard routing
+problems. Advances in Neural Information Processing Systems 34, pages 10418–10430, 2021.
+
+[21] Sirui Li, Zhongxia Yan, and Cathy Wu. Learning to delegate for large-scale vehicle routing. Advances in
+Neural Information Processing Systems 34, 2021.
+
+10
+
+
+
+[22] Liang Xin, Wen Song, Zhiguang Cao, and Jie Zhang. Neurolkh: Combining deep learning model with lin-
+kernighan-helsgaun heuristic for solving the traveling salesman problem. Advances in Neural Information
+Processing Systems 34, 2021.
+
+[23] Arthur Delarue, Ross Anderson, and Christian Tjandraatmadja. Reinforcement learning with combinato-
+rial actions: An application to vehicle routing. Advances in Neural Information Processing Systems 33,
+pages 609–620, 2020.
+
+[24] Liang Xin, Wen Song, Zhiguang Cao, and Jie Zhang. Multi-decoder attention model with embedding
+glimpse for solving vehicle routing problems. In Proceedings of the AAAI Conference on Artificial Intel-
+ligence, volume 35, pages 12042–12049, 2021.
+
+[25] Yining Ma, Jingwen Li, Zhiguang Cao, Wen Song, Hongliang Guo, Yuejiao Gong, and Yeow Meng Chee.
+Efficient neural neighborhood search for pickup and delivery problems. arXiv preprint arXiv:2204.11399,
+2022.
+
+[26] Chun-Cheng Lin, Der-Jiunn Deng, Yen-Ling Chih, and Hsin-Ting Chiu. Smart manufacturing scheduling
+with edge computing using multiclass deep q network. IEEE Transactions on Industrial Informatics,
+15(7):4276–4284, 2019.
+
+[27] Cong Zhang, Wen Song, Zhiguang Cao, Jie Zhang, Puay Siew Tan, and Xu Chi. Learning to dispatch
+for job shop scheduling via deep reinforcement learning. Advances in Neural Information Processing
+Systems 33, pages 1621–1632, 2020.
+
+[28] Emre Yolcu and Barnabás Póczos. Learning local search heuristics for boolean satisfiability. Advances in
+Neural Information Processing Systems 32, 2019.
+
+[29] Vitaly Kurin, Saad Godil, Shimon Whiteson, and Bryan Catanzaro. Can q-learning with graph networks
+learn a generalizable branching heuristic for a sat solver? Advances in Neural Information Processing
+Systems 33, pages 9608–9621, 2020.
+
+[30] Zhuwen Li, Qifeng Chen, and Vladlen Koltun. Combinatorial optimization with graph convolutional
+networks and guided tree search. Advances in Neural Information Processing Systems 31, 2018.
+
+[31] Thomas Barrett, William Clements, Jakob Foerster, and Alex Lvovsky. Exploratory combinatorial opti-
+mization with reinforcement learning. In Proceedings of the AAAI Conference on Artificial Intelligence,
+volume 34, pages 3243–3250, 2020.
+
+[32] Ruoyu Cheng and Junchi Yan. On joint learning for solving placement and routing in chip design. Ad-
+vances in Neural Information Processing Systems 34, 2021.
+
+[33] Azalia Mirhoseini, Anna Goldie, Mustafa Yazgan, Joe Wenjie Jiang, Ebrahim Songhori, Shen Wang,
+Young-Joon Lee, Eric Johnson, Omkar Pathak, Azade Nazi, et al. A graph placement methodology for
+fast chip design. Nature, 594(7862):207–212, 2021.
+
+[34] Chaitanya K Joshi, Thomas Laurent, and Xavier Bresson. An efficient graph convolutional network
+technique for the travelling salesman problem. INFORMS Annual Meeting 2019, Session on Boosting
+Combinatorial Optimization using Machine Learning.
+
+[35] Zhihao Xing and Shikui Tu. A graph neural network assisted monte carlo tree search approach to traveling
+salesman problem. IEEE Access, 8:108418–108428, 2020.
+
+[36] Zhang-Hua Fu, Kai-Bin Qiu, and Hongyuan Zha. Generalize a small pre-trained model to arbitrarily
+large tsp instances. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 35, pages
+7474–7482, 2021.
+
+[37] David Silver, Aja Huang, Chris J. Maddison, Arthur Guez, Laurent Sifre, George van den Driessche,
+Julian Schrittwieser, Ioannis Antonoglou, Veda Panneershelvam, Marc Lanctot, Sander Dieleman, Do-
+minik Grewe, John Nham, Nal Kalchbrenner, Ilya Sutskever, Timothy Lillicrap, Madeleine Leach, Koray
+Kavukcuoglu, Thore Graepel, and Demis Hassabis. Mastering the game of go with deep neural networks
+and tree search. Nature, 529(7587):484–489, Jan 2016.
+
+[38] Renato Negrinho, Matthew Gormley, and Geoffrey J Gordon. Learning beam search policies via imitation
+learning. Advances in Neural Information Processing Systems 31, 2018.
+
+[39] Marc Huber and Günther R Raidl. Learning beam search: Utilizing machine learning to guide beam search
+for solving combinatorial optimization problems. In International Conference on Machine Learning,
+Optimization, and Data Science, pages 283–298. Springer, 2021.
+
+11
+
+
+
+[40] Kenshin Abe, Zijian Xu, Issei Sato, and Masashi Sugiyama. Solving np-hard problems on graphs with
+extended alphago zero. arXiv preprint arXiv:1905.11623, 2019.
+
+[41] Elias Khalil, Pierre Le Bodic, Le Song, George Nemhauser, and Bistra Dilkina. Learning to branch in
+mixed integer programming. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 30,
+2016.
+
+[42] André Hottung, Shunji Tanaka, and Kevin Tierney. Deep learning assisted heuristic tree search for the
+container pre-marshalling problem. Computers & Operations Research, 113:104781, 2020.
+
+[43] Tristan Cazenave. Monte carlo beam search. IEEE Transactions on Computational Intelligence and AI in
+games, 4(1):68–72, 2012.
+
+[44] Hendrik Baier and Mark HM Winands. Beam monte-carlo tree search. In 2012 IEEE Conference on
+Computational Intelligence and Games (CIG), pages 227–233. IEEE, 2012.
+
+[45] Jorik Jooken, Pieter Leyman, Patrick De Causmaecker, and Tony Wauters. Exploring search space trees
+using an adapted version of monte carlo tree search for combinatorial optimization problems. arXiv
+preprint arXiv:2010.11523, 2020.
+
+[46] Stefan Edelkamp, Max Gath, Tristan Cazenave, and Fabien Teytaud. Algorithm and knowledge engi-
+neering for the tsptw problem. In 2013 IEEE Symposium on Computational Intelligence in Scheduling
+(CISched), pages 44–51. IEEE, 2013.
+
+[47] Thibaut Vidal, Teodor Gabriel Crainic, Michel Gendreau, Nadia Lahrichi, and Walter Rei. A hybrid
+genetic algorithm for multidepot and periodic vehicle routing problems. Operations Research, 60(3):611–
+624, 2012.
+
+[48] Thibaut Vidal. Hybrid genetic search for the cvrp: Open-source implementation and swap* neighborhood.
+Computers & Operations Research, 140:105643, 2022.
+
+[49] Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural networks.
+In Proceedings of the 34th International Conference on Machine Learning, volume 70, 2017.
+
+[50] David L Applegate, Robert E Bixby, Vasek Chvatal, and William J Cook. The traveling salesman problem:
+a computational study. Princeton university press, 2006.
+
+[51] IBM ILOG CPLEX Optimization Studio. V20.1: User’s Manual for CPLEX. IBM Corp, 2020.
+
+[52] Keld Helsgaun. An Extension of the Lin-Kernighan-Helsgaun TSP Solver for Constrained Traveling
+Salesman and Vehicle Routing Problems: Technical report. Roskilde Universitet, December 2017.
+
+Checklist
+1. For all authors...
+
+(a) Do the main claims made in the abstract and introduction accurately reflect the paper’s
+contributions and scope? [Yes] They do.
+
+(b) Did you describe the limitations of your work? [Yes] There is a limitation on increas-
+ing β and γ, which we have discussed in Section 3 and Section 4.
+
+(c) Did you discuss any potential negative societal impacts of your work? [No] Our work
+deals with abstract problems, so we think it is too early to discuss its potential societal
+impacts at this point.
+
+(d) Have you read the ethics review guidelines and ensured that your paper conforms to
+them? [Yes] Our paper conforms to the guidelines.
+
+2. If you are including theoretical results...
+(a) Did you state the full set of assumptions of all theoretical results? [N/A]
+(b) Did you include complete proofs of all theoretical results? [N/A]
+
+3. If you ran experiments...
+(a) Did you include the code, data, and instructions needed to reproduce the main exper-
+
+imental results (either in the supplemental material or as a URL)? [Yes] A URL is
+provided in 6.
+
+12
+
+
+
+(b) Did you specify all the training details (e.g., data splits, hyperparameters, how they
+were chosen)? [Yes] See Section 5. Some details are also provided in the Appendix.
+
+(c) Did you report error bars (e.g., with respect to the random seed after running exper-
+iments multiple times)? [No] Our main results are based on experiments on a large
+> 1000 number of problem instances.
+
+(d) Did you include the total amount of compute and the type of resources used (e.g., type
+of GPUs, internal cluster, or cloud provider)? [Yes] See Section 5.
+
+4. If you are using existing assets (e.g., code, data, models) or curating/releasing new assets...
+(a) If your work uses existing assets, did you cite the creators? [Yes] We use existing
+
+codes and datasets. We cite the creators.
+(b) Did you mention the license of the assets? [Yes] We mention the licenses.
+(c) Did you include any new assets either in the supplemental material or as a URL? [No]
+
+We do not.
+(d) Did you discuss whether and how consent was obtained from people whose data
+
+you’re using/curating? [No] Dataset we use is publicly available numerical synthetic
+data.
+
+(e) Did you discuss whether the data you are using/curating contains personally identifi-
+able information or offensive content? [N/A]
+
+5. If you used crowdsourcing or conducted research with human subjects...
+(a) Did you include the full text of instructions given to participants and screenshots, if
+
+applicable? [N/A]
+(b) Did you describe any potential participant risks, with links to Institutional Review
+
+Board (IRB) approvals, if applicable? [N/A]
+(c) Did you include the estimated hourly wage paid to participants and the total amount
+
+spent on participant compensation? [N/A]
+
+13
