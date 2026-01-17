@@ -50,6 +50,7 @@ from PaST.ppo_runner import PPORunner, PPOConfig, RolloutBuffer
 from PaST.eval import Evaluator, EvalResult
 from PaST.sm_benchmark_data import generate_episode_batch
 from PaST.sm_env import GPUBatchSingleMachinePeriodEnv
+from PaST.sequence_env import GPUBatchSequenceEnv
 
 # Version
 TRAIN_VERSION = "2.0-PPO"
@@ -615,13 +616,35 @@ class TrainingEnv:
         self.env_config = env_config
 
         # Create GPU environment
-        self.env = GPUBatchSingleMachinePeriodEnv(
-            batch_size=num_envs,
-            env_config=env_config,
-            device=device,
-        )
-
+        self.replicas_per_instance = 1
+        # Check if run_config passed via variant_config or separately? 
+        # Actually TrainingEnv takes variant_config, num_envs.
+        # We need to inject replicas somewhere. 
+        # Let's add it to __init__ signature.
+        
+        self.replicas_per_instance = getattr(variant_config, "replicas", 1)
+        
+        if variant_config.variant_id == VariantID.PPO_SEQUENCE:
+            self.env = GPUBatchSequenceEnv(
+                batch_size=num_envs,
+                env_config=env_config,
+                device=device,
+            )
+        else:
+            self.env = GPUBatchSingleMachinePeriodEnv(
+                batch_size=num_envs,
+                env_config=env_config,
+                device=device,
+            )
+        
         self.batch_size = num_envs
+        
+        # Verify divisibility
+        if self.batch_size % self.replicas_per_instance != 0:
+            raise ValueError(
+                f"num_envs ({self.batch_size}) must be divisible by "
+                f"replicas ({self.replicas_per_instance})"
+            )
 
         # Track done mask for auto-reset
         self.done_mask = torch.zeros(num_envs, dtype=torch.bool, device=device)
@@ -641,11 +664,28 @@ class TrainingEnv:
 
     def reset(self, seed: Optional[int] = None) -> Dict[str, torch.Tensor]:
         """Reset all environments with new data."""
+        num_unique = self.num_envs // self.replicas_per_instance
+        
         batch_data = generate_episode_batch(
-            batch_size=self.num_envs,
+            batch_size=num_unique,
             config=self.data_config,
             seed=seed,
         )
+        
+        if self.replicas_per_instance > 1:
+            # Repeat interaction data K times
+            for k, v in batch_data.items():
+                # v is (B, ...)
+                # Repeat interleave: [a, a, b, b] not [a, b, a, b] usually better?
+                # Actually for POMO we want [a, a, b, b] so advantage cancels locally?
+                # Standard PPO advantage is global mean. 
+                # But having them in same batch is enough.
+                # Let's use repeat_interleave for structure.
+                if isinstance(v, torch.Tensor):
+                    batch_data[k] = v.repeat_interleave(self.replicas_per_instance, dim=0)
+                elif isinstance(v, np.ndarray):
+                    batch_data[k] = np.repeat(v, self.replicas_per_instance, axis=0)
+                    
         obs = self.env.reset(batch_data)
         self.done_mask = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
@@ -677,11 +717,68 @@ class TrainingEnv:
         # Auto-reset only the newly done indices.
         if newly_done.any():
             reset_idx = torch.nonzero(newly_done, as_tuple=False).squeeze(1)
-            batch_data = generate_episode_batch(
-                batch_size=int(reset_idx.numel()),
-                config=self.data_config,
-                seed=None,
-            )
+            
+            if self.replicas_per_instance > 1:
+                # Naive auto-reset breaks synchronization of replicas if they finish at different times.
+                # However, our SequenceEnv finishes at fixed steps (N_jobs).
+                # N_jobs is instance-specific.
+                # So replicas of same instance will finish at EXACTLY same time.
+                # Replicas of different instances might differ.
+                # BUT `generate_episode_batch` creates random instances.
+                # If we just generate new random instances for the finished slots, 
+                # we lose the "replica" property for the *new* episode unless we coordinate.
+                # Coordinating partial resets with replicas is complex.
+                # 
+                # SIMPLIFICATION: We assume `reset_indices` is called with arbitrary data.
+                # If we want to maintain PPO-POMO property during infinite horizon training:
+                # We should regroup reset_idx by "replica group" and generate 1 instance per group.
+                # But PPO usually collects fixed rollout.
+                # 
+                # For now, let's just generate independent new data. 
+                # This means AFTER the first episode, the "replica" property might degrade 
+                # if execution diverges.
+                # BUT for SequenceEnv: All replicas of instance I have same N_jobs -> finish same time.
+                # So `reset_idx` will contain BLOCKS of indices [0,1,2,3...] corresponding to replicas.
+                # We can detect this structure.
+                
+                # Check if reset_idx is aligned with replicas
+                # This assumes we want to maintain replicas over time.
+                # Let's try to regenerate replicated data for the reset slots.
+                
+                # We need to know how many *groups* are resetting.
+                # Assuming complete synchronization (verified for SequenceEnv w/ fixed N):
+                # We just generate (N_reset / K) instances and repeat.
+                
+                n_reset = int(reset_idx.numel())
+                n_unique_reset = n_reset // self.replicas_per_instance
+                if n_reset % self.replicas_per_instance != 0:
+                    # Sync broken? Fallback to independent
+                    batch_data = generate_episode_batch(
+                        batch_size=n_reset,
+                        config=self.data_config,
+                        seed=None,
+                    )
+                else:
+                    sub_batch = generate_episode_batch(
+                        batch_size=n_unique_reset,
+                        config=self.data_config,
+                        seed=None,
+                    )
+                    # Expand
+                    batch_data = sub_batch # start with dict keys
+                    for k, v in sub_batch.items():
+                        if isinstance(v, torch.Tensor):
+                            batch_data[k] = v.repeat_interleave(self.replicas_per_instance, dim=0)
+                        elif isinstance(v, np.ndarray):
+                            batch_data[k] = np.repeat(v, self.replicas_per_instance, axis=0)
+
+            else:
+                batch_data = generate_episode_batch(
+                    batch_size=int(reset_idx.numel()),
+                    config=self.data_config,
+                    seed=None,
+                )
+                
             obs = self.env.reset_indices(batch_data, reset_idx)
 
         # Keep wrapper done_mask in sync with the underlying env (after any resets).
@@ -1215,6 +1312,14 @@ def parse_args():
         help="Fraction of training over which entropy decays (e.g., 0.8).",
     )
 
+    # POMO-style multi-start
+    parser.add_argument(
+        "--num_replicas",
+        type=int,
+        default=None,
+        help="Number of replicas per instance (for POMO multi-start training).",
+    )
+
     return parser.parse_args()
 
 
@@ -1281,6 +1386,8 @@ def main():
     # Get variant config
     variant_id = VariantID(args.variant_id)
     variant_config = get_variant_config(variant_id)
+    if args.num_replicas is not None:
+        variant_config.replicas = args.num_replicas
 
     # Run training for each seed
     for seed in seeds:

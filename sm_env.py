@@ -1218,6 +1218,333 @@ class GPUBatchSingleMachinePeriodEnv:
 
         return start_times
 
+    # =========================================================================
+    # Duration-Aware Family Variant Helpers
+    # =========================================================================
+
+    def _compute_window_costs(self, p_all: torch.Tensor) -> torch.Tensor:
+        """
+        Compute average window cost w(s,p)/p for all (job, start) pairs.
+
+        Uses prefix sums for efficient O(N*T) computation instead of O(N*T*p).
+
+        For each job j with processing time p[j], and each potential start s:
+            avg_window_cost[j, s] = sum(ct[s : s+p[j]]) / p[j]
+
+        Args:
+            p_all: (B, N) tensor of processing times
+
+        Returns:
+            (B, N, T_max_pad) tensor of average window costs (float32).
+            Invalid positions (s + p > T_max_pad) are set to inf.
+        """
+        B = self.batch_size
+        N = self.N_job_pad
+        T = self.T_max_pad
+
+        # Prefix sum of prices: cumsum[t] = sum(ct[0:t])
+        # Shape: (B, T+1) where cumsum[:, 0] = 0
+        ct_float = self.ct.float()  # (B, T)
+        cumsum = torch.zeros((B, T + 1), dtype=torch.float32, device=self.device)
+        cumsum[:, 1:] = torch.cumsum(ct_float, dim=1)  # (B, T+1)
+
+        # For start s and duration p: window_cost = cumsum[s+p] - cumsum[s]
+        # We need to compute this for all (job, start) pairs
+
+        # Slot indices: (1, 1, T)
+        slot_idx = torch.arange(T, device=self.device).view(1, 1, T)
+
+        # Processing times: (B, N, 1)
+        p_expanded = p_all.unsqueeze(2)  # (B, N, 1)
+
+        # End slot indices: (B, N, T)
+        end_idx = slot_idx + p_expanded  # (B, N, T) - broadcasting
+
+        # Clamp end indices to valid range for gather
+        end_idx_clamped = torch.clamp(end_idx, max=T).long()  # (B, N, T)
+
+        # Gather cumsum values
+        # cumsum_start[b, n, s] = cumsum[b, s]
+        # cumsum_end[b, n, s] = cumsum[b, s + p[b,n]]
+        cumsum_expanded = cumsum.unsqueeze(1).expand(B, N, T + 1)  # (B, N, T+1)
+
+        # For start indices, we can broadcast directly
+        start_cumsum = cumsum[:, :T].unsqueeze(1).expand(B, N, T)  # (B, N, T)
+
+        # For end indices, we need gather
+        end_cumsum = torch.gather(cumsum_expanded, 2, end_idx_clamped)  # (B, N, T)
+
+        # Window cost = end_cumsum - start_cumsum
+        window_cost = end_cumsum - start_cumsum  # (B, N, T)
+
+        # Average window cost = window_cost / p (avoid div by zero)
+        p_safe = torch.clamp(p_expanded.float(), min=1.0)  # (B, N, 1)
+        avg_window_cost = window_cost / p_safe  # (B, N, T)
+
+        # Mark invalid positions (end > T_max_pad) as inf
+        invalid = end_idx > T  # (B, N, T)
+        avg_window_cost = torch.where(
+            invalid,
+            torch.full_like(avg_window_cost, float("inf")),
+            avg_window_cost,
+        )
+
+        return avg_window_cost
+
+    def _compute_duration_aware_family_quantiles(
+        self, avg_window_costs: torch.Tensor, feasible_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute per-episode quantile thresholds for duration-aware families.
+
+        Quantiles are computed over ALL feasible (job, start) pairs in each episode,
+        not per-job, so that family boundaries are consistent across jobs.
+
+        Args:
+            avg_window_costs: (B, N, T) tensor of average window costs
+            feasible_mask: (B, N, T) boolean tensor of feasible (job, start) pairs
+
+        Returns:
+            (B, 3) tensor of quantile thresholds [q25, q50, q75]
+        """
+        B = self.batch_size
+
+        # Flatten to (B, N*T)
+        flat_costs = avg_window_costs.view(B, -1)  # (B, N*T)
+        flat_mask = feasible_mask.view(B, -1)  # (B, N*T)
+
+        # Compute quantiles per episode
+        quantiles = torch.zeros((B, 3), dtype=torch.float32, device=self.device)
+
+        for b in range(B):
+            valid_costs = flat_costs[b][flat_mask[b]]
+            if valid_costs.numel() > 0:
+                quantiles[b, 0] = torch.quantile(valid_costs, 0.25)
+                quantiles[b, 1] = torch.quantile(valid_costs, 0.50)
+                quantiles[b, 2] = torch.quantile(valid_costs, 0.75)
+            else:
+                # No feasible actions - use zeros (will be masked out anyway)
+                quantiles[b] = 0.0
+
+        return quantiles
+
+    def _assign_duration_aware_families(
+        self, avg_window_costs: torch.Tensor, quantiles: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Assign family indices to each (job, start) pair based on avg window cost.
+
+        Family assignment using quartiles [q25, q50, q75]:
+        - Family 0: cost <= q25 (cheapest average window cost)
+        - Family 1: q25 < cost <= q50
+        - Family 2: q50 < cost <= q75
+        - Family 3: cost > q75 (most expensive)
+
+        Args:
+            avg_window_costs: (B, N, T) tensor of average window costs
+            quantiles: (B, 3) tensor of [q25, q50, q75] thresholds
+
+        Returns:
+            (B, N, T) tensor of family indices (0-3)
+        """
+        q25 = quantiles[:, 0:1].unsqueeze(2)  # (B, 1, 1)
+        q50 = quantiles[:, 1:2].unsqueeze(2)  # (B, 1, 1)
+        q75 = quantiles[:, 2:3].unsqueeze(2)  # (B, 1, 1)
+
+        # Default to family 0 (cheapest)
+        families = torch.zeros_like(avg_window_costs, dtype=torch.int32)
+
+        # Assign families based on quantile thresholds
+        families = torch.where(
+            avg_window_costs > q75, torch.tensor(3, device=self.device), families
+        )
+        families = torch.where(
+            (avg_window_costs > q50) & (avg_window_costs <= q75),
+            torch.tensor(2, device=self.device),
+            families,
+        )
+        families = torch.where(
+            (avg_window_costs > q25) & (avg_window_costs <= q50),
+            torch.tensor(1, device=self.device),
+            families,
+        )
+        # Family 0 is default (cost <= q25)
+
+        return families
+
+    def _compute_duration_aware_family_action_mask(
+        self, job_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute action mask for duration-aware family variant.
+
+        An action (job_id, family_id) is valid if:
+        1. job_id refers to an available job
+        2. There exists at least one feasible start time whose avg window cost
+           falls into family_id
+
+        This is more accurate than price-family because it accounts for the
+        full energy cost over the job's duration, not just the start slot price.
+
+        Args:
+            job_mask: (B, N_job_pad) tensor of job availability
+
+        Returns:
+            (B, action_dim) tensor where 1 = valid, 0 = invalid
+        """
+        B = self.batch_size
+        N = self.N_job_pad
+        F = self.num_slack_choices  # num_price_families (4)
+        T = self.T_max_pad
+
+        # Processing times for all jobs: (B, N)
+        p_all = self.p_subset.int()
+
+        # --- Compute feasibility mask for all (job, start) pairs ---
+        slot_indices = (
+            torch.arange(T, device=self.device).unsqueeze(0).unsqueeze(0)
+        )  # (1, 1, T)
+
+        # Valid start slots (>= t_now): (B, 1, T)
+        valid_start = slot_indices >= self.t.unsqueeze(1).unsqueeze(2)
+
+        # End times: (B, N, T)
+        p_expanded = p_all.unsqueeze(2)  # (B, N, 1)
+        end_times = slot_indices + p_expanded  # (B, N, T)
+
+        # Deadline feasibility: end_time <= T_limit
+        T_limit_exp = self.T_limit.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
+        deadline_ok = end_times <= T_limit_exp  # (B, N, T)
+
+        # Remaining work constraint: slot + remaining_work <= T_limit
+        remaining_work = (p_all.float() * job_mask.float()).sum(dim=1)  # (B,)
+        completion_ok = slot_indices.squeeze(1) + remaining_work.unsqueeze(
+            1
+        ).int() <= self.T_limit.unsqueeze(
+            1
+        )  # (B, T)
+
+        # Combined feasibility: (B, N, T)
+        feasible = (
+            valid_start.expand(B, N, T) & deadline_ok & completion_ok.unsqueeze(1)
+        )
+
+        # --- Compute avg window costs and assign families ---
+        avg_window_costs = self._compute_window_costs(p_all)  # (B, N, T)
+
+        # Compute quantiles over feasible (job, start) pairs
+        quantiles = self._compute_duration_aware_family_quantiles(
+            avg_window_costs, feasible
+        )  # (B, 3)
+
+        # Assign families based on avg window cost
+        families = self._assign_duration_aware_families(
+            avg_window_costs, quantiles
+        )  # (B, N, T)
+
+        # --- Build action mask ---
+        action_mask = torch.zeros((B, N, F), dtype=torch.float32, device=self.device)
+
+        for f in range(F):
+            # (job, start) pairs in this family that are feasible: (B, N, T)
+            in_family = families == f
+            feasible_in_family = feasible & in_family
+            # Any feasible start in this family for each job: (B, N)
+            has_feasible = feasible_in_family.any(dim=2)
+            action_mask[:, :, f] = has_feasible.float()
+
+        # Combine with job availability
+        job_available = job_mask.unsqueeze(2)  # (B, N, 1)
+        action_mask = action_mask * job_available
+
+        # Reshape to action_dim: action = job_id * F + family_id
+        action_mask = action_mask.reshape(B, N * F)
+
+        return action_mask
+
+    def _compute_duration_aware_family_start_times_for_job(
+        self, job_ids: torch.Tensor, family_ids: torch.Tensor, p: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute earliest feasible start time for specific jobs and families
+        using duration-aware family assignment.
+
+        CRITICAL: Must use the same logic as _compute_duration_aware_family_action_mask
+        to ensure action mask and decoding are consistent.
+
+        Args:
+            job_ids: (B,) tensor of chosen job indices
+            family_ids: (B,) tensor of chosen family indices
+            p: (B,) tensor of job processing times
+
+        Returns:
+            (B,) tensor of start times (earliest feasible in chosen family)
+        """
+        B = self.batch_size
+        N = self.N_job_pad
+        T = self.T_max_pad
+
+        # Processing times for all jobs (needed for quantile computation)
+        p_all = self.p_subset.int()  # (B, N)
+
+        # --- Compute feasibility mask (same as action mask) ---
+        slot_indices = (
+            torch.arange(T, device=self.device).unsqueeze(0).unsqueeze(0)
+        )  # (1, 1, T)
+        valid_start = slot_indices >= self.t.unsqueeze(1).unsqueeze(2)  # (B, 1, T)
+
+        p_expanded = p_all.unsqueeze(2)  # (B, N, 1)
+        end_times = slot_indices + p_expanded  # (B, N, T)
+        T_limit_exp = self.T_limit.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
+        deadline_ok = end_times <= T_limit_exp  # (B, N, T)
+
+        # Note: we use a simpler feasibility check here (no remaining_work constraint)
+        # because we're decoding a single chosen job, not checking all future possibilities
+        feasible = valid_start.expand(B, N, T) & deadline_ok  # (B, N, T)
+
+        # --- Compute avg window costs and families ---
+        avg_window_costs = self._compute_window_costs(p_all)  # (B, N, T)
+
+        # Compute quantiles over feasible (job, start) pairs
+        quantiles = self._compute_duration_aware_family_quantiles(
+            avg_window_costs, feasible
+        )  # (B, 3)
+
+        # Assign families
+        families = self._assign_duration_aware_families(
+            avg_window_costs, quantiles
+        )  # (B, N, T)
+
+        # --- Extract info for selected jobs ---
+        # Gather for selected job: (B, T)
+        job_ids_long = job_ids.unsqueeze(1).unsqueeze(2).expand(B, 1, T).long()
+        families_for_job = torch.gather(families, 1, job_ids_long).squeeze(1)  # (B, T)
+        # For feasible (bool tensor), convert to float, gather, then back to bool
+        feasible_float = feasible.float()
+        feasible_for_job = (
+            torch.gather(feasible_float, 1, job_ids_long).squeeze(1) > 0.5
+        )  # (B, T)
+
+        # Slots in chosen family that are feasible
+        family_ids_expanded = family_ids.unsqueeze(1)  # (B, 1)
+        in_family = families_for_job == family_ids_expanded  # (B, T)
+        candidates = feasible_for_job & in_family  # (B, T)
+
+        # Find earliest slot
+        slot_1d = torch.arange(T, device=self.device).unsqueeze(0)  # (1, T)
+        large_val = T + 1
+        slot_masked = torch.where(
+            candidates,
+            slot_1d.expand(B, -1),
+            torch.full((B, T), large_val, device=self.device),
+        )
+        start_times = slot_masked.min(dim=1).values  # (B,)
+
+        # Clamp to T_limit (safety)
+        start_times = torch.minimum(start_times, self.T_limit)
+
+        return start_times
+
     def _compute_action_mask(self, job_mask: torch.Tensor) -> torch.Tensor:
         """
         Compute deadline-aware action mask.
@@ -1229,13 +1556,23 @@ class GPUBatchSingleMachinePeriodEnv:
         For price-family variant: slack_id is family_id, and validity depends
         on whether there's any feasible start time in that family.
 
+        For duration-aware family variant: same as price-family, but families
+        are based on average window cost (w(s,p)/p) instead of start slot price.
+
         Args:
             job_mask: (B, N_job_pad) tensor of job availability
 
         Returns:
             (B, action_dim) tensor where 1 = valid, 0 = invalid
         """
-        # Use family-based mask if price-family variant is enabled
+        # Use duration-aware family mask if enabled (takes precedence)
+        if (
+            self.env_config.use_price_families
+            and self.env_config.use_duration_aware_families
+        ):
+            return self._compute_duration_aware_family_action_mask(job_mask)
+
+        # Use slot-price-based family mask if price-family variant is enabled
         if self.env_config.use_price_families:
             return self._compute_family_action_mask(job_mask)
 
@@ -1735,7 +2072,17 @@ class GPUBatchSingleMachinePeriodEnv:
         p = torch.gather(self.p_subset, 1, job_ids.unsqueeze(1).long()).squeeze(1)
 
         # Compute start times based on variant
-        if self.env_config.use_price_families:
+        if (
+            self.env_config.use_price_families
+            and self.env_config.use_duration_aware_families
+        ):
+            # Duration-aware family variant: slack_id is family_id
+            # Find earliest feasible start time whose avg window cost is in that family
+            family_ids = slack_ids  # (B,)
+            start_times = self._compute_duration_aware_family_start_times_for_job(
+                job_ids, family_ids, p
+            )
+        elif self.env_config.use_price_families:
             # Price-family variant: slack_id is family_id
             # Find earliest feasible start time in that family
             family_ids = slack_ids  # (B,)

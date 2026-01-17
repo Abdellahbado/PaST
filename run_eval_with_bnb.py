@@ -200,7 +200,9 @@ def _random_rollout(
 
         sum_mask = mask.sum(dim=1, keepdim=True)
         safe = (sum_mask > 0).squeeze(1)
-        probs = torch.where(sum_mask > 0, mask / (sum_mask + 1e-8), torch.zeros_like(mask))
+        probs = torch.where(
+            sum_mask > 0, mask / (sum_mask + 1e-8), torch.zeros_like(mask)
+        )
         actions = torch.zeros((B,), dtype=torch.long, device=env.device)
         if safe.any():
             actions[safe] = torch.multinomial(probs[safe], num_samples=1).squeeze(1)
@@ -595,10 +597,14 @@ def main() -> None:
     greedy_stats = None
     if bool(args.random_baselines):
         rand_env = GPUBatchSingleMachinePeriodEnv(
-            batch_size=int(args.num_instances), env_config=variant_config.env, device=device
+            batch_size=int(args.num_instances),
+            env_config=variant_config.env,
+            device=device,
         )
         rand_env.reset(batch)
-        rv_energy, rv_sched, rv_infeas = _random_rollout(rand_env, use_completion_mask=False)
+        rv_energy, rv_sched, rv_infeas = _random_rollout(
+            rand_env, use_completion_mask=False
+        )
         random_valid = {
             "energy": rv_energy,
             "scheduled": rv_sched,
@@ -606,10 +612,14 @@ def main() -> None:
         }
 
         rand_env2 = GPUBatchSingleMachinePeriodEnv(
-            batch_size=int(args.num_instances), env_config=variant_config.env, device=device
+            batch_size=int(args.num_instances),
+            env_config=variant_config.env,
+            device=device,
         )
         rand_env2.reset(batch)
-        rf_energy, rf_sched, rf_infeas = _random_rollout(rand_env2, use_completion_mask=True)
+        rf_energy, rf_sched, rf_infeas = _random_rollout(
+            rand_env2, use_completion_mask=True
+        )
         random_feasible = {
             "energy": rf_energy,
             "scheduled": rf_sched,
@@ -618,7 +628,9 @@ def main() -> None:
 
     if bool(args.greedy_entropy):
         ent_env = GPUBatchSingleMachinePeriodEnv(
-            batch_size=int(args.num_instances), env_config=variant_config.env, device=device
+            batch_size=int(args.num_instances),
+            env_config=variant_config.env,
+            device=device,
         )
         ent_env.reset(batch)
         greedy_stats = _greedy_entropy_stats(ent_env, model)
@@ -629,7 +641,9 @@ def main() -> None:
         variant_config.env,
         device,
         batch,
-        max_wait_slots=(int(args.max_wait_slots) if args.max_wait_slots is not None else None),
+        max_wait_slots=(
+            int(args.max_wait_slots) if args.max_wait_slots is not None else None
+        ),
         wait_logit_penalty=float(args.wait_logit_penalty),
         makespan_penalty=float(args.makespan_penalty),
     )
@@ -643,7 +657,9 @@ def main() -> None:
         batch_data=batch,
         beta=int(args.beta),
         gamma=int(args.gamma),
-        max_wait_slots=(int(args.max_wait_slots) if args.max_wait_slots is not None else None),
+        max_wait_slots=(
+            int(args.max_wait_slots) if args.max_wait_slots is not None else None
+        ),
         wait_logit_penalty=float(args.wait_logit_penalty),
         makespan_penalty=float(args.makespan_penalty),
     )
@@ -677,7 +693,9 @@ def main() -> None:
             variant_config.env,
             device,
             shuffled,
-            max_wait_slots=(int(args.max_wait_slots) if args.max_wait_slots is not None else None),
+            max_wait_slots=(
+                int(args.max_wait_slots) if args.max_wait_slots is not None else None
+            ),
             wait_logit_penalty=float(args.wait_logit_penalty),
             makespan_penalty=float(args.makespan_penalty),
         )
@@ -688,7 +706,9 @@ def main() -> None:
             batch_data=shuffled,
             beta=int(args.beta),
             gamma=int(args.gamma),
-            max_wait_slots=(int(args.max_wait_slots) if args.max_wait_slots is not None else None),
+            max_wait_slots=(
+                int(args.max_wait_slots) if args.max_wait_slots is not None else None
+            ),
             wait_logit_penalty=float(args.wait_logit_penalty),
             makespan_penalty=float(args.makespan_penalty),
         )
@@ -795,11 +815,15 @@ def main() -> None:
     if random_valid is not None:
         rv_mean = _mean(random_valid["energy"].tolist())
         rv_infeas = int(np.sum(random_valid["infeasible"]))
-        print(f"  rand-valid: {rv_mean:.4f} | infeasible {rv_infeas}/{int(args.num_instances)}")
+        print(
+            f"  rand-valid: {rv_mean:.4f} | infeasible {rv_infeas}/{int(args.num_instances)}"
+        )
     if random_feasible is not None:
         rf_mean = _mean(random_feasible["energy"].tolist())
         rf_infeas = int(np.sum(random_feasible["infeasible"]))
-        print(f"  rand-feasible: {rf_mean:.4f} | infeasible {rf_infeas}/{int(args.num_instances)}")
+        print(
+            f"  rand-feasible: {rf_mean:.4f} | infeasible {rf_infeas}/{int(args.num_instances)}"
+        )
     if greedy_stats is not None:
         print(
             "  greedy-stats: "

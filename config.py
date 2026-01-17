@@ -67,6 +67,8 @@ class VariantID(Enum):
     PPO_FAMILY_Q4_CTX13 = (
         "ppo_family_q4_ctx13"  # Price-family + identified ctx (q's + next-slot deltas)
     )
+    PPO_SEQUENCE = "ppo_sequence"  # RL sequences jobs, Batch DP times them
+    PPO_DURATION_AWARE_FAMILY = "ppo_duration_aware_family"  # Duration-aware families: families based on avg window cost
 
 
 # =============================================================================
@@ -319,6 +321,10 @@ class EnvConfig:
     # Families are computed per-episode from price quantiles
     use_price_families: bool = False
     num_price_families: int = 4  # Number of price families (quartiles by default)
+
+    # Duration-aware families: families based on average window cost w(s,p)/p
+    # instead of slot price. This makes "family 0 = cheap" mean full-job cost.
+    use_duration_aware_families: bool = False
 
     # LEGACY: Fields for backward compatibility with sm_env.py
     slack_variant: SlackVariant = SlackVariant.SHORT_SLACK
@@ -738,6 +744,89 @@ def get_ppo_family_q4_ctx13() -> VariantConfig:
     return cfg
 
 
+def get_ppo_sequence() -> VariantConfig:
+    """
+    PPO + Sequence-Only (RL) + Batch DP (Time).
+
+    Action Space: N_jobs (Discrete).
+    - We achieve this by setting SlackType.SHORT with a single option [0].
+    - The environment wrapper will interpret action `j` as "append job `j` to sequence".
+
+    Model:
+    - Base model.
+    - No specialized slack inputs needed.
+
+    Env:
+    - K_period_local: irrelevant for timing (DP uses full), but useful for transformer observations.
+      Keep it reasonable (e.g. 48 or 50) so the agent sees "local price context".
+    """
+    model = ModelConfig.base()
+    # Ensure action dim is N_jobs * 1
+    # We must set this implicitly via the env config having 1 slack choice.
+
+    env = EnvConfig()
+    env.slack_type = SlackType.SHORT
+    env.short_slack_spec = ShortSlackSpec(slack_options=[0])  # Only 1 choice => dim = N
+    env.use_periods_full = False
+    env.K_period_local = 48  # Provide some local price context
+
+    training = TrainingConfig()
+    training.algorithm = RLAlgorithm.PPO
+
+    return VariantConfig(
+        variant_id=VariantID.PPO_SEQUENCE,
+        model=model,
+        env=env,
+        training=training,
+    )
+
+
+def get_ppo_duration_aware_family() -> VariantConfig:
+    """
+    PPO + Duration-aware families (4 quartiles) + Local periods (K=48) + Base model.
+
+    This is an improved version of the price-family variant. Instead of assigning
+    families based on start-slot price, families are based on **average window cost**
+    w(s,p)/p = (sum of prices over job duration) / job_length.
+
+    This fixes the "start cheap but spill expensive" problem where a job starts in
+    a cheap slot but extends into expensive slots, making "cheap family" misleading.
+
+    Key design choices:
+    1. Scalar: average window cost w(s,p)/p (not raw w(s,p)), so family semantics
+       are consistent across job lengths.
+    2. Quantiles: computed per episode over all feasible (job, start) pairs.
+    3. Decoding: earliest feasible start whose avg-window-cost is in the chosen family.
+    4. Empty-family fallback: if a family has no feasible starts for a job, that
+       (job, family) action is masked out.
+
+    Action = (job_id, family_id) where family_id ∈ {0,1,2,3} based on per-episode
+    quantiles of average window cost.
+    """
+    model = ModelConfig.base()
+    model.use_global_horizon = False
+
+    env = EnvConfig()
+    env.K_period_local = 48
+    env.slack_type = SlackType.SHORT  # Keep SHORT for shape compatibility
+    env.use_price_families = True  # Enable family-based action space
+    env.use_duration_aware_families = (
+        True  # Use duration-aware (avg window cost) families
+    )
+    env.num_price_families = 4  # 4 quartiles
+    env.use_periods_full = False
+
+    training = TrainingConfig()
+    training.algorithm = RLAlgorithm.PPO
+
+    return VariantConfig(
+        variant_id=VariantID.PPO_DURATION_AWARE_FAMILY,
+        model=model,
+        env=env,
+        training=training,
+    )
+
+
 # Mapping from variant ID to factory function
 VARIANT_FACTORIES = {
     VariantID.PPO_SHORT_BASE: get_ppo_short_base,
@@ -748,6 +837,8 @@ VARIANT_FACTORIES = {
     VariantID.REINFORCE_SHORT_SC: get_reinforce_short_sc,
     VariantID.PPO_FAMILY_Q4: get_ppo_family_q4,
     VariantID.PPO_FAMILY_Q4_CTX13: get_ppo_family_q4_ctx13,
+    VariantID.PPO_SEQUENCE: get_ppo_sequence,
+    VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
 }
 
 
