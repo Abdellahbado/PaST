@@ -412,7 +412,7 @@ def test_env_invariants_no_slack_reward_math_and_masks():
     _assert(float(env.job_available.sum().item()) == 0.0, "No jobs should remain")
 
 
-def test_env_invalid_action_terminates_without_mutation():
+def test_env_invalid_action_is_repaired_with_fallback():
     device = torch.device("cpu")
 
     env_config = EnvConfig()
@@ -456,17 +456,16 @@ def test_env_invalid_action_terminates_without_mutation():
 
     _, rewards, dones, _ = env.step(actions)
 
-    _assert(env.done_mask[0].item() is True, "Invalid-action env should be marked done")
+    # Env0 took an invalid action but should be repaired to a valid fallback action.
+    _assert(env.done_mask[0].item() is True, "Fallback should complete the single job")
+    _assert(float(rewards[0].item()) < 0.0, "Fallback should yield a negative reward")
     _assert(
-        float(rewards[0].item()) == 0.0, "Invalid-action env should have zero reward"
-    )
-    _assert(
-        int(env.t[0].item()) == int(t_before[0].item()),
-        "Invalid-action env time must not advance",
+        int(env.t[0].item()) == int(t_before[0].item()) + 1,
+        "Fallback should advance time by 1",
     )
     _assert(
         float(env.job_available[0].sum().item()) == 0.0,
-        "Invalid-action env should have no available jobs",
+        "Fallback should leave no remaining jobs",
     )
 
     # Valid env should progress and complete its only job.
@@ -501,8 +500,8 @@ def main():
             test_env_invariants_no_slack_reward_math_and_masks,
         ),
         (
-            "env invalid action terminates",
-            test_env_invalid_action_terminates_without_mutation,
+            "env invalid action repaired",
+            test_env_invalid_action_is_repaired_with_fallback,
         ),
     ]
 

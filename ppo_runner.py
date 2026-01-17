@@ -49,6 +49,12 @@ class PPOConfig:
     # Early stopping on KL divergence
     target_kl: Optional[float] = 0.02
 
+    # If the policy produces all -inf logits after masking (all actions masked), PPO
+    # forces a terminal to avoid NaNs. Without a penalty, this creates a loophole where
+    # early failure can look artificially "good" (less negative return).
+    # Applied once per contiguous all-masked run.
+    all_masked_penalty: float = 1000.0
+
     # Advantage normalization
     normalize_advantages: bool = True
 
@@ -373,6 +379,7 @@ class PPORunner:
 
         episode_rewards = []
         episode_lengths = []
+        forced_all_masked_episodes = 0
         current_ep_rewards = torch.zeros(self.env.batch_size, device=self.device)
         current_ep_lengths = torch.zeros(self.env.batch_size, device=self.device)
 
@@ -440,22 +447,44 @@ class PPORunner:
                     logits = logits.masked_fill(action_mask == 0, float("-inf"))
 
                 # Handle infeasible/all-masked states robustly.
-                # These can occur if an env is done and not reset, or if the deadline makes
-                # every (job, slack) action invalid. Treat as terminal for PPO bookkeeping.
+                # These are training killers when they happen for active envs.
                 all_masked = ~torch.isfinite(logits).any(dim=-1)  # (B,)
-                if all_masked.any():
+
+                # Determine which rows are truly active (best-effort through wrappers)
+                done_mask = None
+                if hasattr(self.env, "done_mask") and isinstance(
+                    self.env.done_mask, torch.Tensor
+                ):
+                    if self.env.done_mask.shape == all_masked.shape:
+                        done_mask = self.env.done_mask
+                if (
+                    done_mask is None
+                    and hasattr(self.env, "env")
+                    and hasattr(self.env.env, "done_mask")
+                ):
+                    dm = getattr(self.env.env, "done_mask")
+                    if isinstance(dm, torch.Tensor) and dm.shape == all_masked.shape:
+                        done_mask = dm
+
+                all_masked_active = all_masked
+                if done_mask is not None:
+                    all_masked_active = all_masked & (~done_mask)
+
+                if all_masked_active.any():
                     import warnings
 
                     warnings.warn(
-                        f"All actions masked for {all_masked.sum().item()} envs in rollout step {step}; "
+                        f"All actions masked for {all_masked_active.sum().item()} ACTIVE envs in rollout step {step}; "
                         "treating as terminal to keep PPO stable."
                     )
-                    # Best-effort: prevent stepping those envs if we can reach an underlying env.done_mask.
-                    # Avoid mutating a wrapper's own done_mask bookkeeping when it exposes an inner env.
+
+                    # Best-effort: prevent stepping those envs.
                     if hasattr(self.env, "env") and hasattr(self.env.env, "done_mask"):
-                        self.env.env.done_mask = self.env.env.done_mask | all_masked
+                        self.env.env.done_mask = (
+                            self.env.env.done_mask | all_masked_active
+                        )
                     elif hasattr(self.env, "done_mask"):
-                        self.env.done_mask = self.env.done_mask | all_masked
+                        self.env.done_mask = self.env.done_mask | all_masked_active
 
                 # Sample action safely
                 safe_logits = torch.where(
@@ -502,7 +531,9 @@ class PPORunner:
                         fallback_actions = torch.argmax(action_mask, dim=-1)
                         actions = torch.where(illegal, fallback_actions, actions)
                         # Ensure these overridden rows do not affect PPO gradients.
-                        log_probs = torch.where(illegal, torch.zeros_like(log_probs), log_probs)
+                        log_probs = torch.where(
+                            illegal, torch.zeros_like(log_probs), log_probs
+                        )
 
                 # Valid transition mask: ignore placeholder rows and any overridden illegal-action rows.
                 valid = (~all_masked).float()
@@ -584,6 +615,13 @@ class PPORunner:
                 # re-counted every step. Only count an all-masked terminal once per contiguous run.
                 forced_newly_done = all_masked & active_before & ~prev_all_masked
                 newly_done = newly_done_base | forced_newly_done
+
+                if forced_newly_done.any():
+                    forced_all_masked_episodes += int(forced_newly_done.sum().item())
+                    # Apply a one-time penalty so this can't be exploited.
+                    current_ep_rewards[forced_newly_done] += -float(
+                        self.config.all_masked_penalty
+                    )
 
                 # Exclude placeholder (all_masked) steps from episode reward/length stats.
                 track_mask = active_before & valid_bool
@@ -677,6 +715,7 @@ class PPORunner:
             "rollout/rewards_std": np.std(episode_rewards) if episode_rewards else 0.0,
             "rollout/ep_len_mean": np.mean(episode_lengths) if episode_lengths else 0.0,
             "rollout/num_episodes": len(episode_rewards),
+            "rollout/forced_all_masked_episodes": float(forced_all_masked_episodes),
             "rollout/dones_done_mask_disagree": float(dones_done_mask_disagree),
         }
 

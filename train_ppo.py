@@ -372,13 +372,15 @@ class MetricsLogger:
         # Rollout metrics
         reward_mean = metrics.get("rollout/rewards_mean", 0)
         reward_std = metrics.get("rollout/rewards_std", 0)
+        num_episodes = metrics.get("rollout/num_episodes", 0)
+        forced_all_masked = metrics.get("rollout/forced_all_masked_episodes", 0)
 
         # GPU memory
         gpu_mem = metrics.get("gpu/memory_allocated_mb", 0)
 
         print(
             f"[{update:5d}] steps={env_steps:>10,} | "
-            f"ret={reward_mean:>8.2f}±{reward_std:<6.2f} | "
+            f"ret={reward_mean:>8.2f}±{reward_std:<6.2f} | ep={int(num_episodes):>4d} am={int(forced_all_masked):>3d} | "
             f"π={policy_loss:>7.4f} V={value_loss:>7.4f} H={entropy:>6.3f} | "
             f"kl={approx_kl:.4f} clip={clip_frac:.3f} | "
             f"∇={grad_norm:>6.3f} gclip={grad_clip_frac:.2f} e={ppo_epochs_actual:>2.0f} | "

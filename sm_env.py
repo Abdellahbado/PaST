@@ -15,19 +15,29 @@ The agent decides:
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-from typing import Dict, Tuple, Optional, List, Union, Any
+from typing import Dict, Tuple, Optional, List, Union, Any, TYPE_CHECKING
 from dataclasses import dataclass
 
-try:
-    import torch
+# NOTE: We intentionally import torch in a TYPE_CHECKING-safe way.
+# Pyright/Pylance treats a name as a "variable" (not a module) if it can be
+# assigned (e.g., torch = None), which then breaks type annotations like
+# `torch.Tensor` with "Variable not allowed in type expression".
+if TYPE_CHECKING:
+    import torch  # noqa: F401
 
     TORCH_AVAILABLE = True
-except ImportError:
-    torch = None
-    TORCH_AVAILABLE = False
+else:
+    try:
+        import torch  # type: ignore
+
+        TORCH_AVAILABLE = True
+    except ImportError:
+        torch = None  # type: ignore[assignment]
+        TORCH_AVAILABLE = False
 
 from .config import (
     EnvConfig,
+    SlackType,
     SlackVariant,
     ShortSlackSpec,
     PeriodAlignedSlackSpec,
@@ -1047,8 +1057,15 @@ class GPUBatchSingleMachinePeriodEnv:
         # Processing times for all jobs: (B, N)
         p_all = self.p_subset.int()
 
-        # For each (job, family), check if there's any feasible start time in that family
-        # A start time s is feasible if: s >= t_now AND s + p <= T_limit AND slot_family[s] == family
+        # For each (job, family), check if there's any feasible start time in that family.
+        #
+        # Training-critical: also enforce a completion-feasibility bound so we do not allow
+        # actions that "wait too long" and make it impossible to schedule remaining work.
+        #
+        # If we start a job at time s >= t_now, the earliest possible completion time
+        # (with no additional idle) is s + remaining_work. Therefore we require:
+        #   s + remaining_work <= T_limit
+        # This eliminates dead-ends where the env would later have no valid actions.
 
         # Create mask for valid slots: (B, T_max_pad)
         slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(
@@ -1057,6 +1074,18 @@ class GPUBatchSingleMachinePeriodEnv:
         valid_start_slots = slot_indices >= self.t.unsqueeze(
             1
         )  # (B, T_max_pad) - slot >= t_now
+
+        # Remaining work in slots for each instance
+        remaining_work = (
+            (p_all.float() * job_mask.float()).sum(dim=1).to(torch.int32)
+        )  # (B,)
+
+        # Completion bound: slot + remaining_work <= T_limit
+        completion_ok = slot_indices.to(torch.int32) + remaining_work.unsqueeze(
+            1
+        ) <= self.T_limit.unsqueeze(1).to(
+            torch.int32
+        )  # (B, T_max_pad)
 
         # For each job and slot, check if job can finish by deadline
         # end_time[b, j, s] = s + p[b, j]
@@ -1067,9 +1096,8 @@ class GPUBatchSingleMachinePeriodEnv:
 
         # Feasibility mask: end_time <= T_limit AND start >= t_now
         T_limit_expanded = self.T_limit.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
-        feasible = (end_times <= T_limit_expanded) & valid_start_slots.unsqueeze(
-            1
-        )  # (B, N, T_max_pad)
+        feasible = (end_times <= T_limit_expanded) & valid_start_slots.unsqueeze(1)
+        feasible = feasible & completion_ok.unsqueeze(1)  # (B, N, T_max_pad)
 
         # For each family, check if there's a feasible slot in that family
         # Shape: (B, N, F)
@@ -1233,6 +1261,19 @@ class GPUBatchSingleMachinePeriodEnv:
         T_limit_expanded = self.T_limit.unsqueeze(1).unsqueeze(2)  # (B, 1, 1)
         feasible = end_times <= T_limit_expanded  # (B, N, S)
 
+        # Training-critical: completion-feasibility bound (prevents dead-ends).
+        # If we choose to start a job at time s, earliest completion with no extra idle is
+        # s + remaining_work. Require s + remaining_work <= T_limit.
+        remaining_work = (
+            (p_all.float() * job_mask.float()).sum(dim=1).to(torch.int32)
+        )  # (B,)
+        completion_ok = slack_start_times.to(torch.int32) + remaining_work.unsqueeze(
+            1
+        ) <= self.T_limit.to(torch.int32).unsqueeze(
+            1
+        )  # (B, S)
+        feasible = feasible & completion_ok.unsqueeze(1)  # (B, N, S)
+
         # Combine with job availability
         job_available = job_mask.unsqueeze(2).bool()  # (B, N, 1)
         valid = feasible & job_available  # (B, N, S)
@@ -1252,6 +1293,43 @@ class GPUBatchSingleMachinePeriodEnv:
         """
         B = self.batch_size
         S = self.num_slack_choices
+
+        # New configs use `slack_type` (SHORT / COARSE_TO_FINE / FULL).
+        # Older codepaths use `slack_variant`. We prefer slack_type when present
+        # to avoid mismatches when only slack_type is set.
+        slack_type = getattr(self.env_config, "slack_type", None)
+        if slack_type is not None:
+            if slack_type == SlackType.SHORT:
+                if self.env_config.short_slack_spec is not None:
+                    slack_options = torch.tensor(
+                        self.env_config.short_slack_spec.slack_options,
+                        dtype=torch.int32,
+                        device=self.device,
+                    )
+                    # period_offsets: (B, S)
+                    period_offsets = slack_options.unsqueeze(0).expand(B, S)
+                    return self._compute_period_aligned_starts_batch(period_offsets)
+                return self.t.unsqueeze(1).expand(B, S)
+
+            if slack_type == SlackType.COARSE_TO_FINE:
+                if self.env_config.c2f_slack_spec is not None:
+                    slack_ids = torch.arange(S, device=self.device)  # (S,)
+                    slack_ids_expanded = slack_ids.unsqueeze(0).expand(B, S)  # (B, S)
+                    period_offsets = self._compute_c2f_period_offsets_batch(
+                        slack_ids_expanded
+                    )
+                    return self._compute_period_aligned_starts_batch(period_offsets)
+                return self.t.unsqueeze(1).expand(B, S)
+
+            if slack_type == SlackType.FULL:
+                slack_ids = torch.arange(
+                    S, dtype=torch.int32, device=self.device
+                )  # (S,)
+                period_offsets = slack_ids.unsqueeze(0).expand(B, S)  # (B, S)
+                return self._compute_period_aligned_starts_batch(period_offsets)
+
+            # Unknown slack_type: default to start now
+            return self.t.unsqueeze(1).expand(B, S)
 
         if self.env_config.slack_variant == SlackVariant.NO_SLACK:
             # Only one choice: start now
@@ -1554,16 +1632,10 @@ class GPUBatchSingleMachinePeriodEnv:
         # Env's action feasibility uses availability (1 = available)
         action_mask = self._compute_action_mask(job_available)
 
-        # If an active env has no valid actions, it's a dead-end under the current
-        # (job, slack/family) action space. Mark it done so the training wrapper can
-        # reset it (prevents repeated all-masked warnings in PPO).
-        dead_end = (~self.done_mask) & (action_mask.sum(dim=1) == 0)
-        if dead_end.any():
-            self.done_mask = self.done_mask | dead_end
-            # Make the terminal state explicit
-            self.job_available[dead_end] = 0.0
-
-        # Done envs must have no valid actions
+        # Done envs must have no valid actions.
+        # NOTE: `_get_obs()` is intentionally side-effect free; termination logic
+        # (including dead-ends/infeasibility) must be handled in `step()` and/or
+        # the training runner.
         action_mask = action_mask * (~self.done_mask).float().unsqueeze(1)
 
         return {
@@ -1592,6 +1664,19 @@ class GPUBatchSingleMachinePeriodEnv:
         """
         B = self.batch_size
 
+        # Track infeasible terminations so we can apply a penalty and log it.
+        # This is critical: without a failure penalty, the agent can benefit from
+        # "ending early" (fewer negative energy rewards) which misaligns training
+        # returns vs. true scheduling performance.
+        infeasible_done = torch.zeros((B,), dtype=torch.bool, device=self.device)
+
+        # Penalty baseline: remaining work before any mutation/termination logic.
+        # Using the pre-step remaining work makes the penalty robust even if a terminal
+        # path clears `job_available` for dead-ends.
+        remaining_work_penalty_base = (
+            self.p_subset.float() * self.job_available.float()
+        ).sum(dim=1)
+
         # Decode actions
         job_ids = actions // self.num_slack_choices
         slack_ids = actions % self.num_slack_choices
@@ -1607,18 +1692,42 @@ class GPUBatchSingleMachinePeriodEnv:
         invalid_action = active & (job_available_selected < 0.5)
 
         if invalid_action.any():
-            # Invalid actions indicate a policy/mask bug.
-            # Safer than clamping (which changes the MDP) is to terminate those envs
-            # without applying any state transition.
+            # Invalid actions indicate a policy/mask bug (sampling without respecting masks)
+            # or a wrapper/state sync issue. Terminating those envs is extremely harmful for PPO
+            # because it injects artificial terminals and discards learning signal.
+            #
+            # Training-stable behavior: repair by selecting a valid fallback action for those envs.
+            # If no valid action exists, then the state is a true dead-end/infeasible and we mark done.
             import warnings
 
             warnings.warn(
                 f"Invalid actions detected: {invalid_action.sum().item()} envs selected unavailable jobs. "
-                "Marking them done with zero reward and no state update."
+                "Replacing with a valid fallback action (if available)."
             )
-            self.done_mask = self.done_mask | invalid_action
-            # Make them terminal with no available jobs/actions
-            self.job_available[invalid_action] = 0.0
+
+            # Compute a fresh valid action mask from the CURRENT state.
+            # (Uses job_available and completion/deadline constraints.)
+            am = self._compute_action_mask(self.job_available)  # (B, A)
+            has_any = am.sum(dim=1) > 0.5
+            fallback = torch.argmax(am, dim=1)  # (B,)
+
+            repairable = invalid_action & has_any
+            if repairable.any():
+                actions = torch.where(repairable, fallback, actions)
+                job_ids = actions // self.num_slack_choices
+                slack_ids = actions % self.num_slack_choices
+                # Recompute availability selection for repaired rows
+                job_available_selected = torch.gather(
+                    self.job_available, 1, job_ids.unsqueeze(1).long()
+                ).squeeze(1)
+                invalid_action = active & (job_available_selected < 0.5)
+
+            # If still invalid or truly no valid action exists, treat as dead-end/infeasible.
+            dead = invalid_action
+            if dead.any():
+                self.done_mask = self.done_mask | dead
+                self.job_available[dead] = 0.0
+                infeasible_done = infeasible_done | dead
             active = ~self.done_mask
 
         # Get processing times for selected jobs
@@ -1633,39 +1742,63 @@ class GPUBatchSingleMachinePeriodEnv:
             start_times = self._compute_family_start_times_for_job(
                 job_ids, family_ids, p
             )
-        elif self.env_config.slack_variant == SlackVariant.NO_SLACK:
-            start_times = self.t.clone()
-        elif self.env_config.slack_variant == SlackVariant.SHORT_SLACK:
-            if self.env_config.short_slack_spec is not None:
-                # SHORT_SLACK uses period offsets, not slot offsets
-                # Get the period offset for each instance's slack_id
-                slack_options = torch.tensor(
-                    self.env_config.short_slack_spec.slack_options,
-                    dtype=torch.int32,
-                    device=self.device,
-                )
-                period_offsets = slack_options[slack_ids.long()]  # (B,)
-                # Use period-aligned computation
-                start_times = self._compute_period_aligned_starts(period_offsets)
-            else:
-                start_times = self.t.clone()
-        elif self.env_config.slack_variant == SlackVariant.COARSE_TO_FINE:
-            # Coarse-to-fine: decode slack_id to period offset, then to start time
-            if self.env_config.c2f_slack_spec is not None:
-                # Vectorized computation of period offsets
-                period_offsets = self._compute_c2f_period_offsets(slack_ids)
-                # Find current period for each instance and compute target start
-                start_times = self._compute_period_aligned_starts(period_offsets)
-            else:
-                start_times = self.t.clone()
-        elif self.env_config.slack_variant == SlackVariant.FULL_SLACK:
-            # FULL_SLACK: slack_id is period offset from current period
-            # (matching config.FullSlackSpec which defines K_full_max as period count)
-            period_offsets = slack_ids.int()  # (B,)
-            start_times = self._compute_period_aligned_starts(period_offsets)
         else:
-            # Default: no slack
-            start_times = self.t.clone()
+            # Prefer slack_type (new config). Fall back to slack_variant (legacy).
+            slack_type = getattr(self.env_config, "slack_type", None)
+
+            if slack_type == SlackType.SHORT:
+                if self.env_config.short_slack_spec is not None:
+                    slack_options = torch.tensor(
+                        self.env_config.short_slack_spec.slack_options,
+                        dtype=torch.int32,
+                        device=self.device,
+                    )
+                    period_offsets = slack_options[slack_ids.long()]  # (B,)
+                    start_times = self._compute_period_aligned_starts(period_offsets)
+                else:
+                    start_times = self.t.clone()
+
+            elif slack_type == SlackType.COARSE_TO_FINE:
+                if self.env_config.c2f_slack_spec is not None:
+                    period_offsets = self._compute_c2f_period_offsets(slack_ids)
+                    start_times = self._compute_period_aligned_starts(period_offsets)
+                else:
+                    start_times = self.t.clone()
+
+            elif slack_type == SlackType.FULL:
+                period_offsets = slack_ids.int()  # (B,)
+                start_times = self._compute_period_aligned_starts(period_offsets)
+
+            else:
+                # Legacy fallback
+                if self.env_config.slack_variant == SlackVariant.NO_SLACK:
+                    start_times = self.t.clone()
+                elif self.env_config.slack_variant == SlackVariant.SHORT_SLACK:
+                    if self.env_config.short_slack_spec is not None:
+                        slack_options = torch.tensor(
+                            self.env_config.short_slack_spec.slack_options,
+                            dtype=torch.int32,
+                            device=self.device,
+                        )
+                        period_offsets = slack_options[slack_ids.long()]  # (B,)
+                        start_times = self._compute_period_aligned_starts(
+                            period_offsets
+                        )
+                    else:
+                        start_times = self.t.clone()
+                elif self.env_config.slack_variant == SlackVariant.COARSE_TO_FINE:
+                    if self.env_config.c2f_slack_spec is not None:
+                        period_offsets = self._compute_c2f_period_offsets(slack_ids)
+                        start_times = self._compute_period_aligned_starts(
+                            period_offsets
+                        )
+                    else:
+                        start_times = self.t.clone()
+                elif self.env_config.slack_variant == SlackVariant.FULL_SLACK:
+                    period_offsets = slack_ids.int()  # (B,)
+                    start_times = self._compute_period_aligned_starts(period_offsets)
+                else:
+                    start_times = self.t.clone()
 
         end_times = start_times + p
         # Clamp end_times to T_limit (actions should be masked, but safety clamp)
@@ -1721,8 +1854,33 @@ class GPUBatchSingleMachinePeriodEnv:
         # Rewards
         rewards = -energies
 
+        # Detect post-action infeasibility: even starting immediately, remaining work cannot fit.
+        # This is a correct necessary-and-sufficient condition for feasibility on a single machine
+        # when idling is allowed and there are no release dates.
+        remaining_work_now = (self.p_subset.float() * self.job_available.float()).sum(
+            dim=1
+        )
+        dead_end = (
+            (~self.done_mask)
+            & (remaining_work_now > 0)
+            & ((self.t.float() + remaining_work_now) > self.T_limit.float())
+        )
+        if dead_end.any():
+            self.done_mask = self.done_mask | dead_end
+            self.job_available[dead_end] = 0.0
+            infeasible_done = infeasible_done | dead_end
+
+        if infeasible_done.any():
+            # Penalty upper bound: remaining_work * max_slot_price * e_single.
+            ct_max = self.ct.float().max(dim=1).values
+            penalty = self.e_single.float() * remaining_work_penalty_base * ct_max + 1.0
+            rewards = rewards - penalty * infeasible_done.float()
+
         obs = self._get_obs()
-        info = {"total_energy": self.total_energy.clone()}
+        info = {
+            "total_energy": self.total_energy.clone(),
+            "infeasible_done": infeasible_done.clone(),
+        }
 
         return obs, rewards, self.done_mask, info
 
