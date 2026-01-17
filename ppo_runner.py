@@ -475,8 +475,39 @@ class PPORunner:
                     all_masked, torch.zeros_like(log_probs), log_probs
                 )
 
-                # Valid transition mask: ignore placeholder rows in update/normalization
+                illegal = torch.zeros_like(all_masked, dtype=torch.bool)
+
+                # Extra safety: ensure chosen actions are legal under the env-provided action_mask.
+                # If they are not, we override with a legal fallback and exclude those rows from PPO
+                # (otherwise the environment transition would not match the sampled log-prob).
+                if "action_mask" in obs:
+                    action_mask = obs["action_mask"]
+                    # action_mask: 1 for legal, 0 for illegal. Gather legality of chosen action.
+                    chosen_ok = (
+                        torch.gather(action_mask, 1, actions.unsqueeze(1))
+                        .squeeze(1)
+                        .float()
+                        > 0.5
+                    )
+                    # Ignore placeholder rows (all_masked) for legality checks.
+                    chosen_ok = chosen_ok | all_masked
+                    illegal = ~chosen_ok
+                    if illegal.any():
+                        import warnings
+
+                        warnings.warn(
+                            f"Illegal actions detected after masking: {illegal.sum().item()} envs. "
+                            "Overriding with a legal fallback and dropping those rows from PPO updates."
+                        )
+                        fallback_actions = torch.argmax(action_mask, dim=-1)
+                        actions = torch.where(illegal, fallback_actions, actions)
+                        # Ensure these overridden rows do not affect PPO gradients.
+                        log_probs = torch.where(illegal, torch.zeros_like(log_probs), log_probs)
+
+                # Valid transition mask: ignore placeholder rows and any overridden illegal-action rows.
                 valid = (~all_masked).float()
+                if illegal.any():
+                    valid = torch.where(illegal, torch.zeros_like(valid), valid)
                 valid_bool = valid > 0.5
 
                 # Store transition
