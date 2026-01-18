@@ -446,6 +446,11 @@ class PPORunner:
                     # action_mask: 1 for valid, 0 for invalid
                     logits = logits.masked_fill(action_mask == 0, float("-inf"))
 
+                # Numeric safety: NaN logits can arise from non-finite observations or
+                # unstable activations. Convert NaNs to -inf so they behave like masked actions.
+                if torch.isnan(logits).any():
+                    logits = torch.nan_to_num(logits, nan=float("-inf"))
+
                 # Handle infeasible/all-masked states robustly.
                 # These are training killers when they happen for active envs.
                 all_masked = ~torch.isfinite(logits).any(dim=-1)  # (B,)
@@ -473,9 +478,51 @@ class PPORunner:
                 if all_masked_active.any():
                     import warnings
 
+                    # Best-effort diagnostics: distinguish true "no valid actions" from
+                    # "valid actions exist but logits are non-finite".
+                    mask_zero = None
+                    if "action_mask" in obs:
+                        valid_counts = obs["action_mask"].sum(dim=-1)
+                        mask_zero = valid_counts < 0.5
+
+                    parts = [
+                        f"All logits non-finite for {all_masked_active.sum().item()} ACTIVE envs in rollout step {step}"
+                    ]
+                    if mask_zero is not None:
+                        true_dead = (all_masked_active & mask_zero).sum().item()
+                        nan_logits = (all_masked_active & (~mask_zero)).sum().item()
+                        parts.append(
+                            f"(mask_zero={true_dead}, nonfinite_logits_with_valid_mask={nan_logits})"
+                        )
+
+                    # Check whether observations are already non-finite for those envs.
+                    # This helps debug whether the issue is env-side (obs) or model-side.
+                    try:
+                        bidx = torch.nonzero(all_masked_active, as_tuple=False).view(-1)
+                        if bidx.numel() > 0:
+                            ctx_bad = (
+                                (~torch.isfinite(obs["ctx"][bidx])).any().item()
+                                if "ctx" in obs
+                                else False
+                            )
+                            jobs_bad = (
+                                (~torch.isfinite(obs["jobs"][bidx])).any().item()
+                                if "jobs" in obs
+                                else False
+                            )
+                            periods_bad = (
+                                (~torch.isfinite(obs["periods"][bidx])).any().item()
+                                if "periods" in obs
+                                else False
+                            )
+                            parts.append(
+                                f"(obs_nonfinite: ctx={bool(ctx_bad)} jobs={bool(jobs_bad)} periods={bool(periods_bad)})"
+                            )
+                    except Exception:
+                        pass
+
                     warnings.warn(
-                        f"All actions masked for {all_masked_active.sum().item()} ACTIVE envs in rollout step {step}; "
-                        "treating as terminal to keep PPO stable."
+                        " ".join(parts) + "; treating as terminal to keep PPO stable."
                     )
 
                     # Best-effort: prevent stepping those envs.

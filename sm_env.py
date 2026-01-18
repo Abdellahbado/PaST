@@ -2124,6 +2124,12 @@ class GPUBatchSingleMachinePeriodEnv:
         else:
             ctx = ctx6
 
+        # Defensive: keep observations finite to prevent NaNs/Infs in model logits.
+        # (This should rarely trigger; it's here to harden training on edge cases.)
+        jobs = torch.nan_to_num(jobs, nan=0.0, posinf=0.0, neginf=0.0)
+        periods = torch.nan_to_num(periods, nan=0.0, posinf=0.0, neginf=0.0)
+        ctx = torch.nan_to_num(ctx, nan=0.0, posinf=0.0, neginf=0.0)
+
         # Action mask: check deadline feasibility for each (job, slack) pair
         # Env's action feasibility uses availability (1 = available)
         action_mask = self._compute_action_mask(job_available)
