@@ -2388,10 +2388,31 @@ class GPUBatchSingleMachinePeriodEnv:
             penalty = self.e_single.float() * remaining_work_penalty_base * ct_max + 1.0
             rewards = rewards - penalty * infeasible_done.float()
 
+        # Final guard: if an env is still marked active but has 0 valid actions, it is a
+        # true dead-end/infeasible state. Mark it as infeasible terminal here so PPO
+        # never sees ACTIVE envs with action_mask all-zero.
         obs = self._get_obs()
+        mask_zero_next = (obs["action_mask"].sum(dim=1) < 0.5) & (~self.done_mask)
+        # Only treat as infeasible if there are still jobs remaining.
+        mask_zero_next = mask_zero_next & (self.job_available.sum(dim=1) > 0.5)
+
+        if mask_zero_next.any():
+            self.done_mask = self.done_mask | mask_zero_next
+            self.job_available[mask_zero_next] = 0.0
+            infeasible_done = infeasible_done | mask_zero_next
+
+            # Apply the same infeasibility penalty.
+            ct_max = self.ct.float().max(dim=1).values
+            penalty = self.e_single.float() * remaining_work_penalty_base * ct_max + 1.0
+            rewards = rewards - penalty * mask_zero_next.float()
+
+            # Rebuild obs so runner sees done_mask reflected.
+            obs = self._get_obs()
+
         info = {
             "total_energy": self.total_energy.clone(),
             "infeasible_done": infeasible_done.clone(),
+            "mask_zero_done": mask_zero_next.clone(),
         }
 
         return obs, rewards, self.done_mask, info

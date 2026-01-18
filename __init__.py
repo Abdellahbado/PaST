@@ -24,41 +24,23 @@ Supports 6 ablation variants:
 
 __version__ = "2.0.0"
 
-# =============================================================================
-# Configuration
-# =============================================================================
-
 from .config import (
-    # Enums
     SlackType,
     RLAlgorithm,
     ModelSize,
     VariantID,
-    # Slack specifications
     ShortSlackSpec,
     CoarseToFineSlackSpec,
     FullSlackSpec,
-    # Config classes
     ModelConfig,
     EnvConfig,
     DataConfig,
     TrainingConfig,
     VariantConfig,
-    # Variant factories
     get_variant_config,
     list_variants,
-    get_ppo_short_base,
-    get_ppo_short_large,
-    get_ppo_c2f,
-    get_ppo_full_tokens,
-    get_ppo_full_global,
-    get_reinforce_short_sc,
     VARIANT_FACTORIES,
 )
-
-# =============================================================================
-# Data Generation
-# =============================================================================
 
 from .sm_benchmark_data import (
     generate_raw_instance,
@@ -73,10 +55,6 @@ from .sm_benchmark_data import (
     SingleMachineEpisode,
 )
 
-# =============================================================================
-# Environment
-# =============================================================================
-
 from .sm_env import (
     SingleMachinePeriodEnv,
     GPUBatchSingleMachinePeriodEnv,
@@ -85,91 +63,32 @@ from .sm_env import (
     ENV_VERSION,
 )
 
-# =============================================================================
-# Model
-# =============================================================================
-
 from .past_sm_model import (
-    # Main model
     PaSTSMNet,
     build_model,
-    # Components
-    PaSTEncoder,
-    FactoredActionHead,
-    SimpleActionHead,
-    ValueHead,
-    # Transformer blocks
-    PreLNBlock,
-    PostLNBlock,
-    MultiHeadAttention,
-    FeedForward,
-    make_transformer_block,
-    # Embeddings
-    JobEmbedding,
-    PeriodEmbedding,
-    ContextEmbedding,
-    GlobalHorizonEmbedding,
 )
 
-# =============================================================================
-# PPO Training
-# =============================================================================
-
-from .ppo_runner import (
-    PPOConfig,
-    RolloutBuffer,
-    PPORunner,
-)
-
-from .eval import (
-    EvalResult,
-    Evaluator,
-    compare_variants,
-)
-
-from .train_ppo import (
-    RunConfig,
-    MetricsLogger,
-    CheckpointManager,
-    TrainingEnv,
-    train,
-    get_p100_smoke_config,
-    get_a100_full_config,
-    set_seed,
-    TRAIN_VERSION,
-)
-
-# =============================================================================
-# Exports
-# =============================================================================
+# NOTE: We intentionally do NOT import `PaST.train_ppo` here.
+# Running `python -m PaST.train_ppo` first imports the `PaST` package; if we
+# import `train_ppo` inside __init__, runpy detects it in sys.modules and emits
+# a RuntimeWarning. Import training entrypoints from `PaST.train_ppo` directly.
 
 __all__ = [
-    # Config enums
     "SlackType",
     "RLAlgorithm",
     "ModelSize",
     "VariantID",
-    # Slack specs
     "ShortSlackSpec",
     "CoarseToFineSlackSpec",
     "FullSlackSpec",
-    # Config classes
     "ModelConfig",
     "EnvConfig",
     "DataConfig",
     "TrainingConfig",
     "VariantConfig",
-    # Variant factories
     "get_variant_config",
     "list_variants",
-    "get_ppo_short_base",
-    "get_ppo_short_large",
-    "get_ppo_c2f",
-    "get_ppo_full_tokens",
-    "get_ppo_full_global",
-    "get_reinforce_short_sc",
     "VARIANT_FACTORIES",
-    # Data
     "generate_raw_instance",
     "make_single_machine_episode",
     "generate_episode_batch",
@@ -180,42 +99,11 @@ __all__ = [
     "compute_period_start_slots",
     "RawInstance",
     "SingleMachineEpisode",
-    # Environment
     "SingleMachinePeriodEnv",
     "GPUBatchSingleMachinePeriodEnv",
     "slack_to_start_time",
     "find_period_at_time",
     "ENV_VERSION",
-    # Model
     "PaSTSMNet",
     "build_model",
-    "PaSTEncoder",
-    "FactoredActionHead",
-    "SimpleActionHead",
-    "ValueHead",
-    "PreLNBlock",
-    "PostLNBlock",
-    "MultiHeadAttention",
-    "FeedForward",
-    "make_transformer_block",
-    "JobEmbedding",
-    "PeriodEmbedding",
-    "ContextEmbedding",
-    "GlobalHorizonEmbedding",
-    # PPO Training
-    "PPOConfig",
-    "RolloutBuffer",
-    "PPORunner",
-    "EvalResult",
-    "Evaluator",
-    "compare_variants",
-    "RunConfig",
-    "MetricsLogger",
-    "CheckpointManager",
-    "TrainingEnv",
-    "train",
-    "get_p100_smoke_config",
-    "get_a100_full_config",
-    "set_seed",
-    "TRAIN_VERSION",
 ]

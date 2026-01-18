@@ -15,6 +15,14 @@ Usage:
     python -m PaST.train_ppo --variant_id ppo_full_global --config configs/a100_full.yaml
 """
 
+# Reduce noisy third-party warnings (Kaggle often has legacy `gym` installed).
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"Gym has been unmaintained since 2022.*",
+)
+
 import argparse
 import json
 import math
