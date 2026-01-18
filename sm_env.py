@@ -1265,6 +1265,85 @@ class GPUBatchSingleMachinePeriodEnv:
 
         return start_times
 
+    def _compute_family_best_start_times_for_job(
+        self, job_ids: torch.Tensor, family_ids: torch.Tensor, p: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute best (minimum energy) feasible start time for chosen job and family.
+
+        Uses the same feasibility criteria as _compute_family_action_mask:
+        start >= t, end <= T_limit, and completion_ok (start + remaining_work <= T_limit).
+
+        Args:
+            job_ids: (B,) tensor of chosen job indices
+            family_ids: (B,) tensor of chosen family indices
+            p: (B,) tensor of job processing times
+
+        Returns:
+            (B,) tensor of start times (min-energy feasible in chosen family)
+        """
+        B = self.batch_size
+
+        # Compute slot families
+        slot_families = self._compute_slot_families()  # (B, T_max_pad)
+
+        # Slot indices
+        slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(0)
+
+        # Valid start slots (>= t_now)
+        valid_slots = slot_indices >= self.t.unsqueeze(1)  # (B, T_max_pad)
+
+        # Slots in chosen family
+        family_ids_expanded = family_ids.unsqueeze(1)  # (B, 1)
+        in_family = slot_families == family_ids_expanded  # (B, T_max_pad)
+
+        # Deadline feasibility: slot + p <= T_limit
+        end_times = slot_indices + p.unsqueeze(1)  # (B, T_max_pad)
+        deadline_ok = end_times <= self.T_limit.unsqueeze(1)  # (B, T_max_pad)
+
+        # Completion bound (prevents waiting into infeasible region)
+        remaining_work = (
+            (self.p_subset.float() * self.job_available.float())
+            .sum(dim=1)
+            .to(torch.int32)
+        )  # (B,)
+        completion_ok = slot_indices.to(torch.int32) + remaining_work.unsqueeze(
+            1
+        ) <= self.T_limit.unsqueeze(1).to(torch.int32)
+
+        # Candidate slots: valid AND in family AND meets deadline AND completion_ok
+        candidates = (
+            valid_slots & in_family & deadline_ok & completion_ok
+        )  # (B, T_max_pad)
+
+        # Compute window energy cost for each candidate start
+        # cost(s) = sum(ct[s : s+p]) (e_single is constant, so omitted)
+        ct_float = self.ct.float()  # (B, T_max_pad)
+        ct_cumsum = torch.zeros(
+            (B, self.T_max_pad + 1), dtype=torch.float32, device=self.device
+        )
+        ct_cumsum[:, 1:] = torch.cumsum(ct_float, dim=1)
+
+        end_idx = torch.clamp(end_times.long(), 0, self.T_max_pad)
+        start_idx = torch.clamp(slot_indices.long(), 0, self.T_max_pad)
+
+        cumsum_at_end = torch.gather(ct_cumsum, 1, end_idx)
+        cumsum_at_start = torch.gather(ct_cumsum, 1, start_idx)
+        window_cost = cumsum_at_end - cumsum_at_start  # (B, T_max_pad)
+
+        # Mask non-candidates with +inf, then take argmin
+        inf = torch.tensor(float("inf"), device=self.device)
+        masked_cost = torch.where(candidates, window_cost, inf)
+        best_idx = masked_cost.argmin(dim=1)  # (B,)
+
+        has_any = candidates.any(dim=1)
+        best_start = torch.where(has_any, best_idx, self.T_limit)
+
+        # Clamp to T_limit (safety)
+        best_start = torch.minimum(best_start, self.T_limit)
+
+        return best_start
+
     # =========================================================================
     # Duration-Aware Family Variant Helpers
     # =========================================================================
@@ -2249,11 +2328,16 @@ class GPUBatchSingleMachinePeriodEnv:
             )
         elif self.env_config.use_price_families:
             # Price-family variant: slack_id is family_id
-            # Find earliest feasible start time in that family
+            # Find best feasible start time in that family (optionally min-cost)
             family_ids = slack_ids  # (B,)
-            start_times = self._compute_family_start_times_for_job(
-                job_ids, family_ids, p
-            )
+            if getattr(self.env_config, "use_best_family_start", False):
+                start_times = self._compute_family_best_start_times_for_job(
+                    job_ids, family_ids, p
+                )
+            else:
+                start_times = self._compute_family_start_times_for_job(
+                    job_ids, family_ids, p
+                )
         else:
             # Prefer slack_type (new config). Fall back to slack_variant (legacy).
             slack_type = getattr(self.env_config, "slack_type", None)

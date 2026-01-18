@@ -67,6 +67,12 @@ class VariantID(Enum):
     PPO_FAMILY_Q4_CTX13 = (
         "ppo_family_q4_ctx13"  # Price-family + identified ctx (q's + next-slot deltas)
     )
+    PPO_FAMILY_Q4_BESTSTART = (
+        "ppo_family_q4_beststart"  # Price-family + best feasible start within family
+    )
+    PPO_FAMILY_Q4_CTX13_BESTSTART = (
+        "ppo_family_q4_ctx13_beststart"  # Price-family + ctx13 + best feasible start
+    )
     PPO_SEQUENCE = "ppo_sequence"  # RL sequences jobs, Batch DP times them
     PPO_DURATION_AWARE_FAMILY = "ppo_duration_aware_family"  # Duration-aware families: families based on avg window cost
     PPO_DURATION_AWARE_FAMILY_CTX13 = "ppo_duration_aware_family_ctx13"  # Duration-aware families + identified ctx (q's + next-start deltas)
@@ -323,6 +329,10 @@ class EnvConfig:
     use_price_families: bool = False
     num_price_families: int = 4  # Number of price families (quartiles by default)
 
+    # Price-family decoding: pick the best feasible start within chosen family
+    # (minimizes window energy cost) instead of the earliest slot.
+    use_best_family_start: bool = False
+
     # Duration-aware families: families based on average window cost w(s,p)/p
     # instead of slot price. This makes "family 0 = cheap" mean full-job cost.
     use_duration_aware_families: bool = False
@@ -516,6 +526,7 @@ class VariantConfig:
                 "use_periods_full": self.env.use_periods_full,
                 "use_price_families": self.env.use_price_families,
                 "num_price_families": self.env.num_price_families,
+                "use_best_family_start": self.env.use_best_family_start,
                 "K_slack": self.env.get_num_slack_choices(),
                 "action_dim": self.env.action_dim,
             },
@@ -724,6 +735,19 @@ def get_ppo_family_q4() -> VariantConfig:
     )
 
 
+def get_ppo_family_q4_beststart() -> VariantConfig:
+    """
+    PPO + Price-family (4 quartiles) + Best-start decoding + Local periods (K=48).
+
+    Same action space as `ppo_family_q4`, but decoding selects the feasible start
+    within the chosen family that minimizes window energy cost for the job.
+    """
+    cfg = get_ppo_family_q4()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_BESTSTART
+    cfg.env.use_best_family_start = True
+    return cfg
+
+
 def get_ppo_family_q4_ctx13() -> VariantConfig:
     """Enhanced PPO family variant with identified family semantics in ctx.
 
@@ -742,6 +766,14 @@ def get_ppo_family_q4_ctx13() -> VariantConfig:
     # Keep ModelConfig consistent (even though the model uses env.F_ctx).
     cfg.model.ctx_input_dim = 13
 
+    return cfg
+
+
+def get_ppo_family_q4_ctx13_beststart() -> VariantConfig:
+    """Price-family + ctx13 + best-start decoding within chosen family."""
+    cfg = get_ppo_family_q4_ctx13()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART
+    cfg.env.use_best_family_start = True
     return cfg
 
 
@@ -857,6 +889,8 @@ VARIANT_FACTORIES = {
     VariantID.REINFORCE_SHORT_SC: get_reinforce_short_sc,
     VariantID.PPO_FAMILY_Q4: get_ppo_family_q4,
     VariantID.PPO_FAMILY_Q4_CTX13: get_ppo_family_q4_ctx13,
+    VariantID.PPO_FAMILY_Q4_BESTSTART: get_ppo_family_q4_beststart,
+    VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART: get_ppo_family_q4_ctx13_beststart,
     VariantID.PPO_SEQUENCE: get_ppo_sequence,
     VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
     VariantID.PPO_DURATION_AWARE_FAMILY_CTX13: get_ppo_duration_aware_family_ctx13,
