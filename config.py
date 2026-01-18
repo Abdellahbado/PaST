@@ -69,6 +69,7 @@ class VariantID(Enum):
     )
     PPO_SEQUENCE = "ppo_sequence"  # RL sequences jobs, Batch DP times them
     PPO_DURATION_AWARE_FAMILY = "ppo_duration_aware_family"  # Duration-aware families: families based on avg window cost
+    PPO_DURATION_AWARE_FAMILY_CTX13 = "ppo_duration_aware_family_ctx13"  # Duration-aware families + identified ctx (q's + next-start deltas)
 
 
 # =============================================================================
@@ -827,6 +828,25 @@ def get_ppo_duration_aware_family() -> VariantConfig:
     )
 
 
+def get_ppo_duration_aware_family_ctx13() -> VariantConfig:
+    """Enhanced duration-aware family variant with identified family semantics in ctx.
+
+    Extends ctx from 6 -> 13 by appending:
+        - duration-aware quantiles [q25, q50, q75] over avg window costs
+        - delta_to_next_feasible_start_in_family[0..3]
+
+    Keeps the same action space as `ppo_duration_aware_family` (job × family), but
+    makes family IDs identifiable per episode and provides search guidance.
+    """
+    cfg = get_ppo_duration_aware_family()
+    cfg.variant_id = VariantID.PPO_DURATION_AWARE_FAMILY_CTX13
+
+    cfg.env.F_ctx = 13
+    cfg.model.ctx_input_dim = 13
+
+    return cfg
+
+
 # Mapping from variant ID to factory function
 VARIANT_FACTORIES = {
     VariantID.PPO_SHORT_BASE: get_ppo_short_base,
@@ -839,6 +859,7 @@ VARIANT_FACTORIES = {
     VariantID.PPO_FAMILY_Q4_CTX13: get_ppo_family_q4_ctx13,
     VariantID.PPO_SEQUENCE: get_ppo_sequence,
     VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
+    VariantID.PPO_DURATION_AWARE_FAMILY_CTX13: get_ppo_duration_aware_family_ctx13,
 }
 
 

@@ -2016,39 +2016,111 @@ class GPUBatchSingleMachinePeriodEnv:
         #  - delta_to_next_slot_in_family[0..3] (4)
         # Total F_ctx = 13.
         if self.env_config.use_price_families and self.F_ctx >= 13:
-            slot_families = self._compute_slot_families()  # (B, T_max_pad)
-            slot_indices = torch.arange(self.T_max_pad, device=self.device).unsqueeze(0)
+            if getattr(self.env_config, "use_duration_aware_families", False):
+                # Duration-aware ctx13:
+                #  - duration_q: [q25,q50,q75] over avg window costs
+                #  - delta_to_next_feasible_start_in_family[0..3]
+                #
+                # "Feasible" is defined consistently with the duration-aware masking/decoding:
+                # start >= t, start < T_max, end <= T_limit, end <= T_max,
+                # and completion_ok: start + remaining_work <= T_limit.
 
-            # Valid region: [t, min(T_limit, T_max))
-            valid = slot_indices >= self.t.unsqueeze(1)
-            valid = valid & (slot_indices < self.T_limit.unsqueeze(1))
-            valid = valid & (slot_indices < self.T_max.unsqueeze(1))
-
-            large_val = self.T_max_pad + 1
-            deltas = torch.full(
-                (B, self.num_slack_choices),
-                float(self.T_max_pad),
-                dtype=torch.float32,
-                device=self.device,
-            )
-
-            for f in range(self.num_slack_choices):
-                candidates = valid & (slot_families == f)
-                masked = torch.where(
-                    candidates,
-                    slot_indices.expand(B, -1),
-                    torch.full((B, self.T_max_pad), large_val, device=self.device),
+                # Shape helpers
+                slot_idx_1d = torch.arange(
+                    self.T_max_pad, device=self.device, dtype=torch.int32
                 )
-                next_slot = masked.min(dim=1).values  # (B,)
-                delta_f = (next_slot - self.t).clamp(min=0).float()
-                delta_f = torch.where(
-                    next_slot > self.T_max_pad,
-                    torch.full_like(delta_f, float(self.T_max_pad)),
-                    delta_f,
-                )
-                deltas[:, f] = delta_f
+                slot_idx = slot_idx_1d.view(1, 1, -1)  # (1,1,T)
 
-            ctx = torch.cat([ctx6, self.price_q.float(), deltas], dim=1)
+                t_now = self.t.view(B, 1, 1)
+                T_limit = self.T_limit.view(B, 1, 1)
+                T_max = self.T_max.view(B, 1, 1)
+
+                p_all = self.p_subset.to(torch.int32).view(B, self.N_job_pad, 1)
+                job_ok = (job_available > 0.5).view(B, self.N_job_pad, 1)
+
+                # Remaining work for completion_ok (same semantics as masking/decoding)
+                remaining_work_i32 = remaining_work.to(torch.int32).view(B, 1, 1)
+                completion_ok = (slot_idx + remaining_work_i32) <= T_limit
+
+                end = slot_idx + p_all  # (B,N,T)
+                feasible = slot_idx >= t_now
+                feasible = feasible & (slot_idx < T_max)
+                feasible = feasible & (end <= T_limit)
+                feasible = feasible & (end <= T_max)
+                feasible = feasible & completion_ok
+                feasible = feasible & job_ok
+
+                large_val = torch.tensor(
+                    self.T_max_pad + 1, device=self.device, dtype=torch.int32
+                )
+                deltas = torch.full(
+                    (B, self.num_slack_choices),
+                    float(self.T_max_pad),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+
+                fam = self.duration_families.to(torch.int32)
+                slot_indices_bt = slot_idx_1d.view(1, -1).expand(B, -1)  # (B,T)
+
+                for f in range(self.num_slack_choices):
+                    candidates_slot = (feasible & (fam == f)).any(dim=1)  # (B,T)
+                    masked = torch.where(
+                        candidates_slot,
+                        slot_indices_bt,
+                        large_val.expand_as(slot_indices_bt),
+                    )
+                    next_slot = masked.min(dim=1).values  # (B,)
+                    delta_f = (
+                        (next_slot - self.t.to(torch.int32))
+                        .clamp(min=0)
+                        .to(torch.float32)
+                    )
+                    delta_f = torch.where(
+                        next_slot > self.T_max_pad,
+                        torch.full_like(delta_f, float(self.T_max_pad)),
+                        delta_f,
+                    )
+                    deltas[:, f] = delta_f
+
+                ctx = torch.cat([ctx6, self.duration_q.float(), deltas], dim=1)
+            else:
+                # Price-family ctx13 (slot-price based)
+                slot_families = self._compute_slot_families()  # (B, T_max_pad)
+                slot_indices = torch.arange(
+                    self.T_max_pad, device=self.device
+                ).unsqueeze(0)
+
+                # Valid region: [t, min(T_limit, T_max))
+                valid = slot_indices >= self.t.unsqueeze(1)
+                valid = valid & (slot_indices < self.T_limit.unsqueeze(1))
+                valid = valid & (slot_indices < self.T_max.unsqueeze(1))
+
+                large_val = self.T_max_pad + 1
+                deltas = torch.full(
+                    (B, self.num_slack_choices),
+                    float(self.T_max_pad),
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+
+                for f in range(self.num_slack_choices):
+                    candidates = valid & (slot_families == f)
+                    masked = torch.where(
+                        candidates,
+                        slot_indices.expand(B, -1),
+                        torch.full((B, self.T_max_pad), large_val, device=self.device),
+                    )
+                    next_slot = masked.min(dim=1).values  # (B,)
+                    delta_f = (next_slot - self.t).clamp(min=0).float()
+                    delta_f = torch.where(
+                        next_slot > self.T_max_pad,
+                        torch.full_like(delta_f, float(self.T_max_pad)),
+                        delta_f,
+                    )
+                    deltas[:, f] = delta_f
+
+                ctx = torch.cat([ctx6, self.price_q.float(), deltas], dim=1)
         else:
             ctx = ctx6
 
