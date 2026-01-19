@@ -21,12 +21,17 @@ import os
 import random
 import sys
 import time
+import warnings
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
+
+# Suppress noisy Gym deprecation warnings (appears once per DataLoader worker)
+warnings.filterwarnings("ignore", message=".*Gym has been unmaintained.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
 
 import numpy as np
 import torch
@@ -434,123 +439,7 @@ def _collect_round_batch(
     F_job = env_config.F_job
     N_pad = obs["jobs"].shape[1]
 
-    # Fast path: during SPT completion (no model), keep observations on CPU and
-    # batch DP evaluations across the entire batch to reduce tiny GPU launches.
-    if (not use_model_completion) or (model is None):
-        obs_jobs_cpu = obs["jobs"].detach().cpu()
-        obs_periods_cpu = obs["periods"].detach().cpu()
-        obs_ctx_cpu = obs["ctx"].detach().cpu()
-
-        n_jobs_list = [int(n.item()) for n in n_jobs_all]
-        max_jobs = max(n_jobs_list) if n_jobs_list else 0
-
-        partial_sequences: List[List[int]] = [[] for _ in range(batch_size)]
-        remaining_jobs: List[List[int]] = [list(range(n)) for n in n_jobs_list]
-        job_available = np.zeros((batch_size, N_pad), dtype=np.float32)
-        for i, n in enumerate(n_jobs_list):
-            job_available[i, :n] = 1.0
-
-        # Iterate step-by-step; at each step, evaluate all counterfactual candidates
-        # across all instances in a single DP batch.
-        for _step in range(max_jobs):
-            sequences: List[List[int]] = []
-            instance_indices: List[int] = []
-            seq_meta: List[Tuple[int, int]] = []  # (inst_idx, candidate_job)
-            obs_cache: List[Optional[Dict[str, np.ndarray]]] = [None] * batch_size
-
-            chosen_actions: List[Optional[int]] = [None] * batch_size
-
-            for inst_idx in range(batch_size):
-                if not remaining_jobs[inst_idx]:
-                    continue
-
-                n_jobs = n_jobs_list[inst_idx]
-                # Prepare per-instance obs snapshot (CPU) consistent with availability
-                jobs_cpu = obs_jobs_cpu[inst_idx].clone()
-                periods_cpu = obs_periods_cpu[inst_idx].clone()
-                ctx_cpu = obs_ctx_cpu[inst_idx].clone()
-
-                if F_job >= 2:
-                    jobs_cpu[:, 1] = torch.from_numpy(job_available[inst_idx]).float()
-
-                p_np = p_all[inst_idx].detach().cpu().numpy()
-                remaining_work = float((p_np * job_available[inst_idx]).sum())
-                ctx_cpu[2] = remaining_work
-
-                obs_single = {
-                    "jobs": jobs_cpu.numpy(),
-                    "periods": periods_cpu.numpy(),
-                    "ctx": ctx_cpu.numpy(),
-                }
-                obs_cache[inst_idx] = obs_single
-
-                # Choose action (random/model). In this fast path, model is None.
-                if rng.random() < exploration_eps or model is None:
-                    action = rng.choice(remaining_jobs[inst_idx])
-                else:
-                    # Unreachable here (model is None), but keep a safe fallback.
-                    action = rng.choice(remaining_jobs[inst_idx])
-                chosen_actions[inst_idx] = action
-
-                # Candidate set for counterfactual evaluation
-                rem = remaining_jobs[inst_idx]
-                if len(rem) <= num_counterfactuals:
-                    candidates = rem.copy()
-                else:
-                    candidates = [action]
-                    others = [j for j in rem if j != action]
-                    candidates.extend(rng.sample(others, num_counterfactuals - 1))
-
-                # Build completed sequences for each candidate via SPT
-                for candidate_job in candidates:
-                    cf_partial = partial_sequences[inst_idx] + [candidate_job]
-                    cf_remaining = [j for j in rem if j != candidate_job]
-                    full_seq = complete_sequence_spt(cf_partial, cf_remaining, p_np)
-                    sequences.append(full_seq)
-                    instance_indices.append(inst_idx)
-                    seq_meta.append((inst_idx, candidate_job))
-
-            if sequences:
-                costs = batch_evaluate_sequences(
-                    sequences=sequences,
-                    processing_times=p_all,
-                    ct=ct_all,
-                    e_single=e_all,
-                    T_limit=T_limit_all,
-                    instance_indices=instance_indices,
-                    device=device,
-                )
-
-                for k, (inst_idx, candidate_job) in enumerate(seq_meta):
-                    cf_cost = costs[k].item()
-                    if not np.isfinite(cf_cost):
-                        continue
-                    obs_single = obs_cache[inst_idx]
-                    if obs_single is None:
-                        continue
-                    transitions.append(
-                        QTransition(
-                            jobs=obs_single["jobs"].copy(),
-                            periods=obs_single["periods"].copy(),
-                            ctx=obs_single["ctx"].copy(),
-                            job_avail=job_available[inst_idx].copy(),
-                            action=candidate_job,
-                            q_target=cf_cost,
-                        )
-                    )
-
-            # Advance environment state per instance using chosen action
-            for inst_idx in range(batch_size):
-                action = chosen_actions[inst_idx]
-                if action is None:
-                    continue
-                if action in remaining_jobs[inst_idx]:
-                    partial_sequences[inst_idx].append(action)
-                    remaining_jobs[inst_idx].remove(action)
-                    job_available[inst_idx, action] = 0.0
-
-        return transitions
-
+    # Process each instance sequentially (original working logic)
     for inst_idx in range(batch_size):
         n_jobs = int(n_jobs_all[inst_idx].item())
         p_np = p_all[inst_idx].cpu().numpy()

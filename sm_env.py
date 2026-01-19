@@ -12,6 +12,7 @@ The agent decides:
 2. How much slack (idle time) to insert before the job
 """
 
+import os
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -50,9 +51,19 @@ from .sm_benchmark_data import (
 
 # Version identifier
 ENV_VERSION = "1.1-SM"  # Updated for price-family variant
-print(
-    f"[SingleMachinePeriodEnv v{ENV_VERSION}] Loading single-machine period-aware environment..."
-)
+
+# Only print loading message once (not in worker subprocesses)
+_ENV_LOADING_PRINTED = False
+if os.environ.get("PAST_QUIET_ENV", "0") != "1":
+    import __main__
+
+    if hasattr(__main__, "__file__") or not hasattr(__main__, "__spec__"):
+        # Main process or interactive - print once
+        if not _ENV_LOADING_PRINTED:
+            print(
+                f"[SingleMachinePeriodEnv v{ENV_VERSION}] Loading single-machine period-aware environment..."
+            )
+            _ENV_LOADING_PRINTED = True
 
 
 def slack_to_start_time(
