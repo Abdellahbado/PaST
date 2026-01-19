@@ -22,6 +22,7 @@ import random
 import sys
 import time
 import warnings
+import io
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
@@ -33,8 +34,72 @@ from typing import Dict, List, Optional, Any, Tuple
 os.environ.setdefault("PYTHONWARNINGS", "ignore")
 os.environ.setdefault("GYM_DISABLE_WARNINGS", "1")
 warnings.filterwarnings("ignore")
-warnings.filterwarnings("ignore", message=".*Gym has been unmaintained.*")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
+
+
+class _FilteredTextIO(io.TextIOBase):
+    """Line-filtering wrapper for stdout/stderr to drop noisy warning prints."""
+
+    def __init__(self, base: io.TextIOBase, *, drop_substrings: List[str]):
+        self._base = base
+        self._drop = drop_substrings
+        self._buf = ""
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+
+        self._buf += s
+        out = []
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line_with_nl = line + "\n"
+
+            # Never suppress tracebacks/exceptions
+            if line.startswith("Traceback") or line.startswith("Exception"):
+                out.append(line_with_nl)
+                continue
+
+            # Drop known noisy messages and generic warning lines
+            if any(sub in line for sub in self._drop):
+                continue
+            if (
+                "Warning:" in line
+                or "DeprecationWarning" in line
+                or "UserWarning" in line
+            ):
+                continue
+
+            out.append(line_with_nl)
+
+        if out:
+            return self._base.write("".join(out))
+        return len(s)
+
+    def flush(self) -> None:
+        try:
+            # Flush any remaining partial line (unless it matches filters)
+            if self._buf:
+                line = self._buf
+                self._buf = ""
+                if not any(sub in line for sub in self._drop) and "Warning" not in line:
+                    self._base.write(line)
+            self._base.flush()
+        except Exception:
+            pass
+
+
+_DROP_SUBSTRINGS = [
+    "Gym has been unmaintained since 2022",
+    "Please upgrade to Gymnasium",
+    "See the migration guide at https://gymnasium",
+]
+
+# Filter both streams so we also silence messages emitted by worker processes.
+try:
+    sys.stderr = _FilteredTextIO(sys.stderr, drop_substrings=_DROP_SUBSTRINGS)
+    sys.stdout = _FilteredTextIO(sys.stdout, drop_substrings=_DROP_SUBSTRINGS)
+except Exception:
+    pass
 
 import numpy as np
 import torch

@@ -22,6 +22,73 @@ Supports 6 ablation variants:
 - reinforce_short_sc: REINFORCE + Short slack + Local periods (K=48) + Base model + Self-critic
 """
 
+# ---------------------------------------------------------------------------
+# Global warning suppression
+#
+# Kaggle's environment can emit noisy Gym deprecation banners during import.
+# Because `python -m PaST.train_q_sequence` imports the `PaST` package first,
+# suppression must happen here (before importing env modules).
+# ---------------------------------------------------------------------------
+
+import os
+import sys
+import io
+import warnings
+
+os.environ.setdefault("PYTHONWARNINGS", "ignore")
+os.environ.setdefault("GYM_DISABLE_WARNINGS", "1")
+warnings.filterwarnings("ignore")
+
+
+class _FilteredTextIO(io.TextIOBase):
+    def __init__(self, base: io.TextIOBase, *, drop_substrings: list[str]):
+        self._base = base
+        self._drop = drop_substrings
+        self._buf = ""
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        self._buf += s
+        out: list[str] = []
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line_nl = line + "\n"
+            if line.startswith("Traceback") or line.startswith("Exception"):
+                out.append(line_nl)
+                continue
+            if any(sub in line for sub in self._drop):
+                continue
+            if (
+                "Warning:" in line
+                or "DeprecationWarning" in line
+                or "UserWarning" in line
+            ):
+                continue
+            out.append(line_nl)
+        if out:
+            return self._base.write("".join(out))
+        return len(s)
+
+    def flush(self) -> None:
+        try:
+            self._base.flush()
+        except Exception:
+            pass
+
+
+_DROP_SUBSTRINGS = [
+    "Gym has been unmaintained since 2022",
+    "Please upgrade to Gymnasium",
+    "See the migration guide at https://gymnasium",
+]
+
+try:
+    sys.stderr = _FilteredTextIO(sys.stderr, drop_substrings=_DROP_SUBSTRINGS)
+    sys.stdout = _FilteredTextIO(sys.stdout, drop_substrings=_DROP_SUBSTRINGS)
+except Exception:
+    pass
+
 __version__ = "2.0.0"
 
 from .config import (
