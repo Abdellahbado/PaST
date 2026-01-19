@@ -49,6 +49,18 @@ class _FilteredTextIO(io.TextIOBase):
     def write(self, s: str) -> int:
         if not s:
             return 0
+
+        # Important: some callers (e.g., progress prints with end=" ", tqdm)
+        # write without a trailing newline. If we buffer those, users see no
+        # output for long stretches. For partial writes, pass through unless it
+        # matches our drop filters.
+        if "\n" not in s:
+            if any(sub in s for sub in self._drop):
+                return len(s)
+            if "Warning:" in s or "DeprecationWarning" in s or "UserWarning" in s:
+                return len(s)
+            return self._base.write(s)
+
         self._buf += s
         out: list[str] = []
         while "\n" in self._buf:
@@ -71,6 +83,18 @@ class _FilteredTextIO(io.TextIOBase):
         return len(s)
 
     def flush(self) -> None:
+        # Flush any pending partial line so it isn't lost at exit.
+        if self._buf:
+            try:
+                if not any(sub in self._buf for sub in self._drop) and not (
+                    "Warning:" in self._buf
+                    or "DeprecationWarning" in self._buf
+                    or "UserWarning" in self._buf
+                ):
+                    self._base.write(self._buf)
+            except Exception:
+                pass
+            self._buf = ""
         try:
             self._base.flush()
         except Exception:

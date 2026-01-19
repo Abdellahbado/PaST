@@ -145,6 +145,9 @@ class QRunConfig:
     buffer_size: int = 100_000  # Max transitions to keep in buffer
     collection_batch_size: int = 64  # Episodes per collection batch
     num_collection_workers: int = 0  # 0 = auto (CPU only), 1 = no multiprocessing
+    allow_gpu_collection_multiprocessing: bool = (
+        False  # opt-in; default keeps 1 worker on CUDA
+    )
     num_dataloader_workers: int = 0  # 0 = auto
     num_cpu_threads: int = 0  # 0 = auto (all cores)
 
@@ -732,6 +735,7 @@ def collect_round_data(
     seed: int,
     collection_batch_size: int = 64,  # Fixed batch size for collection
     num_collection_workers: int = 0,
+    allow_gpu_collection_multiprocessing: bool = False,
     num_cpu_threads: int = 0,
 ) -> List[QTransition]:
     """
@@ -750,7 +754,9 @@ def collect_round_data(
     device_str = str(device)
     model_state = model.state_dict() if model is not None else None
 
-    if device.type != "cpu":
+    # Default behavior: keep GPU collection single-process for stability.
+    # Opt-in override is available for experimentation.
+    if device.type != "cpu" and not allow_gpu_collection_multiprocessing:
         num_collection_workers = 1
 
     if num_collection_workers <= 0:
@@ -1041,6 +1047,11 @@ def parse_args():
     parser.add_argument("--num_rounds", type=int, default=100)
     parser.add_argument("--collection_batch_size", type=int, default=64)
     parser.add_argument("--num_collection_workers", type=int, default=0)
+    parser.add_argument(
+        "--allow_gpu_collection_multiprocessing",
+        action="store_true",
+        help="DANGEROUS/EXPERIMENTAL: allow multiple collection worker processes even when device=cuda",
+    )
     parser.add_argument("--num_dataloader_workers", type=int, default=0)
     parser.add_argument("--num_cpu_threads", type=int, default=0)
 
@@ -1083,6 +1094,7 @@ def main():
         num_rounds=args.num_rounds,
         collection_batch_size=args.collection_batch_size,
         num_collection_workers=args.num_collection_workers,
+        allow_gpu_collection_multiprocessing=args.allow_gpu_collection_multiprocessing,
         num_dataloader_workers=args.num_dataloader_workers,
         num_cpu_threads=args.num_cpu_threads,
         num_counterfactuals=args.num_counterfactuals,
@@ -1108,6 +1120,7 @@ def main():
         config.warmup_rounds = 2
         config.collection_batch_size = 16
         config.num_collection_workers = 1
+        config.allow_gpu_collection_multiprocessing = False
         config.num_dataloader_workers = 0
 
     # Set seeds
@@ -1226,6 +1239,7 @@ def main():
             seed=config.seed + round_idx * 100000,
             collection_batch_size=config.collection_batch_size,
             num_collection_workers=config.num_collection_workers,
+            allow_gpu_collection_multiprocessing=config.allow_gpu_collection_multiprocessing,
             num_cpu_threads=config.num_cpu_threads,
         )
 
@@ -1257,6 +1271,18 @@ def main():
         avg_mae = np.mean([m["q_mae"] for m in epoch_metrics])
         train_time = time.time() - train_start
         print(f"loss={avg_loss:.4f}, mae={avg_mae:.2f} in {train_time:.1f}s")
+
+        # Proactively tear down DataLoader workers before evaluation/logging to
+        # avoid expensive/shaky multiprocessing shutdown during interpreter exit.
+        if config.num_dataloader_workers > 0:
+            try:
+                import gc
+
+                del dataloader
+                del dataset
+                gc.collect()
+            except Exception:
+                pass
 
         # === Evaluation ===
         eval_results = None
