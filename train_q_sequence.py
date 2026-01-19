@@ -451,6 +451,63 @@ def complete_sequence_model(
     return sequence
 
 
+def complete_sequences_model_batch(
+    partial_sequences: List[List[int]],
+    available_masks: np.ndarray,  # (B_cand, N_pad) float 1=available
+    model: QSequenceNet,
+    obs_template: Dict[str, torch.Tensor],
+    processing_times: np.ndarray,
+    F_job: int,
+    device: torch.device,
+) -> List[List[int]]:
+    """Batched greedy completion for multiple candidate rollouts (same instance state).
+
+    This preserves the exact greedy policy (argmin Q) used by complete_sequence_model,
+    but runs candidates in parallel to reduce Python overhead and improve GPU utilization.
+    """
+    if available_masks.size == 0:
+        return [list(seq) for seq in partial_sequences]
+
+    B_cand, N_pad = available_masks.shape
+    jobs_base = obs_template["jobs"].to(device)
+    periods_base = obs_template["periods"].to(device)
+    ctx_base = obs_template["ctx"].to(device)
+
+    jobs = jobs_base.unsqueeze(0).expand(B_cand, -1, -1).clone()
+    periods = periods_base.unsqueeze(0).expand(B_cand, -1, -1)
+    ctx = ctx_base.unsqueeze(0).expand(B_cand, -1).clone()
+
+    p_t = torch.from_numpy(processing_times).float().to(device)
+    avail = torch.from_numpy(available_masks).float().to(device)
+
+    out_sequences: List[List[int]] = [list(seq) for seq in partial_sequences]
+
+    model.eval()
+    with torch.no_grad():
+        # All candidates share the same job count/padding; stop when none have available jobs.
+        while bool((avail > 0.5).any()):
+            if F_job >= 2:
+                jobs[:, :, 1] = avail
+
+            # ctx[2] = remaining_work
+            ctx[:, 2] = (p_t.unsqueeze(0) * avail).sum(dim=1)
+
+            mask = avail < 0.5  # True = invalid
+            q = model(jobs, periods, ctx, mask)
+            q = q.masked_fill(mask, float("inf"))
+            action = q.argmin(dim=-1)  # (B_cand,)
+
+            # Mark chosen as unavailable
+            avail.scatter_(1, action.unsqueeze(1), 0.0)
+
+            # Append chosen action to each candidate's sequence
+            act_cpu = action.detach().cpu().tolist()
+            for i, a in enumerate(act_cpu):
+                out_sequences[i].append(int(a))
+
+    return out_sequences
+
+
 def _collect_round_batch(
     *,
     env_config,
@@ -506,6 +563,48 @@ def _collect_round_batch(
     transitions: List[QTransition] = []
     F_job = env_config.F_job
     N_pad = obs["jobs"].shape[1]
+
+    # Accumulate many DP evaluations and run them in large batches.
+    pending_sequences: List[List[int]] = []
+    pending_instance_indices: List[int] = []
+    pending_obs_single: List[Dict[str, np.ndarray]] = []
+    pending_job_avail: List[np.ndarray] = []
+    pending_actions: List[int] = []
+    DP_FLUSH_THRESHOLD = 8192  # sequences per DP call (tunable)
+
+    def flush_pending():
+        nonlocal pending_sequences, pending_instance_indices, pending_obs_single, pending_job_avail, pending_actions
+        if not pending_sequences:
+            return
+        costs = batch_evaluate_sequences(
+            sequences=pending_sequences,
+            processing_times=p_all,
+            ct=ct_all,
+            e_single=e_all,
+            T_limit=T_limit_all,
+            instance_indices=pending_instance_indices,
+            device=device,
+        )
+        costs_cpu = costs.detach().cpu().numpy().tolist()
+        for k, cf_cost in enumerate(costs_cpu):
+            if not np.isfinite(cf_cost):
+                continue
+            transitions.append(
+                QTransition(
+                    jobs=pending_obs_single[k]["jobs"].copy(),
+                    periods=pending_obs_single[k]["periods"].copy(),
+                    ctx=pending_obs_single[k]["ctx"].copy(),
+                    job_avail=pending_job_avail[k].copy(),
+                    action=int(pending_actions[k]),
+                    q_target=float(cf_cost),
+                )
+            )
+
+        pending_sequences = []
+        pending_instance_indices = []
+        pending_obs_single = []
+        pending_job_avail = []
+        pending_actions = []
 
     # Process each instance sequentially (original working logic)
     for inst_idx in range(batch_size):
@@ -566,59 +665,56 @@ def _collect_round_batch(
                 others = [j for j in remaining_jobs if j != action]
                 candidates.extend(rng.sample(others, num_counterfactuals - 1))
 
-            cf_sequences = []
-            cf_instance_indices = []
+            # Build full sequences for each candidate.
+            if use_model_completion and model is not None:
+                partials = []
+                avail_batch = np.zeros((len(candidates), N_pad), dtype=np.float32)
+                for j, candidate_job in enumerate(candidates):
+                    cf_partial = partial_sequence + [candidate_job]
+                    partials.append(cf_partial)
+                    cf_avail = job_available.copy()
+                    cf_avail[candidate_job] = 0.0
+                    avail_batch[j] = cf_avail
 
-            for candidate_job in candidates:
-                cf_partial = partial_sequence + [candidate_job]
-                cf_remaining = [j for j in remaining_jobs if j != candidate_job]
-
-                if use_model_completion and model is not None:
-                    cf_available = job_available.copy()
-                    cf_available[candidate_job] = 0.0
-                    full_seq = complete_sequence_model(
-                        cf_partial,
-                        cf_remaining,
-                        model,
-                        obs_torch,
-                        cf_available,
-                        p_np,
-                        F_job,
-                        device,
+                full_seqs = complete_sequences_model_batch(
+                    partial_sequences=partials,
+                    available_masks=avail_batch,
+                    model=model,
+                    obs_template=obs_torch,
+                    processing_times=p_np,
+                    F_job=F_job,
+                    device=device,
+                )
+            else:
+                full_seqs = []
+                for candidate_job in candidates:
+                    cf_partial = partial_sequence + [candidate_job]
+                    cf_remaining = [j for j in remaining_jobs if j != candidate_job]
+                    full_seqs.append(
+                        complete_sequence_spt(cf_partial, cf_remaining, p_np)
                     )
-                else:
-                    full_seq = complete_sequence_spt(cf_partial, cf_remaining, p_np)
 
-                cf_sequences.append(full_seq)
-                cf_instance_indices.append(0)
+            # Queue DP evals for batching.
+            for candidate_job, full_seq in zip(candidates, full_seqs):
+                pending_sequences.append(full_seq)
+                pending_instance_indices.append(inst_idx)
+                pending_obs_single.append(obs_single)
+                pending_job_avail.append(job_available.copy())
+                pending_actions.append(int(candidate_job))
 
-            costs = batch_evaluate_sequences(
-                sequences=cf_sequences,
-                processing_times=p_inst,
-                ct=ct_inst,
-                e_single=e_inst,
-                T_limit=T_inst,
-                instance_indices=cf_instance_indices,
-                device=device,
-            )
-
-            for cand_idx, candidate_job in enumerate(candidates):
-                cf_cost = costs[cand_idx].item()
-                if np.isfinite(cf_cost):
-                    transitions.append(
-                        QTransition(
-                            jobs=obs_single["jobs"].copy(),
-                            periods=obs_single["periods"].copy(),
-                            ctx=obs_single["ctx"].copy(),
-                            job_avail=job_available.copy(),
-                            action=candidate_job,
-                            q_target=cf_cost,
-                        )
-                    )
+            if len(pending_sequences) >= DP_FLUSH_THRESHOLD:
+                flush_pending()
 
             partial_sequence.append(action)
             remaining_jobs.remove(action)
             job_available[action] = 0.0
+
+            # Flush any remaining DP work periodically per instance.
+            if len(pending_sequences) >= DP_FLUSH_THRESHOLD:
+                flush_pending()
+
+            # Final flush for this batch
+            flush_pending()
 
     return transitions
 
@@ -1025,24 +1121,23 @@ def main():
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    cpu_count = os.cpu_count() or 1
+    if config.num_cpu_threads <= 0:
+        config.num_cpu_threads = cpu_count
+
+    # Configure torch threads even for CUDA runs (preprocessing / DP setup / dataloader)
+    try:
+        torch.set_num_threads(int(config.num_cpu_threads))
+        torch.set_num_interop_threads(min(4, int(config.num_cpu_threads)))
+    except Exception:
+        pass
+
     if device.type == "cpu":
         cpu_count = os.cpu_count() or 1
-        if config.num_cpu_threads <= 0:
-            config.num_cpu_threads = cpu_count
         if config.num_dataloader_workers <= 0:
             config.num_dataloader_workers = min(cpu_count, 8)
         if config.num_collection_workers <= 0:
             config.num_collection_workers = min(cpu_count, 8)
-        try:
-            torch.set_num_threads(config.num_cpu_threads)
-            torch.set_num_interop_threads(min(4, config.num_cpu_threads))
-        except Exception:
-            pass
-    else:
-        # Even on GPU runs, keep CPU threads sensible for preprocessing / DP setup.
-        cpu_count = os.cpu_count() or 1
-        if config.num_cpu_threads <= 0:
-            config.num_cpu_threads = cpu_count
 
     try:
         print(
