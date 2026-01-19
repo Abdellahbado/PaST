@@ -13,6 +13,13 @@ The agent decides:
 """
 
 import os
+import warnings
+
+# Silence Gym/Gymnasium deprecation warnings globally for this module.
+os.environ.setdefault("GYM_DISABLE_WARNINGS", "1")
+warnings.filterwarnings("ignore", message=".*Gym has been unmaintained.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
+
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces

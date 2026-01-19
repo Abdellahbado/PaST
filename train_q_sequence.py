@@ -29,7 +29,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
-# Suppress noisy Gym deprecation warnings (appears once per DataLoader worker)
+# Suppress warnings globally for training runs (including Gym deprecation noise)
+os.environ.setdefault("PYTHONWARNINGS", "ignore")
+os.environ.setdefault("GYM_DISABLE_WARNINGS", "1")
+warnings.filterwarnings("ignore")
 warnings.filterwarnings("ignore", message=".*Gym has been unmaintained.*")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="gym")
 
@@ -1031,7 +1034,7 @@ def main():
     print(f"Warmup rounds (SPT completion): {config.warmup_rounds}")
     print(f"{'='*60}\n")
 
-    best_cost = float("inf")
+    best_cost: Optional[float] = None
 
     for round_idx in range(config.num_rounds):
         round_start = time.time()
@@ -1112,7 +1115,7 @@ def main():
             )
 
             # Save best
-            if eval_results["cost"] < best_cost:
+            if best_cost is None or eval_results["cost"] < best_cost:
                 best_cost = eval_results["cost"]
                 torch.save(model.state_dict(), run_dir / "best_model.pt")
 
@@ -1150,7 +1153,13 @@ def main():
     log_file.close()
 
     print(f"\n{'='*60}")
-    print(f"Training complete! Best cost: {best_cost:.2f}")
+    if best_cost is None:
+        print(
+            "Training complete! Best cost: N/A (evaluation never ran; "
+            "set --eval_every_rounds to a smaller value to compute it)"
+        )
+    else:
+        print(f"Training complete! Best cost: {best_cost:.2f}")
     print(f"Models saved to: {run_dir}")
     print(f"{'='*60}\n")
 
