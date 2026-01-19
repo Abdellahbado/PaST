@@ -76,6 +76,8 @@ class VariantID(Enum):
     PPO_SEQUENCE = "ppo_sequence"  # RL sequences jobs, Batch DP times them
     PPO_DURATION_AWARE_FAMILY = "ppo_duration_aware_family"  # Duration-aware families: families based on avg window cost
     PPO_DURATION_AWARE_FAMILY_CTX13 = "ppo_duration_aware_family_ctx13"  # Duration-aware families + identified ctx (q's + next-start deltas)
+    Q_SEQUENCE = "q_sequence"  # Q-learning for sequences: supervised on DP costs
+    Q_SEQUENCE_CTX13 = "q_sequence_ctx13"  # Q-sequence + identified ctx features
 
 
 # =============================================================================
@@ -879,6 +881,55 @@ def get_ppo_duration_aware_family_ctx13() -> VariantConfig:
     return cfg
 
 
+def get_q_sequence() -> VariantConfig:
+    """
+    Q-learning for Sequences: supervised regression on DP costs.
+
+    This variant learns Q(s, j) = expected DP cost if job j is chosen next,
+    then sequence is completed with a rollout policy.
+
+    Key differences from PPO sequence:
+    - Training: supervised regression on DP-labeled counterfactuals
+    - Model: dueling Q-head outputting per-job Q-values
+    - Inference: argmin Q for greedy, or -Q/tau for SGBS logits
+
+    Uses same environment as PPO_SEQUENCE but different training pipeline.
+    """
+    model = ModelConfig.base()
+
+    env = EnvConfig()
+    env.slack_type = SlackType.SHORT
+    env.short_slack_spec = ShortSlackSpec(slack_options=[0])  # Only 1 choice => dim = N
+    env.use_periods_full = False
+    env.K_period_local = 48  # Local price context
+
+    training = TrainingConfig()
+    training.algorithm = RLAlgorithm.PPO  # Placeholder - actual training is supervised
+
+    return VariantConfig(
+        variant_id=VariantID.Q_SEQUENCE,
+        model=model,
+        env=env,
+        training=training,
+    )
+
+
+def get_q_sequence_ctx13() -> VariantConfig:
+    """
+    Q-learning for Sequences with ctx13 features.
+
+    Same as Q_SEQUENCE but with 13-dim identified context features
+    (price quartiles + next-slot deltas).
+    """
+    cfg = get_q_sequence()
+    cfg.variant_id = VariantID.Q_SEQUENCE_CTX13
+
+    cfg.env.F_ctx = 13
+    cfg.model.ctx_input_dim = 13
+
+    return cfg
+
+
 # Mapping from variant ID to factory function
 VARIANT_FACTORIES = {
     VariantID.PPO_SHORT_BASE: get_ppo_short_base,
@@ -894,6 +945,8 @@ VARIANT_FACTORIES = {
     VariantID.PPO_SEQUENCE: get_ppo_sequence,
     VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
     VariantID.PPO_DURATION_AWARE_FAMILY_CTX13: get_ppo_duration_aware_family_ctx13,
+    VariantID.Q_SEQUENCE: get_q_sequence,
+    VariantID.Q_SEQUENCE_CTX13: get_q_sequence_ctx13,
 }
 
 

@@ -68,6 +68,13 @@ from .past_sm_model import (
     build_model,
 )
 
+from .q_sequence_model import (
+    DuelingQHead,
+    QSequenceNet,
+    QModelWrapper,
+    build_q_model,
+)
+
 # NOTE: We intentionally do NOT import `PaST.train_ppo` here.
 # Running `python -m PaST.train_ppo` first imports the `PaST` package; if we
 # import `train_ppo` inside __init__, runpy detects it in sys.modules and emits
@@ -106,4 +113,8 @@ __all__ = [
     "ENV_VERSION",
     "PaSTSMNet",
     "build_model",
+    "DuelingQHead",
+    "QSequenceNet",
+    "QModelWrapper",
+    "build_q_model",
 ]

@@ -1270,6 +1270,12 @@ def parse_args():
     parser.add_argument("--total_env_steps", type=int, default=None)
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--ppo_epochs", type=int, default=None)
+    parser.add_argument("--num_minibatches", type=int, default=None)
+    parser.add_argument("--clip_eps", type=float, default=None)
+    parser.add_argument("--value_coef", type=float, default=None)
+    parser.add_argument("--entropy_coef", type=float, default=None)
+    parser.add_argument("--max_grad_norm", type=float, default=None)
+    parser.add_argument("--target_kl", type=float, default=None)
 
     # Curriculum learning (easier instances early)
     parser.add_argument(
@@ -1374,6 +1380,18 @@ def main():
         run_config.learning_rate = args.learning_rate
     if args.ppo_epochs is not None:
         run_config.ppo_epochs = args.ppo_epochs
+    if args.num_minibatches is not None:
+        run_config.num_minibatches = args.num_minibatches
+    if args.clip_eps is not None:
+        run_config.clip_eps = args.clip_eps
+    if args.value_coef is not None:
+        run_config.value_coef = args.value_coef
+    if args.entropy_coef is not None:
+        run_config.entropy_coef = args.entropy_coef
+    if args.max_grad_norm is not None:
+        run_config.max_grad_norm = args.max_grad_norm
+    if args.target_kl is not None:
+        run_config.target_kl = args.target_kl
 
     # Curriculum overrides
     if args.curriculum:

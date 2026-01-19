@@ -782,6 +782,11 @@ class PPORunner:
         approx_kls = []
         clip_fracs = []
         grad_norms = []
+        ratio_means = []
+        ratio_stds = []
+        logp_delta_abs_means = []
+        adv_stds = []
+        usable_fracs = []
 
         prev_epoch_minibatches = self.config.num_minibatches
 
@@ -852,6 +857,8 @@ class PPORunner:
                 else:
                     usable = has_any_action
 
+                usable_fracs.append(usable.float().mean().detach())
+
                 if usable.sum().item() == 0:
                     continue
 
@@ -882,6 +889,14 @@ class PPORunner:
                     * advantages
                 )
                 policy_loss = -torch.min(surr1, surr2).mean()
+
+                # Diagnostics for policy movement
+                logp_delta_abs_means.append(
+                    (log_probs_new - log_probs_old).abs().mean().detach()
+                )
+                ratio_means.append(ratio.mean().detach())
+                ratio_stds.append(ratio.std(unbiased=False).detach())
+                adv_stds.append(advantages.std(unbiased=False).detach())
 
                 # Value loss (optionally clipped)
                 if self.config.clip_value:
@@ -956,6 +971,11 @@ class PPORunner:
                 "train/grad_norm": 0.0,
                 "train/grad_norm_max": 0.0,
                 "train/grad_clip_frac": 0.0,
+                "train/ratio_mean": 0.0,
+                "train/ratio_std": 0.0,
+                "train/logp_delta_abs": 0.0,
+                "train/adv_std": 0.0,
+                "train/usable_frac": 0.0,
                 "train/ppo_epochs_actual": 0,
             }
 
@@ -980,6 +1000,11 @@ class PPORunner:
             "train/grad_norm": grad_norm_mean,
             "train/grad_norm_max": grad_norm_max,
             "train/grad_clip_frac": grad_clip_frac,
+            "train/ratio_mean": torch.stack(ratio_means).mean().item(),
+            "train/ratio_std": torch.stack(ratio_stds).mean().item(),
+            "train/logp_delta_abs": torch.stack(logp_delta_abs_means).mean().item(),
+            "train/adv_std": torch.stack(adv_stds).mean().item(),
+            "train/usable_frac": torch.stack(usable_fracs).mean().item(),
             "train/ppo_epochs_actual": epoch + 1,
         }
 
