@@ -43,7 +43,72 @@ from PaST.baselines_sequence_dp import DPResult, spt_lpt_with_dp, spt_sequence, 
 from PaST.config import DataConfig, VariantID, get_variant_config
 from PaST.past_sm_model import build_model
 from PaST.sgbs import greedy_decode, sgbs, DecodeResult
-from PaST.sm_benchmark_data import generate_episode_batch
+from PaST.sm_benchmark_data import (
+    generate_episode_batch,
+    generate_raw_instance,
+    simulate_metaheuristic_assignment,
+    make_single_machine_episode,
+    SingleMachineEpisode
+)
+import random
+
+def batch_from_episodes(
+    episodes: List[SingleMachineEpisode],
+    N_job_pad: int = 50,
+    K_period_pad: int = 250,
+    T_max_pad: int = 500,
+) -> Dict[str, np.ndarray]:
+    """Manually batch a list of episodes (duplicated logic to avoid modifying sm_benchmark_data)."""
+    batch_size = len(episodes)
+    
+    batch = {
+        "p_subset": np.zeros((batch_size, N_job_pad), dtype=np.int32),
+        "n_jobs": np.zeros((batch_size,), dtype=np.int32),
+        "job_mask": np.zeros((batch_size, N_job_pad), dtype=np.float32),
+        "T_max": np.zeros((batch_size,), dtype=np.int32),
+        "T_limit": np.zeros((batch_size,), dtype=np.int32),
+        "T_min": np.zeros((batch_size,), dtype=np.int32),
+        "ct": np.zeros((batch_size, T_max_pad), dtype=np.int32),
+        "Tk": np.zeros((batch_size, K_period_pad), dtype=np.int32),
+        "ck": np.zeros((batch_size, K_period_pad), dtype=np.int32),
+        "period_starts": np.zeros((batch_size, K_period_pad), dtype=np.int32),
+        "K": np.zeros((batch_size,), dtype=np.int32),
+        "period_mask": np.zeros((batch_size, K_period_pad), dtype=np.float32),
+        "e_single": np.zeros((batch_size,), dtype=np.int32),
+        "price_q": np.zeros((batch_size, 3), dtype=np.float32),
+    }
+
+    for i, episode in enumerate(episodes):
+        n = episode.n_jobs
+        k = min(episode.K, K_period_pad)
+        t_max = min(episode.T_max, T_max_pad)
+        n = min(n, N_job_pad)
+
+        batch["n_jobs"][i] = n
+        batch["K"][i] = k
+        batch["T_max"][i] = t_max
+        batch["T_limit"][i] = episode.T_limit
+        batch["T_min"][i] = episode.T_min
+        batch["e_single"][i] = episode.e_single
+
+        if n > 0:
+            batch["p_subset"][i, :n] = episode.p_subset[:n]
+            batch["job_mask"][i, :n] = 1.0
+
+        if k > 0:
+            batch["Tk"][i, :k] = episode.Tk[:k]
+            batch["ck"][i, :k] = episode.ck[:k]
+            batch["period_starts"][i, :k] = episode.period_starts[:k]
+            batch["period_mask"][i, :k] = 1.0
+
+        if t_max > 0:
+            batch["ct"][i, :t_max] = episode.ct[:t_max]
+            ct_valid = episode.ct[:t_max]
+            if len(ct_valid) > 0:
+                q25, q50, q75 = np.quantile(ct_valid, [0.25, 0.5, 0.75])
+                batch["price_q"][i] = [q25, q50, q75]
+    
+    return batch
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -282,6 +347,228 @@ def _action_trace_to_bars_family(
     return bars, total_energy
 
 
+def plot_epsilon_curves(
+    results: List[Dict[str, Any]],
+    out_path: Path,
+    methods: List[str] = ["greedy", "sgbs", "spt_dp", "lpt_dp"],
+):
+    """Plot Energy and Infeasibility vs Slack Ratio."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib missing, skipping plot")
+        return
+
+    # Aggregate by slack_ratio
+    import pandas as pd
+    df = pd.DataFrame(results)
+    
+    # Calculate means per slack_ratio
+    grouped = df.groupby("slack_ratio")
+    
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    
+    # Left axis: Energy
+    ax1.set_xlabel("Slack Ratio (0=Tightest, 1=Loosest)")
+    ax1.set_ylabel("Total Energy", color="tab:blue")
+    ax1.tick_params(axis="y", labelcolor="tab:blue")
+    
+    # Right axis: Infeasibility
+    ax2 = ax1.twinx()
+    ax2.set_ylabel("Infeasibility Rate (%)", color="tab:red")
+    ax2.tick_params(axis="y", labelcolor="tab:red")
+    
+    styles = {
+        "greedy": {"ls": "--", "marker": "o"},
+        "sgbs": {"ls": "-", "marker": "*"},
+        "spt_dp": {"ls": ":", "marker": "s"},
+        "lpt_dp": {"ls": ":", "marker": "^"},
+    }
+    
+    slacks = sorted(df["slack_ratio"].unique())
+    
+    for m in methods:
+        key_energy = f"{m}_energy"
+        # Infeasibility: mean of (energy == inf or energy > some_huge_val check?) 
+        # Actually our DP returns inf for infeasible.
+        # But wait, the results dict has raw energy.
+        
+        # Helper to compute masked mean and inf rate
+        energies = []
+        inf_rates = []
+        
+        for s in slacks:
+            sub = df[df["slack_ratio"] == s]
+            vals = sub[key_energy].values
+            # Define infeasible as inf or very large?
+            # DP returns float("inf"). Env returns a large penalty but finite? 
+            # Let's assume float('inf') for DP, and maybe check env...
+            # The env usually returns a penalty if incomplete.
+            # Let's check "is_feasible" if we had it, but we can rely on energy magnitudes.
+            
+            # Simple heuristic: for DP, inf is inf.
+            # For RL, we might need to check if 'complete' if we had access.
+            # But here we just used energy.
+            
+            # Count infinite
+            n_inf = np.sum(np.isinf(vals))
+            rate = (n_inf / len(vals)) * 100
+            
+            # Mean of finite
+            valid_vals = vals[np.isfinite(vals)]
+            mean_e = np.mean(valid_vals) if len(valid_vals) > 0 else np.nan
+            
+            energies.append(mean_e)
+            inf_rates.append(rate)
+            
+        ax1.plot(slacks, energies, label=m, **styles.get(m, {}), color="tab:blue", alpha=0.7)
+        # We plot infeasibility with same marker but red color? 
+        # Or just plot one infeasibility curve? No, each method has its own.
+        # This graph might get cluttered.
+        # Let's use dashed for inf rate.
+        
+        ax2.plot(slacks, inf_rates, label=f"{m} (inf%)", linestyle=":", marker=styles.get(m, {})["marker"], color="tab:red", alpha=0.5)
+
+    ax1.set_title("Epsilon Constraint Analysis: Energy & Feasibility vs Deadline Slack")
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper right")
+    
+    ax1.grid(True, alpha=0.3)
+    plt.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"Wrote epsilon plot: {out_path}")
+
+
+def run_epsilon_constraint_analysis(
+    args,
+    variant_config,
+    data_cfg,
+    model,
+    device,
+    scale_str,
+):
+    """Run epsilon-constraint loop analysis."""
+    print("\n" + "=" * 70)
+    print(f"EPSILON CONSTRAINT ANALYSIS (steps={args.epsilon_steps})")
+    print("=" * 70)
+    
+    rng = np.random.RandomState(args.eval_seed)
+    # We need Python random for the generator functions
+    py_rng = random.Random(args.eval_seed)
+    
+    results = []
+    
+    # Slack ratios to test (linear from 0.0 to 1.0)
+    # 0.0 means T_limit = T_min
+    # 1.0 means T_limit = T_max (actually T_min + 1.0 * (T_max - T_min))
+    ratios = np.linspace(0.0, 1.0, args.epsilon_steps)
+    
+    # 1. Generate base instances
+    base_instances = []
+    for _ in range(args.num_instances):
+        # Generate raw
+        raw = generate_raw_instance(data_cfg, py_rng)
+        # Assign jobs
+        assignments = simulate_metaheuristic_assignment(raw.n, raw.m, py_rng)
+        # Pick non-empty if possible
+        non_empty = [i for i, a in enumerate(assignments) if len(a) > 0]
+        m_idx = py_rng.choice(non_empty) if non_empty else 0
+        job_idxs = assignments[m_idx]
+        
+        base_instances.append({
+            "raw": raw,
+            "m_idx": m_idx,
+            "job_idxs": job_idxs,
+        })
+        
+    # 2. Loop over slack ratios
+    for r_idx, ratio in enumerate(ratios):
+        print(f"Evaluating slack ratio {ratio:.2f} ({r_idx+1}/{len(ratios)})...")
+        
+        # Create episodes for this ratio
+        episodes = []
+        for b in base_instances:
+            # We want exact control over T_limit to match the ratio
+            # The generator uses random uniform, so we manually call make_single_machine_episode
+            # but we need to override the randomness inside.
+            # Actually make_single_machine_episode takes min/max ratio. 
+            # If we set min=max=ratio, we get fixed ratio.
+            
+            ep = make_single_machine_episode(
+                b["raw"],
+                b["m_idx"],
+                b["job_idxs"],
+                py_rng, # This RNG state will advance, but that's fine
+                deadline_slack_ratio_min=ratio,
+                deadline_slack_ratio_max=ratio,
+            )
+            episodes.append(ep)
+            
+        # Batch them
+        batch = batch_from_episodes(
+            episodes,
+            N_job_pad=int(variant_config.env.N_job_pad),
+            K_period_pad=250,
+            T_max_pad=500
+        )
+        
+        # Move batch to torch
+        # Note: greedy/sgbs expect dict of torch tensors (or numpy, handled internally?)
+        # greedy_decode expects dict of numpy arrays is fine? 
+        # Actually greedy_decode calls `batch_to_device`? No, let's check.
+        # The existing code calls `generate_episode_batch` which returns numpy.
+        # `greedy_decode` docstring says `batch_data: Dict[str, Any]` (numpy).
+        # It handles conversion.
+        
+        # Run Greedy
+        g_res = greedy_decode(model, variant_config.env, device, batch)
+        
+        # Run SGBS
+        s_res = sgbs(
+            model=model,
+            env_config=variant_config.env,
+            device=device,
+            batch_data=batch,
+            beta=int(args.beta),
+            gamma=int(args.gamma),
+        )
+        
+        # Run DP
+        spt_res = spt_lpt_with_dp(variant_config.env, device, batch, which="spt")
+        lpt_res = spt_lpt_with_dp(variant_config.env, device, batch, which="lpt")
+        
+        # Aggregate
+        for i in range(len(episodes)):
+            results.append({
+                "instance_idx": i,
+                "slack_ratio": float(ratio),
+                "T_limit": int(episodes[i].T_limit),
+                "T_min": int(episodes[i].T_min),
+                "greedy_energy": g_res[i].total_energy,
+                "sgbs_energy": s_res[i].total_energy,
+                "spt_dp_energy": spt_res[i].total_energy,
+                "lpt_dp_energy": lpt_res[i].total_energy,
+            })
+            
+    # 3. Save and Plot
+    out_dir = Path(args.out_dir) if args.out_dir else (args.run_dir or Path.cwd())
+    out_csv = out_dir / f"epsilon_results_{scale_str}_seed{args.eval_seed}.csv"
+    
+    import pandas as pd
+    df = pd.DataFrame(results)
+    
+    # Ensure directory exists
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    df.to_csv(out_csv, index=False)
+    print(f"Saved results to {out_csv}")
+    
+    plot_epsilon_curves(results, out_dir / f"epsilon_plot_{scale_str}_seed{args.eval_seed}.png")
+
+
+
 def _mean(x: List[float]) -> float:
     arr = np.array(x, dtype=np.float64)
     finite = np.isfinite(arr)
@@ -427,6 +714,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out_json", type=str, default=None)
     p.add_argument("--out_dir", type=str, default=None, help="Directory for visualization outputs")
     
+    # Epsilon constraint
+    p.add_argument("--epsilon_constraint", action="store_true", help="Run epsilon-constraint loop analysis")
+    p.add_argument("--epsilon_steps", type=int, default=10, help="Number of steps for epsilon loop")
+    
     return p.parse_args()
 
 
@@ -491,6 +782,11 @@ def main() -> None:
     model_state = _extract_model_state(ckpt)
     model.load_state_dict(model_state)
     model.eval()
+    
+    # Dispatch
+    if args.epsilon_constraint:
+        run_epsilon_constraint_analysis(args, variant_config, data_cfg, model, device, scale_str)
+        return
     
     # Generate batch with restricted data config
     batch = generate_episode_batch(

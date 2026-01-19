@@ -21,6 +21,8 @@ import os
 import random
 import sys
 import time
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -68,6 +70,10 @@ class QRunConfig:
     episodes_per_round: int = 1024  # Episodes to collect per DAgger round
     num_rounds: int = 100  # Total DAgger rounds
     buffer_size: int = 100_000  # Max transitions to keep in buffer
+    collection_batch_size: int = 64  # Episodes per collection batch
+    num_collection_workers: int = 0  # 0 = auto (CPU only), 1 = no multiprocessing
+    num_dataloader_workers: int = 0  # 0 = auto
+    num_cpu_threads: int = 0  # 0 = auto (all cores)
 
     # Counterfactual exploration
     num_counterfactuals: int = 8  # Number of jobs to try at each step
@@ -372,6 +378,177 @@ def complete_sequence_model(
     return sequence
 
 
+def _collect_round_batch(
+    *,
+    env_config,
+    data_config: DataConfig,
+    variant_config: VariantConfig,
+    model_state: Optional[Dict[str, torch.Tensor]],
+    batch_size: int,
+    num_counterfactuals: int,
+    exploration_eps: float,
+    use_model_completion: bool,
+    device_str: str,
+    seed: int,
+    num_cpu_threads: int,
+) -> List[QTransition]:
+    """Collect transitions for a single batch (worker-safe)."""
+    if num_cpu_threads > 0:
+        try:
+            torch.set_num_threads(num_cpu_threads)
+            torch.set_num_interop_threads(min(4, num_cpu_threads))
+        except Exception:
+            pass
+
+    rng = random.Random(seed)
+
+    device = torch.device(device_str)
+    model: Optional[QSequenceNet] = None
+    if model_state is not None:
+        model = build_q_model(variant_config)
+        model.load_state_dict(model_state)
+        model.to(device)
+        model.eval()
+
+    env = GPUBatchSequenceEnv(
+        batch_size=batch_size,
+        env_config=env_config,
+        device=device,
+    )
+
+    batch_data = generate_episode_batch(
+        batch_size=batch_size,
+        config=data_config,
+        seed=seed,
+    )
+
+    obs = env.reset(batch_data)
+
+    p_all = env.p_subset.clone()
+    ct_all = env.ct.clone()
+    e_all = env.e_single.clone()
+    T_limit_all = env.T_limit.clone()
+    n_jobs_all = env.n_jobs.clone()
+
+    transitions: List[QTransition] = []
+    F_job = env_config.F_job
+    N_pad = obs["jobs"].shape[1]
+
+    for inst_idx in range(batch_size):
+        n_jobs = int(n_jobs_all[inst_idx].item())
+        p_np = p_all[inst_idx].cpu().numpy()
+
+        obs_torch = {
+            "jobs": obs["jobs"][inst_idx].clone(),
+            "periods": obs["periods"][inst_idx].clone(),
+            "ctx": obs["ctx"][inst_idx].clone(),
+        }
+
+        partial_sequence = []
+        remaining_jobs = list(range(n_jobs))
+        job_available = np.zeros(N_pad, dtype=np.float32)
+        job_available[:n_jobs] = 1.0
+
+        p_inst = p_all[inst_idx : inst_idx + 1]
+        ct_inst = ct_all[inst_idx : inst_idx + 1]
+        e_inst = e_all[inst_idx : inst_idx + 1]
+        T_inst = T_limit_all[inst_idx : inst_idx + 1]
+
+        for _ in range(n_jobs):
+            if not remaining_jobs:
+                break
+
+            if F_job >= 2:
+                obs_torch["jobs"][:, 1] = torch.from_numpy(job_available).float()
+
+            remaining_work = (p_np * job_available).sum()
+            obs_torch["ctx"][2] = remaining_work
+
+            obs_single = {
+                "jobs": obs_torch["jobs"].cpu().numpy(),
+                "periods": obs_torch["periods"].cpu().numpy(),
+                "ctx": obs_torch["ctx"].cpu().numpy(),
+            }
+
+            if rng.random() < exploration_eps or model is None:
+                action = rng.choice(remaining_jobs)
+            else:
+                with torch.no_grad():
+                    jobs_t = obs_torch["jobs"].unsqueeze(0).to(device)
+                    periods_t = obs_torch["periods"].unsqueeze(0).to(device)
+                    ctx_t = obs_torch["ctx"].unsqueeze(0).to(device)
+                    mask_t = (
+                        torch.from_numpy(job_available < 0.5).unsqueeze(0).to(device)
+                    )
+
+                    q = model(jobs_t, periods_t, ctx_t, mask_t)
+                    q[0, mask_t[0]] = float("inf")
+                    action = q.argmin(dim=-1).item()
+
+            if len(remaining_jobs) <= num_counterfactuals:
+                candidates = remaining_jobs.copy()
+            else:
+                candidates = [action]
+                others = [j for j in remaining_jobs if j != action]
+                candidates.extend(rng.sample(others, num_counterfactuals - 1))
+
+            cf_sequences = []
+            cf_instance_indices = []
+
+            for candidate_job in candidates:
+                cf_partial = partial_sequence + [candidate_job]
+                cf_remaining = [j for j in remaining_jobs if j != candidate_job]
+
+                if use_model_completion and model is not None:
+                    cf_available = job_available.copy()
+                    cf_available[candidate_job] = 0.0
+                    full_seq = complete_sequence_model(
+                        cf_partial,
+                        cf_remaining,
+                        model,
+                        obs_torch,
+                        cf_available,
+                        p_np,
+                        F_job,
+                        device,
+                    )
+                else:
+                    full_seq = complete_sequence_spt(cf_partial, cf_remaining, p_np)
+
+                cf_sequences.append(full_seq)
+                cf_instance_indices.append(0)
+
+            costs = batch_evaluate_sequences(
+                sequences=cf_sequences,
+                processing_times=p_inst,
+                ct=ct_inst,
+                e_single=e_inst,
+                T_limit=T_inst,
+                instance_indices=cf_instance_indices,
+                device=device,
+            )
+
+            for cand_idx, candidate_job in enumerate(candidates):
+                cf_cost = costs[cand_idx].item()
+                if np.isfinite(cf_cost):
+                    transitions.append(
+                        QTransition(
+                            jobs=obs_single["jobs"].copy(),
+                            periods=obs_single["periods"].copy(),
+                            ctx=obs_single["ctx"].copy(),
+                            job_avail=job_available.copy(),
+                            action=candidate_job,
+                            q_target=cf_cost,
+                        )
+                    )
+
+            partial_sequence.append(action)
+            remaining_jobs.remove(action)
+            job_available[action] = 0.0
+
+    return transitions
+
+
 def collect_round_data(
     env_config,  # EnvConfig, not env instance
     model: Optional[QSequenceNet],
@@ -384,6 +561,8 @@ def collect_round_data(
     device: torch.device,
     seed: int,
     collection_batch_size: int = 64,  # Fixed batch size for collection
+    num_collection_workers: int = 0,
+    num_cpu_threads: int = 0,
 ) -> List[QTransition]:
     """
     Collect Q-transitions for one round using the real environment.
@@ -393,183 +572,75 @@ def collect_round_data(
     - jobs[..., 1] = availability (when F_job >= 2)
     - ctx[2] = remaining_work
     """
-    rng = random.Random(seed)
-    np_rng = np.random.default_rng(seed)
+    transitions: List[QTransition] = []
 
-    transitions = []
-    F_job = env_config.F_job
-
-    # Process in batches with matching env size
     batch_size = min(num_episodes, collection_batch_size)
     num_batches = (num_episodes + batch_size - 1) // batch_size
 
+    device_str = str(device)
+    model_state = model.state_dict() if model is not None else None
+
+    if device.type != "cpu":
+        num_collection_workers = 1
+
+    if num_collection_workers <= 0:
+        cpu_count = os.cpu_count() or 1
+        num_collection_workers = min(cpu_count, num_batches) if num_batches > 0 else 1
+
+    cpu_count = os.cpu_count() or 1
+    if num_cpu_threads <= 0:
+        num_cpu_threads = cpu_count
+
+    threads_per_worker = max(1, num_cpu_threads // max(1, num_collection_workers))
+
+    batch_specs = []
     for batch_idx in range(num_batches):
         current_batch_size = min(batch_size, num_episodes - batch_idx * batch_size)
         if current_batch_size <= 0:
-            break
+            continue
+        batch_seed = seed + batch_idx * 10000
+        batch_specs.append((current_batch_size, batch_seed))
 
-        # Create env with exactly the batch size we need (fixes concern #3)
-        env = GPUBatchSequenceEnv(
-            batch_size=current_batch_size,
-            env_config=env_config,
-            device=device,
-        )
-
-        # Generate episode batch using repo's data generator
-        batch_data = generate_episode_batch(
-            batch_size=current_batch_size,
-            config=data_config,
-            seed=seed + batch_idx * 10000,
-        )
-
-        # Reset environment with this batch
-        obs = env.reset(batch_data)
-
-        # Extract instance data for DP evaluation
-        p_all = env.p_subset.clone()  # (B, N_pad)
-        ct_all = env.ct.clone()  # (B, T)
-        e_all = env.e_single.clone()  # (B,)
-        T_limit_all = env.T_limit.clone()  # (B,)
-        n_jobs_all = env.n_jobs.clone()  # (B,)
-
-        B = current_batch_size
-        N_pad = obs["jobs"].shape[1]  # Padded job dimension
-
-        # For each instance in batch, collect transitions
-        for inst_idx in range(B):
-            n_jobs = int(n_jobs_all[inst_idx].item())
-            p_np = p_all[inst_idx].cpu().numpy()  # Processing times for this instance
-
-            # Extract single-instance observation (will be updated each step)
-            obs_torch = {
-                "jobs": obs["jobs"][inst_idx].clone(),
-                "periods": obs["periods"][inst_idx].clone(),
-                "ctx": obs["ctx"][inst_idx].clone(),
-            }
-
-            # Track sequence state
-            partial_sequence = []
-            remaining_jobs = list(range(n_jobs))
-            # job_available uses padded dimension; padding positions are unavailable
-            job_available = np.zeros(N_pad, dtype=np.float32)
-            job_available[:n_jobs] = 1.0
-
-            # Instance data for DP
-            p_inst = p_all[inst_idx : inst_idx + 1]  # (1, N_pad)
-            ct_inst = ct_all[inst_idx : inst_idx + 1]  # (1, T)
-            e_inst = e_all[inst_idx : inst_idx + 1]  # (1,)
-            T_inst = T_limit_all[inst_idx : inst_idx + 1]  # (1,)
-
-            for step in range(n_jobs):
-                n_available = len(remaining_jobs)
-                if n_available == 0:
-                    break
-
-                # === Update observations to be consistent with availability (fixes concern #2) ===
-                if F_job >= 2:
-                    obs_torch["jobs"][:, 1] = torch.from_numpy(job_available).float()
-
-                # Update remaining_work in ctx (ctx[2])
-                remaining_work = (p_np * job_available).sum()
-                obs_torch["ctx"][2] = remaining_work
-
-                # Create numpy version for storage (must be done after updates)
-                obs_single = {
-                    "jobs": obs_torch["jobs"].cpu().numpy(),
-                    "periods": obs_torch["periods"].cpu().numpy(),
-                    "ctx": obs_torch["ctx"].cpu().numpy(),
-                }
-
-                # Select action for sequence progression
-                if rng.random() < exploration_eps or model is None:
-                    action = rng.choice(remaining_jobs)
-                else:
-                    # Use model to select action
-                    with torch.no_grad():
-                        jobs_t = obs_torch["jobs"].unsqueeze(0).to(device)
-                        periods_t = obs_torch["periods"].unsqueeze(0).to(device)
-                        ctx_t = obs_torch["ctx"].unsqueeze(0).to(device)
-                        mask_t = (
-                            torch.from_numpy(job_available < 0.5)
-                            .unsqueeze(0)
-                            .to(device)
-                        )
-
-                        q = model(jobs_t, periods_t, ctx_t, mask_t)
-                        q[0, mask_t[0]] = float("inf")
-                        action = q.argmin(dim=-1).item()
-
-                # Select counterfactual candidates
-                if n_available <= num_counterfactuals:
-                    candidates = remaining_jobs.copy()
-                else:
-                    candidates = [action]
-                    others = [j for j in remaining_jobs if j != action]
-                    candidates.extend(rng.sample(others, num_counterfactuals - 1))
-
-                # Build counterfactual sequences and batch-evaluate
-                cf_sequences = []
-                cf_instance_indices = []
-
-                for candidate_job in candidates:
-                    cf_partial = partial_sequence + [candidate_job]
-                    cf_remaining = [j for j in remaining_jobs if j != candidate_job]
-
-                    # Complete the sequence
-                    if use_model_completion and model is not None:
-                        cf_available = job_available.copy()
-                        cf_available[candidate_job] = 0.0
-                        full_seq = complete_sequence_model(
-                            cf_partial,
-                            cf_remaining,
-                            model,
-                            obs_torch,
-                            cf_available,
-                            p_np,
-                            F_job,
-                            device,  # Pass new params
-                        )
-                    else:
-                        full_seq = complete_sequence_spt(cf_partial, cf_remaining, p_np)
-
-                    cf_sequences.append(full_seq)
-                    cf_instance_indices.append(
-                        0
-                    )  # All map to same instance (index 0 in single-instance tensors)
-
-                # Batch DP evaluation
-                costs = batch_evaluate_sequences(
-                    sequences=cf_sequences,
-                    processing_times=p_inst,
-                    ct=ct_inst,
-                    e_single=e_inst,
-                    T_limit=T_inst,
-                    instance_indices=cf_instance_indices,
-                    device=device,
+    if num_collection_workers <= 1:
+        for current_batch_size, batch_seed in batch_specs:
+            transitions.extend(
+                _collect_round_batch(
+                    env_config=env_config,
+                    data_config=data_config,
+                    variant_config=variant_config,
+                    model_state=model_state,
+                    batch_size=current_batch_size,
+                    num_counterfactuals=num_counterfactuals,
+                    exploration_eps=exploration_eps,
+                    use_model_completion=use_model_completion,
+                    device_str=device_str,
+                    seed=batch_seed,
+                    num_cpu_threads=threads_per_worker,
+                )
+            )
+    else:
+        with ProcessPoolExecutor(max_workers=num_collection_workers) as executor:
+            futures = []
+            for current_batch_size, batch_seed in batch_specs:
+                futures.append(
+                    executor.submit(
+                        _collect_round_batch,
+                        env_config=env_config,
+                        data_config=data_config,
+                        variant_config=variant_config,
+                        model_state=model_state,
+                        batch_size=current_batch_size,
+                        num_counterfactuals=num_counterfactuals,
+                        exploration_eps=exploration_eps,
+                        use_model_completion=use_model_completion,
+                        device_str=device_str,
+                        seed=batch_seed,
+                        num_cpu_threads=threads_per_worker,
+                    )
                 )
 
-                # Store transitions for each candidate
-                for cand_idx, candidate_job in enumerate(candidates):
-                    cf_cost = costs[cand_idx].item()
-
-                    # Only store feasible transitions
-                    if np.isfinite(cf_cost):
-                        # Store observations with current state (job_avail field name)
-                        transitions.append(
-                            QTransition(
-                                jobs=obs_single["jobs"].copy(),
-                                periods=obs_single["periods"].copy(),
-                                ctx=obs_single["ctx"].copy(),
-                                job_avail=job_available.copy(),  # Renamed field
-                                action=candidate_job,
-                                q_target=cf_cost,
-                            )
-                        )
-
-                # Progress sequence with actual action
-                partial_sequence.append(action)
-                remaining_jobs.remove(action)
-                job_available[action] = 0.0
+            for future in as_completed(futures):
+                transitions.extend(future.result())
 
     return transitions
 
@@ -798,6 +869,10 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--episodes_per_round", type=int, default=1024)
     parser.add_argument("--num_rounds", type=int, default=100)
+    parser.add_argument("--collection_batch_size", type=int, default=64)
+    parser.add_argument("--num_collection_workers", type=int, default=0)
+    parser.add_argument("--num_dataloader_workers", type=int, default=0)
+    parser.add_argument("--num_cpu_threads", type=int, default=0)
 
     parser.add_argument("--num_counterfactuals", type=int, default=8)
     parser.add_argument("--exploration_eps", type=float, default=0.2)
@@ -828,6 +903,10 @@ def main():
         batch_size=args.batch_size,
         episodes_per_round=args.episodes_per_round,
         num_rounds=args.num_rounds,
+        collection_batch_size=args.collection_batch_size,
+        num_collection_workers=args.num_collection_workers,
+        num_dataloader_workers=args.num_dataloader_workers,
+        num_cpu_threads=args.num_cpu_threads,
         num_counterfactuals=args.num_counterfactuals,
         exploration_eps=args.exploration_eps,
         warmup_rounds=args.warmup_rounds,
@@ -849,6 +928,9 @@ def main():
         config.eval_every_rounds = 2
         config.num_eval_instances = 32
         config.warmup_rounds = 2
+        config.collection_batch_size = 16
+        config.num_collection_workers = 1
+        config.num_dataloader_workers = 0
 
     # Set seeds
     random.seed(config.seed)
@@ -860,6 +942,20 @@ def main():
     # Device
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+
+    if device.type == "cpu":
+        cpu_count = os.cpu_count() or 1
+        if config.num_cpu_threads <= 0:
+            config.num_cpu_threads = cpu_count
+        if config.num_dataloader_workers <= 0:
+            config.num_dataloader_workers = min(cpu_count, 8)
+        if config.num_collection_workers <= 0:
+            config.num_collection_workers = min(cpu_count, 8)
+        try:
+            torch.set_num_threads(config.num_cpu_threads)
+            torch.set_num_interop_threads(min(4, config.num_cpu_threads))
+        except Exception:
+            pass
 
     # Setup output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -938,7 +1034,9 @@ def main():
             use_model_completion=use_model_completion,
             device=device,
             seed=config.seed + round_idx * 100000,
-            collection_batch_size=64,  # Fixed batch size for env creation
+            collection_batch_size=config.collection_batch_size,
+            num_collection_workers=config.num_collection_workers,
+            num_cpu_threads=config.num_cpu_threads,
         )
 
         buffer.extend(transitions)
@@ -956,7 +1054,8 @@ def main():
             batch_size=config.batch_size,
             shuffle=True,
             collate_fn=collate_q_batch,
-            num_workers=0,
+            num_workers=config.num_dataloader_workers,
+            persistent_workers=config.num_dataloader_workers > 0,
         )
 
         epoch_metrics = []
