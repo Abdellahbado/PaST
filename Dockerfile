@@ -1,5 +1,6 @@
-# Base image: CPU-friendly Python
-FROM python:3.11-slim
+# Base image: CUDA-enabled PyTorch runtime (for A100 GPUs)
+# Requires NVIDIA Container Toolkit on the host.
+FROM pytorch/pytorch:2.2.2-cuda12.1-cudnn8-runtime
 
 # Workdir (we keep /app as the parent so that /app/PaST is importable)
 WORKDIR /app
@@ -20,4 +21,4 @@ ENV PAST_OUTPUT_DIR=/outputs
 ENV PYTHONPATH=/app
 
 # Default command (can be overridden at runtime)
-CMD ["python", "-m", "PaST.train_q_sequence", "--variant_id", "q_sequence_cnn_ctx13", "--device", "cpu", "--output_dir", "/outputs"]
+CMD ["python", "-m", "PaST.train_q_sequence", "--variant_id", "q_sequence_cnn_ctx13", "--device", "cuda", "--output_dir", "/outputs"]

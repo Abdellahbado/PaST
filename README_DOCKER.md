@@ -6,7 +6,7 @@ This guide provides a clean, reproducible workflow for running PaST training in 
 
 ## Clone and build from GitHub
 
-git clone <https://github.com/Abdellahbado/PaST.git>
+git clone <https://github.com/Abdellahbado/PaST.git> PaST
 cd PaST
 
 (All commands below assume you are in the PaST repository root: the folder that contains `Dockerfile`.)
@@ -17,14 +17,17 @@ docker build -t past-train .
 
 ## Run (Linux/macOS)
 
+Host requirement (GPU): install NVIDIA Container Toolkit so Docker can access the A100.
+
 Create a host folder for artifacts and run training:
 
 mkdir -p artifacts
 
 docker run --rm \
+  --gpus all \
   --mount type=bind,source="$(pwd)/artifacts",target=/outputs \
   past-train \
-  python -m PaST.train_q_sequence --variant_id q_sequence_cnn_ctx13 --device cpu --output_dir /outputs
+  python -m PaST.train_q_sequence --variant_id q_sequence_cnn_ctx13 --device cuda --output_dir /outputs
 
 ls -lah artifacts/
 
@@ -47,9 +50,10 @@ ls -lah artifacts/
 ### Option A: docker run (one-off overrides)
 
 docker run --rm \
+  --gpus all \
   --mount type=bind,source="$(pwd)/artifacts",target=/outputs \
   past-train \
-  python -m PaST.train_q_sequence --variant_id q_sequence_ctx13 --seed 1 --device cpu --output_dir /outputs
+  python -m PaST.train_q_sequence --variant_id q_sequence_ctx13 --seed 1 --device cuda --output_dir /outputs
 
 ### Option B: docker compose (edit command)
 

@@ -5,8 +5,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Requires NVIDIA Container Toolkit on the host
+    gpus: all
     volumes:
       - ./artifacts:/outputs
     environment:
       - PAST_OUTPUT_DIR=/outputs
-    command: ["python", "-m", "PaST.train_q_sequence", "--variant_id", "q_sequence_cnn_ctx13", "--device", "cpu", "--output_dir", "/outputs"]
+    command: ["python", "-m", "PaST.train_q_sequence", "--variant_id", "q_sequence_cnn_ctx13", "--device", "cuda", "--output_dir", "/outputs"]
