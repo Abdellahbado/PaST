@@ -1245,7 +1245,7 @@ def parse_args():
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="runs",
+        default=os.environ.get("PAST_OUTPUT_DIR", "runs"),
         help="Output directory for runs",
     )
 

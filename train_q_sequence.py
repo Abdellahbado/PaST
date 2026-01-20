@@ -16,6 +16,7 @@ Usage:
 """
 
 import argparse
+import copy
 import json
 import os
 import random
@@ -153,8 +154,20 @@ class QRunConfig:
 
     # Counterfactual exploration
     num_counterfactuals: int = 8  # Number of jobs to try at each step
-    exploration_eps: float = 0.2  # Epsilon for random exploration in data collection
+    exploration_eps_start: float = 0.2  # Start epsilon for random exploration
+    exploration_eps_end: float = 0.2  # End epsilon (kept equal to start by default)
+    exploration_eps_decay_rounds: int = (
+        0  # 0 = no decay; else linear over this many rounds
+    )
     warmup_rounds: int = 5  # Initial rounds use SPT completion (bootstrap)
+
+    # Completion policy schedule
+    completion_policy: str = "model"  # "spt", "model", "mix"
+    completion_prob_start: float = 1.0  # For "mix": prob(model) at start
+    completion_prob_end: float = 1.0  # For "mix": prob(model) at end
+    completion_prob_decay_rounds: int = (
+        0  # 0 = no decay; else linear over this many rounds
+    )
 
     # Model training
     learning_rate: float = 1e-4
@@ -165,6 +178,10 @@ class QRunConfig:
     # Loss
     loss_type: str = "huber"  # "huber", "mse"
     huber_delta: float = 1.0
+
+    # Optional listwise ranking loss (off by default)
+    listwise_weight: float = 0.0
+    listwise_temperature: float = 1.0
 
     # Temperature for Q->logits conversion
     temperature: float = 1.0
@@ -186,6 +203,12 @@ class QRunConfig:
     # Debug
     smoke_test: bool = False
 
+    # Curriculum (optional): start with looser deadlines, anneal to target
+    curriculum: bool = False
+    curriculum_fraction: float = 0.3  # fraction of rounds used for annealing
+    curriculum_slack_min: Optional[float] = None
+    curriculum_slack_max: Optional[float] = None
+
 
 # =============================================================================
 # Dataset
@@ -205,6 +228,7 @@ class QTransition:
     # Target
     action: int  # Job index chosen
     q_target: float  # DP cost of completed sequence
+    state_id: int  # Groups candidates from the same state (for listwise loss)
 
 
 class QTransitionBuffer:
@@ -251,6 +275,7 @@ class QTransitionDataset(Dataset):
             "job_avail": torch.from_numpy(t.job_avail).float(),
             "action": torch.tensor(t.action, dtype=torch.long),
             "q_target": torch.tensor(t.q_target, dtype=torch.float32),
+            "state_id": torch.tensor(t.state_id, dtype=torch.long),
         }
 
 
@@ -274,6 +299,7 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     period_mask = torch.ones(B, max_periods, dtype=torch.bool)
     actions = torch.zeros(B, dtype=torch.long)
     q_targets = torch.zeros(B)
+    state_ids = torch.zeros(B, dtype=torch.long)
 
     for i, b in enumerate(batch):
         n_jobs = b["jobs"].shape[0]
@@ -294,6 +320,7 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
 
         actions[i] = b["action"]
         q_targets[i] = b["q_target"]
+        state_ids[i] = b["state_id"]
 
     return {
         "jobs": jobs,
@@ -303,6 +330,7 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         "period_mask": period_mask,
         "actions": actions,
         "q_targets": q_targets,
+        "state_ids": state_ids,
     }
 
 
@@ -573,10 +601,11 @@ def _collect_round_batch(
     pending_obs_single: List[Dict[str, np.ndarray]] = []
     pending_job_avail: List[np.ndarray] = []
     pending_actions: List[int] = []
+    pending_state_ids: List[int] = []
     DP_FLUSH_THRESHOLD = 8192  # sequences per DP call (tunable)
 
     def flush_pending():
-        nonlocal pending_sequences, pending_instance_indices, pending_obs_single, pending_job_avail, pending_actions
+        nonlocal pending_sequences, pending_instance_indices, pending_obs_single, pending_job_avail, pending_actions, pending_state_ids
         if not pending_sequences:
             return
         costs = batch_evaluate_sequences(
@@ -600,6 +629,7 @@ def _collect_round_batch(
                     job_avail=pending_job_avail[k].copy(),
                     action=int(pending_actions[k]),
                     q_target=float(cf_cost),
+                    state_id=int(pending_state_ids[k]),
                 )
             )
 
@@ -608,8 +638,10 @@ def _collect_round_batch(
         pending_obs_single = []
         pending_job_avail = []
         pending_actions = []
+        pending_state_ids = []
 
     # Process each instance sequentially (original working logic)
+    state_id_counter = 0
     for inst_idx in range(batch_size):
         n_jobs = int(n_jobs_all[inst_idx].item())
         p_np = p_all[inst_idx].cpu().numpy()
@@ -633,6 +665,9 @@ def _collect_round_batch(
         for _ in range(n_jobs):
             if not remaining_jobs:
                 break
+
+            state_id = state_id_counter
+            state_id_counter += 1
 
             if F_job >= 2:
                 obs_torch["jobs"][:, 1] = torch.from_numpy(job_available).float()
@@ -704,6 +739,7 @@ def _collect_round_batch(
                 pending_obs_single.append(obs_single)
                 pending_job_avail.append(job_available.copy())
                 pending_actions.append(int(candidate_job))
+                pending_state_ids.append(int(state_id))
 
             if len(pending_sequences) >= DP_FLUSH_THRESHOLD:
                 flush_pending()
@@ -839,6 +875,7 @@ def train_epoch(
     total_loss = 0.0
     total_q_mse = 0.0
     total_q_mae = 0.0
+    total_listwise = 0.0
     n_batches = 0
 
     for batch in dataloader:
@@ -850,6 +887,7 @@ def train_epoch(
         period_mask = batch["period_mask"].to(device)
         actions = batch["actions"].to(device)
         q_targets = batch["q_targets"].to(device)
+        state_ids = batch["state_ids"].to(device)
 
         # Forward pass
         q_values = model(
@@ -863,11 +901,37 @@ def train_epoch(
         # Get Q-values for taken actions
         q_pred = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
-        # Loss
+        # Base loss
         if config.loss_type == "huber":
             loss = F.huber_loss(q_pred, q_targets, delta=config.huber_delta)
         else:
             loss = F.mse_loss(q_pred, q_targets)
+
+        # Optional listwise ranking loss
+        listwise_loss = torch.tensor(0.0, device=device)
+        if config.listwise_weight > 0:
+            unique_states = torch.unique(state_ids)
+            lw_sum = 0.0
+            lw_count = 0
+            for sid in unique_states:
+                idx = (state_ids == sid).nonzero(as_tuple=False).squeeze(1)
+                if idx.numel() < 2:
+                    continue
+                q_pred_g = q_pred.index_select(0, idx)
+                q_t_g = q_targets.index_select(0, idx)
+
+                # Target distribution from DP costs (lower cost => higher prob)
+                log_p_pred = F.log_softmax(
+                    -q_pred_g / config.listwise_temperature, dim=0
+                )
+                p_t = F.softmax(-q_t_g / config.listwise_temperature, dim=0)
+                lw = -(p_t * log_p_pred).sum()
+                lw_sum += lw
+                lw_count += 1
+
+            if lw_count > 0:
+                listwise_loss = lw_sum / lw_count
+                loss = loss + config.listwise_weight * listwise_loss
 
         # Backward
         optimizer.zero_grad()
@@ -883,12 +947,14 @@ def train_epoch(
         with torch.no_grad():
             total_q_mse += F.mse_loss(q_pred, q_targets).item()
             total_q_mae += (q_pred - q_targets).abs().mean().item()
+            total_listwise += float(listwise_loss.item())
         n_batches += 1
 
     return {
         "loss": total_loss / max(n_batches, 1),
         "q_mse": total_q_mse / max(n_batches, 1),
         "q_mae": total_q_mae / max(n_batches, 1),
+        "listwise": total_listwise / max(n_batches, 1),
     }
 
 
@@ -1045,6 +1111,7 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--episodes_per_round", type=int, default=1024)
     parser.add_argument("--num_rounds", type=int, default=100)
+    parser.add_argument("--buffer_size", type=int, default=100_000)
     parser.add_argument("--collection_batch_size", type=int, default=64)
     parser.add_argument("--num_collection_workers", type=int, default=0)
     parser.add_argument(
@@ -1056,19 +1123,50 @@ def parse_args():
     parser.add_argument("--num_cpu_threads", type=int, default=0)
 
     parser.add_argument("--num_counterfactuals", type=int, default=8)
+    # Backward-compatible: --exploration_eps sets both start/end
     parser.add_argument("--exploration_eps", type=float, default=0.2)
+    parser.add_argument("--exploration_eps_start", type=float, default=None)
+    parser.add_argument("--exploration_eps_end", type=float, default=None)
+    parser.add_argument("--exploration_eps_decay_rounds", type=int, default=0)
     parser.add_argument("--warmup_rounds", type=int, default=5)
+    parser.add_argument(
+        "--completion_policy",
+        type=str,
+        default="model",
+        choices=["spt", "model", "mix"],
+    )
+    parser.add_argument("--completion_prob_start", type=float, default=1.0)
+    parser.add_argument("--completion_prob_end", type=float, default=1.0)
+    parser.add_argument("--completion_prob_decay_rounds", type=int, default=0)
 
     parser.add_argument("--learning_rate", type=float, default=1e-4)
+    parser.add_argument("--weight_decay", type=float, default=1e-5)
+    parser.add_argument("--grad_clip", type=float, default=1.0)
     parser.add_argument("--num_epochs_per_round", type=int, default=10)
+    parser.add_argument(
+        "--loss_type", type=str, default="huber", choices=["huber", "mse"]
+    )
+    parser.add_argument("--huber_delta", type=float, default=1.0)
+    parser.add_argument("--listwise_weight", type=float, default=0.0)
+    parser.add_argument("--listwise_temperature", type=float, default=1.0)
 
     parser.add_argument("--eval_every_rounds", type=int, default=5)
     parser.add_argument("--num_eval_instances", type=int, default=256)
     parser.add_argument("--save_every_rounds", type=int, default=10)
 
     parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--output_dir", type=str, default="runs_q")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=os.environ.get("PAST_OUTPUT_DIR", "runs_q"),
+    )
     parser.add_argument("--smoke_test", action="store_true")
+
+    # Curriculum (deadline slack)
+    parser.add_argument("--curriculum", action="store_true")
+    parser.add_argument("--curriculum_fraction", type=float, default=0.3)
+    parser.add_argument("--curriculum_slack_min", type=float, default=None)
+    parser.add_argument("--curriculum_slack_max", type=float, default=None)
 
     return parser.parse_args()
 
@@ -1092,22 +1190,51 @@ def main():
         batch_size=args.batch_size,
         episodes_per_round=args.episodes_per_round,
         num_rounds=args.num_rounds,
+        buffer_size=args.buffer_size,
         collection_batch_size=args.collection_batch_size,
         num_collection_workers=args.num_collection_workers,
         allow_gpu_collection_multiprocessing=args.allow_gpu_collection_multiprocessing,
         num_dataloader_workers=args.num_dataloader_workers,
         num_cpu_threads=args.num_cpu_threads,
         num_counterfactuals=args.num_counterfactuals,
-        exploration_eps=args.exploration_eps,
+        exploration_eps_start=(
+            args.exploration_eps_start
+            if args.exploration_eps_start is not None
+            else args.exploration_eps
+        ),
+        exploration_eps_end=(
+            args.exploration_eps_end
+            if args.exploration_eps_end is not None
+            else (
+                args.exploration_eps_start
+                if args.exploration_eps_start is not None
+                else args.exploration_eps
+            )
+        ),
+        exploration_eps_decay_rounds=args.exploration_eps_decay_rounds,
         warmup_rounds=args.warmup_rounds,
+        completion_policy=args.completion_policy,
+        completion_prob_start=args.completion_prob_start,
+        completion_prob_end=args.completion_prob_end,
+        completion_prob_decay_rounds=args.completion_prob_decay_rounds,
         learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
+        grad_clip=args.grad_clip,
         num_epochs_per_round=args.num_epochs_per_round,
+        loss_type=args.loss_type,
+        huber_delta=args.huber_delta,
+        listwise_weight=args.listwise_weight,
+        listwise_temperature=args.listwise_temperature,
         eval_every_rounds=args.eval_every_rounds,
         num_eval_instances=args.num_eval_instances,
         save_every_rounds=args.save_every_rounds,
         device=args.device,
         output_dir=args.output_dir,
         smoke_test=args.smoke_test,
+        curriculum=args.curriculum,
+        curriculum_fraction=args.curriculum_fraction,
+        curriculum_slack_min=args.curriculum_slack_min,
+        curriculum_slack_max=args.curriculum_slack_max,
     )
 
     # Smoke test overrides
@@ -1118,6 +1245,8 @@ def main():
         config.eval_every_rounds = 2
         config.num_eval_instances = 32
         config.warmup_rounds = 2
+        config.exploration_eps_decay_rounds = 0
+        config.completion_prob_decay_rounds = 0
         config.collection_batch_size = 16
         config.num_collection_workers = 1
         config.allow_gpu_collection_multiprocessing = False
@@ -1181,6 +1310,14 @@ def main():
     data_config = DataConfig()
     env_config = variant_config.env
 
+    # Safety check: ctx13 semantics require price-family features to be enabled
+    if env_config.F_ctx >= 13 and not env_config.use_price_families:
+        print(
+            "Warning: F_ctx >= 13 but use_price_families=False. "
+            "Price-family ctx features (quantiles/deltas) will be zeros. "
+            "Use q_sequence_ctx13 or enable env.use_price_families."
+        )
+
     # Build model
     model = build_q_model(variant_config)
     model = model.to(device)
@@ -1205,6 +1342,10 @@ def main():
     print(f"Q-Sequence Training: {config.variant_id}")
     print(f"Output: {run_dir}")
     print(f"Warmup rounds (SPT completion): {config.warmup_rounds}")
+    print(
+        f"Completion policy: {config.completion_policy} | "
+        f"mix_prob_start={config.completion_prob_start} | mix_prob_end={config.completion_prob_end}"
+    )
     print(f"{'='*60}\n")
 
     best_cost: Optional[float] = None
@@ -1212,9 +1353,48 @@ def main():
     for round_idx in range(config.num_rounds):
         round_start = time.time()
 
-        # Determine if using model-based completion
-        use_model_completion = round_idx >= config.warmup_rounds
-        completion_policy = "model" if use_model_completion else "SPT"
+        # Determine exploration epsilon for this round
+        if (
+            config.exploration_eps_decay_rounds
+            and config.exploration_eps_decay_rounds > 0
+        ):
+            frac = min(1.0, round_idx / max(1, config.exploration_eps_decay_rounds))
+            eps = config.exploration_eps_start + frac * (
+                config.exploration_eps_end - config.exploration_eps_start
+            )
+        else:
+            eps = config.exploration_eps_start
+
+        # Determine completion policy for this round
+        if round_idx < config.warmup_rounds:
+            use_model_completion = False
+            completion_policy = "SPT"
+        else:
+            if config.completion_policy == "spt":
+                use_model_completion = False
+                completion_policy = "SPT"
+            elif config.completion_policy == "model":
+                use_model_completion = True
+                completion_policy = "model"
+            else:
+                # mix
+                if (
+                    config.completion_prob_decay_rounds
+                    and config.completion_prob_decay_rounds > 0
+                ):
+                    frac = min(
+                        1.0,
+                        (round_idx - config.warmup_rounds)
+                        / max(1, config.completion_prob_decay_rounds),
+                    )
+                    model_prob = config.completion_prob_start + frac * (
+                        config.completion_prob_end - config.completion_prob_start
+                    )
+                else:
+                    model_prob = config.completion_prob_start
+
+                use_model_completion = random.random() < model_prob
+                completion_policy = "model" if use_model_completion else "SPT"
 
         # === Data Collection ===
         print(
@@ -1223,14 +1403,39 @@ def main():
             flush=True,
         )
 
-        # Decay exploration over rounds
-        eps = config.exploration_eps * (1 - round_idx / config.num_rounds)
+        # Note: exploration epsilon already computed above
+
+        # Curriculum: adjust deadline slack early, anneal to target
+        data_config_round = data_config
+        if config.curriculum:
+            decay_rounds = max(1, int(config.curriculum_fraction * config.num_rounds))
+            frac = min(1.0, round_idx / decay_rounds)
+
+            target_min = data_config.deadline_slack_ratio_min
+            target_max = data_config.deadline_slack_ratio_max
+            start_min = (
+                config.curriculum_slack_min
+                if config.curriculum_slack_min is not None
+                else min(0.9, target_min + 0.3)
+            )
+            start_max = (
+                config.curriculum_slack_max
+                if config.curriculum_slack_max is not None
+                else min(0.9, target_max + 0.3)
+            )
+
+            slack_min = start_min + frac * (target_min - start_min)
+            slack_max = start_max + frac * (target_max - start_max)
+
+            data_config_round = copy.deepcopy(data_config)
+            data_config_round.deadline_slack_ratio_min = float(slack_min)
+            data_config_round.deadline_slack_ratio_max = float(slack_max)
 
         transitions = collect_round_data(
             env_config=env_config,  # Pass config, not env instance
             model=model if use_model_completion else None,
             variant_config=variant_config,
-            data_config=data_config,
+            data_config=data_config_round,
             num_episodes=config.episodes_per_round,
             num_counterfactuals=config.num_counterfactuals,
             exploration_eps=eps,
@@ -1269,8 +1474,11 @@ def main():
 
         avg_loss = np.mean([m["loss"] for m in epoch_metrics])
         avg_mae = np.mean([m["q_mae"] for m in epoch_metrics])
+        avg_listwise = np.mean([m.get("listwise", 0.0) for m in epoch_metrics])
         train_time = time.time() - train_start
-        print(f"loss={avg_loss:.4f}, mae={avg_mae:.2f} in {train_time:.1f}s")
+        print(
+            f"loss={avg_loss:.4f}, mae={avg_mae:.2f}, listwise={avg_listwise:.4f} in {train_time:.1f}s"
+        )
 
         # Proactively tear down DataLoader workers before evaluation/logging to
         # avoid expensive/shaky multiprocessing shutdown during interpreter exit.
@@ -1315,6 +1523,7 @@ def main():
             "exploration_eps": eps,
             "loss": avg_loss,
             "q_mae": avg_mae,
+            "listwise": avg_listwise,
         }
         if eval_results:
             log_entry.update({f"eval_{k}": v for k, v in eval_results.items()})

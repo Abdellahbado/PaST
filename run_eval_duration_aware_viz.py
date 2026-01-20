@@ -1,15 +1,16 @@
-"""Enhanced evaluation script with schedule visualization for ppo_family_q4_beststart.
+"""Evaluation script with schedule visualization for ppo_duration_aware_family.
 
 Extends run_eval_family_q4.py with:
 - Gantt-style schedule visualization (price periods + job bars)
 - Multi-scale support (small/medium/large instances)
 - Side-by-side comparison of all methods
-- **Best-start decoding logic** for visualization (iterating through family slots to find min-energy start)
+- Duration-aware family decoding (families based on avg window cost w(s,p)/p)
+- Epsilon-constraint loop analysis
 
 Example:
-    # Viz best-start variant
-    python PaST/run_eval_family_q4_beststart_viz.py \
-        --checkpoint PaST/runs_p100/ppo_family_best/best.pt \
+    # Viz duration-aware variant
+    python PaST/run_eval_duration_aware_viz.py \
+        --checkpoint PaST/runs_p100/ppo_duration_aware/checkpoints/best.pt \
         --eval_seed 1337 \
         --num_instances 16 --num_viz 2 \
         --scale small --beta 4 --gamma 4
@@ -57,6 +58,34 @@ from PaST.sm_benchmark_data import (
     SingleMachineEpisode,
 )
 import random
+import PaST.sgbs as sgbs_module  # Import module to patch it
+
+
+def _monkeypatch_sgbs_for_duration_aware():
+    """
+    CRITICAL WORKAROUND:
+    The default `sgbs._completion_feasible_action_mask` logic supports `use_price_families` (slot-based)
+    but assumes a slot-to-family mapping that is incorrect for DURATION-AWARE families (which depend on p).
+    It also runs very slowly (O(N*T)) per step.
+
+    Since the duration-aware environment (`SingleMachinePeriodEnv` with `use_duration_aware_families=True`)
+    already computes the exact correct action mask in `_get_obs()["action_mask"]`, we can safely
+    disable the redundant (and incorrect) extra masking in SGBS for this script.
+    """
+
+    def _dummy_mask(env, obs):
+        if "action_mask" in obs:
+            return obs["action_mask"].float()
+        return torch.ones((env.batch_size, env.action_dim), device=env.device)
+
+    print(
+        ">> Monkeypatching PaST.sgbs._completion_feasible_action_mask to bypass slow/incorrect logic"
+    )
+    sgbs_module._completion_feasible_action_mask = _dummy_mask
+
+
+# Apply patch immediately
+_monkeypatch_sgbs_for_duration_aware()
 
 
 def batch_from_episodes(
@@ -321,7 +350,6 @@ def _action_trace_to_bars_family(
         # Here we optimize the loop range.
 
         for u in range(t, search_end):
-            # Check family membership
             if slot_families[u] == family_id:
                 energy_cost = get_interval_cost(u, u + p)
                 obj = energy_cost + wait_penalty * max(0, u - t)
@@ -484,37 +512,6 @@ def run_epsilon_constraint_analysis(
     print(f"EPSILON CONSTRAINT ANALYSIS (steps={args.epsilon_steps})")
     print("=" * 70)
 
-    # Parse beta/gamma lists
-    if isinstance(args.beta, int):
-        betas = [args.beta]
-    else:
-        betas = [int(x) for x in str(args.beta).split(",")]
-
-    if isinstance(args.gamma, int):
-        gammas = [args.gamma]
-    else:
-        gammas = [int(x) for x in str(args.gamma).split(",")]
-
-    # Zip if same length > 1, else product?
-    bg_pairs = []
-    if len(betas) == len(gammas) and len(betas) > 1:
-        bg_pairs = list(zip(betas, gammas))
-    elif len(betas) == 1 and len(gammas) >= 1:
-        bg_pairs = [(betas[0], g) for g in gammas]
-    elif len(gammas) == 1 and len(betas) >= 1:
-        bg_pairs = [(b, gammas[0]) for b in betas]
-    else:
-        # Cross product
-        for b in betas:
-            for g in gammas:
-                bg_pairs.append((b, g))
-
-    print(f"SGBS configurations: {bg_pairs}")
-
-    # Ensure output directory exists before starting loop
-    out_dir = Path(args.out_dir) if args.out_dir else (args.run_dir or Path.cwd())
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     rng = np.random.RandomState(args.eval_seed)
     # We need Python random for the generator functions
     py_rng = random.Random(args.eval_seed)
@@ -522,6 +519,8 @@ def run_epsilon_constraint_analysis(
     results = []
 
     # Slack ratios to test (linear from 0.0 to 1.0)
+    # 0.0 means T_limit = T_min
+    # 1.0 means T_limit = T_max (actually T_min + 1.0 * (T_max - T_min))
     ratios = np.linspace(0.0, 1.0, args.epsilon_steps)
 
     # 1. Generate base instances
@@ -551,11 +550,17 @@ def run_epsilon_constraint_analysis(
         # Create episodes for this ratio
         episodes = []
         for b in base_instances:
+            # We want exact control over T_limit to match the ratio
+            # The generator uses random uniform, so we manually call make_single_machine_episode
+            # but we need to override the randomness inside.
+            # Actually make_single_machine_episode takes min/max ratio.
+            # If we set min=max=ratio, we get fixed ratio.
+
             ep = make_single_machine_episode(
                 b["raw"],
                 b["m_idx"],
                 b["job_idxs"],
-                py_rng,
+                py_rng,  # This RNG state will advance, but that's fine
                 deadline_slack_ratio_min=ratio,
                 deadline_slack_ratio_max=ratio,
             )
@@ -569,21 +574,26 @@ def run_epsilon_constraint_analysis(
             T_max_pad=500,
         )
 
+        # Move batch to torch
+        # Note: greedy/sgbs expect dict of torch tensors (or numpy, handled internally?)
+        # greedy_decode expects dict of numpy arrays is fine?
+        # Actually greedy_decode calls `batch_to_device`? No, let's check.
+        # The existing code calls `generate_episode_batch` which returns numpy.
+        # `greedy_decode` docstring says `batch_data: Dict[str, Any]` (numpy).
+        # It handles conversion.
+
         # Run Greedy
         g_res = greedy_decode(model, variant_config.env, device, batch)
 
-        # Run SGBS for each pair
-        sgbs_res_map = {}
-        for b_val, g_val in bg_pairs:
-            s_res = sgbs(
-                model=model,
-                env_config=variant_config.env,
-                device=device,
-                batch_data=batch,
-                beta=int(b_val),
-                gamma=int(g_val),
-            )
-            sgbs_res_map[f"{b_val}-{g_val}"] = s_res
+        # Run SGBS
+        s_res = sgbs(
+            model=model,
+            env_config=variant_config.env,
+            device=device,
+            batch_data=batch,
+            beta=int(args.beta),
+            gamma=int(args.gamma),
+        )
 
         # Run DP
         spt_res = spt_lpt_with_dp(variant_config.env, device, batch, which="spt")
@@ -591,30 +601,25 @@ def run_epsilon_constraint_analysis(
 
         # Aggregate
         for i in range(len(episodes)):
-            row = {
-                "instance_idx": i,
-                "slack_ratio": float(ratio),
-                "T_limit": int(episodes[i].T_limit),
-                "T_min": int(episodes[i].T_min),
-                "greedy_energy": g_res[i].total_energy,
-                "spt_dp_energy": spt_res[i].total_energy,
-                "lpt_dp_energy": lpt_res[i].total_energy,
-            }
-            # Add SGBS results
-            for label, res_list in sgbs_res_map.items():
-                row[f"sgbs_{label}_energy"] = res_list[i].total_energy
+            results.append(
+                {
+                    "instance_idx": i,
+                    "slack_ratio": float(ratio),
+                    "T_limit": int(episodes[i].T_limit),
+                    "T_min": int(episodes[i].T_min),
+                    "greedy_energy": g_res[i].total_energy,
+                    "sgbs_energy": s_res[i].total_energy,
+                    "spt_dp_energy": spt_res[i].total_energy,
+                    "lpt_dp_energy": lpt_res[i].total_energy,
+                }
+            )
 
-            # Keep "sgbs_energy" as the first one for backward compat
-            first_key = list(sgbs_res_map.keys())[0]
-            row["sgbs_energy"] = sgbs_res_map[first_key][i].total_energy
-
-            results.append(row)
-
-        # Visualize schedules
+        # Visualize schedules for this slack ratio
+        out_dir = Path(args.out_dir) if args.out_dir else (args.run_dir or Path.cwd())
         plot_batch_schedules(
             batch=batch,
             greedy_res=g_res,
-            sgbs_res_map=sgbs_res_map,
+            sgbs_res=s_res,
             spt_res=spt_res,
             lpt_res=lpt_res,
             variant_config=variant_config,
@@ -626,45 +631,12 @@ def run_epsilon_constraint_analysis(
         )
 
     # 3. Save and Plot
+    out_dir = Path(args.out_dir) if args.out_dir else (args.run_dir or Path.cwd())
     out_csv = out_dir / f"epsilon_results_{scale_str}_seed{args.eval_seed}.csv"
 
     import pandas as pd
 
     df = pd.DataFrame(results)
-    df.to_csv(out_csv, index=False)
-    print(f"Saved results to {out_csv}")
-
-    plot_epsilon_curves(
-        results, out_dir / f"epsilon_plot_{scale_str}_seed{args.eval_seed}.png"
-    )
-
-    # Print Summary Averages
-    print("\n" + "=" * 70)
-    print("SUMMARY COMPARISON (Average Energy across all slack ratios)")
-    print("=" * 70)
-    print(f"{'Method':<20} | {'Mean Energy':<12} | {'Improvement vs Greedy':<20}")
-    print("-" * 60)
-
-    greedy_mean = df["greedy_energy"].mean()
-    print(f"{'Greedy':<20} | {greedy_mean:<12.2f} | {'-':<20}")
-
-    for label in sgbs_res_map.keys():  # Keys from last iteration valid keys
-        col = f"sgbs_{label}_energy"
-        if col in df.columns:
-            m_mean = df[col].mean()
-            imp = ((greedy_mean - m_mean) / greedy_mean * 100) if greedy_mean > 0 else 0
-            print(f"{f'SGBS({label})':<20} | {m_mean:<12.2f} | {f'{imp:+.2f}%':<20}")
-
-    spt_mean = df["spt_dp_energy"].mean()
-    print(
-        f"{'SPT+DP':<20} | {spt_mean:<12.2f} | {f'{((greedy_mean - spt_mean)/greedy_mean*100):+.2f}%' if greedy_mean>0 else '0%'}"
-    )
-
-    lpt_mean = df["lpt_dp_energy"].mean()
-    print(
-        f"{'LPT+DP':<20} | {lpt_mean:<12.2f} | {f'{((greedy_mean - lpt_mean)/greedy_mean*100):+.2f}%' if greedy_mean>0 else '0%'}"
-    )
-    print("=" * 70)
 
     # Ensure directory exists
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -683,111 +655,6 @@ def _mean(x: List[float]) -> float:
     if not finite.any():
         return float("nan")
     return float(arr[finite].mean())
-
-
-def plot_batch_schedules(
-    batch: Dict[str, Any],
-    greedy_res: List[DecodeResult],
-    sgbs_res_map: Dict[str, List[DecodeResult]],  # key: "beta-gamma"
-    spt_res: List[DPResult],
-    lpt_res: List[DPResult],
-    variant_config,
-    args,
-    out_dir: Path,
-    scale_str: str,
-    title_suffix: str = "",
-    filename_suffix: str = "",
-):
-    """Helper to generate visualizations for a batch of results."""
-    if args.num_viz <= 0:
-        return
-
-    print(f"Generating {args.num_viz} schedule visualizations{title_suffix}...")
-
-    for viz_idx in range(min(int(args.num_viz), int(batch["n_jobs"].shape[0]))):
-        single = _slice_single_instance(batch, viz_idx)
-        n_jobs = int(single["n_jobs"][0])
-        T_limit = int(single["T_limit"][0])
-        p_subset = single["p_subset"][0][:n_jobs].astype(np.int32)
-
-        schedules = {}
-
-        # SPT+DP schedule
-        schedules["SPT+DP"] = {
-            "energy": spt_res[viz_idx].total_energy,
-            "bars": _sequence_schedule_to_bars(
-                spt_res[viz_idx].job_sequence, spt_res[viz_idx].start_times, p_subset
-            ),
-            "complete": True,
-        }
-
-        # LPT+DP schedule
-        schedules["LPT+DP"] = {
-            "energy": lpt_res[viz_idx].total_energy,
-            "bars": _sequence_schedule_to_bars(
-                lpt_res[viz_idx].job_sequence, lpt_res[viz_idx].start_times, p_subset
-            ),
-            "complete": True,
-        }
-
-        # Greedy - from action trace
-        if greedy_res[viz_idx].actions is not None:
-            greedy_bars, greedy_energy = _action_trace_to_bars_family(
-                greedy_res[viz_idx].actions,
-                variant_config.env,
-                p_subset,
-                single["ct"][0],
-                int(single["e_single"][0]),
-                T_limit,
-                single["period_starts"][0],
-                single["Tk"][0],
-                single["ck"][0],
-                int(single["K"][0]),
-            )
-            schedules["Greedy"] = {
-                "energy": greedy_res[viz_idx].total_energy,
-                "bars": greedy_bars,
-                "complete": len(greedy_bars) == n_jobs,
-            }
-
-        # SGBS - all variants
-        for label, res_list in sgbs_res_map.items():
-            if res_list[viz_idx].actions is not None:
-                sgbs_bars, sgbs_energy = _action_trace_to_bars_family(
-                    res_list[viz_idx].actions,
-                    variant_config.env,
-                    p_subset,
-                    single["ct"][0],
-                    int(single["e_single"][0]),
-                    T_limit,
-                    single["period_starts"][0],
-                    single["Tk"][0],
-                    single["ck"][0],
-                    int(single["K"][0]),
-                )
-                schedules[f"SGBS({label})"] = {
-                    "energy": res_list[viz_idx].total_energy,
-                    "bars": sgbs_bars,
-                    "complete": len(sgbs_bars) == n_jobs,
-                }
-
-        # Construct filename
-        fname = f"schedule_viz_{scale_str}_seed{args.eval_seed}{filename_suffix}_idx{viz_idx}.png"
-        out_png = out_dir / fname
-
-        visualize_schedule(
-            out_png,
-            {
-                "n_jobs": n_jobs,
-                "T_limit": T_limit,
-                "Tk": single["Tk"][0],
-                "ck": single["ck"][0],
-                "period_starts": single["period_starts"][0],
-                "K": int(single["K"][0]),
-            },
-            schedules,
-            f" | seed={args.eval_seed} idx={viz_idx}{title_suffix}",
-        )
 
 
 def visualize_schedule(
@@ -921,6 +788,111 @@ def visualize_schedule(
     print(f"Wrote: {out_path}")
 
 
+def plot_batch_schedules(
+    batch: Dict[str, Any],
+    greedy_res: List[DecodeResult],
+    sgbs_res: List[DecodeResult],
+    spt_res: List[DPResult],
+    lpt_res: List[DPResult],
+    variant_config,
+    args,
+    out_dir: Path,
+    scale_str: str,
+    title_suffix: str = "",
+    filename_suffix: str = "",
+):
+    """Helper to generate visualizations for a batch of results."""
+    if args.num_viz <= 0:
+        return
+
+    print(f"Generating {args.num_viz} schedule visualizations{title_suffix}...")
+
+    for viz_idx in range(min(int(args.num_viz), int(batch["n_jobs"].shape[0]))):
+        single = _slice_single_instance(batch, viz_idx)
+        n_jobs = int(single["n_jobs"][0])
+        T_limit = int(single["T_limit"][0])
+        p_subset = single["p_subset"][0][:n_jobs].astype(np.int32)
+
+        schedules = {}
+
+        # SPT+DP schedule
+        schedules["SPT+DP"] = {
+            "energy": spt_res[viz_idx].total_energy,
+            "bars": _sequence_schedule_to_bars(
+                spt_res[viz_idx].job_sequence, spt_res[viz_idx].start_times, p_subset
+            ),
+            "complete": True,
+        }
+
+        # LPT+DP schedule
+        schedules["LPT+DP"] = {
+            "energy": lpt_res[viz_idx].total_energy,
+            "bars": _sequence_schedule_to_bars(
+                lpt_res[viz_idx].job_sequence, lpt_res[viz_idx].start_times, p_subset
+            ),
+            "complete": True,
+        }
+
+        # Greedy - from action trace
+        if greedy_res[viz_idx].actions is not None:
+            greedy_bars, greedy_energy = _action_trace_to_bars_family(
+                greedy_res[viz_idx].actions,
+                variant_config.env,
+                p_subset,
+                single["ct"][0],
+                int(single["e_single"][0]),
+                T_limit,
+                single["period_starts"][0],
+                single["Tk"][0],
+                single["ck"][0],
+                int(single["K"][0]),
+            )
+            schedules["Greedy"] = {
+                "energy": greedy_res[viz_idx].total_energy,
+                "bars": greedy_bars,
+                "complete": len(greedy_bars) == n_jobs,
+            }
+
+        # SGBS - from action trace
+        if sgbs_res[viz_idx].actions is not None:
+            sgbs_bars, sgbs_energy = _action_trace_to_bars_family(
+                sgbs_res[viz_idx].actions,
+                variant_config.env,
+                p_subset,
+                single["ct"][0],
+                int(single["e_single"][0]),
+                T_limit,
+                single["period_starts"][0],
+                single["Tk"][0],
+                single["ck"][0],
+                int(single["K"][0]),
+            )
+            schedules["SGBS"] = {
+                "energy": sgbs_res[viz_idx].total_energy,
+                "bars": sgbs_bars,
+                "complete": len(sgbs_bars) == n_jobs,
+            }
+
+        # Construct filename
+        # e.g. schedule_viz_small_seed42_slack0.50_idx0.png
+        fname = f"schedule_viz_{scale_str}_seed{args.eval_seed}{filename_suffix}_idx{viz_idx}.png"
+        out_png = out_dir / fname
+
+        visualize_schedule(
+            out_png,
+            {
+                "n_jobs": n_jobs,
+                "T_limit": T_limit,
+                "Tk": single["Tk"][0],
+                "ck": single["ck"][0],
+                "period_starts": single["period_starts"][0],
+                "K": int(single["K"][0]),
+            },
+            schedules,
+            f" | seed={args.eval_seed} idx={viz_idx}{title_suffix}",
+        )
+
+
 def parse_args() -> argparse.Namespace:
     # Default variant upgraded to include "beststart"
     p = argparse.ArgumentParser(
@@ -929,19 +901,15 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--run_dir", type=str, default=None)
     p.add_argument("--checkpoint", type=str, default=None)
-    p.add_argument("--variant_id", type=str, default="ppo_family_q4_ctx13_beststart")
+    p.add_argument("--variant_id", type=str, default="ppo_duration_aware_family_ctx13")
     p.add_argument("--which", type=str, default="best", choices=["best", "latest"])
     p.add_argument("--eval_seed", type=int, required=True)
     p.add_argument("--num_instances", type=int, default=64)
     p.add_argument("--device", type=str, default=None, choices=["cuda", "cpu"])
 
     # SGBS parameters
-    p.add_argument(
-        "--beta", type=str, default="4", help="Beam width (int or list '4,16')"
-    )
-    p.add_argument(
-        "--gamma", type=str, default="4", help="Rollout depth (int or list '4,32')"
-    )
+    p.add_argument("--beta", type=int, default=4)
+    p.add_argument("--gamma", type=int, default=4)
 
     # Scale and visualization
     p.add_argument(
@@ -1023,22 +991,14 @@ def main() -> None:
 
     scale_str = args.scale or "mixed"
     print("=" * 70)
-    print(f"SGBS Evaluation with Visualization (BEST-START variant)")
+    print(f"SGBS Evaluation with Visualization (DURATION-AWARE FAMILY variant)")
     print("=" * 70)
     print(f"Variant: {variant_id_str}")
     print(f"Checkpoint: {ckpt_path}")
     print(f"Scale: {scale_str} (T_max choices: {data_cfg.T_max_choices})")
     print(f"Device: {device}")
     print(f"Instances: {args.num_instances}, Viz: {args.num_viz}")
-
-    # Parse SGBS params
-    try:
-        betas = [int(x) for x in str(args.beta).split(",")]
-        gammas = [int(x) for x in str(args.gamma).split(",")]
-    except ValueError:
-        raise ValueError("beta/gamma must be integers or comma-separated integers")
-
-    print(f"SGBS: beta={betas}, gamma={gammas}")
+    print(f"SGBS: beta={args.beta}, gamma={args.gamma}")
     print(f"Use Best Family Start: {variant_config.env.use_best_family_start}")
     print("=" * 70)
 
@@ -1073,23 +1033,15 @@ def main() -> None:
     greedy_time = time.perf_counter() - t0
     print(f"  Greedy done in {greedy_time:.2f}s")
 
-    # For standard run, usage first beta/gamma pair only
-    beta_val = betas[0]
-    gamma_val = gammas[0]
-    if len(betas) > 1 or len(gammas) > 1:
-        print(
-            f"WARNING: Standard run only supports one SGBS config. Using beta={beta_val}, gamma={gamma_val}."
-        )
-
-    print(f"Running SGBS(beta={beta_val}, gamma={gamma_val})...")
+    print(f"Running SGBS(beta={args.beta}, gamma={args.gamma})...")
     t0 = time.perf_counter()
     sgbs_res = sgbs(
         model=model,
         env_config=variant_config.env,
         device=device,
         batch_data=batch,
-        beta=int(beta_val),
-        gamma=int(gamma_val),
+        beta=int(args.beta),
+        gamma=int(args.gamma),
     )
     sgbs_time = time.perf_counter() - t0
     print(f"  SGBS done in {sgbs_time:.2f}s")

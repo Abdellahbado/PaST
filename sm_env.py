@@ -460,6 +460,10 @@ class SingleMachinePeriodEnv(gym.Env):
         #  - q25,q50,q75 (3)
         #  - delta_to_next_slot_in_family[0..3] (4)
         # Total F_ctx = 13.
+        #
+        # Capacity-aware extension (if F_ctx >= 18):
+        #  - slots_remaining_in_family[0..3] in [t, min(T_limit, T_max)) (4)
+        #  - cheap_capacity_deficit (1)
         if self.env_config.use_price_families and self.F_ctx >= 13:
             # Compute per-episode quantiles over valid horizon.
             ct_valid = np.asarray(ep.ct[: int(ep.T_max)], dtype=np.float32)
@@ -493,6 +497,22 @@ class SingleMachinePeriodEnv(gym.Env):
                     ctx[9 + f] = large
                 else:
                     ctx[9 + f] = np.float32(cand[0] - t_now)
+
+            # Capacity-aware features
+            if self.F_ctx >= 18:
+                horizon_len = max(1.0, float(t_end - t_now))
+                # slots_remaining_in_family[0..3]
+                for f in range(4):
+                    ctx[13 + f] = np.float32(
+                        np.sum(valid & (family == f)) / horizon_len
+                    )
+
+                # cheap_capacity_deficit: positive means "not enough cheap slots for remaining work"
+                cheap_slots = float(np.sum(valid & (family == 0)))
+                remaining_work = float(ctx[2])
+                ctx[17] = np.float32(
+                    (remaining_work - cheap_slots) / (remaining_work + 1.0)
+                )
 
         # Action mask: (action_dim,)
         action_mask = self.get_action_mask()
@@ -1140,6 +1160,13 @@ class GPUBatchSingleMachinePeriodEnv:
             1
         )  # (B, T_max_pad) - slot >= t_now
 
+        # Optional: cap how far we allow waiting when using price families.
+        max_wait = getattr(self.env_config, "best_family_start_max_wait_slots", None)
+        if max_wait is not None and int(max_wait) >= 0:
+            valid_start_slots = valid_start_slots & (
+                (slot_indices - self.t.unsqueeze(1)).to(torch.int32) <= int(max_wait)
+            )
+
         # Remaining work in slots for each instance
         remaining_work = (
             (p_all.float() * job_mask.float()).sum(dim=1).to(torch.int32)
@@ -1311,6 +1338,13 @@ class GPUBatchSingleMachinePeriodEnv:
         # Valid start slots (>= t_now)
         valid_slots = slot_indices >= self.t.unsqueeze(1)  # (B, T_max_pad)
 
+        # Optional: cap how far we allow waiting when using price families.
+        max_wait = getattr(self.env_config, "best_family_start_max_wait_slots", None)
+        if max_wait is not None and int(max_wait) >= 0:
+            valid_slots = valid_slots & (
+                (slot_indices - self.t.unsqueeze(1)).to(torch.int32) <= int(max_wait)
+            )
+
         # Slots in chosen family
         family_ids_expanded = family_ids.unsqueeze(1)  # (B, 1)
         in_family = slot_families == family_ids_expanded  # (B, T_max_pad)
@@ -1348,6 +1382,15 @@ class GPUBatchSingleMachinePeriodEnv:
         cumsum_at_end = torch.gather(ct_cumsum, 1, end_idx)
         cumsum_at_start = torch.gather(ct_cumsum, 1, start_idx)
         window_cost = cumsum_at_end - cumsum_at_start  # (B, T_max_pad)
+
+        # Optional: add a wait penalty to discourage jumping far into the future.
+        wait_penalty = float(
+            getattr(self.env_config, "best_family_start_wait_penalty", 0.0)
+        )
+        if wait_penalty > 0.0:
+            # wait(s) = max(0, s - t_now)
+            wait = (slot_indices - self.t.unsqueeze(1)).clamp(min=0).float()
+            window_cost = window_cost + wait_penalty * wait
 
         # Mask non-candidates with +inf, then take argmin
         inf = torch.tensor(float("inf"), device=self.device)
@@ -2112,6 +2155,10 @@ class GPUBatchSingleMachinePeriodEnv:
         #  - q25,q50,q75 (3)
         #  - delta_to_next_slot_in_family[0..3] (4)
         # Total F_ctx = 13.
+        #
+        # Capacity-aware extension (if F_ctx >= 18):
+        #  - slots_remaining_in_family[0..3] in [t, min(T_limit, T_max)) (4)
+        #  - cheap_capacity_deficit (1)
         if self.env_config.use_price_families and self.F_ctx >= 13:
             if getattr(self.env_config, "use_duration_aware_families", False):
                 # Duration-aware ctx13:
@@ -2218,6 +2265,31 @@ class GPUBatchSingleMachinePeriodEnv:
                     deltas[:, f] = delta_f
 
                 ctx = torch.cat([ctx6, self.price_q.float(), deltas], dim=1)
+
+                # Capacity-aware features: expose future "capacity" of each family.
+                if self.F_ctx >= 18:
+                    t_now = self.t.unsqueeze(1)
+                    t_end = torch.minimum(self.T_limit, self.T_max).unsqueeze(1)
+                    slot_idx = torch.arange(
+                        self.T_max_pad, device=self.device
+                    ).unsqueeze(0)
+                    valid = (slot_idx >= t_now) & (slot_idx < t_end)
+
+                    counts = []
+                    for f in range(self.num_slack_choices):
+                        counts.append((valid & (slot_families == f)).sum(dim=1).float())
+
+                    counts_t = torch.stack(counts, dim=1)  # (B, F)
+                    horizon_len = (
+                        (t_end.squeeze(1) - t_now.squeeze(1)).clamp(min=1).float()
+                    )
+                    counts_norm = counts_t / horizon_len.unsqueeze(1)
+
+                    cheap_slots = counts_t[:, 0]
+                    deficit = (remaining_work - cheap_slots) / (remaining_work + 1.0)
+                    deficit = torch.clamp(deficit, min=-1.0, max=1.0).unsqueeze(1)
+
+                    ctx = torch.cat([ctx, counts_norm, deficit], dim=1)
         else:
             ctx = ctx6
 

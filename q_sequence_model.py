@@ -1,14 +1,13 @@
-"""
-Q-value Model for Sequence Scheduling with Dueling Architecture.
+"""PaST Q-value models for sequencing.
 
-This module extends the PaST encoder with a dueling Q-head for learning
-policy-evaluation Q-values: Q(s, j) = expected DP cost if job j is chosen
-next in state s, then the sequence is completed with a fixed rollout policy.
+The default Q-sequence model uses the PaST transformer encoder backbone with a
+dueling Q-head.
 
-Key features:
-- Dueling decomposition: Q(s,j) = V(s) + A(s,j) - mean(A(s,:))
-- Per-job Q-scores for ranking (used in SGBS expansion)
-- Temperature-scaled conversion to logits for action sampling
+This file also provides a lightweight alternative backbone aimed at faster
+inference on CPU:
+    - 1D CNN over period tokens (captures cheap/expensive segments and boundaries)
+    - DeepSets-style MLP over jobs + masked pooling
+    - Fusion MLP + dueling Q-head
 """
 
 from typing import Optional, Tuple
@@ -17,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from PaST.config import VariantConfig, ModelConfig, EnvConfig
+from PaST.config import VariantConfig, ModelConfig, EnvConfig, VariantID
 from PaST.past_sm_model import PaSTEncoder
 
 
@@ -302,8 +301,151 @@ class QSequenceNet(nn.Module):
         return q_values.min(dim=-1).values
 
 
+# =============================================================================
+# Lightweight CNN(periods) + DeepSets(jobs) backbone
+# =============================================================================
+
+
+class PeriodCNNEncoder(nn.Module):
+    """Small Conv1D encoder over period tokens."""
+
+    def __init__(self, in_dim: int, d_model: int):
+        super().__init__()
+        hidden = max(32, d_model // 2)
+        # Conv1d expects [B, C, L]
+        self.net = nn.Sequential(
+            nn.Conv1d(in_dim, hidden, kernel_size=5, padding=2),
+            nn.ReLU(),
+            nn.Conv1d(hidden, hidden, kernel_size=5, padding=2),
+            nn.ReLU(),
+            nn.Conv1d(hidden, d_model, kernel_size=1),
+            nn.ReLU(),
+        )
+
+    def forward(self, periods: Tensor, period_mask: Optional[Tensor] = None) -> Tensor:
+        """Encode periods into a single vector.
+
+        Args:
+            periods: [B, K, F_period]
+            period_mask: [B, K] True = invalid token
+        Returns:
+            period_emb: [B, d_model]
+        """
+        x = periods.transpose(1, 2)  # [B, F, K]
+        x = self.net(x)  # [B, d_model, K]
+
+        if period_mask is not None:
+            valid = (~period_mask).float().unsqueeze(1)  # [B, 1, K]
+            x = x * valid
+            denom = valid.sum(dim=-1).clamp(min=1.0)  # [B, 1]
+            pooled = x.sum(dim=-1) / denom  # [B, d_model]
+        else:
+            pooled = x.mean(dim=-1)
+
+        return pooled
+
+
+class DeepSetsJobEncoder(nn.Module):
+    """Per-job MLP + pooling (masked mean)."""
+
+    def __init__(self, in_dim: int, d_model: int):
+        super().__init__()
+        hidden = max(64, d_model)
+        self.phi = nn.Sequential(
+            nn.Linear(in_dim, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, d_model),
+            nn.ReLU(),
+        )
+        self.rho = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+        )
+
+    def forward(
+        self, jobs: Tensor, job_mask: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
+        """Encode jobs.
+
+        Args:
+            jobs: [B, N, F_job]
+            job_mask: [B, N] True = invalid
+        Returns:
+            job_emb: [B, N, d_model]
+            pooled: [B, d_model]
+        """
+        job_emb = self.phi(jobs)
+        if job_mask is not None:
+            valid = (~job_mask).float().unsqueeze(-1)
+            pooled = (job_emb * valid).sum(dim=1) / valid.sum(dim=1).clamp(min=1.0)
+        else:
+            pooled = job_emb.mean(dim=1)
+        pooled = self.rho(pooled)
+        return job_emb, pooled
+
+
+class QSequenceCNNNet(nn.Module):
+    """Q-sequence network with CNN(periods)+DeepSets(jobs) backbone."""
+
+    def __init__(self, config: VariantConfig):
+        super().__init__()
+        self.config = config
+        self.model_config = config.model
+        self.env_config = config.env
+
+        d_model = self.model_config.d_model
+        self.N_jobs = self.env_config.M_job_bins
+        self.action_dim = self.N_jobs
+
+        self.period_enc = PeriodCNNEncoder(
+            in_dim=self.env_config.F_period, d_model=d_model
+        )
+        self.job_enc = DeepSetsJobEncoder(in_dim=self.env_config.F_job, d_model=d_model)
+
+        # Fuse ctx + period summary into a ctx embedding for the dueling head
+        self.ctx_proj = nn.Sequential(
+            nn.Linear(self.env_config.F_ctx + d_model, d_model),
+            nn.ReLU(),
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+        )
+
+        self.q_head = DuelingQHead(
+            d_model=d_model,
+            hidden_dim=256,
+            use_global_horizon=False,
+        )
+
+    def forward(
+        self,
+        jobs: Tensor,
+        periods_local: Tensor,
+        ctx: Tensor,
+        job_mask: Optional[Tensor] = None,
+        period_mask: Optional[Tensor] = None,
+        periods_full: Optional[Tensor] = None,
+        period_full_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        # Prefer full periods if provided (for future variants), else local.
+        per = periods_full if periods_full is not None else periods_local
+        per_mask = period_full_mask if period_full_mask is not None else period_mask
+
+        period_emb = self.period_enc(per, per_mask)  # [B, d_model]
+        job_emb, _ = self.job_enc(jobs, job_mask)  # [B, N, d_model]
+
+        ctx_in = torch.cat([ctx, period_emb], dim=-1)
+        ctx_emb = self.ctx_proj(ctx_in)  # [B, d_model]
+
+        q_values = self.q_head(
+            job_emb=job_emb, ctx_emb=ctx_emb, global_emb=None, job_mask=job_mask
+        )
+        return q_values
+
+
 def build_q_model(config: VariantConfig) -> QSequenceNet:
     """Build Q-value model from variant configuration."""
+    if config.variant_id in (VariantID.Q_SEQUENCE_CNN, VariantID.Q_SEQUENCE_CNN_CTX13):
+        return QSequenceCNNNet(config)  # type: ignore[return-value]
     return QSequenceNet(config)
 
 

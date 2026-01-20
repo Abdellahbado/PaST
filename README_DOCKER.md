@@ -1,80 +1,94 @@
-# PaST on Docker (A100 / long runs)
+# Docker Training (Artifacts Persisted to Host)
 
-This folder contains everything needed to run PaST (PPO + REINFORCE variants) inside Docker with NVIDIA GPUs.
+This guide is for supervisors who need repeatable training runs and **persistent artifacts**.
 
-## Prereqs (host)
+## What a “mount” means (plain language)
 
-- Docker installed
-- NVIDIA driver installed
-- NVIDIA Container Toolkit installed (`nvidia-container-toolkit`)
+The container writes training results to **/outputs**. We “mount” your local folder **./artifacts** into that location, so anything the container writes to **/outputs** appears on your host in **./artifacts** and stays there after the container exits.
 
-Quick check:
-- `nvidia-smi` works on the host
-- `docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi` works
+---
 
-## Build (from GitHub clone)
+## Quick start (Linux/macOS)
 
-From the repo root:
+Run these commands from the repo root.
 
-- `docker build -t past:latest -f PaST/Dockerfile PaST`
+1. Create a host folder for artifacts:
 
-Apple Silicon note (M1/M2/M3 Macs): the base image is `linux/amd64`, so you may see a platform warning. You can either:
-- Build on the A100 server (recommended; it will be `linux/amd64`), or
-- Force an amd64 build on your Mac (will be slower): `docker build --platform linux/amd64 -t past:latest -f PaST/Dockerfile PaST`
+given command:
+mkdir -p artifacts
 
-This uses `PaST/` as the build context (so other folders aren’t copied).
+1. Build the Docker image:
 
-## Run all variants (recommended)
+given command:
+docker build -t past-train -f PaST/Dockerfile .
 
-From `PaST/`:
+1. Run training with a bind mount:
 
-- `docker compose up --build`
+given command:
+docker run --rm \
+  --mount type=bind,source="$(pwd)/artifacts",target=/outputs \
+  past-train
 
-Outputs persist to:
-- `PaST/runs/` (mounted to `/workspace/runs` inside the container)
+1. Find results on your host:
 
-Stop:
-- `docker compose down`
+- Look in ./artifacts/
+- Each run creates a unique subfolder (for example: q_sequence_cnn_ctx13_s0_20260120_205658/)
+- Inside each run folder you will find:
+  - config.json
+  - log.jsonl
+  - checkpoint_*.pt
+  - best_model.pt
+  - final_model.pt
 
-## Custom runs
+---
 
-Run a single variant (PPO example):
+## Run using docker compose
 
-- `docker run --rm --gpus all -v "$PWD/runs:/workspace/runs" past:latest \
-  python -m PaST.train_ppo --variant_id ppo_full_global --config PaST/configs/a100_full.yaml \
-  --output_dir runs --eval_seed 1337 --eval_seed_mode per_update`
+Run from the PaST/ folder:
 
-Run the full suite with multiple seeds:
+given command:
+docker compose up --build
 
-- `docker run --rm --gpus all -v "$PWD/runs:/workspace/runs" past:latest \
-  python -m PaST.run_experiments --variants all --seeds 0 1 2 \
-  --config PaST/configs/a100_full.yaml --output_dir runs \
-  --eval_seed 1337 --eval_seed_mode per_update`
+Results will appear in PaST/artifacts/ on the host.
 
-## Parallel runs (multi-GPU nodes)
+---
 
-If the server has multiple GPUs, `PaST.run_experiments` can schedule jobs across them:
+## How to change the training command/flags
 
-- `python -m PaST.run_experiments --variants all --seeds 0 1 \
-  --config PaST/configs/a100_full.yaml --output_dir runs \
-  --gpus 0,1 --max_parallel 2`
+### Option A: docker run (one-off overrides)
 
-Notes:
-- With a single A100, keep `--max_parallel 1`.
-- Parallel mode sets `CUDA_VISIBLE_DEVICES` per job.
+Change the command after the image name:
 
-## Fair comparison: same eval instances across all methods
+given command:
+docker run --rm \
+  --mount type=bind,source="$(pwd)/artifacts",target=/outputs \
+  past-train \
+  python -m PaST.train_q_sequence --variant_id q_sequence_ctx13 --seed 1 --device cpu
 
-Pass `--eval_seed` to force the *same evaluation instances* for every variant.
+### Option B: docker compose (edit command)
 
-- `--eval_seed_mode fixed`: always evaluate on the exact same instances.
-- `--eval_seed_mode per_update`: evaluate on a different (but deterministic) batch each eval step.
+Edit the `command:` in docker-compose.yml, for example:
 
-This is implemented in:
-- `PaST/train_ppo.py`
-- `PaST/train_reinforce.py`
+- Variant change: `q_sequence_ctx13` or `q_sequence_cnn_ctx13`
+- Seed change: `--seed 1`
+- Output dir change: `--output_dir /outputs` (default in Docker)
 
-## Monitoring
+---
 
-- Watch metrics: `tail -f PaST/runs/<variant>/seed_<seed>/metrics.jsonl`
-- Best checkpoints: `PaST/runs/<variant>/seed_<seed>/checkpoints/best.pt`
+## Troubleshooting
+
+- **Bind mount path does not exist:**
+  - Docker will fail if the host path doesn’t exist.
+  - Fix: create it first: `mkdir -p artifacts`
+
+- **Files owned by root on the host:**
+  - This can happen if Docker runs as root.
+  - Optional fix: run the container as your user:
+    - `--user "$(id -u):$(id -g)"`
+
+---
+
+## Notes
+
+- Training scripts accept `--output_dir` and default to `/outputs` in Docker via `PAST_OUTPUT_DIR`.
+- The container always writes to /outputs, which maps to ./artifacts on the host.

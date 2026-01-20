@@ -73,11 +73,18 @@ class VariantID(Enum):
     PPO_FAMILY_Q4_CTX13_BESTSTART = (
         "ppo_family_q4_ctx13_beststart"  # Price-family + ctx13 + best feasible start
     )
+    PPO_FAMILY_Q4_CTX18_BESTSTART = "ppo_family_q4_ctx18_beststart"  # Price-family + ctx13 + capacity ctx + best feasible start
     PPO_SEQUENCE = "ppo_sequence"  # RL sequences jobs, Batch DP times them
     PPO_DURATION_AWARE_FAMILY = "ppo_duration_aware_family"  # Duration-aware families: families based on avg window cost
     PPO_DURATION_AWARE_FAMILY_CTX13 = "ppo_duration_aware_family_ctx13"  # Duration-aware families + identified ctx (q's + next-start deltas)
     Q_SEQUENCE = "q_sequence"  # Q-learning for sequences: supervised on DP costs
     Q_SEQUENCE_CTX13 = "q_sequence_ctx13"  # Q-sequence + identified ctx features
+    Q_SEQUENCE_CNN = (
+        "q_sequence_cnn"  # Q-sequence with lightweight CNN(periods)+DeepSets(jobs)
+    )
+    Q_SEQUENCE_CNN_CTX13 = (
+        "q_sequence_cnn_ctx13"  # Same as Q_SEQUENCE_CNN with ctx13 enabled
+    )
 
 
 # =============================================================================
@@ -334,6 +341,18 @@ class EnvConfig:
     # Price-family decoding: pick the best feasible start within chosen family
     # (minimizes window energy cost) instead of the earliest slot.
     use_best_family_start: bool = False
+
+    # Optional BEST-START tie-breaker / regularizer.
+    # Adds (best_family_start_wait_penalty * wait_slots) to the window energy objective.
+    # This discourages jumping far into the future just to hit a cheap slot.
+    best_family_start_wait_penalty: float = 0.0
+
+    # Optional hard cap on waiting for price-family variants.
+    # If set (>=0), an action (job,family) is valid only if there exists a feasible
+    # start in that family with (start - t_now) <= max_wait_slots, and BEST-START
+    # will only search within that wait window.
+    # Default None keeps historical behavior.
+    best_family_start_max_wait_slots: Optional[int] = None
 
     # Duration-aware families: families based on average window cost w(s,p)/p
     # instead of slot price. This makes "family 0 = cheap" mean full-job cost.
@@ -779,6 +798,28 @@ def get_ppo_family_q4_ctx13_beststart() -> VariantConfig:
     return cfg
 
 
+def get_ppo_family_q4_ctx18_beststart() -> VariantConfig:
+    """Price-family + ctx18 (adds family capacity signals) + best-start decoding.
+
+    Extends ctx13 by appending:
+        - slots_remaining_in_family[0..3] in [t, min(T_limit, T_max)) (4)
+        - cheap_capacity_deficit = (remaining_work - slots_remaining_family0)/(remaining_work+1) (1)
+
+    Total ctx dims: 18.
+    """
+    cfg = get_ppo_family_q4_ctx13_beststart()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_CTX18_BESTSTART
+
+    cfg.env.F_ctx = 18
+    cfg.model.ctx_input_dim = 18
+
+    # Leave this at 0 by default to keep decoder semantics unchanged unless you tune it.
+    # A small value (e.g. 0.05) can reduce pathological "wait for cheap" behavior.
+    cfg.env.best_family_start_wait_penalty = 0.0
+
+    return cfg
+
+
 def get_ppo_sequence() -> VariantConfig:
     """
     PPO + Sequence-Only (RL) + Batch DP (Time).
@@ -927,6 +968,38 @@ def get_q_sequence_ctx13() -> VariantConfig:
     cfg.env.F_ctx = 13
     cfg.model.ctx_input_dim = 13
 
+    # IMPORTANT: ctx13 semantics (quantiles + delta-to-next-slot) are only populated
+    # when price-family features are enabled in the env observation builder.
+    # This does NOT change the action space for Q-sequence (still job index), it
+    # only enriches ctx for the model.
+    cfg.env.use_price_families = True
+
+    return cfg
+
+
+def get_q_sequence_cnn() -> VariantConfig:
+    """Q-learning for Sequences with a lightweight CNN+DeepSets encoder.
+
+    Keeps the same environment as `get_q_sequence()` (sequencing + DP timing),
+    but swaps the Q-network backbone to a cheaper architecture:
+      - 1D CNN over period tokens (detects cheap regions/patterns)
+      - DeepSets-style MLP over jobs + pooling
+      - Fusion MLP + dueling Q head
+    """
+    cfg = get_q_sequence()
+    cfg.variant_id = VariantID.Q_SEQUENCE_CNN
+    return cfg
+
+
+def get_q_sequence_cnn_ctx13() -> VariantConfig:
+    """CNN+DeepSets Q-sequence variant with ctx13 identification features."""
+    cfg = get_q_sequence_cnn()
+    cfg.variant_id = VariantID.Q_SEQUENCE_CNN_CTX13
+
+    cfg.env.F_ctx = 13
+    cfg.model.ctx_input_dim = 13
+    cfg.env.use_price_families = True
+
     return cfg
 
 
@@ -942,11 +1015,14 @@ VARIANT_FACTORIES = {
     VariantID.PPO_FAMILY_Q4_CTX13: get_ppo_family_q4_ctx13,
     VariantID.PPO_FAMILY_Q4_BESTSTART: get_ppo_family_q4_beststart,
     VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART: get_ppo_family_q4_ctx13_beststart,
+    VariantID.PPO_FAMILY_Q4_CTX18_BESTSTART: get_ppo_family_q4_ctx18_beststart,
     VariantID.PPO_SEQUENCE: get_ppo_sequence,
     VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
     VariantID.PPO_DURATION_AWARE_FAMILY_CTX13: get_ppo_duration_aware_family_ctx13,
     VariantID.Q_SEQUENCE: get_q_sequence,
     VariantID.Q_SEQUENCE_CTX13: get_q_sequence_ctx13,
+    VariantID.Q_SEQUENCE_CNN: get_q_sequence_cnn,
+    VariantID.Q_SEQUENCE_CNN_CTX13: get_q_sequence_cnn_ctx13,
 }
 
 
