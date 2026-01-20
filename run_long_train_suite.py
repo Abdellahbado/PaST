@@ -23,6 +23,12 @@ class Job:
 
 
 def _training_entrypoint(variant_id: str) -> str:
+    # NOTE: Q-sequence variants are trained via supervised regression in
+    # `PaST.train_q_sequence`. In `config.py` they keep `training.algorithm` as a
+    # PPO placeholder for historical reasons, so we must route by variant_id.
+    if variant_id.startswith("q_sequence"):
+        return "PaST.train_q_sequence"
+
     cfg = get_variant_config(VariantID(variant_id))
     if cfg.training.algorithm == RLAlgorithm.PPO:
         return "PaST.train_ppo"

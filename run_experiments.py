@@ -64,6 +64,10 @@ def _jobs(variants: Sequence[str], seeds: Sequence[int]) -> List[Job]:
 
 
 def _training_entrypoint(variant_id: str) -> str:
+    # Q-sequence variants are trained via supervised regression.
+    if variant_id.startswith("q_sequence"):
+        return "PaST.train_q_sequence"
+
     cfg = get_variant_config(VariantID(variant_id))
     if cfg.training.algorithm == RLAlgorithm.PPO:
         return "PaST.train_ppo"
