@@ -474,7 +474,7 @@ class TrainingConfig:
     """Training hyperparameters (placeholder for future use)."""
 
     # RL algorithm
-    algorithm: RLAlgorithm = RLAlgorithm.PPO
+    algorithm: RLAlgorithm = RLAlgorithm.PPO    
 
     # For REINFORCE
     use_self_critic: bool = False  # Self-critic baseline (greedy rollout)

@@ -940,6 +940,78 @@ class PaSTSMNet(nn.Module):
         slack_idx = action % self.K_slack
         return job_bin_idx, slack_idx
 
+    # =========================================================================
+    # EAS Integration Methods
+    # =========================================================================
+
+    def get_embeddings(
+        self,
+        jobs: Tensor,
+        periods_local: Tensor,
+        ctx: Tensor,
+        job_mask: Optional[Tensor] = None,
+        period_mask: Optional[Tensor] = None,
+        periods_full: Optional[Tensor] = None,
+        period_full_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+        """
+        Get intermediate embeddings for EAS layer insertion.
+
+        This method returns the embeddings after the encoder, before the
+        action and value heads. EAS layers can modify these embeddings
+        before passing them to the heads.
+
+        Args:
+            jobs: [batch, M, F_job]
+            periods_local: [batch, K_local, F_period]
+            ctx: [batch, F_ctx]
+            job_mask: [batch, M] True for invalid bins
+            period_mask: [batch, K_local] True for invalid periods
+            periods_full: [batch, K_full, F_period] (optional)
+            period_full_mask: [batch, K_full] (optional)
+
+        Returns:
+            job_emb: [batch, M, d_model] - job embeddings
+            ctx_emb: [batch, d_model] - context embedding
+            global_emb: [batch, d_model] or None - global horizon embedding
+        """
+        return self.encoder(
+            jobs=jobs,
+            periods_local=periods_local,
+            ctx=ctx,
+            job_mask=job_mask,
+            period_mask=period_mask,
+            periods_full=periods_full,
+            period_full_mask=period_full_mask,
+        )
+
+    def forward_from_embeddings(
+        self,
+        job_emb: Tensor,
+        ctx_emb: Tensor,
+        global_emb: Optional[Tensor] = None,
+        job_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor]:
+        """
+        Complete forward pass from pre-computed embeddings.
+
+        This method takes embeddings (potentially modified by EAS layers)
+        and produces action logits and value estimates.
+
+        Args:
+            job_emb: [batch, M, d_model]
+            ctx_emb: [batch, d_model]
+            global_emb: [batch, d_model] or None
+            job_mask: [batch, M] True for invalid bins
+
+        Returns:
+            logits: [batch, M * K_slack] action logits
+            value: [batch, 1] state value estimate
+        """
+        logits = self.action_head(job_emb, ctx_emb, global_emb, job_mask)
+        value = self.value_head(job_emb, ctx_emb, global_emb, job_mask)
+        return logits, value
+
 
 # =============================================================================
 # Factory Function
