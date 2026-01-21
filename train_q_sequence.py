@@ -1307,7 +1307,8 @@ def main():
         print(f"Warning: Unknown variant {config.variant_id}, using q_sequence")
         variant_config = get_variant_config(VariantID.Q_SEQUENCE, seed=config.seed)
 
-    data_config = DataConfig()
+    # Use the variant's DataConfig so generator distribution matches PPO and the suite.
+    data_config = copy.deepcopy(variant_config.data)
     env_config = variant_config.env
 
     # Safety check: ctx13 semantics require price-family features to be enabled

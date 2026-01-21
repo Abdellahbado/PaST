@@ -170,13 +170,9 @@ def generate_raw_instance(
     Returns:
         RawInstance with all fields populated
     """
-    # Sample parameters if not provided
+    # Sample horizon if not provided
     if T_max is None:
         T_max = rng.choice(config.T_max_choices)
-    if m is None:
-        m = discrete_uniform(config.m_min, config.m_max, rng)
-    if n is None:
-        n = discrete_uniform(config.n_min, config.n_max, rng)
 
     # Determine scale based on T_max
     if T_max <= 80:
@@ -186,18 +182,56 @@ def generate_raw_instance(
     else:
         scale = "vls"
 
+    sampling_mode = getattr(config, "sampling_mode", "uniform_range")
+
+    # Paper benchmark grid sampling (matches New Benchmark/generate_data.py)
+    if sampling_mode == "paper_grid_90":
+        if scale == "small":
+            m_choices = (3, 5, 7)
+            n_choices = (6, 10, 15, 20, 25)
+            p_min, p_max = 1, 4
+            e_min, e_max = 1, 3
+            ck_min, ck_max = 1, 4
+        elif scale == "mls":
+            m_choices = (8, 16, 25)
+            n_choices = (30, 60, 100, 150, 200)
+            p_min, p_max = 1, 4
+            e_min, e_max = 1, 3
+            ck_min, ck_max = 1, 4
+        else:
+            # vls
+            m_choices = (25, 30, 40)
+            n_choices = (250, 300, 350, 400, 500)
+            p_min, p_max = 1, 12
+            e_min, e_max = 1, 6
+            ck_min, ck_max = 1, 8
+
+        if m is None:
+            m = rng.choice(m_choices)
+        if n is None:
+            n = rng.choice(n_choices)
+    else:
+        # Legacy uniform-range sampling
+        if m is None:
+            m = discrete_uniform(config.m_min, config.m_max, rng)
+        if n is None:
+            n = discrete_uniform(config.n_min, config.n_max, rng)
+        p_min, p_max = config.p_min, config.p_max
+        e_min, e_max = config.e_min, config.e_max
+        ck_min, ck_max = config.ck_min, config.ck_max
+
     # Generate period structure
     Tk = sample_intervals_sum_to_T(T_max, config.Tk_choices, rng)
     K = len(Tk)
-    ck = [discrete_uniform(config.ck_min, config.ck_max, rng) for _ in range(K)]
+    ck = [discrete_uniform(ck_min, ck_max, rng) for _ in range(K)]
     ct = expand_ck_to_ct(Tk, ck)
     period_starts = compute_period_start_slots(Tk)
 
     # Generate job processing times
-    p = [discrete_uniform(config.p_min, config.p_max, rng) for _ in range(n)]
+    p = [discrete_uniform(p_min, p_max, rng) for _ in range(n)]
 
     # Generate machine energy rates
-    e = [discrete_uniform(config.e_min, config.e_max, rng) for _ in range(m)]
+    e = [discrete_uniform(e_min, e_max, rng) for _ in range(m)]
 
     return RawInstance(
         instance_id=instance_id,

@@ -423,6 +423,13 @@ class EnvConfig:
 class DataConfig:
     """Data generation configuration."""
 
+    # Sampling mode:
+    # - "uniform_range": sample (m, n) uniformly from [min,max] ranges and
+    #   sample p/e/ck from fixed ranges.
+    # - "paper_grid_90": match the 90-instance benchmark distribution used by
+    #   New Benchmark/generate_data.py (Wang2018 small+mls, Anghinolfi2021 vls).
+    sampling_mode: str = "paper_grid_90"
+
     # Horizon choices for training
     T_max_choices: List[int] = field(
         default_factory=lambda: [50, 80, 100, 300, 350, 500]
