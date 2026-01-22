@@ -171,94 +171,22 @@ def _select_topk_valid_actions(logits_1d: Tensor, k: int) -> List[int]:
 def _completion_feasible_action_mask(
     env: GPUBatchSingleMachinePeriodEnv, obs: Dict[str, Tensor]
 ) -> Tensor:
-    """Extra action mask: keep only actions that still allow scheduling all remaining work.
+    """Compatibility helper for a completion-feasibility mask.
 
-    The env's built-in `action_mask` only enforces immediate feasibility (chosen job finishes
-    before T_limit). It does not prevent choosing slack that leaves insufficient time
-    for the remaining unscheduled jobs.
+    Historically, SGBS applied an additional feasibility filter beyond the env-provided
+    `action_mask`. The current PaST environments already encode both immediate feasibility
+    and completion-feasibility (dead-end prevention) into `obs['action_mask']` for all
+    supported variants, including price-family and duration-aware families.
 
-    This mask enforces a necessary-and-sufficient condition for eventual feasibility in
-    the single-machine setting: after taking an action, the remaining processing time must
-    still fit in the remaining horizon.
+    Keeping this function avoids breaking external scripts that import it, but it should
+    not add restrictions beyond the env.
 
     Returns:
         (B, action_dim) float mask (1=valid, 0=invalid)
     """
-    if "action_mask" not in obs:
-        # If env doesn't provide an action mask, don't restrict further.
-        return torch.ones((env.batch_size, env.action_dim), device=env.device)
-
-    base_mask = obs["action_mask"].float()
-
-    # Remaining work in slots (integer).
-    p_all = env.p_subset.to(torch.int32)  # (B, N)
-    job_avail = env.job_available  # float 0/1
-    remaining_work = (p_all.float() * job_avail).sum(dim=1).to(torch.int32)  # (B,)
-    T_limit = env.T_limit.to(torch.int32)  # (B,)
-
-    B = env.batch_size
-    N = env.N_job_pad
-
-    if getattr(env.env_config, "use_price_families", False):
-        # In this variant, slack_id == family_id.
-        F = env.num_slack_choices
-        T = env.T_max_pad
-
-        slot_families = env._compute_slot_families()  # (B, T)
-        slot_indices = torch.arange(T, device=env.device, dtype=torch.int32).unsqueeze(
-            0
-        )  # (1, T)
-        valid_start = slot_indices >= env.t.to(torch.int32).unsqueeze(1)  # (B, T)
-
-        # end_times[b, j, s] = s + p[b, j]
-        end_times = slot_indices.unsqueeze(1) + p_all.unsqueeze(2)  # (B, N, T)
-        feasible = end_times <= T_limit.unsqueeze(1).unsqueeze(2)
-        feasible = feasible & valid_start.unsqueeze(1)
-
-        job_mask_bool = job_avail.unsqueeze(2).bool()  # (B, N, 1)
-
-        large = torch.tensor(T + 1, device=env.device, dtype=torch.int32)
-        mask = torch.zeros((B, N, F), dtype=torch.float32, device=env.device)
-
-        # For each family, compute the earliest feasible start time for each job.
-        for f in range(int(F)):
-            in_family = (slot_families == int(f)).unsqueeze(1)  # (B, 1, T)
-            candidates = feasible & in_family
-            # start_time = min s where candidates True, else large
-            start_times = (
-                torch.where(
-                    candidates,
-                    slot_indices.unsqueeze(1).expand(B, N, T),
-                    large,
-                )
-                .min(dim=2)
-                .values
-            )  # (B, N)
-
-            end_t = start_times + p_all  # (B, N)
-            remaining_after = remaining_work.unsqueeze(1) - p_all  # (B, N)
-            completion_ok = (end_t + remaining_after) <= T_limit.unsqueeze(1)
-            # If no candidate, start_times==large -> completion_ok False
-            valid = completion_ok & job_mask_bool.squeeze(2)
-            mask[:, :, f] = valid.float()
-
-        mask = mask.reshape(B, N * F)
-        return base_mask * mask
-
-    # Default slack variants: slack_id indexes a discrete start-time mapping.
-    S = env.num_slack_choices
-    slack_start_times = env._compute_all_slack_start_times().to(torch.int32)  # (B, S)
-    start_expanded = slack_start_times.unsqueeze(1)  # (B, 1, S)
-    end_times = start_expanded + p_all.unsqueeze(2)  # (B, N, S)
-
-    remaining_after = remaining_work.unsqueeze(1).unsqueeze(2) - p_all.unsqueeze(
-        2
-    )  # (B, N, 1)
-    completion_ok = (end_times + remaining_after) <= T_limit.unsqueeze(1).unsqueeze(2)
-    valid = completion_ok & job_avail.unsqueeze(2).bool()
-    mask = valid.reshape(B, N * S).float()
-
-    return base_mask * mask
+    if "action_mask" in obs:
+        return obs["action_mask"].float()
+    return torch.ones((env.batch_size, env.action_dim), device=env.device)
 
 
 def _max_wait_action_mask(
@@ -363,9 +291,6 @@ def greedy_rollout(
             break
 
         logits = compute_masked_logits(model, obs)
-        logits = logits.masked_fill(
-            _completion_feasible_action_mask(env, obs) == 0, float("-inf")
-        )
 
         if max_wait_slots is not None:
             logits = logits.masked_fill(
@@ -480,9 +405,26 @@ def sgbs_single_instance(
     if beta <= 0 or gamma <= 0:
         raise ValueError("beta and gamma must be positive")
 
-    env_ref = GPUBatchSingleMachinePeriodEnv(
-        batch_size=1, env_config=env_config, device=device
-    )
+    env_ref = None
+    if hasattr(env_config, "reset") and hasattr(env_config, "step"):
+        # env_config is actually an Environment instance (e.g. GPUBatchSequenceEnv)
+        # We need to create a new instance of the SAME CLASS with batch_size=1
+        target_cls = type(env_config)
+        # Assuming all Envs take (batch_size, env_config, device)
+        # We need to extract the underlying config from the instance
+        real_cfg = getattr(env_config, "env_config", None) 
+        if real_cfg is None:
+             raise ValueError("Passed Env instance must have .env_config attribute")
+        
+        env_ref = target_cls(
+            batch_size=1, env_config=real_cfg, device=device
+        )
+    else:
+        # Standard behavior: env_config is a config object
+        env_ref = GPUBatchSingleMachinePeriodEnv(
+            batch_size=1, env_config=env_config, device=device
+        )
+        
     env_ref.reset(batch_data_single)
 
     if max_depth_steps is None:
@@ -517,8 +459,6 @@ def sgbs_single_instance(
                 continue
 
             logits = compute_masked_logits(model, obs)[0]  # (A,)
-            feas = _completion_feasible_action_mask(env_ref, obs)[0]
-            logits = logits.masked_fill(feas == 0, float("-inf"))
 
             if max_wait_slots is not None:
                 logits = logits.masked_fill(
@@ -551,9 +491,17 @@ def sgbs_single_instance(
         # --- Simulation (batched greedy rollout) ---
         E = expanded_children
         rollout_B = len(E)
-        rollout_env = GPUBatchSingleMachinePeriodEnv(
-            batch_size=int(rollout_B), env_config=env_config, device=device
-        )
+        rollout_env = None
+        if hasattr(env_config, "reset") and hasattr(env_config, "step"):
+             target_cls = type(env_config)
+             real_cfg = getattr(env_config, "env_config", None)
+             rollout_env = target_cls(
+                 batch_size=int(rollout_B), env_config=real_cfg, device=device
+             )
+        else:
+             rollout_env = GPUBatchSingleMachinePeriodEnv(
+                 batch_size=int(rollout_B), env_config=env_config, device=device
+             )
         rollout_env.reset(_repeat_batch_data(batch_data_single, rollout_B))
 
         # Restore each candidate snapshot into rollout env rows

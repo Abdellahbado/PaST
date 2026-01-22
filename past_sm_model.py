@@ -500,6 +500,158 @@ class PaSTEncoder(nn.Module):
 
 
 # =============================================================================
+# Lightweight Encoder: CNN(periods) + DeepSets(jobs)
+# =============================================================================
+
+
+class _PeriodCNN(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        d_model: int,
+        channels: int,
+        num_layers: int,
+        kernel_size: int,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+
+        if kernel_size % 2 == 0:
+            raise ValueError("period_cnn_kernel_size must be odd (for same padding)")
+
+        layers: list[nn.Module] = []
+        padding = kernel_size // 2
+        c_in = in_dim
+        c_hidden = channels
+
+        for i in range(max(1, int(num_layers))):
+            c_out = d_model if i == max(1, int(num_layers)) - 1 else c_hidden
+            layers.append(
+                nn.Conv1d(c_in, c_out, kernel_size=kernel_size, padding=padding)
+            )
+            layers.append(nn.ReLU())
+            if dropout and dropout > 0:
+                layers.append(nn.Dropout(dropout))
+            c_in = c_out
+
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, periods: Tensor) -> Tensor:
+        # periods: [B, K, F] -> [B, F, K]
+        x = periods.transpose(1, 2)
+        x = self.net(x)
+        # [B, d_model, K] -> [B, K, d_model]
+        return x.transpose(1, 2)
+
+
+class _DeepSetsJobs(nn.Module):
+    def __init__(self, in_dim: int, d_model: int, hidden: int, dropout: float = 0.0):
+        super().__init__()
+        layers: list[nn.Module] = [nn.Linear(in_dim, hidden), nn.ReLU()]
+        if dropout and dropout > 0:
+            layers.append(nn.Dropout(dropout))
+        layers += [nn.Linear(hidden, d_model), nn.ReLU()]
+        self.phi = nn.Sequential(*layers)
+
+    def forward(self, jobs: Tensor) -> Tensor:
+        # jobs: [B, M, F_job] -> [B, M, d_model]
+        return self.phi(jobs)
+
+
+class CNNDeepSetsEncoder(nn.Module):
+    """Lightweight encoder that matches PaSTEncoder's output contract.
+
+    - Periods: 1D CNN over local period tokens
+    - Jobs: per-job MLP (DeepSets phi)
+    - Fusion: combine ctx embedding with pooled period embedding
+    """
+
+    def __init__(self, model_config: ModelConfig, env_config: EnvConfig):
+        super().__init__()
+        self.model_config = model_config
+        self.env_config = env_config
+
+        d_model = model_config.d_model
+
+        # Jobs: per-bin embedding
+        self.job_encoder = _DeepSetsJobs(
+            in_dim=env_config.F_job,
+            d_model=d_model,
+            hidden=int(getattr(model_config, "deepsets_hidden", 256)),
+            dropout=float(getattr(model_config, "dropout", 0.0)),
+        )
+
+        # Periods: CNN produces per-period embeddings, then we pool
+        self.period_encoder = _PeriodCNN(
+            in_dim=env_config.F_period,
+            d_model=d_model,
+            channels=int(getattr(model_config, "period_cnn_channels", d_model)),
+            num_layers=int(getattr(model_config, "period_cnn_layers", 2)),
+            kernel_size=int(getattr(model_config, "period_cnn_kernel_size", 3)),
+            dropout=float(getattr(model_config, "dropout", 0.0)),
+        )
+
+        # Context embedding + fusion with pooled period embedding
+        self.ctx_embed = ContextEmbedding(env_config.F_ctx, d_model)
+        self.fuse = nn.Sequential(
+            nn.Linear(d_model * 2, d_model),
+            nn.ReLU(),
+        )
+
+        # Optional: keep global horizon embedding behavior consistent
+        self.use_global_horizon = bool(
+            getattr(model_config, "use_global_horizon", False)
+        )
+        if self.use_global_horizon:
+            self.global_horizon_embed = GlobalHorizonEmbedding(d_model)
+            self.period_full_embed = PeriodEmbedding(env_config.F_period, d_model)
+
+    def forward(
+        self,
+        jobs: Tensor,
+        periods_local: Tensor,
+        ctx: Tensor,
+        job_mask: Optional[Tensor] = None,
+        period_mask: Optional[Tensor] = None,
+        periods_full: Optional[Tensor] = None,
+        period_full_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+        # Job embeddings
+        job_emb = self.job_encoder(jobs)  # [B, M, d_model]
+
+        # Period embeddings + masked pooling
+        period_emb = self.period_encoder(periods_local)  # [B, K, d_model]
+        if period_mask is not None:
+            valid = (~period_mask).float().unsqueeze(-1)  # [B, K, 1]
+            denom = valid.sum(dim=1).clamp(min=1.0)
+            period_pooled = (period_emb * valid).sum(dim=1) / denom
+        else:
+            period_pooled = period_emb.mean(dim=1)
+
+        # Context embedding and fusion
+        ctx_emb_raw = self.ctx_embed(ctx)
+        ctx_emb = self.fuse(torch.cat([ctx_emb_raw, period_pooled], dim=-1))
+
+        # Optional global horizon embedding (unchanged semantics)
+        global_emb = None
+        if self.use_global_horizon:
+            periods_for_global = (
+                periods_full if periods_full is not None else periods_local
+            )
+            mask_for_global = (
+                period_full_mask if period_full_mask is not None else period_mask
+            )
+            periods_for_global_emb = self.period_full_embed(periods_for_global)
+            global_emb = self.global_horizon_embed(
+                periods_for_global_emb,
+                periods_for_global,
+                mask_for_global,
+            )
+
+        return job_emb, ctx_emb, global_emb
+
+
+# =============================================================================
 # Factored Action Head
 # =============================================================================
 
@@ -796,7 +948,11 @@ class PaSTSMNet(nn.Module):
             slack_prior_bias = -(strength * (offsets / tau))
 
         # Encoder
-        self.encoder = PaSTEncoder(self.model_config, self.env_config)
+        backbone = getattr(self.model_config, "backbone", "transformer")
+        if backbone == "cnn_deepsets":
+            self.encoder = CNNDeepSetsEncoder(self.model_config, self.env_config)
+        else:
+            self.encoder = PaSTEncoder(self.model_config, self.env_config)
 
         # Action head (factored or simple)
         if self.model_config.use_factored_head:

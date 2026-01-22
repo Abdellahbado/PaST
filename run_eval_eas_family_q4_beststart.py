@@ -40,7 +40,7 @@ import yaml
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 from PaST.baselines_sequence_dp import DPResult, spt_lpt_with_dp
-from PaST.config import DataConfig, VariantID, get_variant_config
+from PaST.config import DataConfig, VariantID, get_variant_config, list_variants
 from PaST.past_sm_model import build_model
 from PaST.sgbs import greedy_decode, sgbs, DecodeResult
 from PaST.eas import EASConfig, eas_batch, EASResult
@@ -190,10 +190,18 @@ def run_evaluation(
     # Parse SGBS parameters
     betas = [int(x) for x in str(args.beta).split(",")]
     gammas = [int(x) for x in str(args.gamma).split(",")]
-    bg_pairs = list(zip(betas, gammas)) if len(betas) == len(gammas) else [(betas[0], gammas[0])]
+    bg_pairs = (
+        list(zip(betas, gammas))
+        if len(betas) == len(gammas)
+        else [(betas[0], gammas[0])]
+    )
 
     # Setup output directory
-    out_dir = Path(args.out_dir) if args.out_dir else (Path(args.checkpoint).parent.parent / "eas_eval")
+    out_dir = (
+        Path(args.out_dir)
+        if args.out_dir
+        else (Path(args.checkpoint).parent.parent / "eas_eval")
+    )
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate instances
@@ -207,11 +215,13 @@ def run_evaluation(
         assignments = simulate_metaheuristic_assignment(raw.n, raw.m, py_rng)
         non_empty = [i for i, a in enumerate(assignments) if len(a) > 0]
         m_idx = py_rng.choice(non_empty) if non_empty else 0
-        base_instances.append({
-            "raw": raw,
-            "m_idx": m_idx,
-            "job_idxs": assignments[m_idx],
-        })
+        base_instances.append(
+            {
+                "raw": raw,
+                "m_idx": m_idx,
+                "job_idxs": assignments[m_idx],
+            }
+        )
 
     results = []
 
@@ -222,7 +232,10 @@ def run_evaluation(
         episodes = []
         for b in base_instances:
             ep = make_single_machine_episode(
-                b["raw"], b["m_idx"], b["job_idxs"], py_rng,
+                b["raw"],
+                b["m_idx"],
+                b["job_idxs"],
+                py_rng,
                 deadline_slack_ratio_min=ratio,
                 deadline_slack_ratio_max=ratio,
             )
@@ -262,9 +275,7 @@ def run_evaluation(
                 max_iterations=args.max_iterations,
             )
             t0 = time.time()
-            eas_res = eas_batch(
-                model, variant_config.env, device, batch, eas_config
-            )
+            eas_res = eas_batch(model, variant_config.env, device, batch, eas_config)
             eas_time = time.time() - t0
 
         else:  # sgbs_eas
@@ -351,7 +362,9 @@ def print_summary(df: pd.DataFrame, method: str):
     print("=" * 70)
 
 
-def plot_results(df: pd.DataFrame, out_dir: Path, scale_str: str, seed: int, variant: str):
+def plot_results(
+    df: pd.DataFrame, out_dir: Path, scale_str: str, seed: int, variant: str
+):
     """Plot energy vs slack ratio for all methods."""
     try:
         import matplotlib.pyplot as plt
@@ -401,43 +414,68 @@ def plot_results(df: pd.DataFrame, out_dir: Path, scale_str: str, seed: int, var
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="EAS Evaluation for ppo_family_q4_beststart")
+    parser = argparse.ArgumentParser(
+        description="EAS Evaluation for ppo_family_q4_beststart"
+    )
 
     # Model
-    parser.add_argument("--checkpoint", type=str, required=True,
-                        help="Path to model checkpoint")
+    parser.add_argument(
+        "--checkpoint", type=str, required=True, help="Path to model checkpoint"
+    )
+
+    # Variant selection (must match checkpoint architecture)
+    variant_choices = [v.value for v in list_variants()]
+    parser.add_argument(
+        "--variant_id",
+        type=str,
+        default=VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART.value,
+        choices=variant_choices,
+        help="Variant ID used to build the model (must match the checkpoint).",
+    )
 
     # Instance generation
     parser.add_argument("--eval_seed", type=int, default=42)
     parser.add_argument("--num_instances", type=int, default=16)
-    parser.add_argument("--scale", type=str, default="small",
-                        choices=["small", "medium", "large"])
-    parser.add_argument("--epsilon_steps", type=int, default=5,
-                        help="Number of slack ratio steps")
+    parser.add_argument(
+        "--scale", type=str, default="small", choices=["small", "medium", "large"]
+    )
+    parser.add_argument(
+        "--epsilon_steps", type=int, default=5, help="Number of slack ratio steps"
+    )
 
     # Method selection
-    parser.add_argument("--method", type=str, default="sgbs_eas",
-                        choices=["eas", "sgbs_eas"],
-                        help="Search method: eas (standalone) or sgbs_eas (hybrid)")
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="sgbs_eas",
+        choices=["eas", "sgbs_eas"],
+        help="Search method: eas (standalone) or sgbs_eas (hybrid)",
+    )
 
     # SGBS parameters
     parser.add_argument("--beta", type=str, default="4", help="SGBS beam width")
     parser.add_argument("--gamma", type=str, default="4", help="SGBS expansion factor")
 
     # EAS parameters
-    parser.add_argument("--max_iterations", type=int, default=50,
-                        help="Max EAS iterations per instance")
-    parser.add_argument("--eas_lr", type=float, default=0.003,
-                        help="EAS learning rate")
-    parser.add_argument("--eas_il_weight", type=float, default=0.01,
-                        help="EAS imitation learning weight (lambda)")
-    parser.add_argument("--samples_per_iter", type=int, default=32,
-                        help="Samples per EAS iteration")
+    parser.add_argument(
+        "--max_iterations", type=int, default=50, help="Max EAS iterations per instance"
+    )
+    parser.add_argument("--eas_lr", type=float, default=0.003, help="EAS learning rate")
+    parser.add_argument(
+        "--eas_il_weight",
+        type=float,
+        default=0.01,
+        help="EAS imitation learning weight (lambda)",
+    )
+    parser.add_argument(
+        "--samples_per_iter", type=int, default=32, help="Samples per EAS iteration"
+    )
 
     # Output
     parser.add_argument("--out_dir", type=str, default=None)
-    parser.add_argument("--device", type=str,
-                        default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument(
+        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
+    )
 
     args = parser.parse_args()
 
@@ -446,8 +484,8 @@ if __name__ == "__main__":
     run_dir = ckpt_path.parent.parent
     config_path = run_dir / "config.yaml"
 
-    # Use PPO_FAMILY_Q4_CTX13_BESTSTART variant (matches 13-dim checkpoint)
-    variant_config = get_variant_config(VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART)
+    # Variant must match checkpoint (e.g., *_cnn variants)
+    variant_config = get_variant_config(VariantID(args.variant_id))
 
     # Restrict to scale
     data_cfg = _restrict_data_config(variant_config.data, args.scale)

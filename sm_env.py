@@ -1392,12 +1392,32 @@ class GPUBatchSingleMachinePeriodEnv:
             wait = (slot_indices - self.t.unsqueeze(1)).clamp(min=0).float()
             window_cost = window_cost + wait_penalty * wait
 
-        # Mask non-candidates with +inf, then take argmin
+        # Mask non-candidates with +inf.
         inf = torch.tensor(float("inf"), device=self.device)
-        masked_cost = torch.where(candidates, window_cost, inf)
-        best_idx = masked_cost.argmin(dim=1)  # (B,)
+        masked_cost = torch.where(candidates, window_cost, inf)  # (B, T)
 
-        has_any = candidates.any(dim=1)
+        # Primary objective: minimum window energy cost.
+        min_cost = masked_cost.min(dim=1).values  # (B,)
+
+        # Optional tie-break: among near-optimal (within tolerance), pick earliest start.
+        tol = float(getattr(self.env_config, "best_family_start_energy_tolerance", 0.0))
+        if tol > 0.0:
+            # Eligible if candidate and cost <= min_cost + tol
+            eligible = candidates & (window_cost <= (min_cost.unsqueeze(1) + tol))
+            # Earliest eligible slot
+            large_val = self.T_max_pad + 1
+            slot_indices_masked = torch.where(
+                eligible,
+                slot_indices.expand(B, -1),
+                torch.full((B, self.T_max_pad), large_val, device=self.device),
+            )
+            best_idx = slot_indices_masked.min(dim=1).values
+            has_any = eligible.any(dim=1)
+        else:
+            # Pure argmin energy
+            best_idx = masked_cost.argmin(dim=1)  # (B,)
+            has_any = candidates.any(dim=1)
+
         best_start = torch.where(has_any, best_idx, self.T_limit)
 
         # Clamp to T_limit (safety)

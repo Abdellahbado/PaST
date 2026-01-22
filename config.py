@@ -77,6 +77,10 @@ class VariantID(Enum):
     PPO_SEQUENCE = "ppo_sequence"  # RL sequences jobs, Batch DP times them
     PPO_DURATION_AWARE_FAMILY = "ppo_duration_aware_family"  # Duration-aware families: families based on avg window cost
     PPO_DURATION_AWARE_FAMILY_CTX13 = "ppo_duration_aware_family_ctx13"  # Duration-aware families + identified ctx (q's + next-start deltas)
+    PPO_FAMILY_Q4_BESTSTART_CNN = "ppo_family_q4_beststart_cnn"  # family_beststart with lightweight CNN+DeepSets backbone
+    PPO_FAMILY_Q4_CTX13_BESTSTART_CNN = "ppo_family_q4_ctx13_beststart_cnn"  # family_ctx13_beststart with lightweight CNN+DeepSets backbone
+    PPO_DURATION_AWARE_FAMILY_CNN = "ppo_duration_aware_family_cnn"  # duration-aware family with lightweight CNN+DeepSets backbone
+    PPO_DURATION_AWARE_FAMILY_CTX13_CNN = "ppo_duration_aware_family_ctx13_cnn"  # duration-aware family ctx13 with lightweight CNN+DeepSets backbone
     Q_SEQUENCE = "q_sequence"  # Q-learning for sequences: supervised on DP costs
     Q_SEQUENCE_CTX13 = "q_sequence_ctx13"  # Q-sequence + identified ctx features
     Q_SEQUENCE_CNN = (
@@ -247,6 +251,17 @@ class ModelConfig:
     d_ff: int = 512  # Feed-forward hidden dim (if using FF layers)
     dropout: float = 0.0
 
+    # Backbone selection
+    # - "transformer": original PaST cross-attn/self-attn encoder
+    # - "cnn_deepsets": lightweight encoder (CNN over periods + DeepSets over jobs)
+    backbone: str = "transformer"
+
+    # Lightweight backbone hyperparameters (used when backbone == "cnn_deepsets")
+    period_cnn_channels: int = 128
+    period_cnn_layers: int = 2
+    period_cnn_kernel_size: int = 3
+    deepsets_hidden: int = 256
+
     # Transformer variant
     use_pre_ln: bool = True  # Pre-LayerNorm (more stable for RL)
 
@@ -346,6 +361,12 @@ class EnvConfig:
     # Adds (best_family_start_wait_penalty * wait_slots) to the window energy objective.
     # This discourages jumping far into the future just to hit a cheap slot.
     best_family_start_wait_penalty: float = 0.0
+
+    # Optional BEST-START tie-breaker: among near-optimal energy starts, pick the earliest.
+    # If > 0, we find the minimum window energy cost and then select the earliest start
+    # whose cost is within (min_cost + best_family_start_energy_tolerance).
+    # This is scale-sensitive (same units as window_cost = sum(ct) over job duration).
+    best_family_start_energy_tolerance: float = 0.0
 
     # Optional hard cap on waiting for price-family variants.
     # If set (>=0), an action (job,family) is valid only if there exists a feasible
@@ -474,7 +495,7 @@ class TrainingConfig:
     """Training hyperparameters (placeholder for future use)."""
 
     # RL algorithm
-    algorithm: RLAlgorithm = RLAlgorithm.PPO    
+    algorithm: RLAlgorithm = RLAlgorithm.PPO
 
     # For REINFORCE
     use_self_critic: bool = False  # Self-critic baseline (greedy rollout)
@@ -545,6 +566,7 @@ class VariantConfig:
                 "d_ff": self.model.d_ff,
                 "use_pre_ln": self.model.use_pre_ln,
                 "use_global_horizon": self.model.use_global_horizon,
+                "backbone": getattr(self.model, "backbone", "transformer"),
             },
             "env": {
                 "M_job_bins": self.env.M_job_bins,
@@ -555,6 +577,12 @@ class VariantConfig:
                 "use_price_families": self.env.use_price_families,
                 "num_price_families": self.env.num_price_families,
                 "use_best_family_start": self.env.use_best_family_start,
+                "best_family_start_wait_penalty": getattr(
+                    self.env, "best_family_start_wait_penalty", 0.0
+                ),
+                "best_family_start_energy_tolerance": getattr(
+                    self.env, "best_family_start_energy_tolerance", 0.0
+                ),
                 "K_slack": self.env.get_num_slack_choices(),
                 "action_dim": self.env.action_dim,
             },
@@ -776,6 +804,14 @@ def get_ppo_family_q4_beststart() -> VariantConfig:
     return cfg
 
 
+def get_ppo_family_q4_beststart_cnn() -> VariantConfig:
+    """Price-family + best-start decoding, using CNN+DeepSets backbone."""
+    cfg = get_ppo_family_q4_beststart()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_BESTSTART_CNN
+    cfg.model.backbone = "cnn_deepsets"
+    return cfg
+
+
 def get_ppo_family_q4_ctx13() -> VariantConfig:
     """Enhanced PPO family variant with identified family semantics in ctx.
 
@@ -802,6 +838,14 @@ def get_ppo_family_q4_ctx13_beststart() -> VariantConfig:
     cfg = get_ppo_family_q4_ctx13()
     cfg.variant_id = VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART
     cfg.env.use_best_family_start = True
+    return cfg
+
+
+def get_ppo_family_q4_ctx13_beststart_cnn() -> VariantConfig:
+    """Price-family + ctx13 + best-start decoding, using CNN+DeepSets backbone."""
+    cfg = get_ppo_family_q4_ctx13_beststart()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART_CNN
+    cfg.model.backbone = "cnn_deepsets"
     return cfg
 
 
@@ -910,6 +954,14 @@ def get_ppo_duration_aware_family() -> VariantConfig:
     )
 
 
+def get_ppo_duration_aware_family_cnn() -> VariantConfig:
+    """Duration-aware families + CNN+DeepSets backbone."""
+    cfg = get_ppo_duration_aware_family()
+    cfg.variant_id = VariantID.PPO_DURATION_AWARE_FAMILY_CNN
+    cfg.model.backbone = "cnn_deepsets"
+    return cfg
+
+
 def get_ppo_duration_aware_family_ctx13() -> VariantConfig:
     """Enhanced duration-aware family variant with identified family semantics in ctx.
 
@@ -926,6 +978,14 @@ def get_ppo_duration_aware_family_ctx13() -> VariantConfig:
     cfg.env.F_ctx = 13
     cfg.model.ctx_input_dim = 13
 
+    return cfg
+
+
+def get_ppo_duration_aware_family_ctx13_cnn() -> VariantConfig:
+    """Duration-aware families + ctx13 + CNN+DeepSets backbone."""
+    cfg = get_ppo_duration_aware_family_ctx13()
+    cfg.variant_id = VariantID.PPO_DURATION_AWARE_FAMILY_CTX13_CNN
+    cfg.model.backbone = "cnn_deepsets"
     return cfg
 
 
@@ -1021,11 +1081,15 @@ VARIANT_FACTORIES = {
     VariantID.PPO_FAMILY_Q4: get_ppo_family_q4,
     VariantID.PPO_FAMILY_Q4_CTX13: get_ppo_family_q4_ctx13,
     VariantID.PPO_FAMILY_Q4_BESTSTART: get_ppo_family_q4_beststart,
+    VariantID.PPO_FAMILY_Q4_BESTSTART_CNN: get_ppo_family_q4_beststart_cnn,
     VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART: get_ppo_family_q4_ctx13_beststart,
+    VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART_CNN: get_ppo_family_q4_ctx13_beststart_cnn,
     VariantID.PPO_FAMILY_Q4_CTX18_BESTSTART: get_ppo_family_q4_ctx18_beststart,
     VariantID.PPO_SEQUENCE: get_ppo_sequence,
     VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
+    VariantID.PPO_DURATION_AWARE_FAMILY_CNN: get_ppo_duration_aware_family_cnn,
     VariantID.PPO_DURATION_AWARE_FAMILY_CTX13: get_ppo_duration_aware_family_ctx13,
+    VariantID.PPO_DURATION_AWARE_FAMILY_CTX13_CNN: get_ppo_duration_aware_family_ctx13_cnn,
     VariantID.Q_SEQUENCE: get_q_sequence,
     VariantID.Q_SEQUENCE_CTX13: get_q_sequence_ctx13,
     VariantID.Q_SEQUENCE_CNN: get_q_sequence_cnn,
