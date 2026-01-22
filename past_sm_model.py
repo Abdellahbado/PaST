@@ -651,6 +651,240 @@ class CNNDeepSetsEncoder(nn.Module):
         return job_emb, ctx_emb, global_emb
 
 
+class CandidateWindowSparseEncoder(nn.Module):
+    """Candidate-Window Encoder (CWE) with sparse job->window attention.
+
+    Goals:
+    - Keep period tokens until a job-conditioned readout (avoid global mean pooling).
+    - Exploit scheduling structure by proposing a small set of cheap multi-scale windows.
+    - Keep compute small: job-to-anchor attention is O(M * L), with L = sum(topk per scale).
+    """
+
+    def __init__(self, model_config: ModelConfig, env_config: EnvConfig):
+        super().__init__()
+        self.model_config = model_config
+        self.env_config = env_config
+
+        d_model = int(model_config.d_model)
+        attn_dim = int(getattr(model_config, "window_attn_dim", None) or d_model)
+        self.window_scales = list(getattr(model_config, "window_scales", (1, 2, 4, 8)))
+        self.topk_per_scale = int(getattr(model_config, "window_topk_per_scale", 6))
+
+        dropout = float(getattr(model_config, "dropout", 0.0))
+
+        # Jobs
+        self.job_encoder = _DeepSetsJobs(
+            in_dim=env_config.F_job,
+            d_model=d_model,
+            hidden=int(getattr(model_config, "deepsets_hidden", 256)),
+            dropout=dropout,
+        )
+
+        # Periods
+        self.period_encoder = _PeriodCNN(
+            in_dim=env_config.F_period,
+            d_model=d_model,
+            channels=int(getattr(model_config, "period_cnn_channels", d_model)),
+            num_layers=int(getattr(model_config, "period_cnn_layers", 2)),
+            kernel_size=int(getattr(model_config, "period_cnn_kernel_size", 3)),
+            dropout=dropout,
+        )
+
+        # Context
+        self.ctx_embed = ContextEmbedding(env_config.F_ctx, d_model)
+
+        # Light job-set interaction: pooled job summary -> broadcast back into each job
+        self.job_set_proj = nn.Sequential(
+            nn.Linear(
+                d_model, int(getattr(model_config, "window_job_set_mlp_hidden", 128))
+            ),
+            nn.ReLU(),
+            nn.Linear(
+                int(getattr(model_config, "window_job_set_mlp_hidden", 128)), d_model
+            ),
+        )
+
+        # Anchor embedding from window features
+        # Raw features: [avg_price, avg_duration, start_pos_norm, scale_norm]
+        raw_dim = 4
+        anchor_hidden = int(getattr(model_config, "window_anchor_mlp_hidden", 128))
+        self.anchor_mlp = nn.Sequential(
+            nn.Linear(d_model + raw_dim, anchor_hidden),
+            nn.ReLU(),
+            nn.Linear(anchor_hidden, d_model),
+            nn.ReLU(),
+        )
+
+        # Sparse attention projections
+        self.q_proj = nn.Linear(d_model, attn_dim)
+        self.k_proj = nn.Linear(d_model, attn_dim)
+        self.v_proj = nn.Linear(d_model, d_model)
+        self.out_proj = nn.Linear(d_model, d_model)
+        self.attn_ln = nn.LayerNorm(d_model)
+        self.ctx_fuse = nn.Sequential(
+            nn.Linear(d_model * 2, d_model),
+            nn.ReLU(),
+        )
+
+        # Optional global horizon embedding (unchanged semantics)
+        self.use_global_horizon = bool(
+            getattr(model_config, "use_global_horizon", False)
+        )
+        if self.use_global_horizon:
+            self.global_horizon_embed = GlobalHorizonEmbedding(d_model)
+            self.period_full_embed = PeriodEmbedding(env_config.F_period, d_model)
+
+    @staticmethod
+    def _masked_mean(x: Tensor, mask_invalid: Optional[Tensor], dim: int) -> Tensor:
+        if mask_invalid is None:
+            return x.mean(dim=dim)
+        valid = (~mask_invalid).float()
+        while valid.ndim < x.ndim:
+            valid = valid.unsqueeze(-1)
+        denom = valid.sum(dim=dim).clamp(min=1.0)
+        return (x * valid).sum(dim=dim) / denom
+
+    def _select_anchors(
+        self,
+        period_emb: Tensor,
+        periods_raw: Tensor,
+        period_mask: Optional[Tensor],
+    ) -> Tensor:
+        """Build anchor embeddings [B, L, d_model] from multi-scale cheap windows."""
+        B, K, d_model = period_emb.shape
+        device = period_emb.device
+
+        # Raw channels (assumed consistent with EnvConfig.F_period)
+        durations = periods_raw[:, :, 0]  # [B, K]
+        prices = periods_raw[:, :, 1]  # [B, K]
+        energy_per_period = prices * durations  # crude proxy for energy opportunity
+
+        if period_mask is None:
+            valid_period = torch.ones((B, K), device=device, dtype=torch.bool)
+        else:
+            valid_period = ~period_mask
+
+        anchors: list[Tensor] = []
+        max_scale = max([int(s) for s in self.window_scales if int(s) > 0] or [1])
+        max_scale_f = float(max_scale)
+        K_f = float(max(1, K - 1))
+
+        for s in self.window_scales:
+            s = int(s)
+            if s <= 0 or K < s:
+                continue
+            Lpos = K - s + 1
+
+            # Unfold window tokens. NOTE: unfold appends the window dimension at the end.
+            # period_emb: [B, K, d] -> win_emb: [B, Lpos, d, s]
+            win_emb = period_emb.unfold(dimension=1, size=s, step=1)
+            win_emb_mean = win_emb.mean(dim=-1)  # [B, Lpos, d]
+
+            win_valid = valid_period.unfold(dimension=1, size=s, step=1).all(
+                dim=2
+            )  # [B, Lpos]
+            win_dur = durations.unfold(dimension=1, size=s, step=1).sum(
+                dim=2
+            )  # [B, Lpos]
+            win_energy = energy_per_period.unfold(dimension=1, size=s, step=1).sum(
+                dim=2
+            )  # [B, Lpos]
+
+            # avg_price proxy = total energy / total duration
+            avg_price = win_energy / (win_dur.clamp(min=1e-6))
+            # Penalize invalid windows heavily
+            score = avg_price.masked_fill(~win_valid, float("inf"))  # [B, Lpos]
+
+            k_sel = min(self.topk_per_scale, Lpos)
+            if k_sel <= 0:
+                continue
+            # Select lowest-score windows
+            sel_idx = torch.topk(-score, k=k_sel, dim=1).indices  # [B, k_sel]
+
+            # Gather embeddings and raw stats
+            gather_idx_emb = sel_idx.unsqueeze(-1).expand(-1, -1, d_model)
+            sel_win_emb = win_emb_mean.gather(
+                dim=1, index=gather_idx_emb
+            )  # [B, k_sel, d]
+
+            sel_avg_price = avg_price.gather(dim=1, index=sel_idx)  # [B, k_sel]
+            sel_avg_dur = (win_dur / float(s)).gather(
+                dim=1, index=sel_idx
+            )  # [B, k_sel]
+            start_norm = sel_idx.float() / K_f
+            scale_norm = torch.full_like(start_norm, float(s) / max_scale_f)
+
+            raw = torch.stack(
+                [sel_avg_price, sel_avg_dur, start_norm, scale_norm], dim=-1
+            )
+            anchors.append(self.anchor_mlp(torch.cat([sel_win_emb, raw], dim=-1)))
+
+        if not anchors:
+            # Fallback: single pooled anchor from valid periods
+            pooled = self._masked_mean(period_emb, period_mask, dim=1).unsqueeze(
+                1
+            )  # [B,1,d]
+            raw = torch.zeros((B, 1, 4), device=device, dtype=pooled.dtype)
+            return self.anchor_mlp(torch.cat([pooled, raw], dim=-1))
+
+        return torch.cat(anchors, dim=1)  # [B, L, d]
+
+    def forward(
+        self,
+        jobs: Tensor,
+        periods_local: Tensor,
+        ctx: Tensor,
+        job_mask: Optional[Tensor] = None,
+        period_mask: Optional[Tensor] = None,
+        periods_full: Optional[Tensor] = None,
+        period_full_mask: Optional[Tensor] = None,
+    ) -> Tuple[Tensor, Tensor, Optional[Tensor]]:
+        # Encode jobs and add a light global job-set signal
+        job_emb = self.job_encoder(jobs)  # [B, M, d]
+        pooled_jobs = self._masked_mean(job_emb, job_mask, dim=1)  # [B, d]
+        job_emb = job_emb + self.job_set_proj(pooled_jobs).unsqueeze(1)
+
+        # Encode periods into tokens and build anchors
+        period_emb = self.period_encoder(periods_local)  # [B, K, d]
+        anchors = self._select_anchors(
+            period_emb, periods_local, period_mask
+        )  # [B, L, d]
+
+        # Sparse attention: jobs query only anchors
+        q = self.q_proj(job_emb)  # [B, M, a]
+        k = self.k_proj(anchors)  # [B, L, a]
+        v = self.v_proj(anchors)  # [B, L, d]
+        attn_logits = torch.matmul(q, k.transpose(1, 2)) / math.sqrt(
+            float(q.shape[-1])
+        )  # [B, M, L]
+        attn = torch.softmax(attn_logits, dim=-1)
+        job_ctx = torch.matmul(attn, v)  # [B, M, d]
+        job_emb = self.attn_ln(job_emb + self.out_proj(job_ctx))
+
+        # Context embedding fused with a global anchor summary (cheap, but keeps ctx aware of horizon)
+        ctx_emb_raw = self.ctx_embed(ctx)
+        anchor_summary = anchors.mean(dim=1)
+        ctx_emb = self.ctx_fuse(torch.cat([ctx_emb_raw, anchor_summary], dim=-1))
+
+        # Optional global horizon embedding (unchanged semantics)
+        global_emb = None
+        if self.use_global_horizon:
+            periods_for_global = (
+                periods_full if periods_full is not None else periods_local
+            )
+            mask_for_global = (
+                period_full_mask if period_full_mask is not None else period_mask
+            )
+            periods_for_global_emb = self.period_full_embed(periods_for_global)
+            global_emb = self.global_horizon_embed(
+                periods_for_global_emb,
+                periods_for_global,
+                mask_for_global,
+            )
+
+        return job_emb, ctx_emb, global_emb
+
+
 # =============================================================================
 # Factored Action Head
 # =============================================================================
@@ -951,6 +1185,10 @@ class PaSTSMNet(nn.Module):
         backbone = getattr(self.model_config, "backbone", "transformer")
         if backbone == "cnn_deepsets":
             self.encoder = CNNDeepSetsEncoder(self.model_config, self.env_config)
+        elif backbone == "cwe_sparse":
+            self.encoder = CandidateWindowSparseEncoder(
+                self.model_config, self.env_config
+            )
         else:
             self.encoder = PaSTEncoder(self.model_config, self.env_config)
 

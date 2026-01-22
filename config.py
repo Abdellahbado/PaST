@@ -79,6 +79,7 @@ class VariantID(Enum):
     PPO_DURATION_AWARE_FAMILY_CTX13 = "ppo_duration_aware_family_ctx13"  # Duration-aware families + identified ctx (q's + next-start deltas)
     PPO_FAMILY_Q4_BESTSTART_CNN = "ppo_family_q4_beststart_cnn"  # family_beststart with lightweight CNN+DeepSets backbone
     PPO_FAMILY_Q4_CTX13_BESTSTART_CNN = "ppo_family_q4_ctx13_beststart_cnn"  # family_ctx13_beststart with lightweight CNN+DeepSets backbone
+    PPO_FAMILY_Q4_CTX13_BESTSTART_CWE = "ppo_family_q4_ctx13_beststart_cwe"  # family_ctx13_beststart with candidate-window sparse attention backbone
     PPO_DURATION_AWARE_FAMILY_CNN = "ppo_duration_aware_family_cnn"  # duration-aware family with lightweight CNN+DeepSets backbone
     PPO_DURATION_AWARE_FAMILY_CTX13_CNN = "ppo_duration_aware_family_ctx13_cnn"  # duration-aware family ctx13 with lightweight CNN+DeepSets backbone
     Q_SEQUENCE = "q_sequence"  # Q-learning for sequences: supervised on DP costs
@@ -88,6 +89,12 @@ class VariantID(Enum):
     )
     Q_SEQUENCE_CNN_CTX13 = (
         "q_sequence_cnn_ctx13"  # Same as Q_SEQUENCE_CNN with ctx13 enabled
+    )
+    Q_SEQUENCE_CWE = (
+        "q_sequence_cwe"  # Q-sequence with Candidate-Window sparse encoder backbone
+    )
+    Q_SEQUENCE_CWE_CTX13 = (
+        "q_sequence_cwe_ctx13"  # Same as Q_SEQUENCE_CWE with ctx13 enabled
     )
 
 
@@ -254,6 +261,7 @@ class ModelConfig:
     # Backbone selection
     # - "transformer": original PaST cross-attn/self-attn encoder
     # - "cnn_deepsets": lightweight encoder (CNN over periods + DeepSets over jobs)
+    # - "cwe_sparse": candidate-window encoder with sparse job->window attention
     backbone: str = "transformer"
 
     # Lightweight backbone hyperparameters (used when backbone == "cnn_deepsets")
@@ -261,6 +269,14 @@ class ModelConfig:
     period_cnn_layers: int = 2
     period_cnn_kernel_size: int = 3
     deepsets_hidden: int = 256
+
+    # Candidate-Window Encoder (CWE) hyperparameters (used when backbone == "cwe_sparse")
+    # Multi-scale windows are in *period steps* (not time slots).
+    window_scales: Tuple[int, ...] = (1, 2, 4, 8)
+    window_topk_per_scale: int = 6
+    window_attn_dim: Optional[int] = None  # defaults to d_model when None
+    window_anchor_mlp_hidden: int = 128
+    window_job_set_mlp_hidden: int = 128
 
     # Transformer variant
     use_pre_ln: bool = True  # Pre-LayerNorm (more stable for RL)
@@ -867,6 +883,14 @@ def get_ppo_family_q4_ctx13_beststart_cnn() -> VariantConfig:
     return cfg
 
 
+def get_ppo_family_q4_ctx13_beststart_cwe() -> VariantConfig:
+    """Price-family + ctx13 + best-start decoding, using candidate-window sparse attention backbone."""
+    cfg = get_ppo_family_q4_ctx13_beststart()
+    cfg.variant_id = VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART_CWE
+    cfg.model.backbone = "cwe_sparse"
+    return cfg
+
+
 def get_ppo_family_q4_ctx18_beststart() -> VariantConfig:
     """Price-family + ctx18 (adds family capacity signals) + best-start decoding.
 
@@ -1084,6 +1108,29 @@ def get_q_sequence_cnn_ctx13() -> VariantConfig:
     cfg.env.F_ctx = 13
     cfg.model.ctx_input_dim = 13
     cfg.env.use_price_families = True
+    return cfg
+
+
+def get_q_sequence_cwe() -> VariantConfig:
+    """Q-learning for Sequences with the Candidate-Window sparse (CWE) encoder.
+
+    This keeps the same environment/action space as `get_q_sequence()`, but uses
+    the same lightweight job-conditioned period readout as the PPO CWE variant.
+    """
+    cfg = get_q_sequence()
+    cfg.variant_id = VariantID.Q_SEQUENCE_CWE
+    cfg.model.backbone = "cwe_sparse"
+    return cfg
+
+
+def get_q_sequence_cwe_ctx13() -> VariantConfig:
+    """CWE Q-sequence variant with ctx13 identification features."""
+    cfg = get_q_sequence_cwe()
+    cfg.variant_id = VariantID.Q_SEQUENCE_CWE_CTX13
+
+    cfg.env.F_ctx = 13
+    cfg.model.ctx_input_dim = 13
+    cfg.env.use_price_families = True
 
     return cfg
 
@@ -1102,6 +1149,7 @@ VARIANT_FACTORIES = {
     VariantID.PPO_FAMILY_Q4_BESTSTART_CNN: get_ppo_family_q4_beststart_cnn,
     VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART: get_ppo_family_q4_ctx13_beststart,
     VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART_CNN: get_ppo_family_q4_ctx13_beststart_cnn,
+    VariantID.PPO_FAMILY_Q4_CTX13_BESTSTART_CWE: get_ppo_family_q4_ctx13_beststart_cwe,
     VariantID.PPO_FAMILY_Q4_CTX18_BESTSTART: get_ppo_family_q4_ctx18_beststart,
     VariantID.PPO_SEQUENCE: get_ppo_sequence,
     VariantID.PPO_DURATION_AWARE_FAMILY: get_ppo_duration_aware_family,
@@ -1112,6 +1160,8 @@ VARIANT_FACTORIES = {
     VariantID.Q_SEQUENCE_CTX13: get_q_sequence_ctx13,
     VariantID.Q_SEQUENCE_CNN: get_q_sequence_cnn,
     VariantID.Q_SEQUENCE_CNN_CTX13: get_q_sequence_cnn_ctx13,
+    VariantID.Q_SEQUENCE_CWE: get_q_sequence_cwe,
+    VariantID.Q_SEQUENCE_CWE_CTX13: get_q_sequence_cwe_ctx13,
 }
 
 

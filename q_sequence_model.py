@@ -17,7 +17,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from PaST.config import VariantConfig, ModelConfig, EnvConfig, VariantID
-from PaST.past_sm_model import PaSTEncoder
+from PaST.past_sm_model import PaSTEncoder, CandidateWindowSparseEncoder
 
 
 class DuelingQHead(nn.Module):
@@ -442,10 +442,55 @@ class QSequenceCNNNet(nn.Module):
         return q_values
 
 
+class QSequenceCWENet(nn.Module):
+    """Q-sequence network using the Candidate-Window sparse encoder backbone."""
+
+    def __init__(self, config: VariantConfig):
+        super().__init__()
+
+        self.config = config
+        self.model_config = config.model
+        self.env_config = config.env
+
+        d_model = self.model_config.d_model
+        self.N_jobs = self.env_config.M_job_bins
+        self.action_dim = self.N_jobs
+
+        self.encoder = CandidateWindowSparseEncoder(self.model_config, self.env_config)
+        self.q_head = DuelingQHead(
+            d_model=d_model,
+            hidden_dim=256,
+            use_global_horizon=self.model_config.use_global_horizon,
+        )
+
+    def forward(
+        self,
+        jobs: Tensor,
+        periods_local: Tensor,
+        ctx: Tensor,
+        job_mask: Optional[Tensor] = None,
+        period_mask: Optional[Tensor] = None,
+        periods_full: Optional[Tensor] = None,
+        period_full_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        job_emb, ctx_emb, global_emb = self.encoder(
+            jobs=jobs,
+            periods_local=periods_local,
+            ctx=ctx,
+            job_mask=job_mask,
+            period_mask=period_mask,
+            periods_full=periods_full,
+            period_full_mask=period_full_mask,
+        )
+        return self.q_head(job_emb, ctx_emb, global_emb, job_mask)
+
+
 def build_q_model(config: VariantConfig) -> QSequenceNet:
     """Build Q-value model from variant configuration."""
     if config.variant_id in (VariantID.Q_SEQUENCE_CNN, VariantID.Q_SEQUENCE_CNN_CTX13):
         return QSequenceCNNNet(config)  # type: ignore[return-value]
+    if config.variant_id in (VariantID.Q_SEQUENCE_CWE, VariantID.Q_SEQUENCE_CWE_CTX13):
+        return QSequenceCWENet(config)  # type: ignore[return-value]
     return QSequenceNet(config)
 
 

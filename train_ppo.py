@@ -374,6 +374,9 @@ class MetricsLogger:
         clip_frac = metrics.get("train/clip_frac", 0)
         grad_norm = metrics.get("train/grad_norm", 0)
         grad_clip_frac = metrics.get("train/grad_clip_frac", 0)
+        ratio_std = metrics.get("train/ratio_std", 0)
+        logp_delta_abs = metrics.get("train/logp_delta_abs", 0)
+        usable_frac = metrics.get("train/usable_frac", 0)
         lr = metrics.get("train/lr", 0)
         entropy_coef = metrics.get("train/entropy_coef", 0)
         ppo_epochs_actual = metrics.get("train/ppo_epochs_actual", 0)
@@ -395,8 +398,9 @@ class MetricsLogger:
         print(
             f"[{update:5d}] steps={env_steps:>10,} | "
             f"ret={reward_mean:>8.2f}±{reward_std:<6.2f} | r/step={rps_mean:>6.2f}±{rps_std:<6.2f} | tmax<={tmax_max:>4.0f} | ep={int(num_episodes):>4d} am={int(forced_all_masked):>3d} | "
-            f"π={policy_loss:>7.4f} V={value_loss:>7.4f} H={entropy:>6.3f} | "
-            f"kl={approx_kl:.4f} clip={clip_frac:.3f} | "
+            f"π={policy_loss:>9.6f} V={value_loss:>7.4f} H={entropy:>6.3f} | "
+            f"kl={approx_kl:.6f} clip={clip_frac:.3f} | "
+            f"Δlogp={logp_delta_abs:>.4f} rσ={ratio_std:>.4f} use={usable_frac:>.2f} | "
             f"∇={grad_norm:>6.3f} gclip={grad_clip_frac:.2f} e={ppo_epochs_actual:>2.0f} | "
             f"lr={lr:.2e} entc={entropy_coef:.2e} | "
             f"mem={gpu_mem:>6.0f}MB | "
