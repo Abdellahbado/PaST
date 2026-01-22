@@ -755,11 +755,28 @@ class PPORunner:
         )
 
         # Compute metrics
+        ep_reward_per_step = None
+        if episode_rewards and episode_lengths:
+            # Normalize by episode length to make reward scale comparable when
+            # n_jobs varies across generated episodes.
+            # (For SM env, one step corresponds to scheduling one job.)
+            per_step = []
+            for r, L in zip(episode_rewards, episode_lengths):
+                denom = float(L) if float(L) > 0 else 1.0
+                per_step.append(float(r) / denom)
+            ep_reward_per_step = per_step
+
         metrics = {
             "rollout/rewards_mean": (
                 np.mean(episode_rewards) if episode_rewards else 0.0
             ),
             "rollout/rewards_std": np.std(episode_rewards) if episode_rewards else 0.0,
+            "rollout/reward_per_step_mean": (
+                float(np.mean(ep_reward_per_step)) if ep_reward_per_step else 0.0
+            ),
+            "rollout/reward_per_step_std": (
+                float(np.std(ep_reward_per_step)) if ep_reward_per_step else 0.0
+            ),
             "rollout/ep_len_mean": np.mean(episode_lengths) if episode_lengths else 0.0,
             "rollout/num_episodes": len(episode_rewards),
             "rollout/forced_all_masked_episodes": float(forced_all_masked_episodes),
