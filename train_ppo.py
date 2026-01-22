@@ -386,12 +386,15 @@ class MetricsLogger:
         num_episodes = metrics.get("rollout/num_episodes", 0)
         forced_all_masked = metrics.get("rollout/forced_all_masked_episodes", 0)
 
+        # Curriculum diagnostics
+        tmax_max = metrics.get("curriculum/tmax_max", 0)
+
         # GPU memory
         gpu_mem = metrics.get("gpu/memory_allocated_mb", 0)
 
         print(
             f"[{update:5d}] steps={env_steps:>10,} | "
-            f"ret={reward_mean:>8.2f}±{reward_std:<6.2f} | r/step={rps_mean:>6.2f}±{rps_std:<6.2f} | ep={int(num_episodes):>4d} am={int(forced_all_masked):>3d} | "
+            f"ret={reward_mean:>8.2f}±{reward_std:<6.2f} | r/step={rps_mean:>6.2f}±{rps_std:<6.2f} | tmax<={tmax_max:>4.0f} | ep={int(num_episodes):>4d} am={int(forced_all_masked):>3d} | "
             f"π={policy_loss:>7.4f} V={value_loss:>7.4f} H={entropy:>6.3f} | "
             f"kl={approx_kl:.4f} clip={clip_frac:.3f} | "
             f"∇={grad_norm:>6.3f} gclip={grad_clip_frac:.2f} e={ppo_epochs_actual:>2.0f} | "
@@ -672,6 +675,20 @@ class TrainingEnv:
         self.data_config.deadline_slack_ratio_min = ratio_min_f
         self.data_config.deadline_slack_ratio_max = ratio_max_f
 
+    def set_T_max_choices(self, choices: List[int]):
+        """Update data generation horizon choices used by episode sampling.
+
+        This enables curriculum learning over instance scale by starting with
+        short horizons ("small") and gradually introducing longer ones.
+        """
+        if choices is None:
+            return
+        # Keep sorted unique positive ints.
+        uniq = sorted({int(x) for x in choices if int(x) > 0})
+        if not uniq:
+            return
+        self.data_config.T_max_choices = uniq
+
     def reset(self, seed: Optional[int] = None) -> Dict[str, torch.Tensor]:
         """Reset all environments with new data."""
         num_unique = self.num_envs // self.replicas_per_instance
@@ -951,6 +968,50 @@ def train(
     # Curriculum: start with easier instances (looser deadlines) and anneal.
     base_slack_min = float(variant_config.data.deadline_slack_ratio_min)
     base_slack_max = float(variant_config.data.deadline_slack_ratio_max)
+    base_T_max_choices = list(getattr(variant_config.data, "T_max_choices", []))
+
+    def _curriculum_T_max_choices(p: float) -> List[int]:
+        """Curriculum over horizon length (instance scale).
+
+        Stages are heuristic but robust:
+        - start with <=80 (small)
+        - then add <=100
+        - then add <=350 (mls)
+        - finally full list (vls)
+        """
+        if not base_T_max_choices:
+            return []
+        base_sorted = sorted({int(x) for x in base_T_max_choices if int(x) > 0})
+        if len(base_sorted) <= 2:
+            return base_sorted
+
+        def _idx_leq(th: int) -> int:
+            idx = -1
+            for i, v in enumerate(base_sorted):
+                if v <= th:
+                    idx = i
+            return idx
+
+        i0 = _idx_leq(80)
+        if i0 < 0:
+            i0 = 0
+        i1 = max(i0, _idx_leq(100))
+        i2 = max(i1, _idx_leq(350))
+
+        stages = [
+            base_sorted[: i0 + 1],
+            base_sorted[: i1 + 1],
+            base_sorted[: i2 + 1],
+            base_sorted,
+        ]
+        # Remove duplicates while preserving order
+        unique_stages: List[List[int]] = []
+        for s in stages:
+            if not unique_stages or s != unique_stages[-1]:
+                unique_stages.append(s)
+
+        k = min(len(unique_stages) - 1, int(p * len(unique_stages)))
+        return unique_stages[k]
 
     def _curriculum_progress(update_idx: int) -> float:
         if not run_config.curriculum:
@@ -960,7 +1021,7 @@ def train(
         denom = max(1, int(round(frac * max(1, run_config.num_updates))))
         return min(1.0, float(update_idx) / float(denom))
 
-    def _apply_curriculum(update_idx: int) -> Tuple[float, float]:
+    def _apply_curriculum(update_idx: int) -> Tuple[float, float, List[int]]:
         p = _curriculum_progress(update_idx)
         # Start at the easiest setting: fixed slack_ratio = base_slack_max.
         start_min = base_slack_max
@@ -969,11 +1030,15 @@ def train(
         slack_min = start_min + (base_slack_min - start_min) * p
         slack_max = start_max + (base_slack_max - start_max) * p
         env.set_deadline_slack_ratio_range(slack_min, slack_max)
-        return slack_min, slack_max
+        # Instance-size curriculum (T_max choices)
+        tmax_choices = _curriculum_T_max_choices(p)
+        if tmax_choices:
+            env.set_T_max_choices(tmax_choices)
+        return slack_min, slack_max, tmax_choices
 
     # Initial reset
     print("\nStarting training...")
-    cur_slack_min, cur_slack_max = _apply_curriculum(start_update)
+    cur_slack_min, cur_slack_max, cur_T_max_choices = _apply_curriculum(start_update)
     obs = env.reset(seed=run_config.seed)
 
     # Track the most recently used eval seed so the final evaluation can be
@@ -985,7 +1050,7 @@ def train(
         update_start = time.time()
 
         # Update curriculum before collecting the next rollout.
-        cur_slack_min, cur_slack_max = _apply_curriculum(update)
+        cur_slack_min, cur_slack_max, cur_T_max_choices = _apply_curriculum(update)
 
         # Apply learning rate schedule
         current_lr = get_lr_for_update(run_config, update)
@@ -1008,6 +1073,12 @@ def train(
         metrics["curriculum/enabled"] = float(run_config.curriculum)
         metrics["curriculum/deadline_slack_ratio_min"] = float(cur_slack_min)
         metrics["curriculum/deadline_slack_ratio_max"] = float(cur_slack_max)
+        if cur_T_max_choices:
+            metrics["curriculum/tmax_num_choices"] = float(len(cur_T_max_choices))
+            metrics["curriculum/tmax_max"] = float(max(cur_T_max_choices))
+        else:
+            metrics["curriculum/tmax_num_choices"] = 0.0
+            metrics["curriculum/tmax_max"] = 0.0
 
         # Anomaly checking
         if update % run_config.anomaly_check_every == 0:
