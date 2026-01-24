@@ -142,21 +142,9 @@ def run_comparison(args):
     elif args.scale == "medium":
         T_choices = [t for t in dummy_cfg.data.T_max_choices if 100 < int(t) <= 350]
     else:
-        # 3. Pre-generate episodes per ratio (reused across models)
+        T_choices = dummy_cfg.data.T_max_choices
+    
     dummy_cfg.data.T_max_choices = T_choices
-        episodes_by_ratio = []
-        for r_idx, ratio in enumerate(ratios):
-            current_episodes = []
-            for inst_idx, inst in enumerate(instances_data):
-                inst_seed = args.eval_seed + inst_idx + (r_idx * 1000)
-                rng_ep = random.Random(inst_seed)
-                ep = make_single_machine_episode(
-                    inst["raw"], inst["m_idx"], inst["job_idxs"], rng_ep,
-                    deadline_slack_ratio_min=ratio,
-                    deadline_slack_ratio_max=ratio,
-                )
-                current_episodes.append(ep)
-            episodes_by_ratio.append(current_episodes)
 
     # 2. Generate Instances
     print("\nGenerating instances...")
@@ -172,11 +160,25 @@ def run_comparison(args):
             {"raw": raw, "m_idx": m_idx, "job_idxs": assignments[m_idx]}
         )
 
+    # 3. Pre-generate episodes per ratio (reused across models)
+    ratios = np.linspace(0.0, 1.0, 5)
+    episodes_by_ratio = []
+    for r_idx, ratio in enumerate(ratios):
+        current_episodes = []
+        for inst_idx, inst in enumerate(instances_data):
+            inst_seed = args.eval_seed + inst_idx + (r_idx * 1000)
+            rng_ep = random.Random(inst_seed)
+            ep = make_single_machine_episode(
+                inst["raw"], inst["m_idx"], inst["job_idxs"], rng_ep,
+                deadline_slack_ratio_min=ratio,
+                deadline_slack_ratio_max=ratio,
+            )
+            current_episodes.append(ep)
+        episodes_by_ratio.append(current_episodes)
+
     results = []
 
-    # 3. Evaluate Models
-    ratios = np.linspace(0.0, 1.0, 5)
-
+    # 4. Evaluate Models
     for model_info in MODELS_TO_EVAL:
         m_name = model_info["name"]
         m_path_str = model_info["path"]
@@ -193,122 +195,100 @@ def run_comparison(args):
         print(f"\nEvaluate {m_name} ({m_variant_id.value})...")
 
         try:
-            for r_idx, ratio in enumerate(ratios):
             ckpt = _load_checkpoint(resolved_path, device)
             state_dict = safe_extract_state_dict(ckpt)
-            current_episodes = []
+            
+            var_cfg = get_variant_config(m_variant_id)
+            if is_seq:
+                model = build_q_model(var_cfg)
+            else:
+                model = build_model(var_cfg)
+            
+            model.load_state_dict(state_dict)
+            model.to(device)
+            model.eval()
+
+            for r_idx, ratio in enumerate(ratios):
                 current_episodes = episodes_by_ratio[r_idx]
                 batch = batch_from_episodes(
                     current_episodes,
                     N_job_pad=int(var_cfg.env.N_job_pad),
                 )
-                inst_seed = args.eval_seed + inst_idx + (r_idx * 1000)
-                rng_ep = random.Random(inst_seed)
-                # Ensure local periods K matches model requirement
-                # PPO_Seq / Short defaults to K=48 or 50.
-                # We should respect var_cfg.env settings?
-                # make_single_machine_episode helper internally uses DataConfig.
-                # However, the environment constructor (inside batch_from_episodes / env init)
-                # handles K_period logic.
-                ep = make_single_machine_episode(
-                    inst["raw"],
-                    inst["m_idx"],
-                    inst["job_idxs"],
-                    rng_ep,
-                    deadline_slack_ratio_min=ratio,
-                    deadline_slack_ratio_max=ratio,
-                )
-                current_episodes.append(ep)
 
-            batch = batch_from_episodes(
-                current_episodes, N_job_pad=int(var_cfg.env.N_job_pad)
-            )
+                # --- GREEDY ---
+                t0 = time.time()
+                if is_seq:
+                    greedy_res = greedy_decode_q_sequence(model, var_cfg, batch, device)
+                else:
+                    greedy_res = greedy_decode(model, var_cfg.env, device, batch)
+                t_greedy = time.time() - t0
 
-            # --- GREEDY ---
-            t0 = time.time()
-            if is_seq:
-                greedy_res = greedy_decode_q_sequence(model, var_cfg, batch, device)
-            else:
-                greedy_res = greedy_decode(model, var_cfg.env, device, batch)
-            t_greedy = time.time() - t0
+                energies_greedy = [r.total_energy for r in greedy_res]
 
-            energies_greedy = [r.total_energy for r in greedy_res]
+                for i, en in enumerate(energies_greedy):
+                    results.append(
+                        {
+                            "model": m_name,
+                            "instance_idx": i,
+                            "ratio": ratio,
+                            "method": "Greedy" if not is_seq else "Greedy+DP",
+                            "energy": en,
+                            "time": t_greedy / len(greedy_res),
+                        }
+                    )
 
-            for i, en in enumerate(energies_greedy):
-                results.append(
-                    {
-                        "model": m_name,
-                        "instance_idx": i,
-                        "ratio": ratio,
-                        "method": "Greedy" if not is_seq else "Greedy+DP",
-                        "energy": en,
-                        "time": t_greedy / len(greedy_res),
-                    }
-                )
+                # --- SGBS ---
+                # Monkeypatch for duration aware if needed
+                if m_variant_id == VariantID.PPO_DURATION_AWARE_FAMILY_CTX13:
+                    import PaST.sgbs as sgbs_mod
 
-            # --- SGBS ---
-            # Monkeypatch for duration aware if needed
-            if m_variant_id == VariantID.PPO_DURATION_AWARE_FAMILY_CTX13:
-                import PaST.sgbs as sgbs_mod
+                    # Ensure SGBS relies on environment-provided action masks.
+                    sgbs_mod._completion_feasible_action_mask = lambda env, obs: (
+                        obs["action_mask"].float()
+                        if isinstance(obs, dict) and "action_mask" in obs
+                        else torch.ones((env.batch_size, env.action_dim), device=env.device)
+                    )
 
-                # Ensure SGBS relies on environment-provided action masks.
-                sgbs_mod._completion_feasible_action_mask = lambda env, obs: (
-                    obs["action_mask"].float()
-                    if isinstance(obs, dict) and "action_mask" in obs
-                    else torch.ones((env.batch_size, env.action_dim), device=env.device)
-                )
+                t0 = time.time()
+                if is_seq:
+                    sgbs_res = sgbs_q_sequence(
+                        model, var_cfg, batch, device, beta=args.beta, gamma=args.gamma
+                    )
+                    method_label = f"SGBS+DP(b{args.beta}g{args.gamma})"
+                else:
+                    sgbs_res = sgbs(
+                        model, var_cfg.env, device, batch, beta=args.beta, gamma=args.gamma
+                    )
+                    method_label = f"SGBS(b{args.beta}g{args.gamma})"
+                t_sgbs = time.time() - t0
 
-            # --- SGBS ---
-            t0 = time.time()
-            if is_seq:
-                sgbs_res = sgbs_q_sequence(
-                    model, var_cfg, batch, device, beta=args.beta, gamma=args.gamma
-                )
-                method_label = f"SGBS+DP(b{args.beta}g{args.gamma})"
-            else:
-                sgbs_res = sgbs(
-                    model, var_cfg.env, device, batch, beta=args.beta, gamma=args.gamma
-                )
-                method_label = f"SGBS(b{args.beta}g{args.gamma})"
-            t_sgbs = time.time() - t0
+                energies_sgbs = [r.total_energy for r in sgbs_res]
+                for i, en in enumerate(energies_sgbs):
+                    results.append(
+                        {
+                            "model": m_name,
+                            "instance_idx": i,
+                            "ratio": ratio,
+                            "method": method_label,
+                            "energy": en,
+                            "time": t_sgbs / len(sgbs_res),
+                        }
+                    )
 
-            energies_sgbs = [r.total_energy for r in sgbs_res]
-            for i, en in enumerate(energies_sgbs):
-                results.append(
-                    {
-                        "model": m_name,
-                        "instance_idx": i,
-                        "ratio": ratio,
-                        "method": method_label,
-                        "energy": en,
-                        "time": t_sgbs / len(sgbs_res),
-                    }
-                )
+            del model
+            torch.cuda.empty_cache()
 
-        del model
-        torch.cuda.empty_cache()
+        except Exception as e:
+            print(f"Error evaluating {m_name}: {e}")
+            continue
 
-    # 4. Baselines
+    # 5. Baselines
     print("\nEvaluate Baselines (SPT+DP, LPT+DP)...")
     base_env_cfg = get_variant_config(VariantID.PPO_SHORT_BASE).env
 
     for r_idx, ratio in enumerate(ratios):
-        # Regenerate same episodes
-        current_episodes = []
-        for inst_idx, inst in enumerate(instances_data):
-            inst_seed = args.eval_seed + inst_idx + (r_idx * 1000)
-            rng_ep = random.Random(inst_seed)
-            ep = make_single_machine_episode(
-                inst["raw"],
-                inst["m_idx"],
-                inst["job_idxs"],
-                rng_ep,
-                deadline_slack_ratio_min=ratio,
-                deadline_slack_ratio_max=ratio,
-            )
-            current_episodes.append(ep)
-
-        batch = batch_from_episodes(current_episodes)
+        current_episodes = episodes_by_ratio[r_idx]
+        batch = batch_from_episodes(current_episodes, N_job_pad=int(base_env_cfg.N_job_pad))
 
         spt_res = spt_lpt_with_dp(base_env_cfg, device, batch, which="spt")
         lpt_res = spt_lpt_with_dp(base_env_cfg, device, batch, which="lpt")
@@ -335,7 +315,7 @@ def run_comparison(args):
                 }
             )
 
-    # 5. Save & Summary
+    # 6. Save & Summary
     df = pd.DataFrame(results)
     out_csv = f"comparison_results_{args.scale}_seed{args.eval_seed}.csv"
     if args.out_dir:
