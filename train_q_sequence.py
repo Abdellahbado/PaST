@@ -191,6 +191,12 @@ class QRunConfig:
     num_eval_instances: int = 256
     eval_seed: int = 12345
 
+    # SGBS evaluation (beam search - this is the real metric for the model)
+    eval_sgbs: bool = True  # Enable SGBS evaluation
+    eval_sgbs_beta: int = 4  # Beam width for SGBS
+    eval_sgbs_gamma: int = 4  # Expansion factor for SGBS
+    eval_sgbs_num_instances: int = 64  # Fewer instances for SGBS (expensive)
+
     # Checkpointing
     save_every_rounds: int = 10
 
@@ -208,6 +214,9 @@ class QRunConfig:
     curriculum_fraction: float = 0.3  # fraction of rounds used for annealing
     curriculum_slack_min: Optional[float] = None
     curriculum_slack_max: Optional[float] = None
+
+    # Resume from checkpoint
+    resume_from: Optional[str] = None  # Path to checkpoint file or run directory
 
 
 # =============================================================================
@@ -1096,6 +1105,76 @@ def evaluate_greedy(
     }
 
 
+def evaluate_sgbs(
+    model: QSequenceNet,
+    variant_config,
+    data_config: DataConfig,
+    num_instances: int,
+    seed: int,
+    device: torch.device,
+    beta: int = 4,
+    gamma: int = 4,
+) -> Dict[str, float]:
+    """Evaluate model using SGBS beam search - the real metric for Q-sequence.
+
+    This evaluates whether the Q-value landscape supports good beam search,
+    which is the intended use case (not greedy decoding).
+    """
+    from PaST.run_eval_q_sequence import sgbs_q_sequence, greedy_decode_q_sequence
+    from PaST.baselines_sequence_dp import spt_lpt_with_dp
+
+    model.eval()
+
+    # Generate eval instances
+    batch_data = generate_episode_batch(
+        batch_size=num_instances,
+        config=data_config,
+        seed=seed,
+    )
+
+    # Run SGBS
+    sgbs_results = sgbs_q_sequence(
+        model=model,
+        variant_config=variant_config,
+        batch_data=batch_data,
+        device=device,
+        beta=beta,
+        gamma=gamma,
+    )
+
+    # Run greedy for comparison
+    greedy_results = greedy_decode_q_sequence(
+        model=model,
+        variant_config=variant_config,
+        batch_data=batch_data,
+        device=device,
+    )
+
+    # Run SPT baseline
+    spt_results = spt_lpt_with_dp(batch_data, mode="spt")
+
+    # Compute metrics
+    sgbs_costs = [r.total_energy for r in sgbs_results]
+    greedy_costs = [r.total_energy for r in greedy_results]
+    spt_costs = [r.total_energy for r in spt_results]
+
+    avg_sgbs = np.mean(sgbs_costs)
+    avg_greedy = np.mean(greedy_costs)
+    avg_spt = np.mean(spt_costs)
+
+    return {
+        "sgbs_cost": avg_sgbs,
+        "greedy_cost": avg_greedy,
+        "spt_cost": avg_spt,
+        "sgbs_vs_spt": (avg_spt - avg_sgbs) / avg_spt * 100 if avg_spt > 0 else 0,
+        "sgbs_vs_greedy": (
+            (avg_greedy - avg_sgbs) / avg_greedy * 100 if avg_greedy > 0 else 0
+        ),
+        "greedy_vs_spt": (avg_spt - avg_greedy) / avg_spt * 100 if avg_spt > 0 else 0,
+        "n_instances": num_instances,
+    }
+
+
 # =============================================================================
 # Main
 # =============================================================================
@@ -1154,6 +1233,35 @@ def parse_args():
     parser.add_argument("--num_eval_instances", type=int, default=256)
     parser.add_argument("--save_every_rounds", type=int, default=10)
 
+    # SGBS evaluation
+    parser.add_argument(
+        "--eval_sgbs",
+        action="store_true",
+        default=True,
+        help="Enable SGBS beam search evaluation (default: True)",
+    )
+    parser.add_argument(
+        "--no_eval_sgbs",
+        dest="eval_sgbs",
+        action="store_false",
+        help="Disable SGBS evaluation for faster training",
+    )
+    parser.add_argument(
+        "--eval_sgbs_beta", type=int, default=4, help="Beam width for SGBS evaluation"
+    )
+    parser.add_argument(
+        "--eval_sgbs_gamma",
+        type=int,
+        default=4,
+        help="Expansion factor for SGBS evaluation",
+    )
+    parser.add_argument(
+        "--eval_sgbs_num_instances",
+        type=int,
+        default=64,
+        help="Number of instances for SGBS eval (fewer than greedy)",
+    )
+
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument(
         "--output_dir",
@@ -1167,6 +1275,15 @@ def parse_args():
     parser.add_argument("--curriculum_fraction", type=float, default=0.3)
     parser.add_argument("--curriculum_slack_min", type=float, default=None)
     parser.add_argument("--curriculum_slack_max", type=float, default=None)
+
+    # Resume from checkpoint
+    parser.add_argument(
+        "--resume_from",
+        type=str,
+        default=None,
+        help="Path to checkpoint file (.pt) or run directory to resume from. "
+        "If a directory is given, uses the latest checkpoint_*.pt file.",
+    )
 
     return parser.parse_args()
 
@@ -1228,6 +1345,10 @@ def main():
         eval_every_rounds=args.eval_every_rounds,
         num_eval_instances=args.num_eval_instances,
         save_every_rounds=args.save_every_rounds,
+        eval_sgbs=args.eval_sgbs,
+        eval_sgbs_beta=args.eval_sgbs_beta,
+        eval_sgbs_gamma=args.eval_sgbs_gamma,
+        eval_sgbs_num_instances=args.eval_sgbs_num_instances,
         device=args.device,
         output_dir=args.output_dir,
         smoke_test=args.smoke_test,
@@ -1235,6 +1356,7 @@ def main():
         curriculum_fraction=args.curriculum_fraction,
         curriculum_slack_min=args.curriculum_slack_min,
         curriculum_slack_max=args.curriculum_slack_max,
+        resume_from=args.resume_from,
     )
 
     # Smoke test overrides
@@ -1289,15 +1411,58 @@ def main():
     except Exception:
         pass
 
-    # Setup output directory
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name = config.run_name or f"{config.variant_id}_s{config.seed}"
-    run_dir = Path(config.output_dir) / f"{run_name}_{timestamp}"
-    run_dir.mkdir(parents=True, exist_ok=True)
+    # === Resume handling ===
+    start_round = 0
+    checkpoint_data = None
+    resume_run_dir = None
 
-    # Save config
-    with open(run_dir / "config.json", "w") as f:
-        json.dump(asdict(config), f, indent=2)
+    if config.resume_from:
+        resume_path = Path(config.resume_from)
+        if resume_path.is_dir():
+            # Find latest checkpoint in directory
+            checkpoints = sorted(resume_path.glob("checkpoint_*.pt"))
+            if not checkpoints:
+                raise FileNotFoundError(
+                    f"No checkpoint_*.pt files found in {resume_path}"
+                )
+            resume_path = checkpoints[-1]
+            resume_run_dir = Path(config.resume_from)
+        else:
+            resume_run_dir = resume_path.parent
+
+        print(f"Resuming from checkpoint: {resume_path}")
+        checkpoint_data = torch.load(
+            resume_path, map_location="cpu", weights_only=False
+        )
+        start_round = checkpoint_data["round"]
+        print(
+            f"  Resuming from round {start_round + 1} (completed {start_round} rounds)"
+        )
+
+    # Setup output directory
+    if resume_run_dir is not None:
+        # Continue in the same run directory
+        run_dir = resume_run_dir
+        print(f"  Continuing in existing run directory: {run_dir}")
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = config.run_name or f"{config.variant_id}_s{config.seed}"
+        run_dir = Path(config.output_dir) / f"{run_name}_{timestamp}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Save config (append resume info if resuming)
+    config_path = run_dir / "config.json"
+    if config.resume_from:
+        # Append resume info to config
+        with open(config_path, "r") as f:
+            saved_config = json.load(f)
+        saved_config["resumed_from"] = str(resume_path)
+        saved_config["resumed_at_round"] = start_round
+        with open(config_path, "w") as f:
+            json.dump(saved_config, f, indent=2)
+    else:
+        with open(config_path, "w") as f:
+            json.dump(asdict(config), f, indent=2)
 
     # Load variant config
     try:
@@ -1333,11 +1498,17 @@ def main():
         weight_decay=config.weight_decay,
     )
 
-    # Replay buffer
+    # Load checkpoint state if resuming
+    if checkpoint_data is not None:
+        model.load_state_dict(checkpoint_data["model_state"])
+        optimizer.load_state_dict(checkpoint_data["optimizer_state"])
+        print(f"  Loaded model and optimizer state from checkpoint")
+
+    # Replay buffer (note: buffer is NOT restored - we start fresh data collection)
     buffer = QTransitionBuffer(config.buffer_size)
 
-    # Logging
-    log_file = open(run_dir / "log.jsonl", "w")
+    # Logging (append mode if resuming)
+    log_file = open(run_dir / "log.jsonl", "a" if config.resume_from else "w")
 
     print(f"\n{'='*60}")
     print(f"Q-Sequence Training: {config.variant_id}")
@@ -1351,7 +1522,7 @@ def main():
 
     best_cost: Optional[float] = None
 
-    for round_idx in range(config.num_rounds):
+    for round_idx in range(start_round, config.num_rounds):
         round_start = time.time()
 
         # Determine exploration epsilon for this round
@@ -1495,8 +1666,10 @@ def main():
 
         # === Evaluation ===
         eval_results = None
+        sgbs_results = None
         if (round_idx + 1) % config.eval_every_rounds == 0:
-            print(f"  Evaluating...", end=" ", flush=True)
+            # Greedy evaluation
+            print(f"  Evaluating (greedy)...", end=" ", flush=True)
             eval_results = evaluate_greedy(
                 model=model,
                 env_config=env_config,
@@ -1509,9 +1682,35 @@ def main():
                 f"cost={eval_results['cost']:.2f}, vs_spt={eval_results['vs_spt']:.1f}%"
             )
 
-            # Save best
-            if best_cost is None or eval_results["cost"] < best_cost:
-                best_cost = eval_results["cost"]
+            # SGBS evaluation (the real metric for beam search usage)
+            if config.eval_sgbs:
+                print(
+                    f"  Evaluating (SGBS β={config.eval_sgbs_beta} γ={config.eval_sgbs_gamma})...",
+                    end=" ",
+                    flush=True,
+                )
+                sgbs_results = evaluate_sgbs(
+                    model=model,
+                    variant_config=variant_config,
+                    data_config=data_config,
+                    num_instances=config.eval_sgbs_num_instances,
+                    seed=config.eval_seed,
+                    device=device,
+                    beta=config.eval_sgbs_beta,
+                    gamma=config.eval_sgbs_gamma,
+                )
+                print(
+                    f"sgbs_cost={sgbs_results['sgbs_cost']:.2f}, "
+                    f"sgbs_vs_spt={sgbs_results['sgbs_vs_spt']:.1f}%, "
+                    f"sgbs_vs_greedy={sgbs_results['sgbs_vs_greedy']:.1f}%"
+                )
+
+            # Save best (based on SGBS if available, otherwise greedy)
+            current_cost = (
+                sgbs_results["sgbs_cost"] if sgbs_results else eval_results["cost"]
+            )
+            if best_cost is None or current_cost < best_cost:
+                best_cost = current_cost
                 torch.save(model.state_dict(), run_dir / "best_model.pt")
 
         # === Logging ===
@@ -1528,6 +1727,8 @@ def main():
         }
         if eval_results:
             log_entry.update({f"eval_{k}": v for k, v in eval_results.items()})
+        if sgbs_results:
+            log_entry.update({f"sgbs_{k}": v for k, v in sgbs_results.items()})
 
         log_file.write(json.dumps(log_entry) + "\n")
         log_file.flush()
