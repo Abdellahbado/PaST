@@ -1151,7 +1151,12 @@ def evaluate_sgbs(
     )
 
     # Run SPT baseline
-    spt_results = spt_lpt_with_dp(batch_data, mode="spt")
+    spt_results = spt_lpt_with_dp(
+        env_config=variant_config.env,
+        device=device,
+        batch_data=batch_data,
+        which="spt",
+    )
 
     # Compute metrics
     sgbs_costs = [r.total_energy for r in sgbs_results]
