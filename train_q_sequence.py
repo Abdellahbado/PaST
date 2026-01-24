@@ -168,6 +168,9 @@ class QRunConfig:
     completion_prob_decay_rounds: int = (
         0  # 0 = no decay; else linear over this many rounds
     )
+    # Heuristic used when not using model completion
+    # Options: "spt", "lpt", "random", "mixed" (randomly picks spt/lpt/random each time)
+    heuristic_policy: str = "mixed"
 
     # Model training
     learning_rate: float = 1e-4
@@ -426,6 +429,59 @@ def complete_sequence_spt(
     return partial_sequence + remaining_sorted
 
 
+def complete_sequence_lpt(
+    partial_sequence: List[int],
+    remaining_jobs: List[int],
+    processing_times: np.ndarray,
+) -> List[int]:
+    """Complete sequence using LPT (longest processing time) heuristic."""
+    if not remaining_jobs:
+        return partial_sequence
+
+    remaining_sorted = sorted(remaining_jobs, key=lambda j: -processing_times[j])
+    return partial_sequence + remaining_sorted
+
+
+def complete_sequence_random(
+    partial_sequence: List[int],
+    remaining_jobs: List[int],
+    rng: random.Random,
+) -> List[int]:
+    """Complete sequence using random shuffle."""
+    if not remaining_jobs:
+        return partial_sequence
+
+    shuffled = list(remaining_jobs)
+    rng.shuffle(shuffled)
+    return partial_sequence + shuffled
+
+
+def complete_sequence_heuristic(
+    partial_sequence: List[int],
+    remaining_jobs: List[int],
+    processing_times: np.ndarray,
+    heuristic: str,
+    rng: random.Random,
+) -> List[int]:
+    """Complete sequence using specified heuristic.
+
+    Args:
+        heuristic: One of 'spt', 'lpt', 'random', or 'mixed' (randomly picks one)
+    """
+    if heuristic == "mixed":
+        heuristic = rng.choice(["spt", "lpt", "random"])
+
+    if heuristic == "spt":
+        return complete_sequence_spt(partial_sequence, remaining_jobs, processing_times)
+    elif heuristic == "lpt":
+        return complete_sequence_lpt(partial_sequence, remaining_jobs, processing_times)
+    elif heuristic == "random":
+        return complete_sequence_random(partial_sequence, remaining_jobs, rng)
+    else:
+        # Default to SPT
+        return complete_sequence_spt(partial_sequence, remaining_jobs, processing_times)
+
+
 def complete_sequence_model(
     partial_sequence: List[int],
     remaining_jobs: List[int],
@@ -558,6 +614,7 @@ def _collect_round_batch(
     num_counterfactuals: int,
     exploration_eps: float,
     use_model_completion: bool,
+    heuristic_policy: str,
     device_str: str,
     seed: int,
     num_cpu_threads: int,
@@ -738,7 +795,9 @@ def _collect_round_batch(
                     cf_partial = partial_sequence + [candidate_job]
                     cf_remaining = [j for j in remaining_jobs if j != candidate_job]
                     full_seqs.append(
-                        complete_sequence_spt(cf_partial, cf_remaining, p_np)
+                        complete_sequence_heuristic(
+                            cf_partial, cf_remaining, p_np, heuristic_policy, rng
+                        )
                     )
 
             # Queue DP evals for batching.
@@ -776,6 +835,7 @@ def collect_round_data(
     num_counterfactuals: int,
     exploration_eps: float,
     use_model_completion: bool,
+    heuristic_policy: str,
     device: torch.device,
     seed: int,
     collection_batch_size: int = 64,  # Fixed batch size for collection
@@ -834,6 +894,7 @@ def collect_round_data(
                     num_counterfactuals=num_counterfactuals,
                     exploration_eps=exploration_eps,
                     use_model_completion=use_model_completion,
+                    heuristic_policy=heuristic_policy,
                     device_str=device_str,
                     seed=batch_seed,
                     num_cpu_threads=threads_per_worker,
@@ -854,6 +915,7 @@ def collect_round_data(
                         num_counterfactuals=num_counterfactuals,
                         exploration_eps=exploration_eps,
                         use_model_completion=use_model_completion,
+                        heuristic_policy=heuristic_policy,
                         device_str=device_str,
                         seed=batch_seed,
                         num_cpu_threads=threads_per_worker,
@@ -1222,6 +1284,13 @@ def parse_args():
     parser.add_argument("--completion_prob_start", type=float, default=1.0)
     parser.add_argument("--completion_prob_end", type=float, default=1.0)
     parser.add_argument("--completion_prob_decay_rounds", type=int, default=0)
+    parser.add_argument(
+        "--heuristic_policy",
+        type=str,
+        default="mixed",
+        choices=["spt", "lpt", "random", "mixed"],
+        help="Heuristic for completion when not using model. 'mixed' randomly picks spt/lpt/random.",
+    )
 
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--weight_decay", type=float, default=1e-5)
@@ -1339,6 +1408,7 @@ def main():
         completion_prob_start=args.completion_prob_start,
         completion_prob_end=args.completion_prob_end,
         completion_prob_decay_rounds=args.completion_prob_decay_rounds,
+        heuristic_policy=args.heuristic_policy,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         grad_clip=args.grad_clip,
@@ -1518,10 +1588,11 @@ def main():
     print(f"\n{'='*60}")
     print(f"Q-Sequence Training: {config.variant_id}")
     print(f"Output: {run_dir}")
-    print(f"Warmup rounds (SPT completion): {config.warmup_rounds}")
+    print(f"Warmup rounds (heuristic completion): {config.warmup_rounds}")
+    print(f"Heuristic policy (non-model): {config.heuristic_policy}")
     print(
         f"Completion policy: {config.completion_policy} | "
-        f"mix_prob_start={config.completion_prob_start} | mix_prob_end={config.completion_prob_end}"
+        f"model_prob_start={config.completion_prob_start} | model_prob_end={config.completion_prob_end}"
     )
     print(f"{'='*60}\n")
 
@@ -1617,6 +1688,7 @@ def main():
             num_counterfactuals=config.num_counterfactuals,
             exploration_eps=eps,
             use_model_completion=use_model_completion,
+            heuristic_policy=config.heuristic_policy,
             device=device,
             seed=config.seed + round_idx * 100000,
             collection_batch_size=config.collection_batch_size,
