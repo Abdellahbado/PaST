@@ -1494,16 +1494,25 @@ def main():
     if config.resume_from:
         resume_path = Path(config.resume_from)
         if resume_path.is_dir():
-            # Find latest checkpoint in directory
+            # Find latest checkpoint in directory (could be run dir or checkpoints dir)
             checkpoints = sorted(resume_path.glob("checkpoint_*.pt"))
             if not checkpoints:
+                # Try checkpoints subdirectory
+                checkpoints = sorted(resume_path.glob("checkpoints/checkpoint_*.pt"))
+            if not checkpoints:
                 raise FileNotFoundError(
-                    f"No checkpoint_*.pt files found in {resume_path}"
+                    f"No checkpoint_*.pt files found in {resume_path} or {resume_path}/checkpoints"
                 )
             resume_path = checkpoints[-1]
             resume_run_dir = Path(config.resume_from)
+            # If it was the checkpoints dir, go up one level
+            if resume_run_dir.name == "checkpoints":
+                resume_run_dir = resume_run_dir.parent
         else:
+            # File path given - go up to run directory
             resume_run_dir = resume_path.parent
+            if resume_run_dir.name == "checkpoints":
+                resume_run_dir = resume_run_dir.parent
 
         print(f"Resuming from checkpoint: {resume_path}")
         checkpoint_data = torch.load(
@@ -1528,13 +1537,21 @@ def main():
     # Save config (append resume info if resuming)
     config_path = run_dir / "config.json"
     if config.resume_from:
-        # Append resume info to config
-        with open(config_path, "r") as f:
-            saved_config = json.load(f)
-        saved_config["resumed_from"] = str(resume_path)
-        saved_config["resumed_at_round"] = start_round
-        with open(config_path, "w") as f:
-            json.dump(saved_config, f, indent=2)
+        # Try to append resume info to existing config, or create new one
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                saved_config = json.load(f)
+            saved_config["resumed_from"] = str(resume_path)
+            saved_config["resumed_at_round"] = start_round
+            with open(config_path, "w") as f:
+                json.dump(saved_config, f, indent=2)
+        else:
+            # No existing config - create one with current settings + resume info
+            new_config = asdict(config)
+            new_config["resumed_from"] = str(resume_path)
+            new_config["resumed_at_round"] = start_round
+            with open(config_path, "w") as f:
+                json.dump(new_config, f, indent=2)
     else:
         with open(config_path, "w") as f:
             json.dump(asdict(config), f, indent=2)
