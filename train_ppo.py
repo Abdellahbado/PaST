@@ -1354,6 +1354,11 @@ def parse_args():
     parser.add_argument("--max_grad_norm", type=float, default=None)
     parser.add_argument("--target_kl", type=float, default=None)
 
+    # Evaluation and checkpointing frequency
+    parser.add_argument("--eval_every_updates", type=int, default=None)
+    parser.add_argument("--save_latest_every_updates", type=int, default=None)
+    parser.add_argument("--save_latest_every_minutes", type=float, default=None)
+
     # Curriculum learning (easier instances early)
     parser.add_argument(
         "--curriculum",
@@ -1469,6 +1474,14 @@ def main():
         run_config.max_grad_norm = args.max_grad_norm
     if args.target_kl is not None:
         run_config.target_kl = args.target_kl
+
+    # Evaluation and checkpointing overrides
+    if args.eval_every_updates is not None:
+        run_config.eval_every_updates = args.eval_every_updates
+    if args.save_latest_every_updates is not None:
+        run_config.save_latest_every_updates = args.save_latest_every_updates
+    if args.save_latest_every_minutes is not None:
+        run_config.save_latest_every_minutes = args.save_latest_every_minutes
 
     # Curriculum overrides
     if args.curriculum:
