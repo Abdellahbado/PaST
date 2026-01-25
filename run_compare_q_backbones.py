@@ -47,6 +47,81 @@ from PaST.run_eval_eas_ppo_short_base import batch_from_episodes, _load_checkpoi
 from PaST.run_eval_q_sequence import greedy_decode_q_sequence, sgbs_q_sequence
 from PaST.baselines_sequence_dp import spt_lpt_with_dp
 
+
+def _latest_checkpoint_in_dir(ckpt_dir: Path) -> Optional[Path]:
+    """Return latest checkpoint_*.pt in a directory based on the numeric suffix."""
+    if not ckpt_dir.exists() or not ckpt_dir.is_dir():
+        return None
+
+    candidates = list(ckpt_dir.glob("checkpoint_*.pt"))
+    if not candidates:
+        return None
+
+    def _ckpt_num(p: Path) -> int:
+        stem = p.stem  # checkpoint_40
+        try:
+            return int(stem.split("checkpoint_")[-1])
+        except Exception:
+            return -1
+
+    candidates.sort(key=_ckpt_num)
+    return candidates[-1]
+
+
+def _best_checkpoint_in_dir(ckpt_dir: Path) -> Optional[Path]:
+    """Return a "best" checkpoint if present (best_model.pt or best.pt)."""
+    if not ckpt_dir.exists() or not ckpt_dir.is_dir():
+        return None
+
+    for fname in ["best_model.pt", "best.pt"]:
+        cand = ckpt_dir / fname
+        if cand.exists() and cand.is_file():
+            return cand
+    return None
+
+
+def resolve_checkpoint_path(path_str: str, checkpoint_selector: str = "latest") -> Path:
+    """Resolve a checkpoint path.
+
+    Accepts either:
+    - a direct checkpoint file path
+    - a directory containing checkpoints (picks latest checkpoint_*.pt)
+    - a run directory containing a checkpoints/ subdir
+
+    Falls back to best checkpoints if present.
+    """
+    p = resolve_path(path_str)
+
+    if p.exists() and p.is_file():
+        return p
+
+    ckpt_dir = p
+    if p.exists() and p.is_dir():
+        # If user points at the run dir, use its checkpoints/ subdir.
+        if (p / "checkpoints").is_dir():
+            ckpt_dir = p / "checkpoints"
+
+        checkpoint_selector = (checkpoint_selector or "latest").strip().lower()
+
+        if checkpoint_selector in {"best", "best_model"}:
+            best = _best_checkpoint_in_dir(ckpt_dir)
+            if best is not None:
+                return best
+
+        latest = _latest_checkpoint_in_dir(ckpt_dir)
+        if latest is not None:
+            return latest
+
+        # Fallbacks (common naming across scripts)
+        for fname in ["best_model.pt", "best.pt", "latest.pt", "checkpoint.pt"]:
+            cand = ckpt_dir / fname
+            if cand.exists() and cand.is_file():
+                return cand
+
+    # Last resort: return original (will trigger a clear FileNotFoundError)
+    return p
+
+
 # =============================================================================
 # Model Configurations
 # =============================================================================
@@ -59,7 +134,9 @@ MODELS = {
     },
     "CWE": {
         "name": "Q-Seq (CWE)",
-        "path": "runs_p100/q-seq-cwe/checkpoints/checkpoint_55.pt",
+        # Can be a checkpoint file, a checkpoints/ directory, or a run directory.
+        # We'll auto-pick latest checkpoint_*.pt if a directory is provided.
+        "path": "runs_p100/q-seq-cwe/checkpoints",
         "variant_id": VariantID.Q_SEQUENCE_CWE_CTX13,
     },
 }
@@ -102,14 +179,18 @@ def safe_extract_state_dict(ckpt: Dict) -> Dict:
     raise ValueError("Could not extract state dict from checkpoint")
 
 
-def load_q_model(model_key: str, device: torch.device):
+def load_q_model(
+    model_key: str, device: torch.device, checkpoint_selector: str = "latest"
+):
     """Load a Q-sequence model by key."""
     cfg = MODELS[model_key]
     var_cfg = get_variant_config(cfg["variant_id"])
 
     model = build_q_model(var_cfg)
 
-    ckpt_path = resolve_path(cfg["path"])
+    ckpt_path = resolve_checkpoint_path(
+        cfg["path"], checkpoint_selector=checkpoint_selector
+    )
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
 
@@ -394,7 +475,9 @@ def run_comparison(args):
     models = {}
     for key in ["Attention", "CWE"]:
         try:
-            model, var_cfg = load_q_model(key, device)
+            model, var_cfg = load_q_model(
+                key, device, checkpoint_selector=args.checkpoint_selector
+            )
             models[key] = {
                 "model": model,
                 "var_cfg": var_cfg,
@@ -597,6 +680,17 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--visualize", action="store_true", help="Generate comparison visualizations"
+    )
+
+    parser.add_argument(
+        "--checkpoint_selector",
+        type=str,
+        default="latest",
+        choices=["latest", "best_model", "best"],
+        help=(
+            "How to select a checkpoint when a directory is provided: "
+            "'latest' picks the highest checkpoint_*.pt; 'best'/'best_model' uses best_model.pt or best.pt if present"
+        ),
     )
 
     args = parser.parse_args()

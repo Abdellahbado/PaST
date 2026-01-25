@@ -186,6 +186,16 @@ class QRunConfig:
     listwise_weight: float = 0.0
     listwise_temperature: float = 1.0
 
+    # Target shaping (optional)
+    # - none: regress to absolute DP cost of the completed sequence
+    # - state_min: subtract min DP cost among candidate actions from the same state
+    #   (keeps rankings identical, reduces scale/variance)
+    target_normalization: str = "none"
+
+    # Candidate set shaping (optional): ensure heuristic candidates are present
+    # when sampling counterfactual actions (helps avoid purely random negatives).
+    include_heuristic_candidates: bool = False
+
     # Temperature for Q->logits conversion
     temperature: float = 1.0
 
@@ -615,6 +625,8 @@ def _collect_round_batch(
     exploration_eps: float,
     use_model_completion: bool,
     heuristic_policy: str,
+    target_normalization: str,
+    include_heuristic_candidates: bool,
     device_str: str,
     seed: int,
     num_cpu_threads: int,
@@ -684,9 +696,26 @@ def _collect_round_batch(
             device=device,
         )
         costs_cpu = costs.detach().cpu().numpy().tolist()
+
+        # Optional per-state normalization (subtract min DP cost for that state).
+        state_min: Dict[int, float] = {}
+        if (target_normalization or "none").strip().lower() == "state_min":
+            for sid, c in zip(pending_state_ids, costs_cpu):
+                if not np.isfinite(c):
+                    continue
+                sid_i = int(sid)
+                prev = state_min.get(sid_i)
+                state_min[sid_i] = c if prev is None else min(prev, c)
+
         for k, cf_cost in enumerate(costs_cpu):
             if not np.isfinite(cf_cost):
                 continue
+
+            sid_k = int(pending_state_ids[k])
+            q_target = float(cf_cost)
+            if state_min:
+                q_target = float(cf_cost - state_min.get(sid_k, cf_cost))
+
             transitions.append(
                 QTransition(
                     jobs=pending_obs_single[k]["jobs"].copy(),
@@ -694,8 +723,8 @@ def _collect_round_batch(
                     ctx=pending_obs_single[k]["ctx"].copy(),
                     job_avail=pending_job_avail[k].copy(),
                     action=int(pending_actions[k]),
-                    q_target=float(cf_cost),
-                    state_id=int(pending_state_ids[k]),
+                    q_target=q_target,
+                    state_id=sid_k,
                 )
             )
 
@@ -762,12 +791,24 @@ def _collect_round_batch(
                     q[0, mask_t[0]] = float("inf")
                     action = q.argmin(dim=-1).item()
 
+            # Candidate action set for counterfactual evaluation.
+            # Default: chosen action + random negatives.
+            # Optional: always include SPT/LPT candidates for more informative comparisons.
             if len(remaining_jobs) <= num_counterfactuals:
                 candidates = remaining_jobs.copy()
             else:
-                candidates = [action]
-                others = [j for j in remaining_jobs if j != action]
-                candidates.extend(rng.sample(others, num_counterfactuals - 1))
+                cand_set = {int(action)}
+                if include_heuristic_candidates and remaining_jobs:
+                    spt_j = min(remaining_jobs, key=lambda j: p_np[j])
+                    lpt_j = max(remaining_jobs, key=lambda j: p_np[j])
+                    cand_set.add(int(spt_j))
+                    cand_set.add(int(lpt_j))
+
+                others = [j for j in remaining_jobs if j not in cand_set]
+                need = max(0, int(num_counterfactuals) - len(cand_set))
+                if need > 0 and others:
+                    cand_set.update(rng.sample(others, min(need, len(others))))
+                candidates = list(cand_set)
 
             # Build full sequences for each candidate.
             if use_model_completion and model is not None:
@@ -816,12 +857,8 @@ def _collect_round_batch(
             remaining_jobs.remove(action)
             job_available[action] = 0.0
 
-            # Flush any remaining DP work periodically per instance.
-            if len(pending_sequences) >= DP_FLUSH_THRESHOLD:
-                flush_pending()
-
-            # Final flush for this batch
-            flush_pending()
+        # Flush any leftover DP work for this instance.
+        flush_pending()
 
     return transitions
 
@@ -836,6 +873,8 @@ def collect_round_data(
     exploration_eps: float,
     use_model_completion: bool,
     heuristic_policy: str,
+    target_normalization: str,
+    include_heuristic_candidates: bool,
     device: torch.device,
     seed: int,
     collection_batch_size: int = 64,  # Fixed batch size for collection
@@ -895,6 +934,8 @@ def collect_round_data(
                     exploration_eps=exploration_eps,
                     use_model_completion=use_model_completion,
                     heuristic_policy=heuristic_policy,
+                    target_normalization=target_normalization,
+                    include_heuristic_candidates=include_heuristic_candidates,
                     device_str=device_str,
                     seed=batch_seed,
                     num_cpu_threads=threads_per_worker,
@@ -916,6 +957,8 @@ def collect_round_data(
                         exploration_eps=exploration_eps,
                         use_model_completion=use_model_completion,
                         heuristic_policy=heuristic_policy,
+                        target_normalization=target_normalization,
+                        include_heuristic_candidates=include_heuristic_candidates,
                         device_str=device_str,
                         seed=batch_seed,
                         num_cpu_threads=threads_per_worker,
@@ -1303,6 +1346,19 @@ def parse_args():
     parser.add_argument("--listwise_weight", type=float, default=0.0)
     parser.add_argument("--listwise_temperature", type=float, default=1.0)
 
+    parser.add_argument(
+        "--target_normalization",
+        type=str,
+        default="none",
+        choices=["none", "state_min"],
+        help="Optional shaping of q_target values. 'state_min' subtracts the minimum candidate DP cost per state.",
+    )
+    parser.add_argument(
+        "--include_heuristic_candidates",
+        action="store_true",
+        help="Ensure SPT/LPT candidates are included in counterfactual candidate sets (when sampling).",
+    )
+
     parser.add_argument("--eval_every_rounds", type=int, default=5)
     parser.add_argument("--num_eval_instances", type=int, default=256)
     parser.add_argument("--save_every_rounds", type=int, default=10)
@@ -1417,6 +1473,8 @@ def main():
         huber_delta=args.huber_delta,
         listwise_weight=args.listwise_weight,
         listwise_temperature=args.listwise_temperature,
+        target_normalization=args.target_normalization,
+        include_heuristic_candidates=args.include_heuristic_candidates,
         eval_every_rounds=args.eval_every_rounds,
         num_eval_instances=args.num_eval_instances,
         save_every_rounds=args.save_every_rounds,
@@ -1706,6 +1764,8 @@ def main():
             exploration_eps=eps,
             use_model_completion=use_model_completion,
             heuristic_policy=config.heuristic_policy,
+            target_normalization=config.target_normalization,
+            include_heuristic_candidates=config.include_heuristic_candidates,
             device=device,
             seed=config.seed + round_idx * 100000,
             collection_batch_size=config.collection_batch_size,
