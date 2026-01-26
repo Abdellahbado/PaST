@@ -1597,10 +1597,11 @@ def main():
                 m = re.search(r"checkpoint_(\\d+)\\.pt$", path.name)
                 return int(m.group(1)) if m else -1
 
-            checkpoints = list(resume_path.glob("checkpoint_*.pt"))
-            if not checkpoints:
-                # Try checkpoints subdirectory
-                checkpoints = list(resume_path.glob("checkpoints/checkpoint_*.pt"))
+            # Consider BOTH locations; older runs sometimes wrote to the run root,
+            # while newer runs write to run_root/checkpoints/.
+            checkpoints = list(resume_path.glob("checkpoint_*.pt")) + list(
+                resume_path.glob("checkpoints/checkpoint_*.pt")
+            )
             if not checkpoints:
                 raise FileNotFoundError(
                     f"No checkpoint_*.pt files found in {resume_path} or {resume_path}/checkpoints"
