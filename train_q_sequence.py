@@ -1606,7 +1606,18 @@ def main():
                 raise FileNotFoundError(
                     f"No checkpoint_*.pt files found in {resume_path} or {resume_path}/checkpoints"
                 )
-            resume_path = max(checkpoints, key=_ckpt_num)
+            # Pick newest by numeric suffix.
+            checkpoints_sorted = sorted(checkpoints, key=_ckpt_num)
+            resume_path = checkpoints_sorted[-1]
+            try:
+                tail = checkpoints_sorted[-5:]
+                tail_str = ", ".join(p.name for p in tail)
+                print(
+                    f"Found {len(checkpoints)} checkpoints under {resume_path.parent.parent if resume_path.parent.name == 'checkpoints' else resume_path.parent}. "
+                    f"Picking: {resume_path.name}. Recent: [{tail_str}]"
+                )
+            except Exception:
+                pass
             resume_run_dir = Path(config.resume_from)
             # If it was the checkpoints dir, go up one level
             if resume_run_dir.name == "checkpoints":
@@ -1644,6 +1655,8 @@ def main():
         if config_path.exists():
             with open(config_path, "r") as f:
                 saved_config = json.load(f)
+            # Keep the original requested resume path for provenance (can be a directory).
+            saved_config["resume_from"] = config.resume_from
             saved_config["resumed_from"] = str(resume_path)
             saved_config["resumed_at_round"] = start_round
             with open(config_path, "w") as f:

@@ -36,8 +36,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import multiprocessing as mp
 import random
 import time
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -282,6 +284,61 @@ def _import_bnb_module(module_path: Path):
     return mod
 
 
+def _solve_bnb_one(
+    *,
+    n_jobs: int,
+    p_subset: np.ndarray,
+    T: int,
+    energy_costs: np.ndarray,
+    time_limit: float,
+    bnb_path: Optional[str],
+) -> Tuple[List[int], float, Dict[str, int]]:
+    """Solve a single BnB instance.
+
+    Runs in a worker process when parallelism is enabled.
+    """
+    InstanceCls = None
+    SolverCls = None
+
+    if bnb_path:
+        candidate = Path(bnb_path)
+        if not candidate.exists():
+            # Try relative to CWD in worker.
+            candidate = Path.cwd() / bnb_path
+        if candidate.exists():
+            bnb_mod = _import_bnb_module(candidate)
+            if not hasattr(bnb_mod, "BranchAndBoundSolver") or not hasattr(
+                bnb_mod, "Instance"
+            ):
+                raise AttributeError(
+                    f"BnB module {candidate} must define Instance and BranchAndBoundSolver"
+                )
+            InstanceCls = getattr(bnb_mod, "Instance")
+            SolverCls = getattr(bnb_mod, "BranchAndBoundSolver")
+
+    if InstanceCls is None or SolverCls is None:
+        from PaST.solvers.bnb_solver_custom import Instance as _Instance
+        from PaST.solvers.bnb_solver_custom import BranchAndBoundSolver as _Solver
+
+        InstanceCls = _Instance
+        SolverCls = _Solver
+
+    inst = InstanceCls(
+        n_jobs=int(n_jobs),
+        processing_times=np.asarray(p_subset, dtype=np.int32),
+        T=int(T),
+        energy_costs=np.asarray(energy_costs, dtype=np.int64),
+    )
+    solver = SolverCls(inst, time_limit=float(time_limit))
+    seq, cost = solver.solve()
+    stats = {
+        "nodes_explored": int(getattr(solver, "nodes_explored", -1)),
+        "binpack_attempts": int(getattr(solver, "binpack_attempts", -1)),
+        "pruned_by_binpack": int(getattr(solver, "pruned_by_binpack", -1)),
+    }
+    return [int(x) for x in seq], float(cost), stats
+
+
 def _slice_single_instance_np(batch: Dict[str, Any], index: int) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     for k, v in batch.items():
@@ -356,6 +413,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--bnb_workers",
+        type=int,
+        default=1,
+        help=(
+            "Parallel workers for BnB across instances (CPU only). "
+            "Use 1 to disable multiprocessing."
+        ),
+    )
+
+    p.add_argument(
+        "--torch_threads",
+        type=int,
+        default=0,
+        help=(
+            "If >0, sets torch.set_num_threads() for CPU runs. "
+            "Useful to control SGBS/model inference parallelism."
+        ),
+    )
+
+    p.add_argument(
         "--max_jobs",
         type=int,
         default=12,
@@ -373,6 +450,16 @@ def main() -> None:
     device = torch.device(args.device)
     ratios = _ratios_from_arg(args.ratios)
 
+    if int(args.torch_threads) > 0 and device.type == "cpu":
+        try:
+            torch.set_num_threads(int(args.torch_threads))
+            torch.set_num_interop_threads(min(4, int(args.torch_threads)))
+            print(
+                f"Torch CPU threads: {torch.get_num_threads()} (interop={torch.get_num_interop_threads()})"
+            )
+        except Exception:
+            pass
+
     ckpt_path = _resolve_path(args.checkpoint)
     if not ckpt_path.exists():
         raise FileNotFoundError(str(ckpt_path))
@@ -383,9 +470,8 @@ def main() -> None:
     print(f"Loading Q_Seq checkpoint: {ckpt_path}")
     model = _load_q_model(ckpt_path, q_variant, device)
 
-    # Branch-and-Bound solver selection:
-    # - Prefer external module if args.bnb_path is provided and exists.
-    # - Otherwise, use the in-repo solver (keeps Kaggle self-contained).
+    # BnB solver is resolved inside the worker when multiprocessing is enabled.
+    # For the single-process path we keep the same resolution logic as before.
     InstanceCls = None
     SolverCls = None
 
@@ -442,38 +528,101 @@ def main() -> None:
     for ratio, episodes in zip(ratios, episodes_by_ratio):
         print(f"\n=== ratio={ratio:.2f} | instances={len(episodes)} ===")
 
-        for idx, ep in enumerate(episodes):
-            # Build a single-instance batch for both decoders.
-            batch = batch_from_episodes([ep], N_job_pad=int(q_cfg.env.N_job_pad))
-            single_np = _slice_single_instance_np(batch, 0)
+        # Build one batched input for SGBS (this is usually much faster than
+        # calling SGBS 1-by-1 and also lets torch use multiple CPU threads).
+        batch = batch_from_episodes(episodes, N_job_pad=int(q_cfg.env.N_job_pad))
 
-            # --- Q-seq SGBS ---
-            t0 = time.perf_counter()
-            q_res = sgbs_q_sequence(
-                model=model,
-                variant_config=q_cfg,
-                batch_data=batch,
-                device=device,
-                beta=int(args.beta),
-                gamma=int(args.gamma),
-            )[0]
-            t_q = time.perf_counter() - t0
-            total_qseq_time += float(t_q)
+        t0 = time.perf_counter()
+        q_results = sgbs_q_sequence(
+            model=model,
+            variant_config=q_cfg,
+            batch_data=batch,
+            device=device,
+            beta=int(args.beta),
+            gamma=int(args.gamma),
+        )
+        t_q_total = time.perf_counter() - t0
+        total_qseq_time += float(t_q_total)
+        q_time_per_inst = float(t_q_total) / max(1, len(episodes))
 
-            # --- BnB (optimal sequence under the same DP objective) ---
+        # Prepare BnB inputs.
+        bnb_inputs: List[Tuple[int, np.ndarray, int, np.ndarray]] = []
+        singles: List[Dict[str, Any]] = []
+        for idx in range(len(episodes)):
+            single_np = _slice_single_instance_np(batch, idx)
+            singles.append(single_np)
             n_jobs, p, T, energy_costs = _past_to_bnb_instance(single_np)
-            inst = InstanceCls(
-                n_jobs=int(n_jobs),
-                processing_times=np.asarray(p, dtype=np.int32),
-                T=int(T),
-                energy_costs=np.asarray(energy_costs, dtype=np.int64),
+            bnb_inputs.append(
+                (
+                    int(n_jobs),
+                    np.asarray(p, dtype=np.int32),
+                    int(T),
+                    np.asarray(energy_costs, dtype=np.int64),
+                )
             )
 
-            solver = SolverCls(inst, time_limit=float(args.bnb_time_limit))
+        # --- BnB (parallel optional) ---
+        bnb_results: List[Tuple[List[int], float, float, Dict[str, int]]] = []
+
+        bnb_workers = int(args.bnb_workers)
+        if bnb_workers > 1:
+            ctx = mp.get_context("spawn")
             t0 = time.perf_counter()
-            bnb_seq, bnb_cost = solver.solve()
-            t_b = time.perf_counter() - t0
-            total_bnb_time += float(t_b)
+            with ProcessPoolExecutor(
+                max_workers=bnb_workers, mp_context=ctx
+            ) as executor:
+                futures = [
+                    executor.submit(
+                        _solve_bnb_one,
+                        n_jobs=int(n_jobs),
+                        p_subset=p,
+                        T=int(T),
+                        energy_costs=energy_costs,
+                        time_limit=float(args.bnb_time_limit),
+                        bnb_path=(
+                            str(_resolve_path(args.bnb_path)) if args.bnb_path else None
+                        ),
+                    )
+                    for (n_jobs, p, T, energy_costs) in bnb_inputs
+                ]
+                for fut in futures:
+                    seq, cost, stats = fut.result()
+                    bnb_results.append((seq, float(cost), 0.0, stats))
+            t_b_total = time.perf_counter() - t0
+            total_bnb_time += float(t_b_total)
+            bnb_time_per_inst = float(t_b_total) / max(1, len(episodes))
+            # Fill in per-instance times (average) for CSV consistency.
+            bnb_results = [
+                (seq, cost, float(bnb_time_per_inst), stats)
+                for (seq, cost, _t, stats) in bnb_results
+            ]
+        else:
+            # Sequential path with per-instance timing and richer stats.
+            for n_jobs, p, T, energy_costs in bnb_inputs:
+                inst = InstanceCls(
+                    n_jobs=int(n_jobs),
+                    processing_times=np.asarray(p, dtype=np.int32),
+                    T=int(T),
+                    energy_costs=np.asarray(energy_costs, dtype=np.int64),
+                )
+                solver = SolverCls(inst, time_limit=float(args.bnb_time_limit))
+                t0 = time.perf_counter()
+                bnb_seq, bnb_cost = solver.solve()
+                t_b = time.perf_counter() - t0
+                total_bnb_time += float(t_b)
+                stats = {
+                    "nodes_explored": int(getattr(solver, "nodes_explored", -1)),
+                    "binpack_attempts": int(getattr(solver, "binpack_attempts", -1)),
+                    "pruned_by_binpack": int(getattr(solver, "pruned_by_binpack", -1)),
+                }
+                bnb_results.append(
+                    ([int(x) for x in bnb_seq], float(bnb_cost), float(t_b), stats)
+                )
+
+        # Build output rows.
+        for idx, (single_np, q_res) in enumerate(zip(singles, q_results)):
+            n_jobs, _p, T, _energy_costs = bnb_inputs[idx]
+            bnb_seq, bnb_cost, t_b, stats = bnb_results[idx]
 
             # Cross-check cost with PaST DP (should match if conversion is correct).
             bnb_dp = dp_schedule_for_job_sequence(single_np, [int(x) for x in bnb_seq])
@@ -486,6 +635,8 @@ def main() -> None:
             if _finite(q_energy) and _finite(bnb_energy) and bnb_energy > 0:
                 gap = float((q_energy - bnb_energy) / bnb_energy)
 
+            # For batched SGBS we report average per-instance time.
+            # For parallel BnB we may not have per-instance timing.
             rows.append(
                 {
                     "ratio": float(ratio),
@@ -493,25 +644,22 @@ def main() -> None:
                     "n_jobs": int(n_jobs),
                     "T_limit": int(T),
                     "qseq_sgbs_energy": q_energy,
-                    "qseq_sgbs_time_s": float(t_q),
+                    "qseq_sgbs_time_s": float(q_time_per_inst),
                     "bnb_energy": bnb_energy,
                     "bnb_energy_dp_check": bnb_energy_dp,
                     "bnb_time_s": float(t_b),
-                    "bnb_nodes_explored": int(getattr(solver, "nodes_explored", -1)),
-                    "bnb_binpack_attempts": int(
-                        getattr(solver, "binpack_attempts", -1)
-                    ),
-                    "bnb_pruned_by_binpack": int(
-                        getattr(solver, "pruned_by_binpack", -1)
-                    ),
+                    "bnb_nodes_explored": int(stats.get("nodes_explored", -1)),
+                    "bnb_binpack_attempts": int(stats.get("binpack_attempts", -1)),
+                    "bnb_pruned_by_binpack": int(stats.get("pruned_by_binpack", -1)),
                     "gap_rel_q_minus_opt": gap,
                 }
             )
 
+            # Progress print.
             if (idx + 1) % 5 == 0:
                 print(
                     f"  {idx+1}/{len(episodes)} | "
-                    f"q={q_energy:.3f} ({t_q:.2f}s) | "
+                    f"q={q_energy:.3f} (~{q_time_per_inst:.2f}s/inst) | "
                     f"bnb={bnb_energy:.3f} ({t_b:.2f}s) | "
                     f"gap={(100.0*gap):.2f}%"
                 )
@@ -534,6 +682,8 @@ def main() -> None:
             "device": str(args.device),
             "bnb_path": str(_resolve_path(args.bnb_path)) if args.bnb_path else None,
             "bnb_time_limit": float(args.bnb_time_limit),
+            "bnb_workers": int(args.bnb_workers),
+            "torch_threads": int(args.torch_threads),
             "max_jobs": int(args.max_jobs),
         },
         "timing": {
