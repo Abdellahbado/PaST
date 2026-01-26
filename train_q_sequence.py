@@ -20,6 +20,7 @@ import copy
 import json
 import os
 import random
+import re
 import sys
 import time
 import warnings
@@ -1591,15 +1592,20 @@ def main():
         resume_path = Path(config.resume_from)
         if resume_path.is_dir():
             # Find latest checkpoint in directory (could be run dir or checkpoints dir)
-            checkpoints = sorted(resume_path.glob("checkpoint_*.pt"))
+            # NOTE: Don't rely on lexicographic sorting (checkpoint_10.pt < checkpoint_5.pt).
+            def _ckpt_num(path: Path) -> int:
+                m = re.search(r"checkpoint_(\\d+)\\.pt$", path.name)
+                return int(m.group(1)) if m else -1
+
+            checkpoints = list(resume_path.glob("checkpoint_*.pt"))
             if not checkpoints:
                 # Try checkpoints subdirectory
-                checkpoints = sorted(resume_path.glob("checkpoints/checkpoint_*.pt"))
+                checkpoints = list(resume_path.glob("checkpoints/checkpoint_*.pt"))
             if not checkpoints:
                 raise FileNotFoundError(
                     f"No checkpoint_*.pt files found in {resume_path} or {resume_path}/checkpoints"
                 )
-            resume_path = checkpoints[-1]
+            resume_path = max(checkpoints, key=_ckpt_num)
             resume_run_dir = Path(config.resume_from)
             # If it was the checkpoints dir, go up one level
             if resume_run_dir.name == "checkpoints":
