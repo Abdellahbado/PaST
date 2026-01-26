@@ -78,6 +78,7 @@ import random
 # Helper Functions (from run_eval_family_q4_beststart_viz.py)
 # =============================================================================
 
+
 def batch_from_episodes(
     episodes: List[SingleMachineEpisode],
     N_job_pad: int = 50,
@@ -240,6 +241,7 @@ def _sequence_schedule_to_bars(
 # CORE: Cmax-Aware Decoding Logic
 # =============================================================================
 
+
 def _action_trace_to_bars_cmax_aware(
     actions: List[int],
     env_config,
@@ -311,22 +313,23 @@ def _action_trace_to_bars_cmax_aware(
     for a in actions:
         job_id = int(a) // num_families
         family_id = int(a) % num_families
-        
+
         # Validate job_id
         if job_id >= n_jobs:
             continue  # Skip invalid actions
         if job_id in scheduled_jobs:
             continue  # Skip already scheduled jobs
-            
+
         p = int(p_subset[job_id])
 
         # ------------------------------------
         # CMAX-AWARE CAPACITY CHECK
         # ------------------------------------
-        
+
         # Calculate remaining cheap capacity (family 0 slots from t to T_limit)
         cheap_capacity = sum(
-            1 for u in range(t, min(T_limit, len(slot_families))) 
+            1
+            for u in range(t, min(T_limit, len(slot_families)))
             if slot_families[u] == 0
         )
 
@@ -334,7 +337,7 @@ def _action_trace_to_bars_cmax_aware(
         # If cheap_capacity < remaining_work, we KNOW some jobs MUST use expensive slots.
         # Waiting for cheap slots only delays everything and increases Cmax.
         # Solution: START IMMEDIATELY to minimize Cmax.
-        
+
         if cheap_capacity < remaining_work:
             # NOT ENOUGH CHEAP CAPACITY: Start at t immediately to minimize Cmax
             best_start = t
@@ -376,7 +379,7 @@ def _action_trace_to_bars_cmax_aware(
                 "used_earliest": (cheap_capacity < remaining_work),
             }
         )
-        
+
         t = end
         cmax = max(cmax, end)
         scheduled_jobs.add(job_id)
@@ -402,7 +405,7 @@ def _action_trace_to_bars_baseline(
     K: int,
 ) -> Tuple[List[Dict[str, Any]], float, int]:
     """Original best-start decoding (baseline for comparison).
-    
+
     Returns:
         bars: list of job bar dicts
         total_energy: total energy cost
@@ -489,7 +492,9 @@ def _action_trace_to_bars_baseline(
         energy = float(e_single) * float(get_interval_cost(start, end))
         total_energy += energy
 
-        bars.append({"job_id": job_id, "start": start, "end": end, "family_id": family_id})
+        bars.append(
+            {"job_id": job_id, "start": start, "end": end, "family_id": family_id}
+        )
         t = end
         cmax = max(cmax, end)
         scheduled_jobs.add(job_id)
@@ -504,6 +509,7 @@ def _action_trace_to_bars_baseline(
 # =============================================================================
 # Visualization
 # =============================================================================
+
 
 def visualize_schedule(
     out_path: Path,
@@ -536,7 +542,9 @@ def visualize_schedule(
     methods = list(schedules.keys())
     n_methods = len(methods)
 
-    fig, axes = plt.subplots(n_methods + 1, 1, figsize=(14, 2 * (n_methods + 1)), sharex=True)
+    fig, axes = plt.subplots(
+        n_methods + 1, 1, figsize=(14, 2 * (n_methods + 1)), sharex=True
+    )
     if n_methods + 1 == 1:
         axes = [axes]
 
@@ -547,9 +555,13 @@ def visualize_schedule(
         width = Tk[k]
         price = int(ck[k])
         color = price_to_color.get(price, "gray")
-        ax0.barh(0, width, left=x0, height=0.8, color=color, edgecolor="black", linewidth=0.5)
+        ax0.barh(
+            0, width, left=x0, height=0.8, color=color, edgecolor="black", linewidth=0.5
+        )
         if width > 3:
-            ax0.text(x0 + width / 2, 0, f"p={price}", ha="center", va="center", fontsize=7)
+            ax0.text(
+                x0 + width / 2, 0, f"p={price}", ha="center", va="center", fontsize=7
+            )
 
     ax0.set_yticks([])
     ax0.set_ylabel("Prices")
@@ -579,8 +591,17 @@ def visualize_schedule(
             start = bar["start"]
             end = bar["end"]
             color = job_colors[job_id % len(job_colors)]
-            ax.barh(0, end - start, left=start, height=0.8, color=color, edgecolor="black")
-            ax.text(start + (end - start) / 2, 0, f"j{job_id}", ha="center", va="center", fontsize=7)
+            ax.barh(
+                0, end - start, left=start, height=0.8, color=color, edgecolor="black"
+            )
+            ax.text(
+                start + (end - start) / 2,
+                0,
+                f"j{job_id}",
+                ha="center",
+                va="center",
+                fontsize=7,
+            )
 
         status = "" if complete else " [INCOMPLETE]"
         ax.set_ylabel(f"{method}\n(E={energy:.1f}, Cmax={cmax}){status}", fontsize=8)
@@ -588,7 +609,10 @@ def visualize_schedule(
         ax.axvline(T_limit, color="red", linestyle="--", linewidth=1, label="T_limit")
 
     axes[-1].set_xlabel("Time")
-    fig.suptitle(f"Schedule Comparison | n_jobs={n_jobs} T_limit={T_limit}{title_suffix}", fontsize=10)
+    fig.suptitle(
+        f"Schedule Comparison | n_jobs={n_jobs} T_limit={T_limit}{title_suffix}",
+        fontsize=10,
+    )
     plt.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
@@ -598,6 +622,7 @@ def visualize_schedule(
 # =============================================================================
 # Main Evaluation Loop
 # =============================================================================
+
 
 def run_evaluation(
     args,
@@ -640,7 +665,10 @@ def run_evaluation(
             job_idxs = assignments[m_idx]
 
             ep = make_single_machine_episode(
-                raw, m_idx, job_idxs, py_rng,
+                raw,
+                m_idx,
+                job_idxs,
+                py_rng,
                 deadline_slack_ratio_min=ratio,
                 deadline_slack_ratio_max=ratio,
             )
@@ -707,17 +735,19 @@ def run_evaluation(
                 continue
 
             # Baseline decoding
-            bars_baseline, energy_baseline, cmax_baseline = _action_trace_to_bars_baseline(
-                decode_res[i].actions,
-                variant_config.env,
-                p_subset,
-                ct,
-                e_single,
-                T_limit,
-                single["period_starts"][0],
-                single["Tk"][0],
-                single["ck"][0],
-                int(single["K"][0]),
+            bars_baseline, energy_baseline, cmax_baseline = (
+                _action_trace_to_bars_baseline(
+                    decode_res[i].actions,
+                    variant_config.env,
+                    p_subset,
+                    ct,
+                    e_single,
+                    T_limit,
+                    single["period_starts"][0],
+                    single["Tk"][0],
+                    single["ck"][0],
+                    int(single["K"][0]),
+                )
             )
 
             # Cmax-aware decoding
@@ -734,24 +764,32 @@ def run_evaluation(
                 int(single["K"][0]),
             )
 
-            results.append({
-                "instance_idx": i,
-                "slack_ratio": ratio,
-                "n_jobs": n_jobs,
-                "T_limit": T_limit,
-                "decoder": args.decoder,
-                "decoder_total_energy": float(getattr(decode_res[i], "total_energy", float("nan"))),
-                "sgbs_beta": int(args.sgbs_beta) if args.decoder == "sgbs" else None,
-                "sgbs_gamma": int(args.sgbs_gamma) if args.decoder == "sgbs" else None,
-                "baseline_energy": energy_baseline,
-                "baseline_cmax": cmax_baseline,
-                "cmax_aware_energy": energy_cmax,
-                "cmax_aware_cmax": cmax_cmax,
-                "spt_dp_energy": spt_res[i].total_energy,
-                "lpt_dp_energy": lpt_res[i].total_energy,
-                "energy_diff": energy_cmax - energy_baseline,
-                "cmax_diff": cmax_cmax - cmax_baseline,
-            })
+            results.append(
+                {
+                    "instance_idx": i,
+                    "slack_ratio": ratio,
+                    "n_jobs": n_jobs,
+                    "T_limit": T_limit,
+                    "decoder": args.decoder,
+                    "decoder_total_energy": float(
+                        getattr(decode_res[i], "total_energy", float("nan"))
+                    ),
+                    "sgbs_beta": (
+                        int(args.sgbs_beta) if args.decoder == "sgbs" else None
+                    ),
+                    "sgbs_gamma": (
+                        int(args.sgbs_gamma) if args.decoder == "sgbs" else None
+                    ),
+                    "baseline_energy": energy_baseline,
+                    "baseline_cmax": cmax_baseline,
+                    "cmax_aware_energy": energy_cmax,
+                    "cmax_aware_cmax": cmax_cmax,
+                    "spt_dp_energy": spt_res[i].total_energy,
+                    "lpt_dp_energy": lpt_res[i].total_energy,
+                    "energy_diff": energy_cmax - energy_baseline,
+                    "cmax_diff": cmax_cmax - cmax_baseline,
+                }
+            )
 
             # Visualize first few
             if i < args.num_viz:
@@ -773,7 +811,9 @@ def run_evaluation(
                         "cmax": (
                             max(
                                 (st + int(p_subset[j]))
-                                for j, st in zip(spt_res[i].job_sequence, spt_res[i].start_times)
+                                for j, st in zip(
+                                    spt_res[i].job_sequence, spt_res[i].start_times
+                                )
                             )
                             if spt_res[i].start_times
                             else 0
@@ -788,7 +828,9 @@ def run_evaluation(
                         "cmax": (
                             max(
                                 (st + int(p_subset[j]))
-                                for j, st in zip(lpt_res[i].job_sequence, lpt_res[i].start_times)
+                                for j, st in zip(
+                                    lpt_res[i].job_sequence, lpt_res[i].start_times
+                                )
                             )
                             if lpt_res[i].start_times
                             else 0
@@ -817,6 +859,7 @@ def run_evaluation(
 
     # Save results
     import pandas as pd
+
     df = pd.DataFrame(results)
     csv_path = out_dir / f"cmax_aware_results_{scale_str}_seed{args.eval_seed}.csv"
     df.to_csv(csv_path, index=False)
@@ -828,14 +871,18 @@ def run_evaluation(
     print("=" * 70)
     print(f"{'Method':<20} | {'Avg Energy':<12} | {'Avg Cmax':<10}")
     print("-" * 50)
-    print(f"{'Baseline':<20} | {df['baseline_energy'].mean():<12.2f} | {df['baseline_cmax'].mean():<10.1f}")
-    print(f"{'Cmax-Aware':<20} | {df['cmax_aware_energy'].mean():<12.2f} | {df['cmax_aware_cmax'].mean():<10.1f}")
+    print(
+        f"{'Baseline':<20} | {df['baseline_energy'].mean():<12.2f} | {df['baseline_cmax'].mean():<10.1f}"
+    )
+    print(
+        f"{'Cmax-Aware':<20} | {df['cmax_aware_energy'].mean():<12.2f} | {df['cmax_aware_cmax'].mean():<10.1f}"
+    )
     print(f"{'SPT+DP':<20} | {df['spt_dp_energy'].mean():<12.2f} | -")
     print(f"{'LPT+DP':<20} | {df['lpt_dp_energy'].mean():<12.2f} | -")
     print("=" * 70)
 
-    avg_energy_diff = df['energy_diff'].mean()
-    avg_cmax_diff = df['cmax_diff'].mean()
+    avg_energy_diff = df["energy_diff"].mean()
+    avg_cmax_diff = df["cmax_diff"].mean()
     print(f"\nCmax-Aware vs Baseline:")
     print(f"  Energy difference: {avg_energy_diff:+.2f} (negative = Cmax-Aware better)")
     print(f"  Cmax difference: {avg_cmax_diff:+.1f} (negative = Cmax-Aware better)")
@@ -846,41 +893,39 @@ def parse_args():
         description="Evaluate Cmax-aware decoding for price-family variants"
     )
     parser.add_argument(
-        "--checkpoint", "-c", type=str, required=True,
-        help="Path to model checkpoint"
+        "--checkpoint", "-c", type=str, required=True, help="Path to model checkpoint"
     )
     parser.add_argument(
-        "--variant", type=str, default="ppo_family_q4_beststart",
-        help="Variant ID"
+        "--variant", type=str, default="ppo_family_q4_beststart", help="Variant ID"
     )
     parser.add_argument(
-        "--eval_seed", type=int, default=55,
-        help="Random seed for evaluation"
+        "--eval_seed", type=int, default=55, help="Random seed for evaluation"
     )
     parser.add_argument(
-        "--num_instances", type=int, default=32,
-        help="Number of instances to evaluate"
+        "--num_instances", type=int, default=32, help="Number of instances to evaluate"
     )
     parser.add_argument(
-        "--num_viz", type=int, default=4,
-        help="Number of schedules to visualize per slack ratio"
+        "--num_viz",
+        type=int,
+        default=4,
+        help="Number of schedules to visualize per slack ratio",
     )
     parser.add_argument(
-        "--scale", type=str, default="large",
+        "--scale",
+        type=str,
+        default="large",
         choices=["small", "medium", "large"],
-        help="Instance scale"
+        help="Instance scale",
     )
     parser.add_argument(
-        "--slack_ratios", type=str, default="0.22",
-        help="Comma-separated slack ratios to test"
+        "--slack_ratios",
+        type=str,
+        default="0.22",
+        help="Comma-separated slack ratios to test",
     )
+    parser.add_argument("--out_dir", type=str, default=None, help="Output directory")
     parser.add_argument(
-        "--out_dir", type=str, default=None,
-        help="Output directory"
-    )
-    parser.add_argument(
-        "--device", type=str, default="cpu",
-        help="Device (cpu or cuda)"
+        "--device", type=str, default="cpu", help="Device (cpu or cuda)"
     )
 
     # Decoder selection
@@ -889,43 +934,40 @@ def parse_args():
         type=str,
         default="greedy",
         choices=["greedy", "sgbs"],
-        help="Decoder used to produce the action trace (greedy or SGBS)"
+        help="Decoder used to produce the action trace (greedy or SGBS)",
     )
     parser.add_argument(
-        "--sgbs_beta",
-        type=int,
-        default=16,
-        help="SGBS beam width (beta)"
+        "--sgbs_beta", type=int, default=16, help="SGBS beam width (beta)"
     )
     parser.add_argument(
         "--sgbs_gamma",
         type=int,
         default=8,
-        help="SGBS expansion top-k per node (gamma)"
+        help="SGBS expansion top-k per node (gamma)",
     )
     parser.add_argument(
         "--sgbs_max_depth_steps",
         type=int,
         default=None,
-        help="Max rollout steps for SGBS (default: env.N_job_pad + 5)"
+        help="Max rollout steps for SGBS (default: env.N_job_pad + 5)",
     )
     parser.add_argument(
         "--max_wait_slots",
         type=int,
         default=None,
-        help="Optional inference-time cap on waiting (non-family variants only)"
+        help="Optional inference-time cap on waiting (non-family variants only)",
     )
     parser.add_argument(
         "--wait_logit_penalty",
         type=float,
         default=0.0,
-        help="Optional inference-time logit penalty proportional to waiting"
+        help="Optional inference-time logit penalty proportional to waiting",
     )
     parser.add_argument(
         "--makespan_penalty",
         type=float,
         default=0.0,
-        help="Optional inference-time return regularizer for makespan during decoding"
+        help="Optional inference-time return regularizer for makespan during decoding",
     )
     return parser.parse_args()
 

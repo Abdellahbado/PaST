@@ -1,13 +1,22 @@
-"""Backward-compatible wrapper for :pymod:`PaST.algorithms.sgbs`.
+"""Backward-compatible wrapper for the SGBS implementation.
 
-The implementation lives in `PaST/algorithms/sgbs.py`. This wrapper preserves
-existing imports and CLI usage like `python -m PaST.sgbs`.
+The codebase historically moved the implementation between module paths.
+This wrapper keeps external scripts working by importing from whichever
+location exists in the current checkout.
 """
 
-from PaST.algorithms.sgbs import *  # noqa: F401,F403
+try:
+    # Older layout
+    from PaST.algorithms.sgbs import *  # type: ignore  # noqa: F401,F403
+except ModuleNotFoundError:
+    # Current layout
+    from PaST.artifacts.algorithms.sgbs import *  # type: ignore  # noqa: F401,F403
 
 
 if __name__ == "__main__":
     import runpy
 
-    runpy.run_module("PaST.algorithms.sgbs", run_name="__main__")
+    try:
+        runpy.run_module("PaST.algorithms.sgbs", run_name="__main__")
+    except ModuleNotFoundError:
+        runpy.run_module("PaST.artifacts.algorithms.sgbs", run_name="__main__")

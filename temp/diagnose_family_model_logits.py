@@ -39,16 +39,31 @@ def run(variant_id: str, batch_size: int, seed: int, device: str) -> None:
             jobs=obs["jobs"],
             periods_local=obs["periods"],
             ctx=obs["ctx"],
-            job_mask=(obs.get("job_mask", None) < 0.5)
-            if (obs.get("job_mask", None) is not None and obs.get("job_mask").dtype is not torch.bool)
-            else obs.get("job_mask", None),
-            period_mask=(obs.get("period_mask", None) < 0.5)
-            if (obs.get("period_mask", None) is not None and obs.get("period_mask").dtype is not torch.bool)
-            else obs.get("period_mask", None),
+            job_mask=(
+                (obs.get("job_mask", None) < 0.5)
+                if (
+                    obs.get("job_mask", None) is not None
+                    and obs.get("job_mask").dtype is not torch.bool
+                )
+                else obs.get("job_mask", None)
+            ),
+            period_mask=(
+                (obs.get("period_mask", None) < 0.5)
+                if (
+                    obs.get("period_mask", None) is not None
+                    and obs.get("period_mask").dtype is not torch.bool
+                )
+                else obs.get("period_mask", None)
+            ),
             periods_full=obs.get("periods_full", None),
-            period_full_mask=(obs.get("periods_full_mask", None) < 0.5)
-            if (obs.get("periods_full_mask", None) is not None and obs.get("periods_full_mask").dtype is not torch.bool)
-            else obs.get("periods_full_mask", None),
+            period_full_mask=(
+                (obs.get("periods_full_mask", None) < 0.5)
+                if (
+                    obs.get("periods_full_mask", None) is not None
+                    and obs.get("periods_full_mask").dtype is not torch.bool
+                )
+                else obs.get("periods_full_mask", None)
+            ),
         )
 
     action_mask = obs.get("action_mask")
