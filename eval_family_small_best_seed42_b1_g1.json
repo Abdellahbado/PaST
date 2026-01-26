@@ -1,0 +1,21 @@
+{
+  "variant_id": "ppo_duration_aware_family_ctx13",
+  "checkpoint": "best",
+  "eval_seed": 42,
+  "num_instances": 2,
+  "scale": "small",
+  "beta": 1,
+  "gamma": 1,
+  "means": {
+    "greedy_energy": 18.0,
+    "sgbs_energy": 18.0,
+    "spt_dp_energy": 13.0,
+    "lpt_dp_energy": 13.0
+  },
+  "times_sec": {
+    "greedy": 0.030942042000788206,
+    "sgbs": 0.05992324999988341,
+    "spt_dp": 0.00035687499985215254,
+    "lpt_dp": 0.0002135419999831356
+  }
+}

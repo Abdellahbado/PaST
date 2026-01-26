@@ -1,0 +1,24 @@
+{
+  "variant_id": "ppo_family_q4_ctx13",
+  "checkpoint": "best",
+  "eval_seed": 1337,
+  "num_instances": 64,
+  "beta": 16,
+  "gamma": 16,
+  "means": {
+    "greedy_energy": 28.875,
+    "sgbs_energy": 27.0,
+    "spt_dp_energy": 25.625,
+    "lpt_dp_energy": 25.578125
+  },
+  "times_sec": {
+    "greedy": 1.242943958000069,
+    "sgbs": 113.165586459,
+    "spt_dp": 0.020629874999940512,
+    "lpt_dp": 0.01990266600000723
+  },
+  "outputs": {
+    "csv": "PaST/runs_p100/ppo_family_q4_ctx13/seed_0/eval_family_best_seed1337_b16_g16.csv",
+    "json": "PaST/runs_p100/ppo_family_q4_ctx13/seed_0/eval_family_best_seed1337_b16_g16.json"
+  }
+}

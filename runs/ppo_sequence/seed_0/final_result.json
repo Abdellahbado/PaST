@@ -1,0 +1,14 @@
+{
+  "eval/energy_mean": 0.0,
+  "eval/energy_std": 0.0,
+  "eval/energy_min": 0.0,
+  "eval/energy_max": 0.0,
+  "eval/infeasible_count": 0,
+  "eval/infeasible_rate": 0.0,
+  "eval/makespan_mean": 0.0,
+  "eval/makespan_std": 0.0,
+  "eval/num_episodes": 256,
+  "eval/steps_mean": 4.5078125,
+  "eval/seed": 0,
+  "eval/kind": "latest_on_eval_seed"
+}

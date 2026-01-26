@@ -1,0 +1,24 @@
+{
+  "variant_id": "q_sequence",
+  "checkpoint": "PaST/runs_p100/ppo_q_seq/checkpoints/latest.pt",
+  "scale": "large",
+  "eval_seed": 1337,
+  "num_instances": 200,
+  "sgbs_configs": [
+    {
+      "beta": 4,
+      "gamma": 4
+    }
+  ],
+  "temperature": 1.0,
+  "means": {
+    "greedy_energy": 25.91,
+    "spt_dp_energy": 25.84,
+    "lpt_dp_energy": 25.895,
+    "sgbs_4-4_energy": 25.54
+  },
+  "outputs": {
+    "csv": "PaST/runs_p100/ppo_q_seq/eval_q_seq_large_seed1337_b4_g4.csv",
+    "json": "PaST/runs_p100/ppo_q_seq/eval_q_seq_large_seed1337_b4_g4.json"
+  }
+}

@@ -1260,7 +1260,10 @@ def evaluate_sgbs(
     This evaluates whether the Q-value landscape supports good beam search,
     which is the intended use case (not greedy decoding).
     """
-    from PaST.run_eval_q_sequence import sgbs_q_sequence, greedy_decode_q_sequence
+    from PaST.cli.eval.run_eval_q_sequence import (
+        sgbs_q_sequence,
+        greedy_decode_q_sequence,
+    )
     from PaST.baselines_sequence_dp import spt_lpt_with_dp
 
     model.eval()

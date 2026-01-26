@@ -1,0 +1,21 @@
+{
+  "variant_id": "ppo_family_q4_ctx13",
+  "checkpoint": "best",
+  "eval_seed": 12,
+  "num_instances": 40,
+  "scale": "large",
+  "beta": 32,
+  "gamma": 64,
+  "means": {
+    "greedy_energy": 25.775,
+    "sgbs_energy": 23.075,
+    "spt_dp_energy": 17.75,
+    "lpt_dp_energy": 17.825
+  },
+  "times_sec": {
+    "greedy": 0.8301509589946363,
+    "sgbs": 92.06976829199994,
+    "spt_dp": 0.019022874999791384,
+    "lpt_dp": 0.018220083002233878
+  }
+}

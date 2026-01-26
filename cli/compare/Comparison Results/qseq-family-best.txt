@@ -1,0 +1,36 @@
+python -m PaST.run_compare_three_checkpoints --scale medium --num_instances 64 --eval_seed 42 --beta 8 --gamma 16 --device cpu
+
+======================================================================
+COMPARE 3 CHECKPOINTS
+Scale=medium | Instances=64 | Seed=42
+SGBS=on | beta=8 gamma=16
+======================================================================
+
+Evaluate PPO_Family_CWE (ppo_family_q4_ctx13_beststart_cwe) @ PaST/runs_p100/ppo_family_best_cwe/checkpoints/best.pt
+
+Evaluate PPO_Family (ppo_family_q4_ctx13_beststart) @ PaST/runs_p100/ppo_family_best/best.pt
+
+Evaluate Q_Seq (q_sequence) @ PaST/runs_p100/ppo_q_seq/checkpoints/best.pt
+
+Evaluate baselines (SPT+DP, LPT+DP)...
+
+Saved: analysis_out/compare_three_medium_seed42_b8g16.csv
+
+======================================================================
+SUMMARY (Mean Energy)
+======================================================================
+         model         method     energy
+         Q_Seq SGBS+DP(b8g16) 763.028125
+         Q_Seq      Greedy+DP 785.087500
+      Baseline         SPT+DP 785.618750
+      Baseline         LPT+DP 786.118750
+PPO_Family_CWE    SGBS(b8g16) 856.668750
+    PPO_Family    SGBS(b8g16) 858.665625
+PPO_Family_CWE         Greedy 912.918750
+    PPO_Family         Greedy 924.684375
+
+Δ(PPO_Family_CWE - PPO_Family) on Greedy: -11.7656 (-1.27%)
+
+Δ(PPO_Family_CWE - PPO_Family) on SGBS(b8g16): -1.9969 (-0.23%)
+
+─ 4h 40m 27s 

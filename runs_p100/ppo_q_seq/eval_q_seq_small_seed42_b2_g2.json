@@ -1,0 +1,24 @@
+{
+  "variant_id": "q_sequence",
+  "checkpoint": "/Users/mac/Documents/Study/PFE/PaST/runs_p100/ppo_q_seq/checkpoints/best.pt",
+  "scale": "small",
+  "eval_seed": 42,
+  "num_instances": 4,
+  "sgbs_configs": [
+    {
+      "beta": 2,
+      "gamma": 2
+    }
+  ],
+  "temperature": 1.0,
+  "means": {
+    "greedy_energy": 21.75,
+    "spt_dp_energy": 21.75,
+    "lpt_dp_energy": 21.0,
+    "sgbs_2-2_energy": 21.0
+  },
+  "outputs": {
+    "csv": "/Users/mac/Documents/Study/PFE/PaST/runs_p100/ppo_q_seq/eval_q_seq_small_seed42_b2_g2.csv",
+    "json": "/Users/mac/Documents/Study/PFE/PaST/runs_p100/ppo_q_seq/eval_q_seq_small_seed42_b2_g2.json"
+  }
+}

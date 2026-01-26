@@ -9,7 +9,7 @@ if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
 
-exec python -m PaST.run_experiments \
+exec python -m PaST.cli.experiments.run_experiments \
   --variants all \
   --seeds 0 \
   --config PaST/configs/a100_full.yaml \
