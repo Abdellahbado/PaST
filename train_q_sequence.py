@@ -492,6 +492,34 @@ def complete_sequence_heuristic(
         return complete_sequence_spt(partial_sequence, remaining_jobs, processing_times)
 
 
+def select_action_heuristic(
+    remaining_jobs: List[int],
+    processing_times: np.ndarray,
+    heuristic: str,
+    rng: random.Random,
+) -> int:
+    """Select next action using specified heuristic.
+
+    Args:
+        heuristic: One of 'spt', 'lpt', 'random', or 'mixed' (randomly picks one)
+    """
+    if not remaining_jobs:
+        raise ValueError("No remaining jobs to select from")
+
+    if heuristic == "mixed":
+        heuristic = rng.choice(["spt", "lpt", "random"])
+
+    if heuristic == "spt":
+        return int(min(remaining_jobs, key=lambda j: processing_times[j]))
+    if heuristic == "lpt":
+        return int(max(remaining_jobs, key=lambda j: processing_times[j]))
+    if heuristic == "random":
+        return int(rng.choice(remaining_jobs))
+
+    # Default fallback
+    return int(min(remaining_jobs, key=lambda j: processing_times[j]))
+
+
 def complete_sequence_model(
     partial_sequence: List[int],
     remaining_jobs: List[int],
@@ -776,9 +804,9 @@ def _collect_round_batch(
                 "ctx": obs_torch["ctx"].cpu().numpy(),
             }
 
-            if rng.random() < exploration_eps or model is None:
+            if rng.random() < exploration_eps:
                 action = rng.choice(remaining_jobs)
-            else:
+            elif model is not None:
                 with torch.no_grad():
                     jobs_t = obs_torch["jobs"].unsqueeze(0).to(device)
                     periods_t = obs_torch["periods"].unsqueeze(0).to(device)
@@ -790,6 +818,13 @@ def _collect_round_batch(
                     q = model(jobs_t, periods_t, ctx_t, mask_t)
                     q[0, mask_t[0]] = float("inf")
                     action = q.argmin(dim=-1).item()
+            else:
+                action = select_action_heuristic(
+                    remaining_jobs=remaining_jobs,
+                    processing_times=p_np,
+                    heuristic=heuristic_policy,
+                    rng=rng,
+                )
 
             # Candidate action set for counterfactual evaluation.
             # Default: chosen action + random negatives.
@@ -1691,11 +1726,11 @@ def main():
         # Determine completion policy for this round
         if round_idx < config.warmup_rounds:
             use_model_completion = False
-            completion_policy = "SPT"
+            completion_policy = config.heuristic_policy  # Show actual heuristic used
         else:
             if config.completion_policy == "spt":
                 use_model_completion = False
-                completion_policy = "SPT"
+                completion_policy = config.heuristic_policy
             elif config.completion_policy == "model":
                 use_model_completion = True
                 completion_policy = "model"
@@ -1717,7 +1752,9 @@ def main():
                     model_prob = config.completion_prob_start
 
                 use_model_completion = random.random() < model_prob
-                completion_policy = "model" if use_model_completion else "SPT"
+                completion_policy = (
+                    "model" if use_model_completion else config.heuristic_policy
+                )
 
         # === Data Collection ===
         print(
