@@ -47,7 +47,6 @@ import torch
 from PaST.baselines_sequence_dp import dp_schedule_for_job_sequence
 from PaST.config import VariantID, get_variant_config
 from PaST.q_sequence_model import QSequenceNet, build_q_model
-from PaST.cli.eval.run_eval_eas_ppo_short_base import batch_from_episodes
 from PaST.cli.eval.run_eval_q_sequence import (
     _extract_q_model_state,
     _load_checkpoint as _load_q_ckpt,
@@ -57,7 +56,79 @@ from PaST.sm_benchmark_data import (
     generate_raw_instance,
     make_single_machine_episode,
     simulate_metaheuristic_assignment,
+    SingleMachineEpisode,
 )
+
+
+# =============================================================================
+# Local batching utility
+# =============================================================================
+
+
+def batch_from_episodes(
+    episodes: List[SingleMachineEpisode],
+    N_job_pad: int = 50,
+    K_period_pad: int = 250,
+    T_max_pad: int = 500,
+) -> Dict[str, np.ndarray]:
+    """Manually batch a list of single-machine episodes.
+
+    This is intentionally inlined here to keep the compare script self-contained
+    (no dependency on other CLI eval scripts).
+    """
+    batch_size = len(episodes)
+
+    batch = {
+        "p_subset": np.zeros((batch_size, N_job_pad), dtype=np.int32),
+        "n_jobs": np.zeros((batch_size,), dtype=np.int32),
+        "job_mask": np.zeros((batch_size, N_job_pad), dtype=np.float32),
+        "T_max": np.zeros((batch_size,), dtype=np.int32),
+        "T_limit": np.zeros((batch_size,), dtype=np.int32),
+        "T_min": np.zeros((batch_size,), dtype=np.int32),
+        "ct": np.zeros((batch_size, T_max_pad), dtype=np.int32),
+        "Tk": np.zeros((batch_size, K_period_pad), dtype=np.int32),
+        "ck": np.zeros((batch_size, K_period_pad), dtype=np.int32),
+        "period_starts": np.zeros((batch_size, K_period_pad), dtype=np.int32),
+        "K": np.zeros((batch_size,), dtype=np.int32),
+        "period_mask": np.zeros((batch_size, K_period_pad), dtype=np.float32),
+        "e_single": np.zeros((batch_size,), dtype=np.int32),
+        "price_q": np.zeros((batch_size, 3), dtype=np.float32),
+    }
+
+    for i, episode in enumerate(episodes):
+        n = min(int(episode.n_jobs), int(N_job_pad))
+        k = min(int(episode.K), int(K_period_pad))
+        t_max = min(int(episode.T_max), int(T_max_pad))
+
+        batch["n_jobs"][i] = n
+        batch["K"][i] = k
+        batch["T_max"][i] = t_max
+        batch["T_limit"][i] = int(episode.T_limit)
+        batch["T_min"][i] = int(episode.T_min)
+        batch["e_single"][i] = int(episode.e_single)
+
+        if n > 0:
+            batch["p_subset"][i, :n] = np.asarray(episode.p_subset[:n], dtype=np.int32)
+            batch["job_mask"][i, :n] = 1.0
+
+        if k > 0:
+            batch["Tk"][i, :k] = np.asarray(episode.Tk[:k], dtype=np.int32)
+            batch["ck"][i, :k] = np.asarray(episode.ck[:k], dtype=np.int32)
+            batch["period_starts"][i, :k] = np.asarray(
+                episode.period_starts[:k], dtype=np.int32
+            )
+            batch["period_mask"][i, :k] = 1.0
+
+        if t_max > 0:
+            batch["ct"][i, :t_max] = np.asarray(episode.ct[:t_max], dtype=np.int32)
+            ct_valid = np.asarray(
+                episode.ct[: min(int(episode.T_limit), t_max)], dtype=np.int32
+            )
+            if ct_valid.size > 0:
+                q25, q50, q75 = np.quantile(ct_valid, [0.25, 0.5, 0.75])
+                batch["price_q"][i] = [q25, q50, q75]
+
+    return batch
 
 
 def _resolve_path(path_str: str) -> Path:
@@ -271,8 +342,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--bnb_path",
         type=str,
-        default="Transformer Implementation/Data Generation/solver_improved.py",
-        help="Path to solver_improved.py containing BranchAndBoundSolver",
+        default=None,
+        help=(
+            "Optional path to an external solver_improved.py defining Instance and BranchAndBoundSolver. "
+            "If omitted or not found, uses the in-repo solver PaST.solvers.bnb_solver_custom."
+        ),
     )
     p.add_argument(
         "--bnb_time_limit",
@@ -309,11 +383,35 @@ def main() -> None:
     print(f"Loading Q_Seq checkpoint: {ckpt_path}")
     model = _load_q_model(ckpt_path, q_variant, device)
 
-    bnb_mod = _import_bnb_module(_resolve_path(args.bnb_path))
-    if not hasattr(bnb_mod, "BranchAndBoundSolver") or not hasattr(bnb_mod, "Instance"):
-        raise AttributeError(
-            f"BnB module {args.bnb_path} must define Instance and BranchAndBoundSolver"
+    # Branch-and-Bound solver selection:
+    # - Prefer external module if args.bnb_path is provided and exists.
+    # - Otherwise, use the in-repo solver (keeps Kaggle self-contained).
+    InstanceCls = None
+    SolverCls = None
+
+    if args.bnb_path:
+        candidate = _resolve_path(str(args.bnb_path))
+        if candidate.exists():
+            bnb_mod = _import_bnb_module(candidate)
+            if not hasattr(bnb_mod, "BranchAndBoundSolver") or not hasattr(
+                bnb_mod, "Instance"
+            ):
+                raise AttributeError(
+                    f"BnB module {candidate} must define Instance and BranchAndBoundSolver"
+                )
+            InstanceCls = getattr(bnb_mod, "Instance")
+            SolverCls = getattr(bnb_mod, "BranchAndBoundSolver")
+            print(f"Using external BnB solver: {candidate}")
+
+    if InstanceCls is None or SolverCls is None:
+        from PaST.solvers.bnb_solver_custom import (  # local import to keep optional
+            Instance as _Instance,
+            BranchAndBoundSolver as _Solver,
         )
+
+        InstanceCls = _Instance
+        SolverCls = _Solver
+        print("Using in-repo BnB solver: PaST.solvers.bnb_solver_custom")
 
     episodes_by_ratio = _generate_episodes_by_ratio(
         scale=args.scale,
@@ -364,16 +462,14 @@ def main() -> None:
 
             # --- BnB (optimal sequence under the same DP objective) ---
             n_jobs, p, T, energy_costs = _past_to_bnb_instance(single_np)
-            inst = bnb_mod.Instance(
+            inst = InstanceCls(
                 n_jobs=int(n_jobs),
                 processing_times=np.asarray(p, dtype=np.int32),
                 T=int(T),
                 energy_costs=np.asarray(energy_costs, dtype=np.int64),
             )
 
-            solver = bnb_mod.BranchAndBoundSolver(
-                inst, time_limit=float(args.bnb_time_limit)
-            )
+            solver = SolverCls(inst, time_limit=float(args.bnb_time_limit))
             t0 = time.perf_counter()
             bnb_seq, bnb_cost = solver.solve()
             t_b = time.perf_counter() - t0
@@ -436,7 +532,7 @@ def main() -> None:
             "beta": int(args.beta),
             "gamma": int(args.gamma),
             "device": str(args.device),
-            "bnb_path": str(_resolve_path(args.bnb_path)),
+            "bnb_path": str(_resolve_path(args.bnb_path)) if args.bnb_path else None,
             "bnb_time_limit": float(args.bnb_time_limit),
             "max_jobs": int(args.max_jobs),
         },
