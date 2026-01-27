@@ -41,6 +41,22 @@ import numpy as np
 import torch
 import yaml
 
+
+def _torch_load_compat(path, device: torch.device):
+    """Load a torch checkpoint compatibly across PyTorch versions.
+
+    PyTorch 2.6 changed torch.load default to weights_only=True.
+    Our checkpoints include non-tensor Python/numpy objects (rng states, configs),
+    so we must load with weights_only=False (trusted checkpoints only).
+    """
+
+    try:
+        return torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        # Older PyTorch without weights_only kwarg
+        return torch.load(path, map_location=device)
+
+
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -561,7 +577,7 @@ class CheckpointManager:
         """Load latest checkpoint if exists."""
         path = self.checkpoint_dir / "latest.pt"
         if path.exists():
-            return torch.load(path, map_location=device)
+            return _torch_load_compat(path, device)
         return None
 
     def load_best_energy_from_checkpoint(self, device: torch.device):
@@ -573,7 +589,7 @@ class CheckpointManager:
         """
         path = self.checkpoint_dir / "best.pt"
         if path.exists():
-            checkpoint = torch.load(path, map_location=device)
+            checkpoint = _torch_load_compat(path, device)
             if "eval_result" in checkpoint:
                 self.best_energy = checkpoint["eval_result"].get(
                     "eval/energy_mean", float("inf")
@@ -961,7 +977,7 @@ def train(
     start_update = 0
     if resume_path:
         print(f"\nResuming from {resume_path}...")
-        checkpoint = torch.load(resume_path, map_location=device)
+        checkpoint = _torch_load_compat(resume_path, device)
         runner.load_state_dict(checkpoint["runner"])
         set_rng_states(checkpoint["rng_states"])
         start_update = runner.update_count
@@ -1197,7 +1213,7 @@ def train(
     # 2) Also evaluate BEST checkpoint on the same eval batch (if it exists).
     best_path = run_dir / "checkpoints" / "best.pt"
     if best_path.exists():
-        best_checkpoint = torch.load(best_path, map_location=device)
+        best_checkpoint = _torch_load_compat(best_path, device)
         runner.load_state_dict(best_checkpoint["runner"])
         best_main, _ = evaluator.evaluate(eval_batch_main, deterministic=True)
         print(

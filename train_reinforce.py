@@ -17,6 +17,21 @@ from pathlib import Path
 
 import torch
 
+
+def _torch_load_compat(path: str, device: torch.device):
+    """Load a torch checkpoint compatibly across PyTorch versions.
+
+    PyTorch 2.6 changed torch.load default to weights_only=True. Our checkpoints
+    contain non-tensor objects (rng states/configs), so we must load with
+    weights_only=False (trusted checkpoints only).
+    """
+
+    try:
+        return torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        return torch.load(path, map_location=device)
+
+
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -171,7 +186,7 @@ def main():
 
     start_update = 0
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location=device)
+        checkpoint = _torch_load_compat(args.resume, device)
         runner.load_state_dict(checkpoint["runner"])
         set_rng_states(checkpoint["rng_states"])
         start_update = runner.update_count

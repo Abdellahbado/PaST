@@ -38,7 +38,10 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 def _load_checkpoint(path: Path, device: torch.device) -> Dict[str, Any]:
     if not path.exists():
         raise FileNotFoundError(str(path))
-    ckpt = torch.load(path, map_location=device)
+    try:
+        ckpt = torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        ckpt = torch.load(path, map_location=device)
     if not isinstance(ckpt, dict):
         raise ValueError(f"Invalid checkpoint format at {path}")
     return ckpt

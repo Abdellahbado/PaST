@@ -14,7 +14,10 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     try:
-        ckpt = torch.load(args.path, map_location="cpu")
+        try:
+            ckpt = torch.load(args.path, map_location="cpu", weights_only=False)
+        except TypeError:
+            ckpt = torch.load(args.path, map_location="cpu")
         print(f"Checkpoint type: {type(ckpt)}")
         if isinstance(ckpt, dict):
             print(f"Keys: {list(ckpt.keys())}")
