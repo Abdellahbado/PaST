@@ -330,13 +330,60 @@ def get_rng_states() -> Dict[str, Any]:
     return states
 
 
+def _coerce_torch_byte_tensor(state: Any) -> torch.Tensor:
+    """Coerce a serialized RNG state into a CPU uint8 tensor.
+
+    PyTorch expects RNG states as a CPU ByteTensor (dtype=uint8). Depending on the
+    environment and torch version that produced the checkpoint, this can be saved
+    and reloaded as a list, numpy array, or tensor with a different dtype/device.
+    """
+
+    if isinstance(state, torch.Tensor):
+        t = state
+    elif isinstance(state, np.ndarray):
+        arr = state
+        if arr.dtype != np.uint8:
+            arr = arr.astype(np.uint8, copy=False)
+        t = torch.from_numpy(arr)
+    elif isinstance(state, (bytes, bytearray)):
+        t = torch.tensor(list(state), dtype=torch.uint8)
+    else:
+        # Covers list/tuple and other sequence-like objects.
+        t = torch.as_tensor(state)
+
+    if t.dtype != torch.uint8:
+        t = t.to(dtype=torch.uint8)
+    if t.device.type != "cpu":
+        t = t.cpu()
+    return t.contiguous()
+
+
 def set_rng_states(states: Dict[str, Any]):
     """Restore RNG states from checkpoint."""
-    random.setstate(states["python"])
-    np.random.set_state(states["numpy"])
-    torch.set_rng_state(states["torch"])
+    # Python / NumPy
+    if "python" in states:
+        random.setstate(states["python"])
+    if "numpy" in states:
+        np.random.set_state(states["numpy"])
+
+    # Torch CPU
+    if "torch" in states:
+        try:
+            torch.set_rng_state(_coerce_torch_byte_tensor(states["torch"]))
+        except Exception as e:
+            print(f"[WARN] Failed to restore torch RNG state: {e}")
+
+    # Torch CUDA (optional)
     if torch.cuda.is_available() and "cuda" in states:
-        torch.cuda.set_rng_state_all(states["cuda"])
+        try:
+            cuda_states = states["cuda"]
+            if isinstance(cuda_states, (list, tuple)):
+                cuda_states = [_coerce_torch_byte_tensor(s) for s in cuda_states]
+            else:
+                cuda_states = [_coerce_torch_byte_tensor(cuda_states)]
+            torch.cuda.set_rng_state_all(cuda_states)
+        except Exception as e:
+            print(f"[WARN] Failed to restore CUDA RNG state: {e}")
 
 
 # =============================================================================
