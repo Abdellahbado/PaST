@@ -401,6 +401,95 @@ def _sgbs_single_instance(
         q = model(jobs_t, periods_t, ctx_t, invalid_mask)
         return q
 
+    def _state_hash_for_rollout(
+        *,
+        job_sequences: torch.Tensor,
+        invalid_mask: torch.Tensor,
+        step_index: int,
+        n_jobs: int,
+        seed: int,
+    ) -> torch.Tensor:
+        """Compute a deterministic per-row hash for rollout randomness.
+
+        Goal: make rollout decisions deterministic per state/prefix so that
+        evaluations are comparable across models (avoids run-order RNG drift).
+        """
+        # job_sequences: [B, N_pad], invalid_mask: [B, N_pad]
+        B, N_pad = int(job_sequences.shape[0]), int(job_sequences.shape[1])
+        idx = torch.arange(N_pad, device=job_sequences.device, dtype=torch.int64) + 1
+
+        valid = (~invalid_mask).to(torch.int64)
+        # Hash availability mask.
+        mask_hash = (valid * (idx * 1315423911)).sum(dim=-1)  # (B,)
+
+        # Hash prefix (chosen jobs so far). Restrict to real jobs only.
+        seq_n = job_sequences[:, :n_jobs].to(torch.int64)
+        pos = torch.arange(n_jobs, device=job_sequences.device, dtype=torch.int64) + 1
+        prefix_hash = (seq_n * (pos * 2654435761)).sum(dim=-1)  # (B,)
+
+        base = (
+            torch.tensor(int(seed), device=job_sequences.device, dtype=torch.int64)
+            + torch.tensor(
+                int(step_index), device=job_sequences.device, dtype=torch.int64
+            )
+            * 97531
+            + mask_hash
+            + prefix_hash
+        )
+        # Finalize with a simple mix.
+        base = base ^ (base >> 13)
+        base = base * 1274126177
+        base = base ^ (base >> 16)
+        return base
+
+    def _deterministic_uniform_action(
+        *,
+        job_sequences: torch.Tensor,
+        invalid_mask: torch.Tensor,
+        step_index: int,
+        n_jobs: int,
+        seed: int,
+    ) -> torch.Tensor:
+        """Deterministic "random" action: uniform-ish among valid actions."""
+        B, N_pad = int(invalid_mask.shape[0]), int(invalid_mask.shape[1])
+        idx = torch.arange(N_pad, device=invalid_mask.device, dtype=torch.int64) + 1
+        base = _state_hash_for_rollout(
+            job_sequences=job_sequences,
+            invalid_mask=invalid_mask,
+            step_index=step_index,
+            n_jobs=n_jobs,
+            seed=seed,
+        )
+        action_ids = idx.view(1, N_pad).expand(B, N_pad)
+        x = base.view(B, 1) + action_ids * 2654435761
+        x = (x ^ (x >> 13)) * 1274126177
+        x = x ^ (x >> 16)
+        x_u32 = (x & 0xFFFFFFFF).to(torch.float32)
+        scores = x_u32 / 4294967296.0
+        scores = scores.masked_fill(invalid_mask, float("-inf"))
+        return scores.argmax(dim=-1)
+
+    def _deterministic_bernoulli(
+        *,
+        job_sequences: torch.Tensor,
+        invalid_mask: torch.Tensor,
+        step_index: int,
+        n_jobs: int,
+        seed: int,
+        p: float,
+        salt: int,
+    ) -> torch.Tensor:
+        """Deterministic Bernoulli(p) per row based on state hash."""
+        base = _state_hash_for_rollout(
+            job_sequences=job_sequences,
+            invalid_mask=invalid_mask,
+            step_index=step_index,
+            n_jobs=n_jobs,
+            seed=int(seed) + int(salt),
+        )
+        u = ((base & 0xFFFFFFFF).to(torch.float32)) / 4294967296.0
+        return u < float(p)
+
     # Vectorized beam state
     # sequences: [B, N_max] (stores chosen job indices)
     # avail:     [B, N_max] float, 1.0 for available jobs
@@ -430,8 +519,6 @@ def _sgbs_single_instance(
         raise ValueError(f"rollout_mix_prob must be in [0,1], got {mix_p}")
 
     base_seed = int(rollout_seed) if rollout_seed is not None else 0
-    gen = torch.Generator(device=device)
-    gen.manual_seed(base_seed)
 
     # Pre-build a repeated single batch when needed
     for step in range(n):
@@ -503,14 +590,20 @@ def _sgbs_single_instance(
             q_r = _q_values_from_obs(obs_r, invalid_r)
             q_r = q_r.masked_fill(invalid_r, float("inf"))
 
+            # Use current step index from env state (all rows share it, but keep it explicit)
+            step_idx_val = int(env_roll.step_indices[0].item())
+
             # Rollout/completion policy (used only for simulation; pruning still uses DP energy)
             if rollout_policy == "model":
                 action = q_r.argmin(dim=-1)
             elif rollout_policy == "random":
-                # Uniform random among valid actions via random scores
-                scores = torch.rand(q_r.shape, device=device, generator=gen)
-                scores = scores.masked_fill(invalid_r, float("-inf"))
-                action = scores.argmax(dim=-1)
+                action = _deterministic_uniform_action(
+                    job_sequences=env_roll.job_sequences,
+                    invalid_mask=invalid_r,
+                    step_index=step_idx_val,
+                    n_jobs=n,
+                    seed=base_seed,
+                )
             else:
                 # Heuristic rollouts based on processing times
                 # env_roll.p_subset: [B, N_pad]
@@ -526,17 +619,30 @@ def _sgbs_single_instance(
                     score_h = p_n.masked_fill(inv_n, float("-inf"))
                     action_h = score_h.argmax(dim=-1)
                 elif rollout_policy == "mix_model_random":
-                    scores = torch.rand((p_n.shape[0], n), device=device, generator=gen)
-                    scores = scores.masked_fill(inv_n, float("-inf"))
-                    action_h = scores.argmax(dim=-1)
+                    # Use deterministic "random" among real jobs.
+                    invalid_real = invalid_r.clone()
+                    if invalid_real.shape[1] > n:
+                        invalid_real[:, n:] = True
+                    action_h = _deterministic_uniform_action(
+                        job_sequences=env_roll.job_sequences,
+                        invalid_mask=invalid_real,
+                        step_index=step_idx_val,
+                        n_jobs=n,
+                        seed=base_seed + 11,
+                    )
                 else:
                     raise RuntimeError(f"Unhandled rollout_policy: {rollout_policy}")
 
                 if rollout_policy.startswith("mix_model"):
                     action_m = q_r.argmin(dim=-1)
-                    use_model = (
-                        torch.rand((q_r.shape[0],), device=device, generator=gen)
-                        < mix_p
+                    use_model = _deterministic_bernoulli(
+                        job_sequences=env_roll.job_sequences,
+                        invalid_mask=invalid_r,
+                        step_index=step_idx_val,
+                        n_jobs=n,
+                        seed=base_seed,
+                        p=mix_p,
+                        salt=97,
                     )
                     action = torch.where(use_model, action_m, action_h)
                 else:

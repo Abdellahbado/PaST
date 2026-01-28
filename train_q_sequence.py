@@ -187,6 +187,40 @@ class QRunConfig:
     listwise_weight: float = 0.0
     listwise_temperature: float = 1.0
 
+    # ---------------------------------------------------------------------
+    # New features (opt-in): target aggregation + policy-focused training
+    # ---------------------------------------------------------------------
+
+    # Target generation: multiple completions per (s,j) and aggregate.
+    # - auto: keep legacy behavior (single completion determined by completion_policy)
+    # - otherwise: comma-separated list from {model,spt,lpt,random,mixed}
+    target_rollouts: str = "auto"
+    # Aggregate rollout costs into a single label per (s,j)
+    # - single: legacy (use first/only rollout)
+    # - min: min over rollouts
+    # - softmin: smooth minimum (temperature-controlled)
+    target_rollout_aggregation: str = "single"
+    target_num_random_rollouts: int = 2
+    target_softmin_tau: float = 1.0
+
+    # Training objective
+    # - regression: regress Q(s,j) to aggregated DP cost (legacy)
+    # - policy: ranking/classification objective is primary
+    train_objective: str = "regression"
+    regression_weight: float = 1.0
+    policy_weight: float = 0.0
+    policy_temperature: float = 1.0
+    policy_target: str = "soft"  # soft|hard
+
+    # Top-γ aligned loss (encourage true best action in top-γ)
+    top_gamma: int = 0
+    top_gamma_weight: float = 0.0
+    top_gamma_margin: float = 0.0
+
+    # Slow / checkpointed teacher model for model-based completions
+    teacher_update_every_rounds: int = 1
+    teacher_update_on_save: bool = True
+
     # Target shaping (optional)
     # - none: regress to absolute DP cost of the completed sequence
     # - state_min: subtract min DP cost among candidate actions from the same state
@@ -467,6 +501,48 @@ def complete_sequence_random(
     return partial_sequence + shuffled
 
 
+def _parse_target_rollouts(spec: str) -> List[str]:
+    s = (spec or "").strip().lower()
+    if not s or s == "auto":
+        return ["auto"]
+    items = [x.strip() for x in s.split(",") if x.strip()]
+    allowed = {"model", "spt", "lpt", "random", "mixed"}
+    for it in items:
+        if it not in allowed:
+            raise ValueError(
+                f"Invalid target rollout '{it}'. Allowed: {sorted(allowed)}"
+            )
+    # de-dup while preserving order
+    out: List[str] = []
+    seen = set()
+    for it in items:
+        if it in seen:
+            continue
+        out.append(it)
+        seen.add(it)
+    return out
+
+
+def _aggregate_rollout_costs(
+    costs: List[float], aggregation: str, softmin_tau: float
+) -> float:
+    if not costs:
+        return float("nan")
+    mode = (aggregation or "single").strip().lower()
+    if mode == "single":
+        return float(costs[0])
+    if mode == "min":
+        return float(min(costs))
+    if mode == "softmin":
+        tau = float(softmin_tau)
+        if tau <= 0:
+            return float(min(costs))
+        c = torch.tensor(costs, dtype=torch.float64)
+        # softmin(c) = -tau * logsumexp(-c/tau)
+        return float((-tau * torch.logsumexp(-c / tau, dim=0)).item())
+    raise ValueError(f"Unknown target_rollout_aggregation: {aggregation}")
+
+
 def complete_sequence_heuristic(
     partial_sequence: List[int],
     remaining_jobs: List[int],
@@ -649,6 +725,7 @@ def _collect_round_batch(
     data_config: DataConfig,
     variant_config: VariantConfig,
     model_state: Optional[Dict[str, torch.Tensor]],
+    teacher_model_state: Optional[Dict[str, torch.Tensor]],
     batch_size: int,
     num_counterfactuals: int,
     exploration_eps: float,
@@ -656,6 +733,10 @@ def _collect_round_batch(
     heuristic_policy: str,
     target_normalization: str,
     include_heuristic_candidates: bool,
+    target_rollouts: str,
+    target_rollout_aggregation: str,
+    target_num_random_rollouts: int,
+    target_softmin_tau: float,
     device_str: str,
     seed: int,
     num_cpu_threads: int,
@@ -677,6 +758,13 @@ def _collect_round_batch(
         model.load_state_dict(model_state)
         model.to(device)
         model.eval()
+
+    teacher_model: Optional[QSequenceNet] = None
+    if teacher_model_state is not None:
+        teacher_model = build_q_model(variant_config)
+        teacher_model.load_state_dict(teacher_model_state)
+        teacher_model.to(device)
+        teacher_model.eval()
 
     env = GPUBatchSequenceEnv(
         batch_size=batch_size,
@@ -702,17 +790,70 @@ def _collect_round_batch(
     F_job = env_config.F_job
     N_pad = obs["jobs"].shape[1]
 
-    # Accumulate many DP evaluations and run them in large batches.
+    # IMPORTANT: state_id must be globally unique across collection calls.
+    # It is used to group candidate actions from the *same state* for listwise loss.
+    # If state_id collides across batches/rounds/workers, unrelated states get grouped
+    # together and the listwise targets/gradients become meaningless.
+    #
+    # We derive a stable 64-bit base from the per-batch seed (already unique in
+    # collect_round_data via seed + batch_idx*10000) and add a local counter.
+    # Mask seed to keep the value safely within int64.
+    state_id_base = (int(seed) & 0x3FFFFFFF) << 32
+
+    # Accumulate DP evaluations and aggregate them into per-(state,action) labels.
     pending_sequences: List[List[int]] = []
     pending_instance_indices: List[int] = []
-    pending_obs_single: List[Dict[str, np.ndarray]] = []
-    pending_job_avail: List[np.ndarray] = []
-    pending_actions: List[int] = []
-    pending_state_ids: List[int] = []
+    pending_candidate_uid: List[int] = []
+
+    candidate_meta: Dict[int, Dict[str, Any]] = {}
+    candidate_costs: Dict[int, List[float]] = {}
+    candidate_expected: Dict[int, int] = {}
+
+    state_meta: Dict[int, Dict[str, Any]] = {}
+    # state_meta[state_id] = {"expected": int, "candidates": [uid...], "done": {uid: cost}}
+
+    next_candidate_uid = 0
     DP_FLUSH_THRESHOLD = 8192  # sequences per DP call (tunable)
 
+    def _emit_state_if_ready(state_id: int) -> None:
+        s = state_meta.get(state_id)
+        if not s:
+            return
+        done: Dict[int, float] = s.get("done", {})
+        if len(done) < int(s["expected"]):
+            return
+
+        # Optional normalization across candidates in this state.
+        state_min_cost = min(done.values()) if done else 0.0
+        do_norm = (target_normalization or "none").strip().lower() == "state_min"
+
+        for uid in s["candidates"]:
+            meta = candidate_meta.get(uid)
+            if meta is None:
+                continue
+            cf_cost = float(done[uid])
+            q_target = float(cf_cost - state_min_cost) if do_norm else float(cf_cost)
+            transitions.append(
+                QTransition(
+                    jobs=meta["obs"]["jobs"].copy(),
+                    periods=meta["obs"]["periods"].copy(),
+                    ctx=meta["obs"]["ctx"].copy(),
+                    job_avail=meta["job_avail"].copy(),
+                    action=int(meta["action"]),
+                    q_target=float(q_target),
+                    state_id=int(state_id),
+                )
+            )
+
+            # cleanup per-candidate
+            candidate_meta.pop(uid, None)
+            candidate_costs.pop(uid, None)
+            candidate_expected.pop(uid, None)
+
+        state_meta.pop(state_id, None)
+
     def flush_pending():
-        nonlocal pending_sequences, pending_instance_indices, pending_obs_single, pending_job_avail, pending_actions, pending_state_ids
+        nonlocal pending_sequences, pending_instance_indices, pending_candidate_uid
         if not pending_sequences:
             return
         costs = batch_evaluate_sequences(
@@ -726,43 +867,31 @@ def _collect_round_batch(
         )
         costs_cpu = costs.detach().cpu().numpy().tolist()
 
-        # Optional per-state normalization (subtract min DP cost for that state).
-        state_min: Dict[int, float] = {}
-        if (target_normalization or "none").strip().lower() == "state_min":
-            for sid, c in zip(pending_state_ids, costs_cpu):
-                if not np.isfinite(c):
-                    continue
-                sid_i = int(sid)
-                prev = state_min.get(sid_i)
-                state_min[sid_i] = c if prev is None else min(prev, c)
-
-        for k, cf_cost in enumerate(costs_cpu):
+        for uid, cf_cost in zip(pending_candidate_uid, costs_cpu):
             if not np.isfinite(cf_cost):
                 continue
-
-            sid_k = int(pending_state_ids[k])
-            q_target = float(cf_cost)
-            if state_min:
-                q_target = float(cf_cost - state_min.get(sid_k, cf_cost))
-
-            transitions.append(
-                QTransition(
-                    jobs=pending_obs_single[k]["jobs"].copy(),
-                    periods=pending_obs_single[k]["periods"].copy(),
-                    ctx=pending_obs_single[k]["ctx"].copy(),
-                    job_avail=pending_job_avail[k].copy(),
-                    action=int(pending_actions[k]),
-                    q_target=q_target,
-                    state_id=sid_k,
+            uid_i = int(uid)
+            candidate_costs.setdefault(uid_i, []).append(float(cf_cost))
+            exp = int(candidate_expected.get(uid_i, 0))
+            if exp > 0 and len(candidate_costs[uid_i]) >= exp:
+                # Candidate complete => aggregate and attach to its state.
+                meta = candidate_meta.get(uid_i)
+                if meta is None:
+                    continue
+                state_id = int(meta["state_id"])
+                agg = _aggregate_rollout_costs(
+                    candidate_costs[uid_i],
+                    aggregation=target_rollout_aggregation,
+                    softmin_tau=target_softmin_tau,
                 )
-            )
+                s = state_meta.get(state_id)
+                if s is not None:
+                    s.setdefault("done", {})[uid_i] = float(agg)
+                    _emit_state_if_ready(state_id)
 
         pending_sequences = []
         pending_instance_indices = []
-        pending_obs_single = []
-        pending_job_avail = []
-        pending_actions = []
-        pending_state_ids = []
+        pending_candidate_uid = []
 
     # Process each instance sequentially (original working logic)
     state_id_counter = 0
@@ -790,7 +919,7 @@ def _collect_round_batch(
             if not remaining_jobs:
                 break
 
-            state_id = state_id_counter
+            state_id = int(state_id_base + state_id_counter)
             state_id_counter += 1
 
             if F_job >= 2:
@@ -847,44 +976,129 @@ def _collect_round_batch(
                 candidates = list(cand_set)
 
             # Build full sequences for each candidate.
-            if use_model_completion and model is not None:
-                partials = []
-                avail_batch = np.zeros((len(candidates), N_pad), dtype=np.float32)
-                for j, candidate_job in enumerate(candidates):
-                    cf_partial = partial_sequence + [candidate_job]
-                    partials.append(cf_partial)
-                    cf_avail = job_available.copy()
-                    cf_avail[candidate_job] = 0.0
-                    avail_batch[j] = cf_avail
+            rollout_tokens = _parse_target_rollouts(target_rollouts)
+            use_auto = len(rollout_tokens) == 1 and rollout_tokens[0] == "auto"
+            rollouts_per_candidate: Dict[int, List[List[int]]] = {
+                int(j): [] for j in candidates
+            }
 
-                full_seqs = complete_sequences_model_batch(
-                    partial_sequences=partials,
-                    available_masks=avail_batch,
-                    model=model,
-                    obs_template=obs_torch,
-                    processing_times=p_np,
-                    F_job=F_job,
-                    device=device,
-                )
+            model_for_completion = teacher_model if teacher_model is not None else model
+
+            # Legacy/auto behavior: one completion decided by use_model_completion + heuristic
+            if use_auto:
+                if use_model_completion and model_for_completion is not None:
+                    partials = []
+                    avail_batch = np.zeros((len(candidates), N_pad), dtype=np.float32)
+                    for j, candidate_job in enumerate(candidates):
+                        cf_partial = partial_sequence + [candidate_job]
+                        partials.append(cf_partial)
+                        cf_avail = job_available.copy()
+                        cf_avail[candidate_job] = 0.0
+                        avail_batch[j] = cf_avail
+                    full_seqs = complete_sequences_model_batch(
+                        partial_sequences=partials,
+                        available_masks=avail_batch,
+                        model=model_for_completion,
+                        obs_template=obs_torch,
+                        processing_times=p_np,
+                        F_job=F_job,
+                        device=device,
+                    )
+                    for candidate_job, seq in zip(candidates, full_seqs):
+                        rollouts_per_candidate[int(candidate_job)].append(list(seq))
+                else:
+                    for candidate_job in candidates:
+                        cf_partial = partial_sequence + [candidate_job]
+                        cf_remaining = [j for j in remaining_jobs if j != candidate_job]
+                        rollouts_per_candidate[int(candidate_job)].append(
+                            complete_sequence_heuristic(
+                                cf_partial, cf_remaining, p_np, heuristic_policy, rng
+                            )
+                        )
             else:
-                full_seqs = []
+                # Multi-rollout targets: evaluate several completion styles per (s,j)
+                if "model" in rollout_tokens and model_for_completion is not None:
+                    partials = []
+                    avail_batch = np.zeros((len(candidates), N_pad), dtype=np.float32)
+                    for j, candidate_job in enumerate(candidates):
+                        cf_partial = partial_sequence + [candidate_job]
+                        partials.append(cf_partial)
+                        cf_avail = job_available.copy()
+                        cf_avail[candidate_job] = 0.0
+                        avail_batch[j] = cf_avail
+                    model_seqs = complete_sequences_model_batch(
+                        partial_sequences=partials,
+                        available_masks=avail_batch,
+                        model=model_for_completion,
+                        obs_template=obs_torch,
+                        processing_times=p_np,
+                        F_job=F_job,
+                        device=device,
+                    )
+                    for candidate_job, seq in zip(candidates, model_seqs):
+                        rollouts_per_candidate[int(candidate_job)].append(list(seq))
+
                 for candidate_job in candidates:
                     cf_partial = partial_sequence + [candidate_job]
                     cf_remaining = [j for j in remaining_jobs if j != candidate_job]
-                    full_seqs.append(
-                        complete_sequence_heuristic(
-                            cf_partial, cf_remaining, p_np, heuristic_policy, rng
+
+                    if "spt" in rollout_tokens:
+                        rollouts_per_candidate[int(candidate_job)].append(
+                            complete_sequence_spt(cf_partial, cf_remaining, p_np)
                         )
-                    )
+                    if "lpt" in rollout_tokens:
+                        rollouts_per_candidate[int(candidate_job)].append(
+                            complete_sequence_lpt(cf_partial, cf_remaining, p_np)
+                        )
+                    if "mixed" in rollout_tokens:
+                        rollouts_per_candidate[int(candidate_job)].append(
+                            complete_sequence_heuristic(
+                                cf_partial, cf_remaining, p_np, "mixed", rng
+                            )
+                        )
+                    if "random" in rollout_tokens:
+                        for _r in range(int(target_num_random_rollouts)):
+                            rr = random.Random(rng.randint(0, 2**31 - 1))
+                            rollouts_per_candidate[int(candidate_job)].append(
+                                complete_sequence_random(cf_partial, cf_remaining, rr)
+                            )
+
+                # Safety: ensure every candidate has at least one rollout
+                for candidate_job in candidates:
+                    if not rollouts_per_candidate[int(candidate_job)]:
+                        cf_partial = partial_sequence + [candidate_job]
+                        cf_remaining = [j for j in remaining_jobs if j != candidate_job]
+                        rollouts_per_candidate[int(candidate_job)].append(
+                            complete_sequence_heuristic(
+                                cf_partial, cf_remaining, p_np, heuristic_policy, rng
+                            )
+                        )
+
+            # Register this state's candidate set so we can normalize per-state and emit transitions.
+            state_meta[int(state_id)] = {
+                "expected": int(len(candidates)),
+                "candidates": [],
+                "done": {},
+            }
 
             # Queue DP evals for batching.
-            for candidate_job, full_seq in zip(candidates, full_seqs):
-                pending_sequences.append(full_seq)
-                pending_instance_indices.append(inst_idx)
-                pending_obs_single.append(obs_single)
-                pending_job_avail.append(job_available.copy())
-                pending_actions.append(int(candidate_job))
-                pending_state_ids.append(int(state_id))
+            for candidate_job in candidates:
+                # Allocate candidate uid
+                uid = next_candidate_uid
+                next_candidate_uid += 1
+                state_meta[int(state_id)]["candidates"].append(int(uid))
+                candidate_meta[int(uid)] = {
+                    "obs": obs_single,
+                    "job_avail": job_available.copy(),
+                    "action": int(candidate_job),
+                    "state_id": int(state_id),
+                }
+                r_seqs = rollouts_per_candidate[int(candidate_job)]
+                candidate_expected[int(uid)] = int(len(r_seqs))
+                for full_seq in r_seqs:
+                    pending_sequences.append(full_seq)
+                    pending_instance_indices.append(inst_idx)
+                    pending_candidate_uid.append(int(uid))
 
             if len(pending_sequences) >= DP_FLUSH_THRESHOLD:
                 flush_pending()
@@ -896,12 +1110,20 @@ def _collect_round_batch(
         # Flush any leftover DP work for this instance.
         flush_pending()
 
+    # Final flush at end of batch.
+    flush_pending()
+
+    # Emit any completed states that may still be buffered (should be none).
+    for sid in list(state_meta.keys()):
+        _emit_state_if_ready(int(sid))
+
     return transitions
 
 
 def collect_round_data(
     env_config,  # EnvConfig, not env instance
     model: Optional[QSequenceNet],
+    teacher_model: Optional[QSequenceNet],
     variant_config: VariantConfig,
     data_config: DataConfig,
     num_episodes: int,
@@ -911,6 +1133,10 @@ def collect_round_data(
     heuristic_policy: str,
     target_normalization: str,
     include_heuristic_candidates: bool,
+    target_rollouts: str,
+    target_rollout_aggregation: str,
+    target_num_random_rollouts: int,
+    target_softmin_tau: float,
     device: torch.device,
     seed: int,
     collection_batch_size: int = 64,  # Fixed batch size for collection
@@ -933,6 +1159,7 @@ def collect_round_data(
 
     device_str = str(device)
     model_state = model.state_dict() if model is not None else None
+    teacher_state = teacher_model.state_dict() if teacher_model is not None else None
 
     # Default behavior: keep GPU collection single-process for stability.
     # Opt-in override is available for experimentation.
@@ -965,6 +1192,7 @@ def collect_round_data(
                     data_config=data_config,
                     variant_config=variant_config,
                     model_state=model_state,
+                    teacher_model_state=teacher_state,
                     batch_size=current_batch_size,
                     num_counterfactuals=num_counterfactuals,
                     exploration_eps=exploration_eps,
@@ -972,6 +1200,10 @@ def collect_round_data(
                     heuristic_policy=heuristic_policy,
                     target_normalization=target_normalization,
                     include_heuristic_candidates=include_heuristic_candidates,
+                    target_rollouts=target_rollouts,
+                    target_rollout_aggregation=target_rollout_aggregation,
+                    target_num_random_rollouts=target_num_random_rollouts,
+                    target_softmin_tau=target_softmin_tau,
                     device_str=device_str,
                     seed=batch_seed,
                     num_cpu_threads=threads_per_worker,
@@ -988,6 +1220,7 @@ def collect_round_data(
                         data_config=data_config,
                         variant_config=variant_config,
                         model_state=model_state,
+                        teacher_model_state=teacher_state,
                         batch_size=current_batch_size,
                         num_counterfactuals=num_counterfactuals,
                         exploration_eps=exploration_eps,
@@ -995,6 +1228,10 @@ def collect_round_data(
                         heuristic_policy=heuristic_policy,
                         target_normalization=target_normalization,
                         include_heuristic_candidates=include_heuristic_candidates,
+                        target_rollouts=target_rollouts,
+                        target_rollout_aggregation=target_rollout_aggregation,
+                        target_num_random_rollouts=target_num_random_rollouts,
+                        target_softmin_tau=target_softmin_tau,
                         device_str=device_str,
                         seed=batch_seed,
                         num_cpu_threads=threads_per_worker,
@@ -1026,6 +1263,8 @@ def train_epoch(
     total_q_mse = 0.0
     total_q_mae = 0.0
     total_listwise = 0.0
+    total_policy = 0.0
+    total_top_gamma = 0.0
     n_batches = 0
 
     for batch in dataloader:
@@ -1051,13 +1290,84 @@ def train_epoch(
         # Get Q-values for taken actions
         q_pred = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
-        # Base loss
-        if config.loss_type == "huber":
-            loss = F.huber_loss(q_pred, q_targets, delta=config.huber_delta)
-        else:
-            loss = F.mse_loss(q_pred, q_targets)
+        # --- Regression loss (optional / auxiliary) ---
+        reg_loss = torch.tensor(0.0, device=device)
+        if float(getattr(config, "regression_weight", 1.0)) > 0:
+            if config.loss_type == "huber":
+                reg_loss = F.huber_loss(q_pred, q_targets, delta=config.huber_delta)
+            else:
+                reg_loss = F.mse_loss(q_pred, q_targets)
 
-        # Optional listwise ranking loss
+        # --- Policy / ranking loss (primary when train_objective=policy) ---
+        policy_loss = torch.tensor(0.0, device=device)
+        top_gamma_loss = torch.tensor(0.0, device=device)
+
+        objective = (
+            (getattr(config, "train_objective", "regression") or "regression")
+            .strip()
+            .lower()
+        )
+        policy_w = float(getattr(config, "policy_weight", 0.0))
+        topg_w = float(getattr(config, "top_gamma_weight", 0.0))
+        topg = int(getattr(config, "top_gamma", 0) or 0)
+        topg_margin = float(getattr(config, "top_gamma_margin", 0.0))
+        pol_temp = float(getattr(config, "policy_temperature", 1.0))
+        pol_target = (
+            (getattr(config, "policy_target", "soft") or "soft").strip().lower()
+        )
+
+        if objective == "policy" or policy_w > 0 or topg_w > 0:
+            unique_states = torch.unique(state_ids)
+            pl_sum = 0.0
+            tg_sum = 0.0
+            count = 0
+            for sid in unique_states:
+                idx = (state_ids == sid).nonzero(as_tuple=False).squeeze(1)
+                if idx.numel() < 2:
+                    continue
+
+                # Candidate actions and targets for this state
+                cand_actions = actions.index_select(0, idx)  # (M,)
+                cand_targets = q_targets.index_select(0, idx)  # (M,)
+
+                # Use one representative forward pass row (observations identical per state)
+                rep = int(idx[0].item())
+                q_state = q_values[rep]  # (N_pad,)
+                q_cand = q_state.index_select(0, cand_actions)  # (M,)
+
+                logits = -q_cand / max(pol_temp, 1e-8)
+
+                # Target distribution from aggregated costs (lower cost => higher prob)
+                if pol_target == "hard":
+                    best_pos = int(torch.argmin(cand_targets).item())
+                    pl = F.cross_entropy(
+                        logits.unsqueeze(0),
+                        torch.tensor([best_pos], device=device, dtype=torch.long),
+                    )
+                else:
+                    p_t = F.softmax(-cand_targets / max(pol_temp, 1e-8), dim=0)
+                    log_p = F.log_softmax(logits, dim=0)
+                    pl = -(p_t * log_p).sum()
+
+                pl_sum += pl
+
+                if topg_w > 0 and topg > 0:
+                    k = min(int(topg), int(cand_actions.numel()))
+                    # Boundary is k-th smallest predicted cost among candidates
+                    boundary = torch.kthvalue(q_cand, k).values
+                    best_pos = int(torch.argmin(cand_targets).item())
+                    q_best = q_cand[best_pos]
+                    tg = F.relu(q_best - boundary + float(topg_margin))
+                    tg_sum += tg
+
+                count += 1
+
+            if count > 0:
+                policy_loss = pl_sum / count
+                if topg_w > 0 and topg > 0:
+                    top_gamma_loss = tg_sum / count
+
+        # Optional legacy listwise ranking loss (kept for backward compatibility)
         listwise_loss = torch.tensor(0.0, device=device)
         if config.listwise_weight > 0:
             unique_states = torch.unique(state_ids)
@@ -1081,7 +1391,14 @@ def train_epoch(
 
             if lw_count > 0:
                 listwise_loss = lw_sum / lw_count
-                loss = loss + config.listwise_weight * listwise_loss
+
+        # Combine losses
+        loss = (
+            float(getattr(config, "regression_weight", 1.0)) * reg_loss
+            + float(getattr(config, "policy_weight", 0.0)) * policy_loss
+            + float(getattr(config, "top_gamma_weight", 0.0)) * top_gamma_loss
+            + float(getattr(config, "listwise_weight", 0.0)) * listwise_loss
+        )
 
         # Backward
         optimizer.zero_grad()
@@ -1098,6 +1415,8 @@ def train_epoch(
             total_q_mse += F.mse_loss(q_pred, q_targets).item()
             total_q_mae += (q_pred - q_targets).abs().mean().item()
             total_listwise += float(listwise_loss.item())
+            total_policy += float(policy_loss.item())
+            total_top_gamma += float(top_gamma_loss.item())
         n_batches += 1
 
     return {
@@ -1105,6 +1424,8 @@ def train_epoch(
         "q_mse": total_q_mse / max(n_batches, 1),
         "q_mae": total_q_mae / max(n_batches, 1),
         "listwise": total_listwise / max(n_batches, 1),
+        "policy": total_policy / max(n_batches, 1),
+        "top_gamma": total_top_gamma / max(n_batches, 1),
     }
 
 
@@ -1398,6 +1719,109 @@ def parse_args():
         help="Ensure SPT/LPT candidates are included in counterfactual candidate sets (when sampling).",
     )
 
+    # ------------------------------------------------------------------
+    # New features (opt-in)
+    # ------------------------------------------------------------------
+    parser.add_argument(
+        "--target_rollouts",
+        type=str,
+        default="auto",
+        help=(
+            "Target rollout set for labels. 'auto' keeps legacy single-completion behavior. "
+            "Otherwise comma-separated from {model,spt,lpt,random,mixed}."
+        ),
+    )
+    parser.add_argument(
+        "--target_rollout_aggregation",
+        type=str,
+        default="single",
+        choices=["single", "min", "softmin"],
+        help="How to aggregate multiple rollout DP costs into a single label per (s,j).",
+    )
+    parser.add_argument(
+        "--target_num_random_rollouts",
+        type=int,
+        default=2,
+        help="When target_rollouts includes 'random', number of random completions per (s,j).",
+    )
+    parser.add_argument(
+        "--target_softmin_tau",
+        type=float,
+        default=1.0,
+        help="Softmin temperature tau for target_rollout_aggregation=softmin.",
+    )
+
+    parser.add_argument(
+        "--train_objective",
+        type=str,
+        default="regression",
+        choices=["regression", "policy"],
+        help="Training objective. 'policy' makes ranking/classification primary.",
+    )
+    parser.add_argument(
+        "--regression_weight",
+        type=float,
+        default=1.0,
+        help="Weight for regression loss on DP costs (auxiliary if train_objective=policy).",
+    )
+    parser.add_argument(
+        "--policy_weight",
+        type=float,
+        default=0.0,
+        help="Weight for policy/ranking loss (set >0 or use train_objective=policy).",
+    )
+    parser.add_argument(
+        "--policy_temperature",
+        type=float,
+        default=1.0,
+        help="Temperature for policy target distribution and predicted logits.",
+    )
+    parser.add_argument(
+        "--policy_target",
+        type=str,
+        default="soft",
+        choices=["soft", "hard"],
+        help="Policy targets: 'soft' distribution from costs, or 'hard' argmin label.",
+    )
+
+    parser.add_argument(
+        "--top_gamma",
+        type=int,
+        default=0,
+        help="Top-γ aligned loss: encourage true best action to be within top-γ (0 disables).",
+    )
+    parser.add_argument(
+        "--top_gamma_weight",
+        type=float,
+        default=0.0,
+        help="Weight for top-γ aligned hinge loss.",
+    )
+    parser.add_argument(
+        "--top_gamma_margin",
+        type=float,
+        default=0.0,
+        help="Margin for top-γ hinge loss (default 0).",
+    )
+
+    parser.add_argument(
+        "--teacher_update_every_rounds",
+        type=int,
+        default=1,
+        help="Update frozen teacher model every N rounds (1 = every round, 0 = never).",
+    )
+    parser.add_argument(
+        "--teacher_update_on_save",
+        action="store_true",
+        default=True,
+        help="Also update teacher when a checkpoint is saved.",
+    )
+    parser.add_argument(
+        "--no_teacher_update_on_save",
+        dest="teacher_update_on_save",
+        action="store_false",
+        help="Disable teacher update on checkpoint save.",
+    )
+
     parser.add_argument("--eval_every_rounds", type=int, default=5)
     parser.add_argument("--num_eval_instances", type=int, default=256)
     parser.add_argument("--save_every_rounds", type=int, default=10)
@@ -1514,6 +1938,20 @@ def main():
         listwise_temperature=args.listwise_temperature,
         target_normalization=args.target_normalization,
         include_heuristic_candidates=args.include_heuristic_candidates,
+        target_rollouts=args.target_rollouts,
+        target_rollout_aggregation=args.target_rollout_aggregation,
+        target_num_random_rollouts=args.target_num_random_rollouts,
+        target_softmin_tau=args.target_softmin_tau,
+        train_objective=args.train_objective,
+        regression_weight=args.regression_weight,
+        policy_weight=args.policy_weight,
+        policy_temperature=args.policy_temperature,
+        policy_target=args.policy_target,
+        top_gamma=args.top_gamma,
+        top_gamma_weight=args.top_gamma_weight,
+        top_gamma_margin=args.top_gamma_margin,
+        teacher_update_every_rounds=args.teacher_update_every_rounds,
+        teacher_update_on_save=args.teacher_update_on_save,
         eval_every_rounds=args.eval_every_rounds,
         num_eval_instances=args.num_eval_instances,
         save_every_rounds=args.save_every_rounds,
@@ -1545,6 +1983,14 @@ def main():
         config.num_collection_workers = 1
         config.allow_gpu_collection_multiprocessing = False
         config.num_dataloader_workers = 0
+
+    # Sensible defaults for policy-based training mode
+    if (config.train_objective or "regression").strip().lower() == "policy":
+        if config.policy_weight <= 0:
+            config.policy_weight = 1.0
+        # Keep regression as a small stabilizer unless user explicitly disabled it.
+        if config.regression_weight >= 1.0:
+            config.regression_weight = 0.1
 
     # Set seeds
     random.seed(config.seed)
@@ -1712,6 +2158,11 @@ def main():
         optimizer.load_state_dict(checkpoint_data["optimizer_state"])
         print(f"  Loaded model and optimizer state from checkpoint")
 
+    # Frozen teacher model for completion/labeling (updated slowly)
+    teacher_model = build_q_model(variant_config).to(device)
+    teacher_model.load_state_dict(model.state_dict())
+    teacher_model.eval()
+
     # Replay buffer (note: buffer is NOT restored - we start fresh data collection)
     buffer = QTransitionBuffer(config.buffer_size)
 
@@ -1726,6 +2177,15 @@ def main():
     print(
         f"Completion policy: {config.completion_policy} | "
         f"model_prob_start={config.completion_prob_start} | model_prob_end={config.completion_prob_end}"
+    )
+    print(
+        f"Targets: rollouts={config.target_rollouts} | agg={config.target_rollout_aggregation} | "
+        f"randK={config.target_num_random_rollouts}"
+    )
+    print(
+        f"Objective: {config.train_objective} | reg_w={config.regression_weight} | "
+        f"pol_w={config.policy_weight} | topγ={config.top_gamma} (w={config.top_gamma_weight}) | "
+        f"teacher_every={config.teacher_update_every_rounds} | teacher_on_save={config.teacher_update_on_save}"
     )
     print(f"{'='*60}\n")
 
@@ -1817,6 +2277,7 @@ def main():
         transitions = collect_round_data(
             env_config=env_config,  # Pass config, not env instance
             model=model if use_model_completion else None,
+            teacher_model=teacher_model,
             variant_config=variant_config,
             data_config=data_config_round,
             num_episodes=config.episodes_per_round,
@@ -1826,6 +2287,10 @@ def main():
             heuristic_policy=config.heuristic_policy,
             target_normalization=config.target_normalization,
             include_heuristic_candidates=config.include_heuristic_candidates,
+            target_rollouts=config.target_rollouts,
+            target_rollout_aggregation=config.target_rollout_aggregation,
+            target_num_random_rollouts=config.target_num_random_rollouts,
+            target_softmin_tau=config.target_softmin_tau,
             device=device,
             seed=config.seed + round_idx * 100000,
             collection_batch_size=config.collection_batch_size,
@@ -1861,9 +2326,12 @@ def main():
         avg_loss = np.mean([m["loss"] for m in epoch_metrics])
         avg_mae = np.mean([m["q_mae"] for m in epoch_metrics])
         avg_listwise = np.mean([m.get("listwise", 0.0) for m in epoch_metrics])
+        avg_policy = np.mean([m.get("policy", 0.0) for m in epoch_metrics])
+        avg_topg = np.mean([m.get("top_gamma", 0.0) for m in epoch_metrics])
         train_time = time.time() - train_start
         print(
-            f"loss={avg_loss:.4f}, mae={avg_mae:.2f}, listwise={avg_listwise:.4f} in {train_time:.1f}s"
+            f"loss={avg_loss:.4f}, mae={avg_mae:.2f}, policy={avg_policy:.4f}, topγ={avg_topg:.4f}, "
+            f"listwise={avg_listwise:.4f} in {train_time:.1f}s"
         )
 
         # Proactively tear down DataLoader workers before evaluation/logging to
@@ -1937,6 +2405,8 @@ def main():
             "exploration_eps": eps,
             "loss": avg_loss,
             "q_mae": avg_mae,
+            "policy": avg_policy,
+            "top_gamma": avg_topg,
             "listwise": avg_listwise,
         }
         if eval_results:
@@ -1948,6 +2418,7 @@ def main():
         log_file.flush()
 
         # === Checkpointing ===
+        saved_ckpt = False
         if (round_idx + 1) % config.save_every_rounds == 0:
             torch.save(
                 {
@@ -1958,6 +2429,21 @@ def main():
                 },
                 run_dir / f"checkpoint_{round_idx + 1}.pt",
             )
+            saved_ckpt = True
+
+        # === Teacher update (slow / checkpointed teacher) ===
+        update_teacher = False
+        if int(config.teacher_update_every_rounds) > 0:
+            if (round_idx + 1) % int(config.teacher_update_every_rounds) == 0:
+                update_teacher = True
+        if bool(config.teacher_update_on_save) and saved_ckpt:
+            update_teacher = True
+        if update_teacher:
+            try:
+                teacher_model.load_state_dict(model.state_dict())
+                teacher_model.eval()
+            except Exception:
+                pass
 
     # Final save
     torch.save(model.state_dict(), run_dir / "final_model.pt")
@@ -1973,7 +2459,7 @@ def main():
         print(f"Training complete! Best cost: {best_cost:.2f}")
     print(f"Models saved to: {run_dir}")
     print(f"{'='*60}\n")
-    
+
 
 if __name__ == "__main__":
     main()

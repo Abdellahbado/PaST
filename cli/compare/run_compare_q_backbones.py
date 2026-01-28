@@ -875,6 +875,90 @@ def run_comparison(args):
     ]
     print(summary.to_string(index=False))
 
+    # 8a. Ratio-wise summary (pooling across ratios can hide signal and inflate variance)
+    try:
+        print("\n" + "=" * 70)
+        print("SUMMARY BY RATIO (Mean Energy)")
+        print("=" * 70)
+
+        df_r = df.copy()
+        df_r["energy"] = pd.to_numeric(df_r["energy"], errors="coerce")
+        finite = np.isfinite(df_r["energy"].to_numpy(dtype=float))
+        df_r = df_r.loc[finite]
+
+        if len(df_r) == 0:
+            print("No finite energies to summarize by ratio.")
+        else:
+            ratio_summary = (
+                df_r.groupby(["ratio", "model_name", "method"], dropna=False)["energy"]
+                .agg(["mean", "std", "count"])
+                .reset_index()
+                .sort_values(["ratio", "mean"], ascending=[True, True])
+            )
+            with pd.option_context("display.max_rows", 300, "display.width", 140):
+                print(ratio_summary.to_string(index=False))
+    except Exception as e:
+        print(f"\n[warn] Could not compute ratio-wise summary: {e}")
+
+    # 8a2. Paired deltas (instance-wise) between the first two non-baseline models.
+    try:
+        primary_models = [
+            m for m in df["model_name"].unique().tolist() if m != "Baseline"
+        ]
+        if len(primary_models) >= 2:
+            a, b = primary_models[0], primary_models[1]
+            print("\n" + "=" * 70)
+            print(f"PAIRED DELTAS (A-B)  A={a}  B={b}")
+            print("=" * 70)
+
+            rows = []
+            for (ratio, method), grp in df.groupby(["ratio", "method"], dropna=False):
+                ga = grp[grp["model_name"] == a][["instance_idx", "energy"]].copy()
+                gb = grp[grp["model_name"] == b][["instance_idx", "energy"]].copy()
+                if ga.empty or gb.empty:
+                    continue
+
+                ga["energy"] = pd.to_numeric(ga["energy"], errors="coerce")
+                gb["energy"] = pd.to_numeric(gb["energy"], errors="coerce")
+                mrg = ga.merge(gb, on="instance_idx", suffixes=("_a", "_b"))
+                if mrg.empty:
+                    continue
+
+                ea = mrg["energy_a"].to_numpy(dtype=float)
+                eb = mrg["energy_b"].to_numpy(dtype=float)
+                finite = np.isfinite(ea) & np.isfinite(eb)
+                if not finite.any():
+                    continue
+
+                d = ea[finite] - eb[finite]
+                rows.append(
+                    {
+                        "ratio": float(ratio),
+                        "method": str(method),
+                        "n": int(d.shape[0]),
+                        "mean(A-B)": float(np.mean(d)),
+                        "std": (
+                            float(np.std(d, ddof=1)) if d.shape[0] > 1 else float("nan")
+                        ),
+                        "A win%": float(np.mean(d < 0.0)),
+                        "B win%": float(np.mean(d > 0.0)),
+                        "tie%": float(np.mean(d == 0.0)),
+                    }
+                )
+
+            if rows:
+                out = (
+                    pd.DataFrame(rows)
+                    .sort_values(["ratio", "method"])
+                    .reset_index(drop=True)
+                )
+                with pd.option_context("display.width", 140):
+                    print(out.to_string(index=False))
+            else:
+                print("No paired rows found.")
+    except Exception as e:
+        print(f"\n[warn] Could not compute paired deltas: {e}")
+
     # 8b. Fair summary: restrict to the subset of (instance_idx, ratio) where *all* methods are feasible.
     # This avoids a method looking better simply because it has infeasible (inf) rows that were excluded.
     try:
