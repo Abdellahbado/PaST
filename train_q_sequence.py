@@ -1259,6 +1259,10 @@ def train_epoch(
     """Train for one epoch."""
     model.train()
 
+    # Numerical safety: if we ever generate non-finite values, skip that batch
+    # rather than poisoning the optimizer state with NaNs/Infs.
+    warned_nonfinite = False
+
     total_loss = 0.0
     total_q_mse = 0.0
     total_q_mae = 0.0
@@ -1286,6 +1290,15 @@ def train_epoch(
             job_mask=job_mask,
             period_mask=period_mask,
         )
+
+        if not torch.isfinite(q_values).all():
+            if not warned_nonfinite:
+                print(
+                    "WARNING: non-finite q_values detected; skipping a batch (consider lowering lr / threads).",
+                    flush=True,
+                )
+                warned_nonfinite = True
+            continue
 
         # Get Q-values for taken actions
         q_pred = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
@@ -1335,7 +1348,13 @@ def train_epoch(
                 q_state = q_values[rep]  # (N_pad,)
                 q_cand = q_state.index_select(0, cand_actions)  # (M,)
 
-                logits = -q_cand / max(pol_temp, 1e-8)
+                # Robustify against inf/NaN from exploding weights.
+                q_cand = torch.nan_to_num(q_cand, nan=0.0, posinf=1e6, neginf=-1e6)
+                cand_targets = torch.nan_to_num(
+                    cand_targets, nan=0.0, posinf=1e12, neginf=-1e12
+                )
+
+                logits = (-q_cand / max(pol_temp, 1e-8)).clamp(-50.0, 50.0)
 
                 # Target distribution from aggregated costs (lower cost => higher prob)
                 if pol_target == "hard":
@@ -1345,7 +1364,10 @@ def train_epoch(
                         torch.tensor([best_pos], device=device, dtype=torch.long),
                     )
                 else:
-                    p_t = F.softmax(-cand_targets / max(pol_temp, 1e-8), dim=0)
+                    target_logits = (-cand_targets / max(pol_temp, 1e-8)).clamp(
+                        -50.0, 50.0
+                    )
+                    p_t = F.softmax(target_logits, dim=0)
                     log_p = F.log_softmax(logits, dim=0)
                     pl = -(p_t * log_p).sum()
 
@@ -1399,6 +1421,15 @@ def train_epoch(
             + float(getattr(config, "top_gamma_weight", 0.0)) * top_gamma_loss
             + float(getattr(config, "listwise_weight", 0.0)) * listwise_loss
         )
+
+        if not torch.isfinite(loss):
+            if not warned_nonfinite:
+                print(
+                    "WARNING: non-finite loss detected; skipping a batch (try lower --learning_rate / higher --policy_temperature).",
+                    flush=True,
+                )
+                warned_nonfinite = True
+            continue
 
         # Backward
         optimizer.zero_grad()
@@ -2006,6 +2037,14 @@ def main():
     cpu_count = os.cpu_count() or 1
     if config.num_cpu_threads <= 0:
         config.num_cpu_threads = cpu_count
+    else:
+        # Avoid severe oversubscription on small machines (e.g., Kaggle 4 cores).
+        if int(config.num_cpu_threads) > int(cpu_count):
+            print(
+                f"Capping --num_cpu_threads from {config.num_cpu_threads} to os.cpu_count={cpu_count} for stability/perf.",
+                flush=True,
+            )
+            config.num_cpu_threads = int(cpu_count)
 
     # Configure torch threads even for CUDA runs (preprocessing / DP setup / dataloader)
     try:
@@ -2013,6 +2052,14 @@ def main():
         torch.set_num_interop_threads(min(4, int(config.num_cpu_threads)))
     except Exception:
         pass
+
+    # Cap dataloader workers to CPU count to avoid overload.
+    if config.num_dataloader_workers > int(cpu_count):
+        print(
+            f"Capping --num_dataloader_workers from {config.num_dataloader_workers} to os.cpu_count={cpu_count}.",
+            flush=True,
+        )
+        config.num_dataloader_workers = int(cpu_count)
 
     if device.type == "cpu":
         cpu_count = os.cpu_count() or 1
