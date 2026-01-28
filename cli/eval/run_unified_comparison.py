@@ -1378,7 +1378,7 @@ def run_evaluation(
                 ):
                     # Normal decoding energy is already what the env used during decode.
                     if args.decoding in ("normal", "both"):
-                        _, _, normal_cmax = _action_trace_to_bars_normal(
+                        _, normal_energy, normal_cmax = _action_trace_to_bars_normal(
                             results[i].actions,
                             variant_config.env,
                             p_subset,
@@ -1386,7 +1386,7 @@ def run_evaluation(
                             e_single,
                             T_limit,
                         )
-                        row[f"{variant_name}_normal_energy"] = results[i].total_energy
+                        row[f"{variant_name}_normal_energy"] = normal_energy
                         row[f"{variant_name}_normal_cmax"] = normal_cmax
 
                     # Progressive decoding is a post-processing heuristic on the same action trace.
@@ -1468,7 +1468,7 @@ def run_evaluation(
                         and results[viz_idx].actions is not None
                     ):
                         if args.decoding in ("normal", "both"):
-                            bars, _, cmax = _action_trace_to_bars_normal(
+                            bars, energy, cmax = _action_trace_to_bars_normal(
                                 results[viz_idx].actions,
                                 variant_config.env,
                                 p_subset,
@@ -1477,7 +1477,7 @@ def run_evaluation(
                                 T_limit,
                             )
                             schedules[f"{variant_name} (normal)"] = {
-                                "energy": results[viz_idx].total_energy,
+                                "energy": energy,
                                 "cmax": cmax,
                                 "bars": bars,
                             }

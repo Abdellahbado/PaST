@@ -42,13 +42,14 @@ from PaST.sm_benchmark_data import (
     generate_raw_instance,
     simulate_metaheuristic_assignment,
     make_single_machine_episode,
+    episode_to_dict,
 )
 from PaST.cli.eval.run_eval_eas_ppo_short_base import (
     batch_from_episodes,
     _load_checkpoint,
 )
 from PaST.cli.eval.run_eval_q_sequence import greedy_decode_q_sequence, sgbs_q_sequence
-from PaST.baselines_sequence_dp import spt_lpt_with_dp
+from PaST.baselines_sequence_dp import spt_lpt_with_dp, dp_schedule_for_job_sequence
 
 
 def _latest_checkpoint_in_dir(ckpt_dir: Path) -> Optional[Path]:
@@ -150,13 +151,32 @@ MODELS = {
 
 
 def resolve_path(path_str: str) -> Path:
-    """Try to resolve path relative to CWD or CWD/PaST."""
+    """Try to resolve path relative to CWD or CWD/PaST.
+
+    Accepts:
+    - absolute paths
+    - workspace-relative paths
+    - paths prefixed with "PaST/" (and can also resolve after stripping that prefix)
+    """
     p = Path(path_str)
     if p.exists():
         return p
+
+    # Try relative to the PaST package root.
     p_past = Path("PaST") / path_str
     if p_past.exists():
         return p_past
+
+    # If user provided PaST/..., also try stripping it.
+    parts = list(p.parts)
+    if parts and parts[0] == "PaST":
+        p_stripped = Path(*parts[1:])
+        if p_stripped.exists():
+            return p_stripped
+        p_stripped2 = Path("PaST") / p_stripped
+        if p_stripped2.exists():
+            return p_stripped2
+
     return p
 
 
@@ -182,17 +202,75 @@ def safe_extract_state_dict(ckpt: Dict) -> Dict:
     raise ValueError("Could not extract state dict from checkpoint")
 
 
-def load_q_model(
-    model_key: str, device: torch.device, checkpoint_selector: str = "latest"
-):
-    """Load a Q-sequence model by key."""
-    cfg = MODELS[model_key]
-    var_cfg = get_variant_config(cfg["variant_id"])
+class RandomQSequenceNet(torch.nn.Module):
+    """A deterministic pseudo-random Q model.
 
+    Important: Q-values are deterministic *per state* (based on the job-availability
+    mask), not per forward-call. This avoids accidentally giving RandomQ extra
+    stochastic exploration during SGBS just because SGBS evaluates many nodes.
+    """
+
+    def __init__(self, seed: int):
+        super().__init__()
+        self.seed = int(seed)
+
+    def reset(self) -> None:
+        # Kept for API symmetry with real models; no internal state required.
+        return None
+
+    def forward(
+        self,
+        jobs_t: torch.Tensor,
+        periods_t: torch.Tensor,
+        ctx_t: torch.Tensor,
+        invalid_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        # jobs_t: [B, N_pad, F], invalid_mask: [B, N_pad]
+        B, N = int(jobs_t.shape[0]), int(jobs_t.shape[1])
+
+        # Derive a cheap deterministic fingerprint of the state from the valid-action mask.
+        # valid_mask: 1 for valid jobs, 0 for invalid.
+        valid_mask = (~invalid_mask).to(torch.int64)
+        # A simple polynomial hash over mask bits.
+        idx = torch.arange(N, device=jobs_t.device, dtype=torch.int64) + 1
+        mask_hash = (valid_mask * (idx * 1315423911)).sum(dim=-1)  # (B,)
+
+        # Also include remaining job count to distinguish early/late steps.
+        remaining = valid_mask.sum(dim=-1)  # (B,)
+
+        # Build a reproducible pseudo-random value per action.
+        # Use integer mixing, then map to [0,1).
+        base = (
+            torch.tensor(self.seed, device=jobs_t.device, dtype=torch.int64)
+            + mask_hash
+            + remaining * 2654435761
+        )
+        # action-specific mix
+        action_ids = idx.view(1, N).expand(B, N)
+        x = base.view(B, 1) + action_ids * 97531
+        x = (x ^ (x >> 13)) * 1274126177
+        x = x ^ (x >> 16)
+
+        # Convert to float in [0,1). Use uint32 mask for stable behaviour.
+        x_u32 = (x & 0xFFFFFFFF).to(torch.float32)
+        q = x_u32 / 4294967296.0
+        return q
+
+
+def load_q_model_from_spec(
+    *,
+    model_name: str,
+    variant_id: VariantID,
+    checkpoint_path: str,
+    device: torch.device,
+    checkpoint_selector: str = "latest",
+):
+    """Load a Q-sequence model from an explicit checkpoint path."""
+    var_cfg = get_variant_config(variant_id)
     model = build_q_model(var_cfg)
 
     ckpt_path = resolve_checkpoint_path(
-        cfg["path"], checkpoint_selector=checkpoint_selector
+        checkpoint_path, checkpoint_selector=checkpoint_selector
     )
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
@@ -204,6 +282,14 @@ def load_q_model(
     model.eval()
 
     return model, var_cfg
+
+
+@dataclass
+class ModelSpec:
+    key: str
+    name: str
+    path: str
+    variant_id: VariantID
 
 
 # =============================================================================
@@ -233,6 +319,9 @@ def evaluate_model(
     use_sgbs: bool = False,
     beta: int = 4,
     gamma: int = 4,
+    sgbs_rollout: str = "model",
+    sgbs_rollout_mix_prob: float = 0.5,
+    sgbs_rollout_seed: int = 0,
 ) -> List[EvalResult]:
     """Evaluate a model on a list of episodes."""
     results = []
@@ -262,7 +351,15 @@ def evaluate_model(
     if use_sgbs:
         t0 = time.time()
         sgbs_res = sgbs_q_sequence(
-            model, var_cfg, batch, device, beta=beta, gamma=gamma
+            model,
+            var_cfg,
+            batch,
+            device,
+            beta=beta,
+            gamma=gamma,
+            rollout_policy=str(sgbs_rollout),
+            rollout_mix_prob=float(sgbs_rollout_mix_prob),
+            rollout_seed=int(sgbs_rollout_seed),
         )
         t_sgbs = time.time() - t0
 
@@ -312,6 +409,49 @@ def evaluate_baselines(
                     T_limit=episodes[i].T_limit,
                 )
             )
+
+    return results
+
+
+def evaluate_random_permutation_baseline(
+    episodes: List,
+    ratio: float,
+    seed: int,
+) -> List[EvalResult]:
+    """Evaluate a random job sequence baseline (RandomPerm+DP)."""
+    rng = random.Random(int(seed))
+    results: List[EvalResult] = []
+
+    t0 = time.time()
+    dp_results = []
+    for ep in episodes:
+        n = int(getattr(ep, "n_jobs"))
+        seq = list(range(n))
+        rng.shuffle(seq)
+        # dp_schedule_for_job_sequence expects a dict shaped (1, ...)
+        single = {
+            "n_jobs": np.asarray([int(ep.n_jobs)], dtype=np.int32),
+            "p_subset": np.asarray(ep.p_subset[None, :], dtype=np.int32),
+            "ct": np.asarray(ep.ct[None, :], dtype=np.int32),
+            "T_limit": np.asarray([int(ep.T_limit)], dtype=np.int32),
+            "e_single": np.asarray([int(ep.e_single)], dtype=np.int32),
+        }
+        dp_results.append(dp_schedule_for_job_sequence(single, seq))
+    t_total = time.time() - t0
+
+    for i, res in enumerate(dp_results):
+        results.append(
+            EvalResult(
+                model_name="Baseline",
+                method="RandomPerm+DP",
+                instance_idx=i,
+                ratio=ratio,
+                energy=res.total_energy,
+                time_sec=t_total / max(1, len(dp_results)),
+                n_jobs=len(episodes[i].p_subset),
+                T_limit=episodes[i].T_limit,
+            )
+        )
 
     return results
 
@@ -475,21 +615,87 @@ def run_comparison(args):
 
     # 1. Load Models
     print("\n📦 Loading models...")
-    models = {}
-    for key in ["Attention", "CWE"]:
-        try:
-            model, var_cfg = load_q_model(
-                key, device, checkpoint_selector=args.checkpoint_selector
+
+    specs: List[ModelSpec] = []
+
+    if not args.no_attention:
+        specs.append(
+            ModelSpec(
+                key="Attention",
+                name=args.attention_name or MODELS["Attention"]["name"],
+                path=args.attention_ckpt or MODELS["Attention"]["path"],
+                variant_id=VariantID.Q_SEQUENCE,
             )
-            models[key] = {
+        )
+
+    # Support either one or two CWE checkpoints.
+    if args.cwe_ckpt_1:
+        specs.append(
+            ModelSpec(
+                key="CWE_1",
+                name=args.cwe_name_1 or "Q-Seq (CWE #1)",
+                path=args.cwe_ckpt_1,
+                variant_id=VariantID.Q_SEQUENCE_CWE_CTX13,
+            )
+        )
+    else:
+        # Backward-compatible default CWE path.
+        specs.append(
+            ModelSpec(
+                key="CWE",
+                name=args.cwe_name_1 or MODELS["CWE"]["name"],
+                path=MODELS["CWE"]["path"],
+                variant_id=VariantID.Q_SEQUENCE_CWE_CTX13,
+            )
+        )
+
+    if args.cwe_ckpt_2:
+        specs.append(
+            ModelSpec(
+                key="CWE_2",
+                name=args.cwe_name_2 or "Q-Seq (CWE #2)",
+                path=args.cwe_ckpt_2,
+                variant_id=VariantID.Q_SEQUENCE_CWE_CTX13,
+            )
+        )
+
+    models = {}
+    for spec in specs:
+        try:
+            model, var_cfg = load_q_model_from_spec(
+                model_name=spec.name,
+                variant_id=spec.variant_id,
+                checkpoint_path=spec.path,
+                device=device,
+                checkpoint_selector=args.checkpoint_selector,
+            )
+            models[spec.key] = {
                 "model": model,
                 "var_cfg": var_cfg,
-                "name": MODELS[key]["name"],
+                "name": spec.name,
+                "path": spec.path,
             }
             n_params = sum(p.numel() for p in model.parameters())
-            print(f"  ✓ {MODELS[key]['name']}: {n_params:,} params")
+            print(f"  ✓ {spec.name}: {n_params:,} params")
         except Exception as e:
-            print(f"  ✗ {MODELS[key]['name']}: {e}")
+            print(f"  ✗ {spec.name}: {e}")
+
+    # Optional: add a random-Q baseline model (supports greedy and SGBS)
+    if args.include_random_q:
+        try:
+            var_cfg_rand = get_variant_config(VariantID.Q_SEQUENCE)
+            rand_model = RandomQSequenceNet(seed=int(args.random_seed))
+            rand_model.to(device)
+            rand_model.eval()
+            models["RandomQ"] = {
+                "model": rand_model,
+                "var_cfg": var_cfg_rand,
+                "name": args.random_name,
+                "path": "<random>",
+            }
+            print(f"  ✓ {args.random_name}: (random baseline)")
+        except Exception as e:
+            print(f"  ✗ {args.random_name}: {e}")
 
     if len(models) == 0:
         print("\n❌ No models loaded. Exiting.")
@@ -543,8 +749,25 @@ def run_comparison(args):
     # 4. Evaluate
     all_results = []
 
+    def _finite_mean_and_infeasible_count(
+        values: List[float],
+    ) -> tuple[float, int, int]:
+        arr = np.asarray(values, dtype=np.float64)
+        finite_mask = np.isfinite(arr)
+        infeasible = int((~finite_mask).sum())
+        finite_n = int(finite_mask.sum())
+        mean_finite = float(arr[finite_mask].mean()) if finite_n > 0 else float("inf")
+        return mean_finite, infeasible, int(arr.size)
+
     for key, model_data in models.items():
         print(f"\n🔍 Evaluating {model_data['name']}...")
+
+        # Reset random model call counter per run for reproducibility
+        if hasattr(model_data["model"], "reset"):
+            try:
+                model_data["model"].reset()
+            except Exception:
+                pass
 
         for r_idx, ratio in enumerate(ratios):
             episodes = episodes_by_ratio[r_idx]
@@ -558,14 +781,23 @@ def run_comparison(args):
                 use_sgbs=args.use_sgbs,
                 beta=args.beta,
                 gamma=args.gamma,
+                sgbs_rollout=args.sgbs_rollout,
+                sgbs_rollout_mix_prob=args.sgbs_rollout_mix_prob,
+                sgbs_rollout_seed=args.sgbs_rollout_seed + int(r_idx) * 1000,
             )
             all_results.extend(results)
 
             # Progress
-            greedy_mean = np.mean(
-                [r.energy for r in results if r.method == "Greedy+DP"]
+            greedy_energies = [r.energy for r in results if r.method == "Greedy+DP"]
+            greedy_mean, infeasible, total_n = _finite_mean_and_infeasible_count(
+                greedy_energies
             )
-            print(f"    Ratio {ratio:.2f}: Greedy mean = {greedy_mean:.2f}")
+            if infeasible > 0:
+                print(
+                    f"    Ratio {ratio:.2f}: Greedy mean (finite) = {greedy_mean:.2f} | infeasible={infeasible}/{total_n}"
+                )
+            else:
+                print(f"    Ratio {ratio:.2f}: Greedy mean = {greedy_mean:.2f}")
 
     # 5. Baselines
     print("\n🔍 Evaluating Baselines (SPT+DP, LPT+DP)...")
@@ -573,6 +805,14 @@ def run_comparison(args):
         episodes = episodes_by_ratio[r_idx]
         baseline_results = evaluate_baselines(episodes, device, ratio)
         all_results.extend(baseline_results)
+
+        if args.include_random_perm:
+            rand_perm_results = evaluate_random_permutation_baseline(
+                episodes,
+                ratio,
+                seed=int(args.random_seed) + int(r_idx) * 1000,
+            )
+            all_results.extend(rand_perm_results)
 
     # 6. Compile Results
     df = pd.DataFrame(
@@ -603,15 +843,77 @@ def run_comparison(args):
     print("\n" + "=" * 70)
     print("SUMMARY (Mean Energy)")
     print("=" * 70)
+    print(
+        "Note: Mean/Std are computed over finite energies only; Infeasible counts are shown separately."
+    )
+
+    # Replace infinities for summary stats (but keep raw df as-is for CSV/debugging).
+    df_summary = df.copy()
+    df_summary["energy"] = df_summary["energy"].replace([np.inf, -np.inf], np.nan)
 
     summary = (
-        df.groupby(["model_name", "method"])["energy"]
+        df_summary.groupby(["model_name", "method"])["energy"]
         .agg(["mean", "std", "count"])
         .reset_index()
     )
+
+    infeasible_counts = (
+        df.groupby(["model_name", "method"])["energy"]
+        .apply(lambda s: int((~np.isfinite(np.asarray(s, dtype=np.float64))).sum()))
+        .reset_index(name="infeasible_count")
+    )
+
+    summary = summary.merge(infeasible_counts, on=["model_name", "method"], how="left")
     summary = summary.sort_values("mean")
-    summary.columns = ["Model", "Method", "Mean Energy", "Std", "Count"]
+    summary.columns = [
+        "Model",
+        "Method",
+        "Mean Energy",
+        "Std",
+        "Count",
+        "Infeasible",
+    ]
     print(summary.to_string(index=False))
+
+    # 8b. Fair summary: restrict to the subset of (instance_idx, ratio) where *all* methods are feasible.
+    # This avoids a method looking better simply because it has infeasible (inf) rows that were excluded.
+    try:
+        wide = df.pivot_table(
+            index=["instance_idx", "ratio"],
+            columns=["model_name", "method"],
+            values="energy",
+            aggfunc="first",
+        )
+        # Keep only rows where every column is finite.
+        finite_mask = np.isfinite(wide.to_numpy(dtype=np.float64)).all(axis=1)
+        wide_common = wide.loc[finite_mask]
+
+        if len(wide_common) > 0 and len(wide_common) < len(wide):
+            print("\n" + "=" * 70)
+            print("COMMON-FEASIBLE SUMMARY (Mean Energy)")
+            print("=" * 70)
+            print(
+                f"Common-feasible rows: {len(wide_common)}/{len(wide)} (dropped {len(wide) - len(wide_common)} rows with any infeasibility)"
+            )
+
+            # Compute mean/std/count on the common-feasible subset.
+            common_stats = []
+            for model_name, method in wide_common.columns:
+                vals = wide_common[(model_name, method)].to_numpy(dtype=np.float64)
+                common_stats.append(
+                    {
+                        "Model": model_name,
+                        "Method": method,
+                        "Mean Energy": float(np.mean(vals)),
+                        "Std": float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0,
+                        "Count": int(len(vals)),
+                    }
+                )
+
+            common_df = pd.DataFrame(common_stats).sort_values("Mean Energy")
+            print(common_df.to_string(index=False))
+    except Exception as e:
+        print(f"\n[warn] Could not compute common-feasible summary: {e}")
 
     # Highlight comparison
     if (
@@ -673,6 +975,36 @@ if __name__ == "__main__":
     parser.add_argument("--gamma", type=int, default=4, help="SGBS expansion width")
 
     parser.add_argument(
+        "--sgbs_rollout",
+        type=str,
+        default="model",
+        choices=[
+            "model",
+            "random",
+            "spt",
+            "lpt",
+            "mix_model_spt",
+            "mix_model_random",
+        ],
+        help=(
+            "Rollout/completion policy inside SGBS simulation. "
+            "Expansion still uses the model's Q; this only changes how candidates are completed before DP scoring."
+        ),
+    )
+    parser.add_argument(
+        "--sgbs_rollout_mix_prob",
+        type=float,
+        default=0.5,
+        help="For mix_model_* rollouts: probability of using the model vs the heuristic during rollout.",
+    )
+    parser.add_argument(
+        "--sgbs_rollout_seed",
+        type=int,
+        default=None,
+        help="Seed for stochastic rollouts (defaults to eval_seed).",
+    )
+
+    parser.add_argument(
         "--device",
         type=str,
         default="cuda" if torch.cuda.is_available() else "cpu",
@@ -696,5 +1028,85 @@ if __name__ == "__main__":
         ),
     )
 
+    # --- Override checkpoint paths (useful for ad-hoc comparisons) ---
+    parser.add_argument(
+        "--attention_ckpt",
+        type=str,
+        default=None,
+        help=(
+            "Checkpoint path for the attention Q-seq model. "
+            "Can be a file, checkpoints/ directory, or run directory (containing checkpoints/)."
+        ),
+    )
+    parser.add_argument(
+        "--attention_name",
+        type=str,
+        default=None,
+        help="Display name for the attention checkpoint in the output table.",
+    )
+    parser.add_argument(
+        "--no_attention",
+        action="store_true",
+        help="Do not load/evaluate the attention model (compare CWE checkpoints only).",
+    )
+
+    parser.add_argument(
+        "--cwe_ckpt_1",
+        type=str,
+        default=None,
+        help=(
+            "First CWE Q-seq checkpoint path (file/dir/run). If omitted, uses the script default CWE path."
+        ),
+    )
+    parser.add_argument(
+        "--cwe_name_1",
+        type=str,
+        default=None,
+        help="Display name for CWE checkpoint #1.",
+    )
+    parser.add_argument(
+        "--cwe_ckpt_2",
+        type=str,
+        default=None,
+        help="Second CWE Q-seq checkpoint path (file/dir/run).",
+    )
+    parser.add_argument(
+        "--cwe_name_2",
+        type=str,
+        default=None,
+        help="Display name for CWE checkpoint #2.",
+    )
+
+    # --- Random baselines ---
+    parser.add_argument(
+        "--include_random_perm",
+        action="store_true",
+        help="Include a RandomPerm+DP baseline (random job order, then DP timing).",
+    )
+    parser.add_argument(
+        "--include_random_q",
+        action="store_true",
+        help="Include a RandomQ baseline model (supports greedy and SGBS decoding).",
+    )
+    parser.add_argument(
+        "--random_seed",
+        type=int,
+        default=None,
+        help="Seed for random baselines (defaults to eval_seed if omitted).",
+    )
+    parser.add_argument(
+        "--random_name",
+        type=str,
+        default="Baseline (RandomQ)",
+        help="Display name for the RandomQ baseline model.",
+    )
+
     args = parser.parse_args()
+
+    if args.random_seed is None:
+        args.random_seed = int(args.eval_seed)
+
+    if args.sgbs_rollout_seed is None:
+        args.sgbs_rollout_seed = int(args.eval_seed)
+
     run_comparison(args)

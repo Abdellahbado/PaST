@@ -264,6 +264,9 @@ def sgbs_q_sequence(
     beta: int,
     gamma: int,
     temperature: float = 1.0,
+    rollout_policy: str = "model",
+    rollout_mix_prob: float = 0.5,
+    rollout_seed: Optional[int] = None,
 ) -> List[DPResult]:
     """SGBS decode for Q-sequence model.
 
@@ -301,6 +304,9 @@ def sgbs_q_sequence(
                 beta=beta,
                 gamma=gamma,
                 temperature=temperature,
+                rollout_policy=rollout_policy,
+                rollout_mix_prob=rollout_mix_prob,
+                rollout_seed=rollout_seed,
             )
             results.append(result)
 
@@ -355,6 +361,9 @@ def _sgbs_single_instance(
     beta: int,
     gamma: int,
     temperature: float = 1.0,
+    rollout_policy: str = "model",
+    rollout_mix_prob: float = 0.5,
+    rollout_seed: Optional[int] = None,
 ) -> DPResult:
     """SGBS for a single instance with Q-sequence model."""
     env_config = variant_config.env
@@ -402,6 +411,27 @@ def _sgbs_single_instance(
 
     best_energy = float("inf")
     best_sequence = list(range(n))  # Fallback
+
+    rollout_policy = (rollout_policy or "model").strip().lower()
+    if rollout_policy not in {
+        "model",
+        "random",
+        "spt",
+        "lpt",
+        "mix_model_spt",
+        "mix_model_random",
+    }:
+        raise ValueError(
+            "rollout_policy must be one of: model, random, spt, lpt, mix_model_spt, mix_model_random"
+        )
+
+    mix_p = float(rollout_mix_prob)
+    if mix_p < 0.0 or mix_p > 1.0:
+        raise ValueError(f"rollout_mix_prob must be in [0,1], got {mix_p}")
+
+    base_seed = int(rollout_seed) if rollout_seed is not None else 0
+    gen = torch.Generator(device=device)
+    gen.manual_seed(base_seed)
 
     # Pre-build a repeated single batch when needed
     for step in range(n):
@@ -472,7 +502,47 @@ def _sgbs_single_instance(
             invalid_r = _obs_invalid_job_mask(env_roll, obs_r)
             q_r = _q_values_from_obs(obs_r, invalid_r)
             q_r = q_r.masked_fill(invalid_r, float("inf"))
-            action = q_r.argmin(dim=-1)
+
+            # Rollout/completion policy (used only for simulation; pruning still uses DP energy)
+            if rollout_policy == "model":
+                action = q_r.argmin(dim=-1)
+            elif rollout_policy == "random":
+                # Uniform random among valid actions via random scores
+                scores = torch.rand(q_r.shape, device=device, generator=gen)
+                scores = scores.masked_fill(invalid_r, float("-inf"))
+                action = scores.argmax(dim=-1)
+            else:
+                # Heuristic rollouts based on processing times
+                # env_roll.p_subset: [B, N_pad]
+                p = env_roll.p_subset.to(torch.float32)
+                # Only first n jobs are real; others are padding.
+                p_n = p[:, :n]
+                inv_n = invalid_r[:, :n]
+
+                if rollout_policy in {"spt", "mix_model_spt"}:
+                    score_h = p_n.masked_fill(inv_n, float("inf"))
+                    action_h = score_h.argmin(dim=-1)
+                elif rollout_policy == "lpt":
+                    score_h = p_n.masked_fill(inv_n, float("-inf"))
+                    action_h = score_h.argmax(dim=-1)
+                elif rollout_policy == "mix_model_random":
+                    scores = torch.rand((p_n.shape[0], n), device=device, generator=gen)
+                    scores = scores.masked_fill(inv_n, float("-inf"))
+                    action_h = scores.argmax(dim=-1)
+                else:
+                    raise RuntimeError(f"Unhandled rollout_policy: {rollout_policy}")
+
+                if rollout_policy.startswith("mix_model"):
+                    action_m = q_r.argmin(dim=-1)
+                    use_model = (
+                        torch.rand((q_r.shape[0],), device=device, generator=gen)
+                        < mix_p
+                    )
+                    action = torch.where(use_model, action_m, action_h)
+                else:
+                    # pure spt/lpt
+                    action = action_h
+
             _, _, dones, _ = env_roll.step(action)
 
         # Score all completed sequences with batch DP (energy = cost)
