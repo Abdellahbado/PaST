@@ -219,6 +219,12 @@ class QRunConfig:
     completion_prob_decay_rounds: int = (
         0  # 0 = no decay; else linear over this many rounds
     )
+    # If True, never use the model for completion/action selection during collection,
+    # even if completion_policy requests it. Useful for pure heuristic pretraining.
+    no_model_completion: bool = False
+    # If True and completion_policy=="mix", sample model-vs-heuristic per episode
+    # within a round (instead of choosing one for the entire round).
+    completion_mix_per_episode: bool = False
     # Heuristic used when not using model completion
     # Options: "spt", "lpt", "random", "mixed" (randomly picks spt/lpt/random each time)
     heuristic_policy: str = "mixed"
@@ -268,6 +274,10 @@ class QRunConfig:
     target_num_random_rollouts: int = 2
     target_softmin_tau: float = 1.0
 
+    # If >0, disable the 'model' rollout token until this round index (0-based).
+    # Example: 200 => for rounds 0..199, any explicit 'model' targets are ignored.
+    target_disable_model_until_round: int = 0
+
     # Training objective
     # - regression: regress Q(s,j) to aggregated DP cost (legacy)
     # - policy: ranking/classification objective is primary
@@ -310,6 +320,11 @@ class QRunConfig:
     eval_sgbs_gamma: int = 4  # Expansion factor for SGBS
     eval_sgbs_num_instances: int = 64  # Fewer instances for SGBS (expensive)
 
+    # Optional baseline: compare against SGBS guided by random Q-values.
+    # This is useful to detect when the learned Q landscape is not adding signal.
+    eval_sgbs_random_q: bool = False
+    eval_sgbs_random_q_seed: int = 0  # 0 => derive from eval seed
+
     # Checkpointing
     save_every_rounds: int = 10
 
@@ -331,6 +346,18 @@ class QRunConfig:
     curriculum_fraction: float = 0.3  # fraction of rounds used for annealing
     curriculum_slack_min: Optional[float] = None
     curriculum_slack_max: Optional[float] = None
+
+    # Curriculum (optional): start with smaller instances (fewer jobs), anneal to target.
+    jobs_curriculum: bool = False
+    jobs_curriculum_n_max_start: Optional[int] = None
+    jobs_curriculum_fraction: float = 0.3  # fraction of rounds used for annealing
+
+    # Curriculum (optional): learn from the end first.
+    # Keep only states where remaining_jobs_count <= max_remaining during training.
+    stage_curriculum: bool = False
+    stage_max_remaining_start: int = 1
+    stage_max_remaining_end: int = 10_000
+    stage_max_remaining_decay_rounds: int = 200
 
     # Resume from checkpoint
     resume_from: Optional[str] = None  # Path to checkpoint file or run directory
@@ -355,6 +382,9 @@ class QTransition:
     action: int  # Job index chosen
     q_target: float  # DP cost of completed sequence
     state_id: int  # Groups candidates from the same state (for listwise loss)
+
+    # Metadata for curricula/debugging
+    remaining_jobs_count: int  # number of jobs remaining at this decision state
 
 
 class QTransitionBuffer:
@@ -423,6 +453,9 @@ class QTransitionDataset(Dataset):
             "action": torch.tensor(t.action, dtype=torch.long),
             "q_target": q_target,
             "state_id": torch.tensor(t.state_id, dtype=torch.long),
+            "remaining_jobs_count": torch.tensor(
+                int(getattr(t, "remaining_jobs_count", 0)), dtype=torch.long
+            ),
         }
 
 
@@ -447,6 +480,7 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
     actions = torch.zeros(B, dtype=torch.long)
     q_targets = torch.zeros(B)
     state_ids = torch.zeros(B, dtype=torch.long)
+    remaining_jobs_count = torch.zeros(B, dtype=torch.long)
 
     for i, b in enumerate(batch):
         n_jobs = b["jobs"].shape[0]
@@ -468,6 +502,8 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         actions[i] = b["action"]
         q_targets[i] = b["q_target"]
         state_ids[i] = b["state_id"]
+        if "remaining_jobs_count" in b:
+            remaining_jobs_count[i] = b["remaining_jobs_count"]
 
     # Final defense: ensure padded tensors are finite.
     jobs = torch.nan_to_num(jobs, nan=0.0, posinf=0.0, neginf=0.0)
@@ -484,6 +520,7 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         "actions": actions,
         "q_targets": q_targets,
         "state_ids": state_ids,
+        "remaining_jobs_count": remaining_jobs_count,
     }
 
 
@@ -840,6 +877,10 @@ def _collect_round_batch(
     dp_eval_workers: int = 0,
     dp_flush_threshold: int = 8192,
     dp_eval_async: bool = False,
+    completion_mix_per_episode: bool = False,
+    completion_mix_model_prob: float = 0.0,
+    round_idx: int = 0,
+    target_disable_model_until_round: int = 0,
 ) -> List[QTransition]:
     """Collect transitions for a single batch (worker-safe)."""
     if num_cpu_threads > 0:
@@ -1057,6 +1098,7 @@ def _collect_round_batch(
                     action=int(meta["action"]),
                     q_target=float(q_target),
                     state_id=int(state_id),
+                    remaining_jobs_count=int(meta.get("remaining_jobs_count", 0)),
                 )
             )
 
@@ -1150,6 +1192,18 @@ def _collect_round_batch(
     # Process each instance sequentially (original working logic)
     state_id_counter = 0
     for inst_idx in range(batch_size):
+        # Optional: per-episode mixing between model policy and heuristic policy.
+        # This affects the action-selection policy and the legacy/auto completion behavior.
+        inst_use_model_completion = bool(use_model_completion)
+        if bool(completion_mix_per_episode):
+            mp = float(completion_mix_model_prob)
+            mp = max(0.0, min(1.0, mp))
+            inst_use_model_completion = (model is not None) and (rng.random() < mp)
+
+        inst_model: Optional[QSequenceNet] = (
+            model if inst_use_model_completion else None
+        )
+
         n_jobs = int(n_jobs_all[inst_idx].item())
         p_np = p_all[inst_idx].cpu().numpy()
 
@@ -1173,6 +1227,8 @@ def _collect_round_batch(
             if not remaining_jobs:
                 break
 
+            remaining_jobs_count = int(len(remaining_jobs))
+
             # Keep inflight bookkeeping current so scheduling decisions (flush/backlog)
             # are based on actually-running tasks, not already-finished futures.
             if dp_executor is not None:
@@ -1195,7 +1251,7 @@ def _collect_round_batch(
 
             if rng.random() < exploration_eps:
                 action = rng.choice(remaining_jobs)
-            elif model is not None:
+            elif inst_model is not None:
                 with torch.no_grad():
                     jobs_t = obs_torch["jobs"].unsqueeze(0).to(device)
                     periods_t = obs_torch["periods"].unsqueeze(0).to(device)
@@ -1204,7 +1260,7 @@ def _collect_round_batch(
                         torch.from_numpy(job_available < 0.5).unsqueeze(0).to(device)
                     )
 
-                    q = model(jobs_t, periods_t, ctx_t, mask_t)
+                    q = inst_model(jobs_t, periods_t, ctx_t, mask_t)
                     q[0, mask_t[0]] = float("inf")
                     action = q.argmin(dim=-1).item()
             else:
@@ -1236,16 +1292,26 @@ def _collect_round_batch(
 
             # Build full sequences for each candidate.
             rollout_tokens = _parse_target_rollouts(target_rollouts)
+            if int(round_idx) < int(target_disable_model_until_round or 0):
+                rollout_tokens = [t for t in rollout_tokens if t != "model"]
             use_auto = len(rollout_tokens) == 1 and rollout_tokens[0] == "auto"
             rollouts_per_candidate: Dict[int, List[List[int]]] = {
                 int(j): [] for j in candidates
             }
 
             model_for_completion = teacher_model if teacher_model is not None else model
+            inst_model_for_completion = (
+                model_for_completion if inst_use_model_completion else None
+            )
+
+            # If model targets are disabled for early rounds, force heuristic completion
+            # even when legacy/auto behavior would use the teacher/model.
+            if int(round_idx) < int(target_disable_model_until_round or 0):
+                inst_model_for_completion = None
 
             # Legacy/auto behavior: one completion decided by use_model_completion + heuristic
             if use_auto:
-                if use_model_completion and model_for_completion is not None:
+                if inst_model_for_completion is not None:
                     partials = []
                     avail_batch = np.zeros((len(candidates), N_pad), dtype=np.float32)
                     for j, candidate_job in enumerate(candidates):
@@ -1257,7 +1323,7 @@ def _collect_round_batch(
                     full_seqs = complete_sequences_model_batch(
                         partial_sequences=partials,
                         available_masks=avail_batch,
-                        model=model_for_completion,
+                        model=inst_model_for_completion,
                         obs_template=obs_torch,
                         processing_times=p_np,
                         F_job=F_job,
@@ -1351,6 +1417,7 @@ def _collect_round_batch(
                     "job_avail": job_available.copy(),
                     "action": int(candidate_job),
                     "state_id": int(state_id),
+                    "remaining_jobs_count": int(remaining_jobs_count),
                 }
                 r_seqs = rollouts_per_candidate[int(candidate_job)]
                 candidate_expected[int(uid)] = int(len(r_seqs))
@@ -1434,6 +1501,10 @@ def collect_round_data(
     dp_flush_threshold: int = 8192,
     dp_eval_async: bool = False,
     collection_log_every_batches: int = 0,
+    completion_mix_per_episode: bool = False,
+    completion_mix_model_prob: float = 0.0,
+    round_idx: int = 0,
+    target_disable_model_until_round: int = 0,
 ) -> List[QTransition]:
     """
     Collect Q-transitions for one round using the real environment.
@@ -1499,6 +1570,8 @@ def collect_round_data(
                     num_counterfactuals=num_counterfactuals,
                     exploration_eps=exploration_eps,
                     use_model_completion=use_model_completion,
+                    completion_mix_per_episode=bool(completion_mix_per_episode),
+                    completion_mix_model_prob=float(completion_mix_model_prob),
                     heuristic_policy=heuristic_policy,
                     target_normalization=target_normalization,
                     include_heuristic_candidates=include_heuristic_candidates,
@@ -1513,6 +1586,10 @@ def collect_round_data(
                     dp_eval_workers=dp_eval_workers,
                     dp_flush_threshold=dp_flush_threshold,
                     dp_eval_async=dp_eval_async,
+                    round_idx=int(round_idx),
+                    target_disable_model_until_round=int(
+                        target_disable_model_until_round or 0
+                    ),
                 )
             )
     else:
@@ -1531,6 +1608,8 @@ def collect_round_data(
                         num_counterfactuals=num_counterfactuals,
                         exploration_eps=exploration_eps,
                         use_model_completion=use_model_completion,
+                        completion_mix_per_episode=bool(completion_mix_per_episode),
+                        completion_mix_model_prob=float(completion_mix_model_prob),
                         heuristic_policy=heuristic_policy,
                         target_normalization=target_normalization,
                         include_heuristic_candidates=include_heuristic_candidates,
@@ -1545,6 +1624,10 @@ def collect_round_data(
                         dp_eval_workers=dp_eval_workers,
                         dp_flush_threshold=dp_flush_threshold,
                         dp_eval_async=dp_eval_async,
+                        round_idx=int(round_idx),
+                        target_disable_model_until_round=int(
+                            target_disable_model_until_round or 0
+                        ),
                     )
                 )
 
@@ -1575,6 +1658,7 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     config: QRunConfig,
     device: torch.device,
+    stage_max_remaining: Optional[int] = None,
 ) -> Dict[str, float]:
     """Train for one epoch."""
     model.train()
@@ -1606,6 +1690,26 @@ def train_epoch(
         actions = batch["actions"].to(device, non_blocking=non_blocking)
         q_targets = batch["q_targets"].to(device, non_blocking=non_blocking)
         state_ids = batch["state_ids"].to(device, non_blocking=non_blocking)
+        remaining_jobs_count = batch.get("remaining_jobs_count")
+        if remaining_jobs_count is not None:
+            remaining_jobs_count = remaining_jobs_count.to(
+                device, non_blocking=non_blocking
+            )
+
+        # Stage curriculum: learn from the end first.
+        # Since remaining_jobs_count is constant per state, this drops/keeps whole states.
+        if stage_max_remaining is not None and remaining_jobs_count is not None:
+            keep = remaining_jobs_count <= int(stage_max_remaining)
+            if not bool(keep.any()):
+                continue
+            jobs = jobs[keep]
+            periods = periods[keep]
+            ctx = ctx[keep]
+            job_mask = job_mask[keep]
+            period_mask = period_mask[keep]
+            actions = actions[keep]
+            q_targets = q_targets[keep]
+            state_ids = state_ids[keep]
 
         # Defensive: if any upstream features/labels are non-finite, sanitize them.
         # This prevents wasted compute from batch skipping and makes it easier
@@ -1983,6 +2087,8 @@ def evaluate_sgbs(
     device: torch.device,
     beta: int = 4,
     gamma: int = 4,
+    compare_random_q: bool = False,
+    random_q_seed: int = 0,
 ) -> Dict[str, float]:
     """Evaluate model using SGBS beam search - the real metric for Q-sequence.
 
@@ -2004,7 +2110,7 @@ def evaluate_sgbs(
         seed=seed,
     )
 
-    # Run SGBS
+    # Run SGBS (model-guided)
     sgbs_results = sgbs_q_sequence(
         model=model,
         variant_config=variant_config,
@@ -2013,6 +2119,45 @@ def evaluate_sgbs(
         beta=beta,
         gamma=gamma,
     )
+
+    # Optional baseline: SGBS guided by random Q-values (same instances)
+    sgbs_random_q_results = None
+    if bool(compare_random_q):
+        rq_seed = (
+            int(seed) + 12345 if int(random_q_seed or 0) == 0 else int(random_q_seed)
+        )
+
+        class _RandomQModel(nn.Module):
+            def __init__(self, *, seed: int):
+                super().__init__()
+                self._gen = torch.Generator(device=device)
+                self._gen.manual_seed(int(seed))
+
+            def forward(
+                self,
+                jobs: torch.Tensor,
+                periods: torch.Tensor,
+                ctx: torch.Tensor,
+                job_mask: Optional[torch.Tensor] = None,
+            ) -> torch.Tensor:
+                # Lower Q is better (argmin). Uniform random is a good null baseline.
+                B, N_pad = int(jobs.shape[0]), int(jobs.shape[1])
+                q = torch.rand((B, N_pad), device=jobs.device, generator=self._gen)
+                if job_mask is not None:
+                    q = q.masked_fill(job_mask, float("inf"))
+                return q
+
+        random_model = _RandomQModel(seed=rq_seed).to(device)
+        random_model.eval()
+        sgbs_random_q_results = sgbs_q_sequence(
+            model=random_model,
+            variant_config=variant_config,
+            batch_data=batch_data,
+            device=device,
+            beta=beta,
+            gamma=gamma,
+            rollout_seed=rq_seed,
+        )
 
     # Run greedy for comparison
     greedy_results = greedy_decode_q_sequence(
@@ -2035,11 +2180,17 @@ def evaluate_sgbs(
     greedy_costs = [r.total_energy for r in greedy_results]
     spt_costs = [r.total_energy for r in spt_results]
 
+    sgbs_random_q_costs = (
+        [r.total_energy for r in sgbs_random_q_results]
+        if sgbs_random_q_results is not None
+        else []
+    )
+
     avg_sgbs = np.mean(sgbs_costs)
     avg_greedy = np.mean(greedy_costs)
     avg_spt = np.mean(spt_costs)
 
-    return {
+    out = {
         "sgbs_cost": avg_sgbs,
         "greedy_cost": avg_greedy,
         "spt_cost": avg_spt,
@@ -2050,6 +2201,22 @@ def evaluate_sgbs(
         "greedy_vs_spt": (avg_spt - avg_greedy) / avg_spt * 100 if avg_spt > 0 else 0,
         "n_instances": num_instances,
     }
+
+    if sgbs_random_q_costs:
+        avg_rand = float(np.mean(sgbs_random_q_costs))
+        out.update(
+            {
+                "sgbs_random_q_cost": avg_rand,
+                "sgbs_model_vs_random_q": (
+                    (avg_rand - avg_sgbs) / avg_rand * 100 if avg_rand > 0 else 0
+                ),
+                "sgbs_random_q_vs_spt": (
+                    (avg_spt - avg_rand) / avg_spt * 100 if avg_spt > 0 else 0
+                ),
+            }
+        )
+
+    return out
 
 
 # =============================================================================
@@ -2134,6 +2301,22 @@ def parse_args():
     parser.add_argument("--completion_prob_end", type=float, default=1.0)
     parser.add_argument("--completion_prob_decay_rounds", type=int, default=0)
     parser.add_argument(
+        "--no_model_completion",
+        action="store_true",
+        help=(
+            "Disable model-based action selection/completion during collection (heuristics only), "
+            "even if completion_policy requests model. Useful for pure pretraining."
+        ),
+    )
+    parser.add_argument(
+        "--completion_mix_per_episode",
+        action="store_true",
+        help=(
+            "When completion_policy=mix, sample model-vs-heuristic per episode within a round "
+            "(instead of choosing for the whole round)."
+        ),
+    )
+    parser.add_argument(
         "--heuristic_policy",
         type=str,
         default="mixed",
@@ -2175,6 +2358,15 @@ def parse_args():
         help=(
             "Target rollout set for labels. 'auto' keeps legacy single-completion behavior. "
             "Otherwise comma-separated from {model,spt,lpt,random,mixed}."
+        ),
+    )
+    parser.add_argument(
+        "--target_disable_model_until_round",
+        type=int,
+        default=0,
+        help=(
+            "If >0, ignore the 'model' token in target_rollouts until this round index (0-based). "
+            "Example: 200 => disable model targets for rounds 0..199."
         ),
     )
     parser.add_argument(
@@ -2301,6 +2493,19 @@ def parse_args():
         help="Number of instances for SGBS eval (fewer than greedy)",
     )
 
+    parser.add_argument(
+        "--eval_sgbs_random_q",
+        action="store_true",
+        default=False,
+        help="Also evaluate SGBS using random Q-values (baseline) on the same instances.",
+    )
+    parser.add_argument(
+        "--eval_sgbs_random_q_seed",
+        type=int,
+        default=0,
+        help="Seed for random-Q SGBS baseline (0 derives from eval seed).",
+    )
+
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument(
         "--output_dir",
@@ -2327,6 +2532,53 @@ def parse_args():
     parser.add_argument("--curriculum_fraction", type=float, default=0.3)
     parser.add_argument("--curriculum_slack_min", type=float, default=None)
     parser.add_argument("--curriculum_slack_max", type=float, default=None)
+
+    # Curriculum (job-count)
+    parser.add_argument(
+        "--jobs_curriculum",
+        action="store_true",
+        help="Curriculum over number of jobs: start with smaller instances, anneal to target n_max.",
+    )
+    parser.add_argument(
+        "--jobs_curriculum_n_max_start",
+        type=int,
+        default=None,
+        help="Starting n_max for jobs_curriculum (defaults to data_config.n_min if unset).",
+    )
+    parser.add_argument(
+        "--jobs_curriculum_fraction",
+        type=float,
+        default=0.3,
+        help="Fraction of rounds used to anneal jobs_curriculum toward target n_max.",
+    )
+
+    # Curriculum (learn from end)
+    parser.add_argument(
+        "--stage_curriculum",
+        action="store_true",
+        help=(
+            "Learn-from-the-end curriculum: only train on states with <= max remaining jobs, "
+            "annealed over rounds."
+        ),
+    )
+    parser.add_argument(
+        "--stage_max_remaining_start",
+        type=int,
+        default=1,
+        help="Stage curriculum: initial max remaining jobs to include in training.",
+    )
+    parser.add_argument(
+        "--stage_max_remaining_end",
+        type=int,
+        default=10000,
+        help="Stage curriculum: final max remaining jobs (large => effectively all).",
+    )
+    parser.add_argument(
+        "--stage_max_remaining_decay_rounds",
+        type=int,
+        default=200,
+        help="Stage curriculum: linear anneal duration in rounds (0 disables anneal).",
+    )
 
     # Resume from checkpoint
     parser.add_argument(
@@ -2390,6 +2642,10 @@ def main():
         completion_prob_start=args.completion_prob_start,
         completion_prob_end=args.completion_prob_end,
         completion_prob_decay_rounds=args.completion_prob_decay_rounds,
+        no_model_completion=bool(getattr(args, "no_model_completion", False)),
+        completion_mix_per_episode=bool(
+            getattr(args, "completion_mix_per_episode", False)
+        ),
         heuristic_policy=args.heuristic_policy,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
@@ -2402,6 +2658,9 @@ def main():
         target_normalization=args.target_normalization,
         include_heuristic_candidates=args.include_heuristic_candidates,
         target_rollouts=args.target_rollouts,
+        target_disable_model_until_round=int(
+            getattr(args, "target_disable_model_until_round", 0) or 0
+        ),
         target_rollout_aggregation=args.target_rollout_aggregation,
         target_num_random_rollouts=args.target_num_random_rollouts,
         target_softmin_tau=args.target_softmin_tau,
@@ -2422,6 +2681,8 @@ def main():
         eval_sgbs_beta=args.eval_sgbs_beta,
         eval_sgbs_gamma=args.eval_sgbs_gamma,
         eval_sgbs_num_instances=args.eval_sgbs_num_instances,
+        eval_sgbs_random_q=bool(getattr(args, "eval_sgbs_random_q", False)),
+        eval_sgbs_random_q_seed=int(getattr(args, "eval_sgbs_random_q_seed", 0) or 0),
         device=args.device,
         output_dir=args.output_dir,
         smoke_test=args.smoke_test,
@@ -2433,6 +2694,21 @@ def main():
         curriculum_fraction=args.curriculum_fraction,
         curriculum_slack_min=args.curriculum_slack_min,
         curriculum_slack_max=args.curriculum_slack_max,
+        jobs_curriculum=bool(getattr(args, "jobs_curriculum", False)),
+        jobs_curriculum_n_max_start=getattr(args, "jobs_curriculum_n_max_start", None),
+        jobs_curriculum_fraction=float(
+            getattr(args, "jobs_curriculum_fraction", 0.3) or 0.3
+        ),
+        stage_curriculum=bool(getattr(args, "stage_curriculum", False)),
+        stage_max_remaining_start=int(
+            getattr(args, "stage_max_remaining_start", 1) or 1
+        ),
+        stage_max_remaining_end=int(
+            getattr(args, "stage_max_remaining_end", 10000) or 10000
+        ),
+        stage_max_remaining_decay_rounds=int(
+            getattr(args, "stage_max_remaining_decay_rounds", 200) or 200
+        ),
         resume_from=args.resume_from,
     )
 
@@ -2711,6 +2987,8 @@ def main():
             eps = config.exploration_eps_start
 
         # Determine completion policy for this round
+        mix_per_episode = False
+        mix_model_prob = 0.0
         if round_idx < config.warmup_rounds:
             use_model_completion = False
             completion_policy = config.heuristic_policy  # Show actual heuristic used
@@ -2738,10 +3016,32 @@ def main():
                 else:
                     model_prob = config.completion_prob_start
 
-                use_model_completion = random.random() < model_prob
-                completion_policy = (
-                    "model" if use_model_completion else config.heuristic_policy
+                mix_per_episode = bool(
+                    getattr(config, "completion_mix_per_episode", False)
                 )
+                mix_model_prob = float(model_prob)
+                if mix_per_episode:
+                    # Sample within collect_round_data; keep this round labeled as "mix".
+                    use_model_completion = True
+                    completion_policy = (
+                        f"mix(p={max(0.0, min(1.0, mix_model_prob)):.2f})"
+                    )
+                else:
+                    # Legacy behavior: choose model-vs-heuristic for the whole round.
+                    use_model_completion = random.random() < model_prob
+                    completion_policy = (
+                        "model" if use_model_completion else config.heuristic_policy
+                    )
+
+        # Optional: force heuristic-only collection (pure pretraining).
+        if bool(getattr(config, "no_model_completion", False)):
+            use_model_completion = False
+            mix_per_episode = False
+            mix_model_prob = 0.0
+            if (config.completion_policy or "").strip().lower() == "mix":
+                completion_policy = f"mix({config.heuristic_policy})"
+            else:
+                completion_policy = config.heuristic_policy
 
         # === Data Collection ===
         print(
@@ -2778,9 +3078,35 @@ def main():
             data_config_round.deadline_slack_ratio_min = float(slack_min)
             data_config_round.deadline_slack_ratio_max = float(slack_max)
 
+        # Curriculum: start with smaller instances (fewer jobs), anneal to target.
+        if bool(getattr(config, "jobs_curriculum", False)):
+            decay_rounds = max(
+                1,
+                int(
+                    float(getattr(config, "jobs_curriculum_fraction", 0.3))
+                    * float(config.num_rounds)
+                ),
+            )
+            frac = min(1.0, float(round_idx) / float(decay_rounds))
+            target_n_max = int(getattr(data_config, "n_max", 25))
+            start_n_max = getattr(config, "jobs_curriculum_n_max_start", None)
+            if start_n_max is None:
+                start_n_max = int(getattr(data_config, "n_min", 6))
+            n_max_round = int(
+                round(
+                    float(start_n_max) + frac * float(target_n_max - int(start_n_max))
+                )
+            )
+            n_max_round = max(
+                int(getattr(data_config, "n_min", 1)), min(target_n_max, n_max_round)
+            )
+            if data_config_round is data_config:
+                data_config_round = copy.deepcopy(data_config)
+            data_config_round.n_max = int(n_max_round)
+
         transitions = collect_round_data(
             env_config=env_config,  # Pass config, not env instance
-            model=model if use_model_completion else None,
+            model=model if (use_model_completion or mix_per_episode) else None,
             teacher_model=teacher_model,
             variant_config=variant_config,
             data_config=data_config_round,
@@ -2788,6 +3114,8 @@ def main():
             num_counterfactuals=config.num_counterfactuals,
             exploration_eps=eps,
             use_model_completion=use_model_completion,
+            completion_mix_per_episode=bool(mix_per_episode),
+            completion_mix_model_prob=float(mix_model_prob),
             heuristic_policy=config.heuristic_policy,
             target_normalization=config.target_normalization,
             include_heuristic_candidates=config.include_heuristic_candidates,
@@ -2797,6 +3125,10 @@ def main():
             target_softmin_tau=config.target_softmin_tau,
             device=device,
             seed=config.seed + round_idx * 100000,
+            round_idx=int(round_idx),
+            target_disable_model_until_round=int(
+                getattr(config, "target_disable_model_until_round", 0) or 0
+            ),
             collection_batch_size=config.collection_batch_size,
             num_collection_workers=config.num_collection_workers,
             allow_gpu_collection_multiprocessing=config.allow_gpu_collection_multiprocessing,
@@ -2835,8 +3167,30 @@ def main():
         dataloader = DataLoader(**dl_kwargs)
 
         epoch_metrics = []
+
+        # Stage curriculum schedule for this round (None disables filtering).
+        stage_max_remaining = None
+        if bool(getattr(config, "stage_curriculum", False)):
+            decay = int(getattr(config, "stage_max_remaining_decay_rounds", 0) or 0)
+            start_m = int(getattr(config, "stage_max_remaining_start", 1) or 1)
+            end_m = int(getattr(config, "stage_max_remaining_end", 10000) or 10000)
+            if decay <= 0:
+                stage_max_remaining = int(end_m)
+            else:
+                frac = min(1.0, float(round_idx) / float(max(1, decay)))
+                stage_max_remaining = int(
+                    round(float(start_m) + frac * float(end_m - start_m))
+                )
+                stage_max_remaining = max(1, stage_max_remaining)
         for epoch in range(config.num_epochs_per_round):
-            metrics = train_epoch(model, dataloader, optimizer, config, device)
+            metrics = train_epoch(
+                model,
+                dataloader,
+                optimizer,
+                config,
+                device,
+                stage_max_remaining=stage_max_remaining,
+            )
             epoch_metrics.append(metrics)
 
         avg_loss = np.mean([m["loss"] for m in epoch_metrics])
@@ -2896,12 +3250,23 @@ def main():
                     device=device,
                     beta=config.eval_sgbs_beta,
                     gamma=config.eval_sgbs_gamma,
+                    compare_random_q=bool(getattr(config, "eval_sgbs_random_q", False)),
+                    random_q_seed=int(
+                        getattr(config, "eval_sgbs_random_q_seed", 0) or 0
+                    ),
                 )
                 print(
                     f"sgbs_cost={sgbs_results['sgbs_cost']:.2f}, "
                     f"sgbs_vs_spt={sgbs_results['sgbs_vs_spt']:.1f}%, "
                     f"sgbs_vs_greedy={sgbs_results['sgbs_vs_greedy']:.1f}%"
                 )
+
+                if "sgbs_random_q_cost" in sgbs_results:
+                    print(
+                        f"  Random-Q SGBS baseline: sgbs_random_q_cost={sgbs_results['sgbs_random_q_cost']:.2f}, "
+                        f"model_vs_random_q={sgbs_results['sgbs_model_vs_random_q']:.1f}%",
+                        flush=True,
+                    )
 
             # Save best (based on SGBS if available, otherwise greedy)
             current_cost = (
