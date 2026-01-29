@@ -107,7 +107,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Sampler
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -418,6 +418,13 @@ class QTransitionDataset(Dataset):
 
     def __init__(self, transitions: List[QTransition]):
         self.transitions = transitions
+        # Mapping used for policy/listwise losses: group all candidates from the same
+        # decision state (state_id) so we can train on meaningful per-state rankings.
+        self.state_to_indices: Dict[int, List[int]] = {}
+        for i, t in enumerate(self.transitions):
+            sid = int(getattr(t, "state_id", 0))
+            self.state_to_indices.setdefault(sid, []).append(i)
+        self.state_ids: List[int] = list(self.state_to_indices.keys())
 
     def __len__(self):
         return len(self.transitions)
@@ -522,6 +529,59 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         "state_ids": state_ids,
         "remaining_jobs_count": remaining_jobs_count,
     }
+
+
+class _StateGroupedBatchSampler(Sampler[List[int]]):
+    """Batch sampler that groups samples by state_id.
+
+    This is critical for policy/listwise losses, which require multiple candidate
+    actions from the same decision state to appear in the same minibatch.
+    """
+
+    def __init__(
+        self,
+        dataset: QTransitionDataset,
+        max_transitions_per_batch: int,
+        seed: int,
+    ):
+        self.dataset = dataset
+        self.max_transitions_per_batch = int(max(1, max_transitions_per_batch))
+        self.seed = int(seed)
+        self._iter_calls = 0
+
+    def __iter__(self):
+        self._iter_calls += 1
+        rng = random.Random(self.seed + self._iter_calls)
+        state_ids = list(self.dataset.state_ids)
+        rng.shuffle(state_ids)
+
+        batch: List[int] = []
+        for sid in state_ids:
+            inds = self.dataset.state_to_indices.get(int(sid), [])
+            if not inds:
+                continue
+
+            # If adding this state would exceed the batch cap, flush current batch.
+            if batch and (len(batch) + len(inds) > self.max_transitions_per_batch):
+                yield batch
+                batch = []
+
+            # If a single state has more transitions than the cap, still yield it.
+            if not batch and len(inds) > self.max_transitions_per_batch:
+                yield list(inds)
+                continue
+
+            batch.extend(list(inds))
+
+        if batch:
+            yield batch
+
+    def __len__(self) -> int:
+        # Approximate number of batches based on total transitions.
+        n = len(self.dataset)
+        return (
+            n + self.max_transitions_per_batch - 1
+        ) // self.max_transitions_per_batch
 
 
 # =============================================================================
@@ -3152,15 +3212,43 @@ def main():
 
         # Create dataset from buffer
         dataset = QTransitionDataset(buffer.buffer.copy())
-        dl_kwargs = dict(
-            dataset=dataset,
-            batch_size=config.batch_size,
-            shuffle=True,
-            collate_fn=collate_q_batch,
-            num_workers=config.num_dataloader_workers,
-            persistent_workers=config.num_dataloader_workers > 0,
-            pin_memory=(device.type == "cuda"),
+
+        objective = (
+            (getattr(config, "train_objective", "regression") or "regression")
+            .strip()
+            .lower()
         )
+        use_grouped_batches = bool(
+            objective == "policy"
+            or float(getattr(config, "policy_weight", 0.0)) > 0
+            or float(getattr(config, "top_gamma_weight", 0.0)) > 0
+            or float(getattr(config, "listwise_weight", 0.0)) > 0
+        )
+
+        if use_grouped_batches:
+            batch_sampler = _StateGroupedBatchSampler(
+                dataset=dataset,
+                max_transitions_per_batch=int(config.batch_size),
+                seed=int(config.seed + round_idx * 100000),
+            )
+            dl_kwargs = dict(
+                dataset=dataset,
+                batch_sampler=batch_sampler,
+                collate_fn=collate_q_batch,
+                num_workers=config.num_dataloader_workers,
+                persistent_workers=config.num_dataloader_workers > 0,
+                pin_memory=(device.type == "cuda"),
+            )
+        else:
+            dl_kwargs = dict(
+                dataset=dataset,
+                batch_size=config.batch_size,
+                shuffle=True,
+                collate_fn=collate_q_batch,
+                num_workers=config.num_dataloader_workers,
+                persistent_workers=config.num_dataloader_workers > 0,
+                pin_memory=(device.type == "cuda"),
+            )
         if config.num_dataloader_workers > 0:
             dl_kwargs["prefetch_factor"] = 2
 
