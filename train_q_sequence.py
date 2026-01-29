@@ -26,7 +26,7 @@ import time
 import warnings
 import io
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -233,6 +233,11 @@ class QRunConfig:
     dp_eval_device: str = "auto"
     dp_eval_workers: int = 0
 
+    # If True and dp_eval_device=cpu and dp_eval_workers=1, run DP asynchronously
+    # in a background thread to overlap DP compute with candidate generation.
+    dp_eval_async: bool = False
+    dp_flush_threshold: int = 8192
+
     # Model training
     learning_rate: float = 1e-4
     weight_decay: float = 1e-5
@@ -317,6 +322,10 @@ class QRunConfig:
     # Debug
     smoke_test: bool = False
 
+    # Local debug/visibility
+    local_quick: bool = False
+    collection_log_every_batches: int = 0  # 0 disables; 1 prints every batch
+
     # Curriculum (optional): start with looser deadlines, anneal to target
     curriculum: bool = False
     curriculum_fraction: float = 0.3  # fraction of rounds used for annealing
@@ -385,13 +394,34 @@ class QTransitionDataset(Dataset):
 
     def __getitem__(self, idx):
         t = self.transitions[idx]
+        # Defensive: ensure no NaN/Inf enters the model due to upstream feature
+        # edge cases (e.g., normalization/div-by-zero). Prefer sanitizing here
+        # so the rest of the pipeline stays simple.
+        jobs = torch.nan_to_num(
+            torch.from_numpy(t.jobs).float(), nan=0.0, posinf=0.0, neginf=0.0
+        )
+        periods = torch.nan_to_num(
+            torch.from_numpy(t.periods).float(), nan=0.0, posinf=0.0, neginf=0.0
+        )
+        ctx = torch.nan_to_num(
+            torch.from_numpy(t.ctx).float(), nan=0.0, posinf=0.0, neginf=0.0
+        )
+        job_avail = torch.nan_to_num(
+            torch.from_numpy(t.job_avail).float(), nan=0.0, posinf=0.0, neginf=0.0
+        )
+        q_target = torch.nan_to_num(
+            torch.tensor(t.q_target, dtype=torch.float32),
+            nan=0.0,
+            posinf=1e12,
+            neginf=-1e12,
+        )
         return {
-            "jobs": torch.from_numpy(t.jobs).float(),
-            "periods": torch.from_numpy(t.periods).float(),
-            "ctx": torch.from_numpy(t.ctx).float(),
-            "job_avail": torch.from_numpy(t.job_avail).float(),
+            "jobs": jobs,
+            "periods": periods,
+            "ctx": ctx,
+            "job_avail": job_avail,
             "action": torch.tensor(t.action, dtype=torch.long),
-            "q_target": torch.tensor(t.q_target, dtype=torch.float32),
+            "q_target": q_target,
             "state_id": torch.tensor(t.state_id, dtype=torch.long),
         }
 
@@ -438,6 +468,12 @@ def collate_q_batch(batch: List[Dict]) -> Dict[str, torch.Tensor]:
         actions[i] = b["action"]
         q_targets[i] = b["q_target"]
         state_ids[i] = b["state_id"]
+
+    # Final defense: ensure padded tensors are finite.
+    jobs = torch.nan_to_num(jobs, nan=0.0, posinf=0.0, neginf=0.0)
+    periods = torch.nan_to_num(periods, nan=0.0, posinf=0.0, neginf=0.0)
+    ctx = torch.nan_to_num(ctx, nan=0.0, posinf=0.0, neginf=0.0)
+    q_targets = torch.nan_to_num(q_targets, nan=0.0, posinf=1e12, neginf=-1e12)
 
     return {
         "jobs": jobs,
@@ -802,6 +838,8 @@ def _collect_round_batch(
     num_cpu_threads: int,
     dp_eval_device: str = "auto",
     dp_eval_workers: int = 0,
+    dp_flush_threshold: int = 8192,
+    dp_eval_async: bool = False,
 ) -> List[QTransition]:
     """Collect transitions for a single batch (worker-safe)."""
     if num_cpu_threads > 0:
@@ -876,8 +914,10 @@ def _collect_round_batch(
             T_limit_all,
         )
 
-    # Optional DP multiprocessing pool (lives for the batch).
-    dp_executor: Optional[ProcessPoolExecutor] = None
+    # Optional DP executor (lives for the batch).
+    # - ProcessPoolExecutor when dp_workers>1
+    # - ThreadPoolExecutor(max_workers=1) when dp_eval_async and dp_workers==1
+    dp_executor: Optional[Any] = None
     if dp_device.type == "cpu" and dp_workers <= 0:
         # Auto: use available cores but avoid oversubscription.
         dp_workers = min(int(os.cpu_count() or 1), 4)
@@ -888,10 +928,20 @@ def _collect_round_batch(
             initargs=(p_all_dp, ct_all_dp, e_all_dp, T_limit_all_dp),
         )
 
+    # Async DP (single worker thread) to overlap DP compute with Python logic.
+    # Only enabled on CPU, and only meaningful when dp_workers==1.
+    if (
+        dp_executor is None
+        and bool(dp_eval_async)
+        and dp_device.type == "cpu"
+        and int(dp_workers) == 1
+    ):
+        dp_executor = ThreadPoolExecutor(max_workers=1)
+
     def _dp_eval(seqs: List[List[int]], inst_indices: List[int]) -> List[float]:
         if not seqs:
             return []
-        if dp_executor is None:
+        if dp_executor is None or isinstance(dp_executor, ThreadPoolExecutor):
             costs_t = batch_evaluate_sequences(
                 sequences=seqs,
                 processing_times=p_all_dp,
@@ -955,7 +1005,11 @@ def _collect_round_batch(
     # state_meta[state_id] = {"expected": int, "candidates": [uid...], "done": {uid: cost}}
 
     next_candidate_uid = 0
-    DP_FLUSH_THRESHOLD = 8192  # sequences per DP call (tunable)
+    # DP submission granularity. Smaller values reduce worker idle time but increase
+    # per-submit overhead. We allow going down to 64 for profiling/tuning.
+    DP_FLUSH_THRESHOLD = max(
+        64, int(dp_flush_threshold) if dp_flush_threshold else 8192
+    )
 
     def _emit_state_if_ready(state_id: int) -> None:
         s = state_meta.get(state_id)
@@ -975,12 +1029,31 @@ def _collect_round_batch(
                 continue
             cf_cost = float(done[uid])
             q_target = float(cf_cost - state_min_cost) if do_norm else float(cf_cost)
+
+            if not np.isfinite(q_target):
+                # Drop pathological labels instead of poisoning training.
+                continue
+
+            # Sanitize observations before storing.
+            obs_jobs = np.nan_to_num(
+                meta["obs"]["jobs"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32, copy=False)
+            obs_periods = np.nan_to_num(
+                meta["obs"]["periods"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32, copy=False)
+            obs_ctx = np.nan_to_num(
+                meta["obs"]["ctx"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32, copy=False)
+            obs_avail = np.nan_to_num(
+                meta["job_avail"], nan=0.0, posinf=0.0, neginf=0.0
+            ).astype(np.float32, copy=False)
+
             transitions.append(
                 QTransition(
-                    jobs=meta["obs"]["jobs"].copy(),
-                    periods=meta["obs"]["periods"].copy(),
-                    ctx=meta["obs"]["ctx"].copy(),
-                    job_avail=meta["job_avail"].copy(),
+                    jobs=obs_jobs.copy(),
+                    periods=obs_periods.copy(),
+                    ctx=obs_ctx.copy(),
+                    job_avail=obs_avail.copy(),
                     action=int(meta["action"]),
                     q_target=float(q_target),
                     state_id=int(state_id),
@@ -1039,7 +1112,21 @@ def _collect_round_batch(
         if dp_executor is None:
             costs_cpu = _dp_eval(pending_sequences, pending_instance_indices)
             _process_costs(pending_candidate_uid, costs_cpu)
+        elif isinstance(dp_executor, ThreadPoolExecutor):
+            # Submit a single DP job; DP runs in background thread.
+            # Opportunistically drain completed tasks to keep backlog accurate.
+            _drain_inflight(wait=False)
+            fut = dp_executor.submit(
+                _dp_eval, pending_sequences, pending_instance_indices
+            )
+            inflight_dp.append((fut, list(pending_candidate_uid)))
+            _drain_inflight(wait=False)
         else:
+            # Drop completed tasks so inflight_dp length reflects actual pending work.
+            # This avoids a common starvation pattern where many futures have already
+            # finished, but we don't flush because inflight_dp still looks "full".
+            _drain_inflight(wait=False)
+
             # Submit DP work asynchronously in chunks.
             n = len(pending_sequences)
             chunks = max(1, dp_workers)
@@ -1085,6 +1172,11 @@ def _collect_round_batch(
         for _ in range(n_jobs):
             if not remaining_jobs:
                 break
+
+            # Keep inflight bookkeeping current so scheduling decisions (flush/backlog)
+            # are based on actually-running tasks, not already-finished futures.
+            if dp_executor is not None:
+                _drain_inflight(wait=False)
 
             state_id = int(state_id_base + state_id_counter)
             state_id_counter += 1
@@ -1267,8 +1359,23 @@ def _collect_round_batch(
                     pending_instance_indices.append(inst_idx)
                     pending_candidate_uid.append(int(uid))
 
+            # Keep CPU DP workers saturated: when using dp_executor, submit work a bit
+            # earlier to build a backlog and reduce idle gaps.
             if len(pending_sequences) >= DP_FLUSH_THRESHOLD:
                 flush_pending()
+            elif dp_executor is not None:
+                # If workers are starved, push smaller chunks earlier.
+                # ThreadPoolExecutor has only 1 worker, so keep a small backlog.
+                if isinstance(dp_executor, ThreadPoolExecutor):
+                    backlog_target = 4
+                else:
+                    backlog_target = max(8, dp_workers * 8)
+                min_flush = max(64, DP_FLUSH_THRESHOLD // 4)
+                if (
+                    len(pending_sequences) >= min_flush
+                    and len(inflight_dp) < backlog_target
+                ):
+                    flush_pending()
 
             partial_sequence.append(action)
             remaining_jobs.remove(action)
@@ -1324,6 +1431,9 @@ def collect_round_data(
     num_cpu_threads: int = 0,
     dp_eval_device: str = "auto",
     dp_eval_workers: int = 0,
+    dp_flush_threshold: int = 8192,
+    dp_eval_async: bool = False,
+    collection_log_every_batches: int = 0,
 ) -> List[QTransition]:
     """
     Collect Q-transitions for one round using the real environment.
@@ -1337,6 +1447,9 @@ def collect_round_data(
 
     batch_size = min(num_episodes, collection_batch_size)
     num_batches = (num_episodes + batch_size - 1) // batch_size
+
+    log_every = int(collection_log_every_batches or 0)
+    t_collect0 = time.time()
 
     device_str = str(device)
     model_state = model.state_dict() if model is not None else None
@@ -1366,7 +1479,15 @@ def collect_round_data(
         batch_specs.append((current_batch_size, batch_seed))
 
     if num_collection_workers <= 1:
-        for current_batch_size, batch_seed in batch_specs:
+        for b_idx, (current_batch_size, batch_seed) in enumerate(batch_specs, start=1):
+            if log_every > 0 and (
+                b_idx % log_every == 0 or b_idx == 1 or b_idx == num_batches
+            ):
+                elapsed = time.time() - t_collect0
+                print(
+                    f"    collect batch {b_idx}/{num_batches} (B={current_batch_size}) | transitions={len(transitions)} | elapsed={elapsed:.1f}s",
+                    flush=True,
+                )
             transitions.extend(
                 _collect_round_batch(
                     env_config=env_config,
@@ -1390,6 +1511,8 @@ def collect_round_data(
                     num_cpu_threads=threads_per_worker,
                     dp_eval_device=dp_eval_device,
                     dp_eval_workers=dp_eval_workers,
+                    dp_flush_threshold=dp_flush_threshold,
+                    dp_eval_async=dp_eval_async,
                 )
             )
     else:
@@ -1420,11 +1543,23 @@ def collect_round_data(
                         num_cpu_threads=threads_per_worker,
                         dp_eval_device=dp_eval_device,
                         dp_eval_workers=dp_eval_workers,
+                        dp_flush_threshold=dp_flush_threshold,
+                        dp_eval_async=dp_eval_async,
                     )
                 )
 
+            done_ct = 0
             for future in as_completed(futures):
                 transitions.extend(future.result())
+                done_ct += 1
+                if log_every > 0 and (
+                    done_ct % log_every == 0 or done_ct == 1 or done_ct == len(futures)
+                ):
+                    elapsed = time.time() - t_collect0
+                    print(
+                        f"    collect batch {done_ct}/{len(futures)} done | transitions={len(transitions)} | elapsed={elapsed:.1f}s",
+                        flush=True,
+                    )
 
     return transitions
 
@@ -1447,6 +1582,10 @@ def train_epoch(
     # Numerical safety: if we ever generate non-finite values, skip that batch
     # rather than poisoning the optimizer state with NaNs/Infs.
     warned_nonfinite = False
+    warned_nonfinite_input = False
+
+    skipped_nonfinite_q = 0
+    skipped_nonfinite_loss = 0
 
     total_loss = 0.0
     total_q_mse = 0.0
@@ -1468,6 +1607,33 @@ def train_epoch(
         q_targets = batch["q_targets"].to(device, non_blocking=non_blocking)
         state_ids = batch["state_ids"].to(device, non_blocking=non_blocking)
 
+        # Defensive: if any upstream features/labels are non-finite, sanitize them.
+        # This prevents wasted compute from batch skipping and makes it easier
+        # to debug the true source (we warn once).
+        if (
+            (not torch.isfinite(jobs).all())
+            or (not torch.isfinite(periods).all())
+            or (not torch.isfinite(ctx).all())
+        ):
+            if not warned_nonfinite_input:
+                print(
+                    "WARNING: non-finite inputs detected (jobs/periods/ctx). Sanitizing to keep training stable.",
+                    flush=True,
+                )
+                warned_nonfinite_input = True
+            jobs = torch.nan_to_num(jobs, nan=0.0, posinf=0.0, neginf=0.0)
+            periods = torch.nan_to_num(periods, nan=0.0, posinf=0.0, neginf=0.0)
+            ctx = torch.nan_to_num(ctx, nan=0.0, posinf=0.0, neginf=0.0)
+
+        if not torch.isfinite(q_targets).all():
+            if not warned_nonfinite_input:
+                print(
+                    "WARNING: non-finite q_targets detected. Sanitizing to keep training stable.",
+                    flush=True,
+                )
+                warned_nonfinite_input = True
+            q_targets = torch.nan_to_num(q_targets, nan=0.0, posinf=1e12, neginf=-1e12)
+
         # Forward pass
         q_values = model(
             jobs=jobs,
@@ -1477,14 +1643,31 @@ def train_epoch(
             period_mask=period_mask,
         )
 
-        if not torch.isfinite(q_values).all():
-            if not warned_nonfinite:
-                print(
-                    "WARNING: non-finite q_values detected; skipping a batch (consider lowering lr / threads).",
-                    flush=True,
-                )
-                warned_nonfinite = True
-            continue
+        # IMPORTANT: The Q-model masks invalid jobs with +inf by design.
+        # That is expected and must not cause batch skipping.
+        # Only flag non-finite values on VALID (unmasked) job positions.
+        if job_mask is not None:
+            valid_pos = ~job_mask
+            # If somehow a row has no valid positions, skip it (should not happen).
+            if valid_pos.any() and (not torch.isfinite(q_values[valid_pos]).all()):
+                if not warned_nonfinite:
+                    print(
+                        "WARNING: non-finite q_values detected on valid actions; skipping a batch (consider lowering lr / check inputs).",
+                        flush=True,
+                    )
+                    warned_nonfinite = True
+                skipped_nonfinite_q += 1
+                continue
+        else:
+            if not torch.isfinite(q_values).all():
+                if not warned_nonfinite:
+                    print(
+                        "WARNING: non-finite q_values detected; skipping a batch (consider lowering lr / check inputs).",
+                        flush=True,
+                    )
+                    warned_nonfinite = True
+                skipped_nonfinite_q += 1
+                continue
 
         # Get Q-values for taken actions
         q_pred = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
@@ -1615,6 +1798,7 @@ def train_epoch(
                     flush=True,
                 )
                 warned_nonfinite = True
+            skipped_nonfinite_loss += 1
             continue
 
         # Backward
@@ -1635,6 +1819,12 @@ def train_epoch(
             total_policy += float(policy_loss.item())
             total_top_gamma += float(top_gamma_loss.item())
         n_batches += 1
+
+    if skipped_nonfinite_q > 0 or skipped_nonfinite_loss > 0:
+        print(
+            f"  train_epoch: skipped_batches nonfinite_q={skipped_nonfinite_q} nonfinite_loss={skipped_nonfinite_loss}",
+            flush=True,
+        )
 
     return {
         "loss": total_loss / max(n_batches, 1),
@@ -1908,6 +2098,25 @@ def parse_args():
         ),
     )
 
+    parser.add_argument(
+        "--dp_eval_async",
+        action="store_true",
+        help=(
+            "If set and dp_eval_device=cpu and dp_eval_workers=1, run DP evaluation asynchronously in a background "
+            "thread to overlap DP compute with candidate generation (can increase sustained CPU usage)."
+        ),
+    )
+
+    parser.add_argument(
+        "--dp_flush_threshold",
+        type=int,
+        default=8192,
+        help=(
+            "DP flush threshold (number of sequences per DP submit). Lower starts DP sooner (more overlap), "
+            "higher reduces overhead. Recommended on Kaggle with dp_eval_workers=4: 2048..8192."
+        ),
+    )
+
     parser.add_argument("--num_counterfactuals", type=int, default=8)
     # Backward-compatible: --exploration_eps sets both start/end
     parser.add_argument("--exploration_eps", type=float, default=0.2)
@@ -2100,6 +2309,19 @@ def parse_args():
     )
     parser.add_argument("--smoke_test", action="store_true")
 
+    # Local quick mode (small instances + more progress logs)
+    parser.add_argument(
+        "--local_quick",
+        action="store_true",
+        help="Force a tiny data distribution for fast local testing (few jobs + short horizon).",
+    )
+    parser.add_argument(
+        "--collection_log_every_batches",
+        type=int,
+        default=0,
+        help="Print a progress line every N collection batches (0 disables).",
+    )
+
     # Curriculum (deadline slack)
     parser.add_argument("--curriculum", action="store_true")
     parser.add_argument("--curriculum_fraction", type=float, default=0.3)
@@ -2145,6 +2367,8 @@ def main():
         num_cpu_threads=args.num_cpu_threads,
         dp_eval_device=args.dp_eval_device,
         dp_eval_workers=args.dp_eval_workers,
+        dp_flush_threshold=args.dp_flush_threshold,
+        dp_eval_async=bool(args.dp_eval_async),
         num_counterfactuals=args.num_counterfactuals,
         exploration_eps_start=(
             args.exploration_eps_start
@@ -2201,6 +2425,10 @@ def main():
         device=args.device,
         output_dir=args.output_dir,
         smoke_test=args.smoke_test,
+        local_quick=bool(getattr(args, "local_quick", False)),
+        collection_log_every_batches=int(
+            getattr(args, "collection_log_every_batches", 0) or 0
+        ),
         curriculum=args.curriculum,
         curriculum_fraction=args.curriculum_fraction,
         curriculum_slack_min=args.curriculum_slack_min,
@@ -2385,6 +2613,27 @@ def main():
     data_config = copy.deepcopy(variant_config.data)
     env_config = variant_config.env
 
+    # Quick local override: reduce instance sizes so runs complete in ~1-3 minutes.
+    if bool(getattr(config, "local_quick", False)):
+        data_config.sampling_mode = "uniform_range"
+        data_config.T_max_choices = [50]
+        data_config.m_min = 3
+        data_config.m_max = 3
+        data_config.n_min = 6
+        data_config.n_max = 8
+        data_config.p_min = 1
+        data_config.p_max = 4
+        data_config.ck_min = 1
+        data_config.ck_max = 4
+        data_config.e_min = 1
+        data_config.e_max = 3
+        print(
+            "[local_quick] Overriding DataConfig for fast local run: "
+            f"T_max_choices={data_config.T_max_choices} m=[{data_config.m_min},{data_config.m_max}] "
+            f"n=[{data_config.n_min},{data_config.n_max}]",
+            flush=True,
+        )
+
     # Safety check: ctx13 semantics require price-family features to be enabled
     if env_config.F_ctx >= 13 and not env_config.use_price_families:
         print(
@@ -2554,6 +2803,11 @@ def main():
             num_cpu_threads=config.num_cpu_threads,
             dp_eval_device=getattr(config, "dp_eval_device", "auto"),
             dp_eval_workers=int(getattr(config, "dp_eval_workers", 0) or 0),
+            dp_flush_threshold=int(getattr(config, "dp_flush_threshold", 8192) or 8192),
+            dp_eval_async=bool(getattr(config, "dp_eval_async", False)),
+            collection_log_every_batches=int(
+                getattr(config, "collection_log_every_batches", 0) or 0
+            ),
         )
 
         buffer.extend(transitions)
