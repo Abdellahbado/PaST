@@ -123,6 +123,56 @@ from PaST.sm_benchmark_data import generate_episode_batch
 from PaST.sequence_env import GPUBatchSequenceEnv
 
 
+# =============================================================================
+# DP multiprocessing helpers (top-level for pickling)
+# =============================================================================
+
+
+_DP_SHARED: Dict[str, torch.Tensor] = {}
+
+
+def _dp_pool_init(
+    processing_times: torch.Tensor,
+    ct: torch.Tensor,
+    e_single: torch.Tensor,
+    T_limit: torch.Tensor,
+) -> None:
+    """Initializer for DP worker processes."""
+    global _DP_SHARED
+    _DP_SHARED = {
+        "p": processing_times,
+        "ct": ct,
+        "e": e_single,
+        "T": T_limit,
+    }
+    try:
+        torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
+    except Exception:
+        pass
+
+
+def _dp_eval_chunk_worker(
+    sequences: List[List[int]],
+    instance_indices: List[int],
+) -> List[float]:
+    """Evaluate a chunk of sequences on CPU using globally-initialized tensors."""
+    p = _DP_SHARED["p"]
+    ct = _DP_SHARED["ct"]
+    e = _DP_SHARED["e"]
+    T = _DP_SHARED["T"]
+    costs_t = batch_evaluate_sequences(
+        sequences=sequences,
+        processing_times=p,
+        ct=ct,
+        e_single=e,
+        T_limit=T,
+        instance_indices=instance_indices,
+        device=torch.device("cpu"),
+    )
+    return costs_t.detach().cpu().numpy().tolist()
+
+
 TRAIN_VERSION = "2.0-QSEQ"
 
 
@@ -172,6 +222,16 @@ class QRunConfig:
     # Heuristic used when not using model completion
     # Options: "spt", "lpt", "random", "mixed" (randomly picks spt/lpt/random each time)
     heuristic_policy: str = "mixed"
+
+    # ---------------------------------------------------------------------
+    # Performance tuning (collection DP evaluation)
+    # ---------------------------------------------------------------------
+    # DP evaluation dominates collection time on CPU. To speed it up, you can
+    # evaluate DP costs on CPU in parallel even when training/inference is on CUDA.
+    # - dp_eval_device: auto|cpu|cuda
+    # - dp_eval_workers: number of worker processes for DP eval (0=auto, 1=off)
+    dp_eval_device: str = "auto"
+    dp_eval_workers: int = 0
 
     # Model training
     learning_rate: float = 1e-4
@@ -740,6 +800,8 @@ def _collect_round_batch(
     device_str: str,
     seed: int,
     num_cpu_threads: int,
+    dp_eval_device: str = "auto",
+    dp_eval_workers: int = 0,
 ) -> List[QTransition]:
     """Collect transitions for a single batch (worker-safe)."""
     if num_cpu_threads > 0:
@@ -786,6 +848,82 @@ def _collect_round_batch(
     T_limit_all = env.T_limit.clone()
     n_jobs_all = env.n_jobs.clone()
 
+    # Choose device for DP evaluation (can differ from model/env device).
+    dp_dev = (dp_eval_device or "auto").strip().lower()
+    if dp_dev == "auto":
+        dp_device = device
+    elif dp_dev in {"cpu", "cuda"}:
+        dp_device = torch.device(dp_dev)
+    else:
+        raise ValueError("dp_eval_device must be one of: auto|cpu|cuda")
+
+    # If user requests multiprocessing, force DP to CPU (CUDA multiprocessing is fragile).
+    dp_workers = int(dp_eval_workers or 0)
+    if dp_workers != 0 and dp_workers != 1 and dp_device.type != "cpu":
+        dp_device = torch.device("cpu")
+
+    # Materialize DP tensors on CPU once if needed.
+    if dp_device.type == "cpu":
+        p_all_dp = p_all.detach().cpu()
+        ct_all_dp = ct_all.detach().cpu()
+        e_all_dp = e_all.detach().cpu()
+        T_limit_all_dp = T_limit_all.detach().cpu()
+    else:
+        p_all_dp, ct_all_dp, e_all_dp, T_limit_all_dp = (
+            p_all,
+            ct_all,
+            e_all,
+            T_limit_all,
+        )
+
+    # Optional DP multiprocessing pool (lives for the batch).
+    dp_executor: Optional[ProcessPoolExecutor] = None
+    if dp_device.type == "cpu" and dp_workers <= 0:
+        # Auto: use available cores but avoid oversubscription.
+        dp_workers = min(int(os.cpu_count() or 1), 4)
+    if dp_device.type == "cpu" and dp_workers > 1:
+        dp_executor = ProcessPoolExecutor(
+            max_workers=dp_workers,
+            initializer=_dp_pool_init,
+            initargs=(p_all_dp, ct_all_dp, e_all_dp, T_limit_all_dp),
+        )
+
+    def _dp_eval(seqs: List[List[int]], inst_indices: List[int]) -> List[float]:
+        if not seqs:
+            return []
+        if dp_executor is None:
+            costs_t = batch_evaluate_sequences(
+                sequences=seqs,
+                processing_times=p_all_dp,
+                ct=ct_all_dp,
+                e_single=e_all_dp,
+                T_limit=T_limit_all_dp,
+                instance_indices=inst_indices,
+                device=dp_device,
+            )
+            return costs_t.detach().cpu().numpy().tolist()
+
+        # Chunk work across processes
+        n = len(seqs)
+        chunks = max(1, dp_workers)
+        chunk_size = (n + chunks - 1) // chunks
+
+        costs_out: List[float] = [0.0 for _ in range(n)]
+        futures: List[Tuple[int, int, Any]] = []
+        for start in range(0, n, chunk_size):
+            end = min(n, start + chunk_size)
+            fut = dp_executor.submit(
+                _dp_eval_chunk_worker,
+                seqs[start:end],
+                inst_indices[start:end],
+            )
+            futures.append((start, end, fut))
+
+        for start, end, fut in futures:
+            res = fut.result()
+            costs_out[start:end] = res
+        return costs_out
+
     transitions: List[QTransition] = []
     F_job = env_config.F_job
     N_pad = obs["jobs"].shape[1]
@@ -804,6 +942,10 @@ def _collect_round_batch(
     pending_sequences: List[List[int]] = []
     pending_instance_indices: List[int] = []
     pending_candidate_uid: List[int] = []
+
+    # When dp_executor is enabled, we submit DP work asynchronously so CPU DP can
+    # overlap with sequence generation / model rollouts.
+    inflight_dp: List[Tuple[Any, List[int]]] = []
 
     candidate_meta: Dict[int, Dict[str, Any]] = {}
     candidate_costs: Dict[int, List[float]] = {}
@@ -852,22 +994,8 @@ def _collect_round_batch(
 
         state_meta.pop(state_id, None)
 
-    def flush_pending():
-        nonlocal pending_sequences, pending_instance_indices, pending_candidate_uid
-        if not pending_sequences:
-            return
-        costs = batch_evaluate_sequences(
-            sequences=pending_sequences,
-            processing_times=p_all,
-            ct=ct_all,
-            e_single=e_all,
-            T_limit=T_limit_all,
-            instance_indices=pending_instance_indices,
-            device=device,
-        )
-        costs_cpu = costs.detach().cpu().numpy().tolist()
-
-        for uid, cf_cost in zip(pending_candidate_uid, costs_cpu):
+    def _process_costs(uids: List[int], costs_list: List[float]) -> None:
+        for uid, cf_cost in zip(uids, costs_list):
             if not np.isfinite(cf_cost):
                 continue
             uid_i = int(uid)
@@ -888,6 +1016,45 @@ def _collect_round_batch(
                 if s is not None:
                     s.setdefault("done", {})[uid_i] = float(agg)
                     _emit_state_if_ready(state_id)
+
+    def _drain_inflight(*, wait: bool) -> None:
+        nonlocal inflight_dp
+        if not inflight_dp:
+            return
+
+        remaining: List[Tuple[Any, List[int]]] = []
+        for fut, uids in inflight_dp:
+            if (not wait) and (not fut.done()):
+                remaining.append((fut, uids))
+                continue
+            costs_list = fut.result()
+            _process_costs(uids, costs_list)
+        inflight_dp = remaining
+
+    def flush_pending():
+        nonlocal pending_sequences, pending_instance_indices, pending_candidate_uid
+        if not pending_sequences:
+            return
+
+        if dp_executor is None:
+            costs_cpu = _dp_eval(pending_sequences, pending_instance_indices)
+            _process_costs(pending_candidate_uid, costs_cpu)
+        else:
+            # Submit DP work asynchronously in chunks.
+            n = len(pending_sequences)
+            chunks = max(1, dp_workers)
+            chunk_size = (n + chunks - 1) // chunks
+            for start in range(0, n, chunk_size):
+                end = min(n, start + chunk_size)
+                fut = dp_executor.submit(
+                    _dp_eval_chunk_worker,
+                    pending_sequences[start:end],
+                    pending_instance_indices[start:end],
+                )
+                inflight_dp.append((fut, pending_candidate_uid[start:end]))
+
+            # Opportunistically drain completed tasks (no blocking).
+            _drain_inflight(wait=False)
 
         pending_sequences = []
         pending_instance_indices = []
@@ -1109,9 +1276,21 @@ def _collect_round_batch(
 
         # Flush any leftover DP work for this instance.
         flush_pending()
+        # Ensure we have DP results for this instance before moving on too far.
+        _drain_inflight(wait=False)
 
     # Final flush at end of batch.
     flush_pending()
+
+    # Drain all remaining DP work (blocking) before emitting leftover states.
+    _drain_inflight(wait=True)
+
+    # Ensure DP executor is torn down cleanly.
+    if dp_executor is not None:
+        try:
+            dp_executor.shutdown(wait=True, cancel_futures=False)
+        except Exception:
+            pass
 
     # Emit any completed states that may still be buffered (should be none).
     for sid in list(state_meta.keys()):
@@ -1143,6 +1322,8 @@ def collect_round_data(
     num_collection_workers: int = 0,
     allow_gpu_collection_multiprocessing: bool = False,
     num_cpu_threads: int = 0,
+    dp_eval_device: str = "auto",
+    dp_eval_workers: int = 0,
 ) -> List[QTransition]:
     """
     Collect Q-transitions for one round using the real environment.
@@ -1207,6 +1388,8 @@ def collect_round_data(
                     device_str=device_str,
                     seed=batch_seed,
                     num_cpu_threads=threads_per_worker,
+                    dp_eval_device=dp_eval_device,
+                    dp_eval_workers=dp_eval_workers,
                 )
             )
     else:
@@ -1235,6 +1418,8 @@ def collect_round_data(
                         device_str=device_str,
                         seed=batch_seed,
                         num_cpu_threads=threads_per_worker,
+                        dp_eval_device=dp_eval_device,
+                        dp_eval_workers=dp_eval_workers,
                     )
                 )
 
@@ -1273,14 +1458,15 @@ def train_epoch(
 
     for batch in dataloader:
         # Move to device
-        jobs = batch["jobs"].to(device)
-        periods = batch["periods"].to(device)
-        ctx = batch["ctx"].to(device)
-        job_mask = batch["job_mask"].to(device)
-        period_mask = batch["period_mask"].to(device)
-        actions = batch["actions"].to(device)
-        q_targets = batch["q_targets"].to(device)
-        state_ids = batch["state_ids"].to(device)
+        non_blocking = device.type == "cuda"
+        jobs = batch["jobs"].to(device, non_blocking=non_blocking)
+        periods = batch["periods"].to(device, non_blocking=non_blocking)
+        ctx = batch["ctx"].to(device, non_blocking=non_blocking)
+        job_mask = batch["job_mask"].to(device, non_blocking=non_blocking)
+        period_mask = batch["period_mask"].to(device, non_blocking=non_blocking)
+        actions = batch["actions"].to(device, non_blocking=non_blocking)
+        q_targets = batch["q_targets"].to(device, non_blocking=non_blocking)
+        state_ids = batch["state_ids"].to(device, non_blocking=non_blocking)
 
         # Forward pass
         q_values = model(
@@ -1702,6 +1888,26 @@ def parse_args():
     parser.add_argument("--num_dataloader_workers", type=int, default=0)
     parser.add_argument("--num_cpu_threads", type=int, default=0)
 
+    parser.add_argument(
+        "--dp_eval_device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help=(
+            "Device for DP evaluation during collection. 'cpu' enables CPU-parallel DP; "
+            "'cuda' keeps DP on GPU; 'auto' matches --device."
+        ),
+    )
+    parser.add_argument(
+        "--dp_eval_workers",
+        type=int,
+        default=0,
+        help=(
+            "Number of worker processes for DP evaluation during collection (CPU only). "
+            "0=auto, 1=disable multiprocessing. If >1 and dp_eval_device is not cpu, it will be forced to cpu."
+        ),
+    )
+
     parser.add_argument("--num_counterfactuals", type=int, default=8)
     # Backward-compatible: --exploration_eps sets both start/end
     parser.add_argument("--exploration_eps", type=float, default=0.2)
@@ -1937,6 +2143,8 @@ def main():
         allow_gpu_collection_multiprocessing=args.allow_gpu_collection_multiprocessing,
         num_dataloader_workers=args.num_dataloader_workers,
         num_cpu_threads=args.num_cpu_threads,
+        dp_eval_device=args.dp_eval_device,
+        dp_eval_workers=args.dp_eval_workers,
         num_counterfactuals=args.num_counterfactuals,
         exploration_eps_start=(
             args.exploration_eps_start
@@ -2344,6 +2552,8 @@ def main():
             num_collection_workers=config.num_collection_workers,
             allow_gpu_collection_multiprocessing=config.allow_gpu_collection_multiprocessing,
             num_cpu_threads=config.num_cpu_threads,
+            dp_eval_device=getattr(config, "dp_eval_device", "auto"),
+            dp_eval_workers=int(getattr(config, "dp_eval_workers", 0) or 0),
         )
 
         buffer.extend(transitions)
@@ -2356,14 +2566,19 @@ def main():
 
         # Create dataset from buffer
         dataset = QTransitionDataset(buffer.buffer.copy())
-        dataloader = DataLoader(
-            dataset,
+        dl_kwargs = dict(
+            dataset=dataset,
             batch_size=config.batch_size,
             shuffle=True,
             collate_fn=collate_q_batch,
             num_workers=config.num_dataloader_workers,
             persistent_workers=config.num_dataloader_workers > 0,
+            pin_memory=(device.type == "cuda"),
         )
+        if config.num_dataloader_workers > 0:
+            dl_kwargs["prefetch_factor"] = 2
+
+        dataloader = DataLoader(**dl_kwargs)
 
         epoch_metrics = []
         for epoch in range(config.num_epochs_per_round):
