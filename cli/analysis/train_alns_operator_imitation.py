@@ -123,13 +123,27 @@ def main() -> None:
         pred_actions = logits_te.argmax(dim=1).cpu().numpy()
         deltas_te = deltas[test_idx]
 
+        # Some actions can be infeasible under the current epsilon constraint.
+        # Those are typically encoded as +/-inf in the stored delta table.
+        finite_mask = np.isfinite(deltas_te)
+        row_has_finite = finite_mask.any(axis=1)
+
         # Random policy expected delta
         rng = np.random.default_rng(int(args.seed))
         rand_actions = rng.integers(0, a, size=len(test_idx))
 
-        pred_delta = deltas_te[np.arange(len(test_idx)), pred_actions]
-        rand_delta = deltas_te[np.arange(len(test_idx)), rand_actions]
-        oracle_delta = deltas_te.min(axis=1)
+        finite_vals = deltas_te[finite_mask]
+        if finite_vals.size > 0:
+            large_penalty = float(np.nanmax(finite_vals)) + 1.0
+        else:
+            large_penalty = 1e9
+
+        # Replace any non-finite delta with a large penalty so means are defined.
+        safe = np.where(finite_mask, deltas_te, large_penalty)
+
+        pred_delta = safe[np.arange(len(test_idx)), pred_actions]
+        rand_delta = safe[np.arange(len(test_idx)), rand_actions]
+        oracle_delta = safe.min(axis=1)
 
         # Convert to reward
         pred_r = -pred_delta
@@ -147,11 +161,24 @@ def main() -> None:
         print(f"- test accuracy@3: {float(acc3):.3f}")
 
         print("Headroom (test set)")
-        print(f"- mean delta (pred):  {float(pred_delta.mean()):.4f}")
-        print(f"- mean delta (rand):  {float(rand_delta.mean()):.4f}")
-        print(f"- mean delta (oracle): {float(oracle_delta.mean()):.4f}")
-        print(f"- mean reward gain pred-rand: {float((pred_r - rand_r).mean()):.4f}")
-        print(f"- mean reward gap to oracle:  {float((oracle_r - pred_r).mean()):.4f}")
+        infeas_action_frac = float((~finite_mask).mean())
+        infeas_row_frac = float((~row_has_finite).mean())
+        print(f"- infeasible-action fraction: {infeas_action_frac:.3f}")
+        print(f"- all-actions-infeasible rows: {infeas_row_frac:.3f}")
+
+        valid = row_has_finite
+        if valid.any():
+            print(f"- mean delta (pred):  {float(pred_delta[valid].mean()):.4f}")
+            print(f"- mean delta (rand):  {float(rand_delta[valid].mean()):.4f}")
+            print(f"- mean delta (oracle): {float(oracle_delta[valid].mean()):.4f}")
+            print(
+                f"- mean reward gain pred-rand: {float((pred_r[valid] - rand_r[valid]).mean()):.4f}"
+            )
+            print(
+                f"- mean reward gap to oracle:  {float((oracle_r[valid] - pred_r[valid]).mean()):.4f}"
+            )
+        else:
+            print("- No valid rows with any feasible action in test set.")
 
 
 if __name__ == "__main__":

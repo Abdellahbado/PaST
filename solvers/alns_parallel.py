@@ -93,6 +93,9 @@ class ALNSConfig:
     oracle_max_states: int = 256
 
 
+ALNSAction = Tuple[str, float, str]  # (destroy_name, k_mult, repair_name)
+
+
 def _assert_solution_valid(sol: Solution, n_jobs: int, m: int) -> None:
     if len(sol.sequences) != int(m):
         raise ValueError(f"Solution has {len(sol.sequences)} machines, expected {m}")
@@ -371,6 +374,17 @@ def _destroy_worst_machine(
     return new_sol, removed, [worst]
 
 
+def _destroy_all(sol: Solution) -> Tuple[Solution, List[int], List[int]]:
+    """Remove *all* jobs.
+
+    This operator makes the move set ergodic together with a non-greedy repair:
+    in principle, any feasible assignment+sequencing can be reconstructed.
+    """
+    removed: List[int] = [j for seq in sol.sequences for j in seq]
+    m = len(sol.sequences)
+    return Solution(sequences=[[] for _ in range(m)]), removed, list(range(m))
+
+
 # -------------------------
 # Repair (greedy insertion)
 # -------------------------
@@ -450,6 +464,52 @@ def _best_insertion_for_job(
     return best_sol, best_eval, best_mi
 
 
+def _try_insertion_at(
+    raw: RawInstance,
+    epsilon: int,
+    sol: Solution,
+    eval_: FullEval,
+    job: int,
+    mi: int,
+    pos: int,
+) -> Tuple[Optional[Solution], Optional[FullEval]]:
+    """Try inserting a job at an exact (machine, position).
+
+    This is used by stochastic repairs to allow constructing arbitrary sequences.
+    """
+    trial_sol = Solution(sequences=[list(s) for s in sol.sequences])
+    trial_sol.sequences[int(mi)].insert(int(pos), int(job))
+
+    mdp = _eval_machine_sequence(raw, int(mi), trial_sol.sequences[int(mi)], epsilon)
+    if not np.isfinite(mdp.energy):
+        return None, None
+
+    per_machine = list(eval_.per_machine)
+    per_machine[int(mi)] = mdp
+
+    total = 0.0
+    feasible = True
+    makespan = 0
+    for md in per_machine:
+        if not np.isfinite(md.energy):
+            feasible = False
+            break
+        total += float(md.energy)
+        makespan = max(makespan, int(md.makespan))
+    if (not feasible) or makespan > int(epsilon):
+        return None, None
+
+    return (
+        trial_sol,
+        FullEval(
+            total_energy=float(total),
+            makespan=int(makespan),
+            feasible=True,
+            per_machine=per_machine,
+        ),
+    )
+
+
 def _repair_greedy(
     raw: RawInstance,
     epsilon: int,
@@ -477,6 +537,197 @@ def _repair_greedy(
         touched.add(mi)
 
     return sol, ev, sorted(touched)
+
+
+def _repair_random(
+    raw: RawInstance,
+    epsilon: int,
+    partial: Solution,
+    partial_eval: FullEval,
+    removed_jobs: List[int],
+    cfg: ALNSConfig,
+    rng: random.Random,
+    max_trials_per_job: int = 128,
+) -> Tuple[Optional[Solution], Optional[FullEval], List[int]]:
+    """Stochastic repair: insert jobs into random machines/positions.
+
+    This is intentionally *non-greedy* so that (destroy_all + repair_random)
+    has the capability to reconstruct any feasible assignment+sequence.
+    """
+    touched: set[int] = set()
+    jobs = list(removed_jobs)
+    rng.shuffle(jobs)
+
+    sol = partial
+    ev = partial_eval
+
+    for j in jobs:
+        ok = False
+        for _ in range(int(max_trials_per_job)):
+            mi = int(rng.randrange(int(raw.m)))
+            npos = len(sol.sequences[mi])
+            pos = int(rng.randrange(npos + 1))
+            sol2, ev2 = _try_insertion_at(raw, epsilon, sol, ev, int(j), mi, pos)
+            if sol2 is None or ev2 is None:
+                continue
+            sol, ev = sol2, ev2
+            touched.add(mi)
+            ok = True
+            break
+
+        if not ok:
+            # If pure random failed, fall back to greedy best insertion
+            sol2, ev2, mi2 = _best_insertion_for_job(raw, epsilon, sol, ev, j, cfg, rng)
+            if sol2 is None or ev2 is None or mi2 is None:
+                return None, None, sorted(touched)
+            sol, ev = sol2, ev2
+            touched.add(int(mi2))
+
+    return sol, ev, sorted(touched)
+
+
+def default_action_list() -> List[ALNSAction]:
+    """Default discrete action set for RL/control experiments."""
+    destroy_ops = ["random", "worst_machine", "longest", "all"]
+    repair_ops = ["greedy", "random"]
+    k_mults = [0.5, 1.0]
+
+    actions: List[ALNSAction] = []
+    for d in destroy_ops:
+        for rname in repair_ops:
+            if d == "all":
+                actions.append((d, 1.0, rname))
+            else:
+                for km in k_mults:
+                    actions.append((d, float(km), rname))
+    return actions
+
+
+def alns_state_features(
+    raw: RawInstance,
+    sol: Solution,
+    ev: FullEval,
+    best_ev: FullEval,
+    epsilon: int,
+    it: int,
+    no_improve: int,
+    tau: float,
+    cfg: ALNSConfig,
+) -> List[float]:
+    p = np.asarray(raw.p, dtype=np.float32)
+    loads = np.array(
+        [sum(p[j] for j in seq) for seq in sol.sequences], dtype=np.float32
+    )
+    if loads.size == 0:
+        load_mean = 0.0
+        load_cv = 0.0
+    else:
+        load_mean = float(loads.mean())
+        load_std = float(loads.std())
+        load_cv = float(load_std / (load_mean + 1e-6))
+    return [
+        float(it) / float(max(1, cfg.max_iters)),
+        float(no_improve) / float(max(1, cfg.no_improve_limit)),
+        float(tau),
+        float(ev.total_energy) if np.isfinite(ev.total_energy) else 1e9,
+        float(best_ev.total_energy) if np.isfinite(best_ev.total_energy) else 1e9,
+        (
+            float(ev.total_energy - best_ev.total_energy)
+            if np.isfinite(ev.total_energy) and np.isfinite(best_ev.total_energy)
+            else 0.0
+        ),
+        float(ev.makespan),
+        float(int(epsilon) - int(ev.makespan)),
+        load_mean,
+        load_cv,
+    ]
+
+
+def alns_apply_action(
+    raw: RawInstance,
+    epsilon: int,
+    sol: Solution,
+    ev: FullEval,
+    action: ALNSAction,
+    cfg: ALNSConfig,
+    rng: random.Random,
+) -> Tuple[Optional[Solution], Optional[FullEval], List[int], List[int]]:
+    """Apply a single destroy+repair action (no acceptance logic here)."""
+    dname, km, rname = action
+
+    # Make destruction gentler when we're close to the deadline.
+    slack = max(0, int(epsilon) - int(ev.makespan))
+    slack_norm = float(slack) / float(max(1, int(epsilon)))
+    slack_mult = 0.5 + 0.5 * max(0.0, min(1.0, slack_norm))
+
+    if dname == "all":
+        partial, removed, touched = _destroy_all(sol)
+    else:
+        k_base = float(cfg.destroy_frac) * float(raw.n) * float(km) * float(slack_mult)
+        k = int(max(cfg.destroy_min, min(cfg.destroy_max, int(round(k_base)))))
+        if dname == "random":
+            partial, removed, touched = _destroy_random(sol, k, rng)
+        elif dname == "worst_machine":
+            partial, removed, touched = _destroy_worst_machine(sol, ev, k, rng)
+        elif dname == "longest":
+            partial, removed, touched = _destroy_longest_jobs(raw, sol, k, rng)
+        else:
+            raise ValueError(f"Unknown destroy op: {dname}")
+
+    partial_ev = _update_eval_for_machines(
+        raw=raw,
+        epsilon=epsilon,
+        sol=partial,
+        prev=ev,
+        machine_indices=touched,
+    )
+
+    if rname == "greedy":
+        repaired, repaired_ev, touched2 = _repair_greedy(
+            raw=raw,
+            epsilon=epsilon,
+            partial=partial,
+            partial_eval=partial_ev,
+            removed_jobs=removed,
+            cfg=cfg,
+            rng=rng,
+        )
+    elif rname == "random":
+        repaired, repaired_ev, touched2 = _repair_random(
+            raw=raw,
+            epsilon=epsilon,
+            partial=partial,
+            partial_eval=partial_ev,
+            removed_jobs=removed,
+            cfg=cfg,
+            rng=rng,
+        )
+    else:
+        raise ValueError(f"Unknown repair op: {rname}")
+
+    if repaired is None or repaired_ev is None:
+        return None, None, touched, removed
+
+    _assert_solution_valid(repaired, n_jobs=raw.n, m=raw.m)
+
+    if cfg.verify_cost:
+        for mi in touched:
+            _eval_machine_sequence(
+                raw,
+                int(mi),
+                repaired.sequences[int(mi)],
+                epsilon,
+                verify_cost=True,
+            )
+
+    touched_all = sorted(set(touched).union(touched2))
+
+    if cfg.local_search:
+        repaired, repaired_ev = _try_local_intra_swap(
+            raw, epsilon, repaired, repaired_ev, touched_all, cfg, rng
+        )
+
+    return repaired, repaired_ev, touched_all, removed
 
 
 # -------------------------
@@ -643,110 +894,16 @@ def alns_solve(
 
     iter_log: List[Dict[str, Any]] = []
 
-    # Define action space (destroy op id, k_multiplier)
-    destroy_ops = ["random", "worst_machine", "longest"]
-    k_mults = [0.5, 1.0]  # small/large destruction
-    action_list: List[Tuple[str, float]] = [
-        (d, km) for d in destroy_ops for km in k_mults
-    ]
+    action_list = default_action_list()
 
     oracle_rows: List[Dict[str, Any]] = []
 
     def state_features(
         sol: Solution, ev: FullEval, it: int, no_imp: int, tau_: float
     ) -> List[float]:
-        p = np.asarray(raw.p, dtype=np.float32)
-        loads = np.array(
-            [sum(p[j] for j in seq) for seq in sol.sequences], dtype=np.float32
+        return alns_state_features(
+            raw, sol, ev, best_ev, epsilon, it, no_imp, tau_, cfg
         )
-        if loads.size == 0:
-            load_mean = 0.0
-            load_cv = 0.0
-        else:
-            load_mean = float(loads.mean())
-            load_std = float(loads.std())
-            load_cv = float(load_std / (load_mean + 1e-6))
-        return [
-            float(it) / float(max(1, cfg.max_iters)),
-            float(no_imp) / float(max(1, cfg.no_improve_limit)),
-            float(tau_),
-            float(ev.total_energy) if np.isfinite(ev.total_energy) else 1e9,
-            float(best_ev.total_energy) if np.isfinite(best_ev.total_energy) else 1e9,
-            (
-                float(ev.total_energy - best_ev.total_energy)
-                if np.isfinite(ev.total_energy) and np.isfinite(best_ev.total_energy)
-                else 0.0
-            ),
-            float(ev.makespan),
-            float(epsilon - ev.makespan),
-            load_mean,
-            load_cv,
-        ]
-
-    def apply_action(
-        sol: Solution, ev: FullEval, action: Tuple[str, float]
-    ) -> Tuple[Optional[Solution], Optional[FullEval], List[int], List[int]]:
-        dname, km = action
-
-        # Make destruction gentler when we're close to the deadline.
-        slack = max(0, int(epsilon) - int(ev.makespan))
-        slack_norm = float(slack) / float(max(1, int(epsilon)))
-        slack_mult = 0.5 + 0.5 * max(0.0, min(1.0, slack_norm))
-
-        k_base = float(cfg.destroy_frac) * float(raw.n) * float(km) * float(slack_mult)
-        k = int(max(cfg.destroy_min, min(cfg.destroy_max, int(round(k_base)))))
-        if dname == "random":
-            partial, removed, touched = _destroy_random(sol, k, rng)
-        elif dname == "worst_machine":
-            partial, removed, touched = _destroy_worst_machine(sol, ev, k, rng)
-        elif dname == "longest":
-            partial, removed, touched = _destroy_longest_jobs(raw, sol, k, rng)
-        else:
-            raise ValueError(f"Unknown destroy op: {dname}")
-
-        # Incrementally evaluate the partial solution (recompute only touched machines).
-        partial_ev = _update_eval_for_machines(
-            raw=raw,
-            epsilon=epsilon,
-            sol=partial,
-            prev=ev,
-            machine_indices=touched,
-        )
-
-        repaired, repaired_ev, touched2 = _repair_greedy(
-            raw=raw,
-            epsilon=epsilon,
-            partial=partial,
-            partial_eval=partial_ev,
-            removed_jobs=removed,
-            cfg=cfg,
-            rng=rng,
-        )
-        if repaired is None or repaired_ev is None:
-            return None, None, touched, removed
-
-        # Safety: ensure we never lose/duplicate jobs.
-        _assert_solution_valid(repaired, n_jobs=raw.n, m=raw.m)
-
-        # Optional: verify per-machine DP energy matches recomputation.
-        if cfg.verify_cost:
-            for mi in touched:
-                _eval_machine_sequence(
-                    raw,
-                    int(mi),
-                    repaired.sequences[int(mi)],
-                    epsilon,
-                    verify_cost=True,
-                )
-
-        touched_all = sorted(set(touched).union(touched2))
-
-        if cfg.local_search:
-            repaired, repaired_ev = _try_local_intra_swap(
-                raw, epsilon, repaired, repaired_ev, touched_all, cfg, rng
-            )
-
-        return repaired, repaired_ev, touched_all, removed
 
     # Classic ALNS operator adaptation state
     weights = np.ones(len(action_list), dtype=np.float64)
@@ -765,7 +922,9 @@ def alns_solve(
             best_a = None
             best_delta = float("inf")
             for a in action_list:
-                cand_sol, cand_ev, _, _ = apply_action(cur_sol, cur_ev, a)
+                cand_sol, cand_ev, _, _ = alns_apply_action(
+                    raw, epsilon, cur_sol, cur_ev, a, cfg, rng
+                )
                 if cand_ev is None or not cand_ev.feasible:
                     delta = float("inf")
                 else:
@@ -788,7 +947,9 @@ def alns_solve(
         a_idx = int(np.searchsorted(np.cumsum(probs), rng.random(), side="right"))
         a_idx = max(0, min(len(action_list) - 1, a_idx))
         action = action_list[a_idx]
-        cand_sol, cand_ev, touched_m, removed = apply_action(cur_sol, cur_ev, action)
+        cand_sol, cand_ev, touched_m, removed = alns_apply_action(
+            raw, epsilon, cur_sol, cur_ev, action, cfg, rng
+        )
         if cand_ev is None or cand_sol is None:
             # Failed repair; continue
             no_improve += 1
@@ -847,14 +1008,22 @@ def alns_solve(
             iter_log.append(
                 {
                     "iter": int(it),
-                    "action": {"destroy": action[0], "k_mult": action[1]},
-                    "k": int(
-                        max(
-                            cfg.destroy_min,
-                            min(
-                                cfg.destroy_max,
-                                int(round(cfg.destroy_frac * raw.n * action[1])),
-                            ),
+                    "action": {
+                        "destroy": action[0],
+                        "k_mult": action[1],
+                        "repair": action[2],
+                    },
+                    "k": (
+                        int(len(removed))
+                        if action[0] == "all"
+                        else int(
+                            max(
+                                cfg.destroy_min,
+                                min(
+                                    cfg.destroy_max,
+                                    int(round(cfg.destroy_frac * raw.n * action[1])),
+                                ),
+                            )
                         )
                     ),
                     "removed": int(len(removed)),
@@ -910,7 +1079,9 @@ def alns_solve(
 
     if cfg.oracle_dataset:
         out["oracle_dataset"] = {
-            "action_list": [{"destroy": a[0], "k_mult": a[1]} for a in action_list],
+            "action_list": [
+                {"destroy": a[0], "k_mult": a[1], "repair": a[2]} for a in action_list
+            ],
             "rows": oracle_rows,
         }
 
