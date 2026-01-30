@@ -152,8 +152,10 @@ def _compute_gae(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     # rewards/values/dones: [T,B]
     T, B = rewards.shape
-    adv = torch.zeros((T, B), dtype=torch.float32)
-    last_gae = torch.zeros((B,), dtype=torch.float32)
+    device = rewards.device
+    dtype = rewards.dtype
+    adv = torch.zeros((T, B), dtype=dtype, device=device)
+    last_gae = torch.zeros((B,), dtype=dtype, device=device)
 
     for t in reversed(range(T)):
         if t == T - 1:
