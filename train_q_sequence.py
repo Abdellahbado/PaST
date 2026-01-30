@@ -285,6 +285,9 @@ class QRunConfig:
     regression_weight: float = 1.0
     policy_weight: float = 0.0
     policy_temperature: float = 1.0
+    # Temperature used to form the *target* distribution from candidate DP costs.
+    # If None/<=0, defaults to policy_temperature.
+    policy_target_temperature: Optional[float] = None
     policy_target: str = "soft"  # soft|hard
 
     # Top-γ aligned loss (encourage true best action in top-γ)
@@ -1737,6 +1740,11 @@ def train_epoch(
     total_listwise = 0.0
     total_policy = 0.0
     total_top_gamma = 0.0
+    total_policy_acc1 = 0.0
+    total_policy_topg_hit = 0.0
+    total_target_entropy = 0.0
+    total_target_gap = 0.0
+    total_state_groups = 0
     n_batches = 0
 
     for batch in dataloader:
@@ -1858,6 +1866,10 @@ def train_epoch(
         topg = int(getattr(config, "top_gamma", 0) or 0)
         topg_margin = float(getattr(config, "top_gamma_margin", 0.0))
         pol_temp = float(getattr(config, "policy_temperature", 1.0))
+        pol_tgt_temp = getattr(config, "policy_target_temperature", None)
+        if pol_tgt_temp is None or float(pol_tgt_temp) <= 0:
+            pol_tgt_temp = pol_temp
+        pol_tgt_temp = float(pol_tgt_temp)
         pol_target = (
             (getattr(config, "policy_target", "soft") or "soft").strip().lower()
         )
@@ -1867,6 +1879,10 @@ def train_epoch(
             pl_sum = 0.0
             tg_sum = 0.0
             count = 0
+            acc1_sum = 0.0
+            topg_hit_sum = 0.0
+            ent_sum = 0.0
+            gap_sum = 0.0
             for sid in unique_states:
                 idx = (state_ids == sid).nonzero(as_tuple=False).squeeze(1)
                 if idx.numel() < 2:
@@ -1889,6 +1905,34 @@ def train_epoch(
 
                 logits = (-q_cand / max(pol_temp, 1e-8)).clamp(-50.0, 50.0)
 
+                # Diagnostics: how informative are the per-state targets?
+                # - gap: 2nd_best - best (in target cost units)
+                # - entropy: entropy of soft target distribution
+                # - acc@1: does the model pick the target-best candidate?
+                with torch.no_grad():
+                    best_pos = int(torch.argmin(cand_targets).item())
+                    pred_best_pos = int(torch.argmin(q_cand).item())
+                    acc1_sum += 1.0 if pred_best_pos == best_pos else 0.0
+
+                    sorted_t = torch.sort(cand_targets).values
+                    if int(sorted_t.numel()) >= 2:
+                        gap_sum += float((sorted_t[1] - sorted_t[0]).item())
+
+                    tgt_logits_diag = (-cand_targets / max(pol_tgt_temp, 1e-8)).clamp(
+                        -50.0, 50.0
+                    )
+                    p_diag = F.softmax(tgt_logits_diag, dim=0)
+                    ent_sum += float(
+                        (-(p_diag * torch.log(p_diag + 1e-12)).sum()).item()
+                    )
+
+                    if topg_w > 0 and topg > 0:
+                        k_diag = min(int(topg), int(cand_actions.numel()))
+                        topk_idx = torch.topk(q_cand, k=k_diag, largest=False).indices
+                        topg_hit_sum += (
+                            1.0 if (topk_idx == best_pos).any().item() else 0.0
+                        )
+
                 # Target distribution from aggregated costs (lower cost => higher prob)
                 if pol_target == "hard":
                     best_pos = int(torch.argmin(cand_targets).item())
@@ -1897,7 +1941,7 @@ def train_epoch(
                         torch.tensor([best_pos], device=device, dtype=torch.long),
                     )
                 else:
-                    target_logits = (-cand_targets / max(pol_temp, 1e-8)).clamp(
+                    target_logits = (-cand_targets / max(pol_tgt_temp, 1e-8)).clamp(
                         -50.0, 50.0
                     )
                     p_t = F.softmax(target_logits, dim=0)
@@ -1921,6 +1965,14 @@ def train_epoch(
                 policy_loss = pl_sum / count
                 if topg_w > 0 and topg > 0:
                     top_gamma_loss = tg_sum / count
+
+                # diagnostics (averaged over state groups in this batch)
+                total_policy_acc1 += float(acc1_sum / count)
+                if topg_w > 0 and topg > 0:
+                    total_policy_topg_hit += float(topg_hit_sum / count)
+                total_target_entropy += float(ent_sum / count)
+                total_target_gap += float(gap_sum / count)
+                total_state_groups += int(count)
 
         # Optional legacy listwise ranking loss (kept for backward compatibility)
         listwise_loss = torch.tensor(0.0, device=device)
@@ -1990,7 +2042,7 @@ def train_epoch(
             flush=True,
         )
 
-    return {
+    out = {
         "loss": total_loss / max(n_batches, 1),
         "q_mse": total_q_mse / max(n_batches, 1),
         "q_mae": total_q_mae / max(n_batches, 1),
@@ -1998,6 +2050,14 @@ def train_epoch(
         "policy": total_policy / max(n_batches, 1),
         "top_gamma": total_top_gamma / max(n_batches, 1),
     }
+    # These diagnostics are averaged per batch (already averaged per-state within batch).
+    # They are meant for trend monitoring, not as absolute metrics.
+    out["policy_acc1"] = total_policy_acc1 / max(n_batches, 1)
+    out["policy_topg_hit"] = total_policy_topg_hit / max(n_batches, 1)
+    out["target_entropy"] = total_target_entropy / max(n_batches, 1)
+    out["target_gap"] = total_target_gap / max(n_batches, 1)
+    out["state_groups"] = int(total_state_groups)
+    return out
 
 
 # =============================================================================
@@ -2475,6 +2535,15 @@ def parse_args():
         help="Temperature for policy target distribution and predicted logits.",
     )
     parser.add_argument(
+        "--policy_target_temperature",
+        type=float,
+        default=None,
+        help=(
+            "Temperature for forming *target* probabilities from candidate DP costs. "
+            "If unset, defaults to --policy_temperature. Lower => sharper targets."
+        ),
+    )
+    parser.add_argument(
         "--policy_target",
         type=str,
         default="soft",
@@ -2728,6 +2797,7 @@ def main():
         regression_weight=args.regression_weight,
         policy_weight=args.policy_weight,
         policy_temperature=args.policy_temperature,
+        policy_target_temperature=getattr(args, "policy_target_temperature", None),
         policy_target=args.policy_target,
         top_gamma=args.top_gamma,
         top_gamma_weight=args.top_gamma_weight,
@@ -3286,9 +3356,14 @@ def main():
         avg_listwise = np.mean([m.get("listwise", 0.0) for m in epoch_metrics])
         avg_policy = np.mean([m.get("policy", 0.0) for m in epoch_metrics])
         avg_topg = np.mean([m.get("top_gamma", 0.0) for m in epoch_metrics])
+        avg_acc1 = np.mean([m.get("policy_acc1", 0.0) for m in epoch_metrics])
+        avg_topg_hit = np.mean([m.get("policy_topg_hit", 0.0) for m in epoch_metrics])
+        avg_t_ent = np.mean([m.get("target_entropy", 0.0) for m in epoch_metrics])
+        avg_t_gap = np.mean([m.get("target_gap", 0.0) for m in epoch_metrics])
         train_time = time.time() - train_start
         print(
             f"loss={avg_loss:.4f}, mae={avg_mae:.2f}, policy={avg_policy:.4f}, topγ={avg_topg:.4f}, "
+            f"acc1={avg_acc1:.3f}, tgt_ent={avg_t_ent:.3f}, tgt_gap={avg_t_gap:.4f}, "
             f"listwise={avg_listwise:.4f} in {train_time:.1f}s"
         )
 
@@ -3377,6 +3452,10 @@ def main():
             "policy": avg_policy,
             "top_gamma": avg_topg,
             "listwise": avg_listwise,
+            "policy_acc1": float(avg_acc1),
+            "policy_topg_hit": float(avg_topg_hit),
+            "target_entropy": float(avg_t_ent),
+            "target_gap": float(avg_t_gap),
         }
         if eval_results:
             log_entry.update({f"eval_{k}": v for k, v in eval_results.items()})
