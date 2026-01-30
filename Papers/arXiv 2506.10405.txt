@@ -1,0 +1,2979 @@
+Green Scheduling with Time-of-Use Tariffs and Machine States: Optimizing
+Energy Cost via Branch-and-Bound and Bin Packing Strategies
+Ondřej Benedikta , István Módosa , Antonin Novaka,∗, Zdeněk Hanzáleka
+
+arXiv:2506.10405v1 [math.OC] 12 Jun 2025
+
+a Czech Institute of Informatics, Robotics and Cybernetics, Czech Technical University in Prague, Czech Republic
+
+Abstract
+This paper presents a branch-and-bound algorithm, enhanced with bin packing strategies, for scheduling under variable energy pricing and power-saving states. The proposed algorithm addresses the 1, TOU| states |TEC
+problem, which involves scheduling jobs to minimize total energy cost (TEC) while considering time-of-use
+(TOU) electricity prices and different machine states (e.g., processing, idle, off). Key innovations include
+instance pre-processing for rapid lower bound calculations, a novel branching scheme combined with initializations, a block-finding primal heuristic, and a tighter lower bound for jobs with non-coprime processing
+times. These enhancements result in an efficient algorithm capable of solving benchmark instances with real
+energy prices with 200 jobs more than 100 times faster than existing state-of-the-art methods.
+Keywords: Scheduling, Single machine, Time of Use, Machine states, Variable energy costs, Total energy
+cost minimization, Branch and Bound.
+
+1. Introduction
+Optimizing the efficient use of energy in manufacturing facilities is crucial in today’s world for several
+reasons. First, energy costs are rising continuously, and producing products and providing services is becoming more expensive. Therefore, businesses must find ways to lower their energy bills to remain competitive
+and increase profitability. This is especially important for the automotive or glass and steel industries, which
+rely on furnaces (Benedikt et al., 2021), industrial robots (Bukata et al., 2019), and similar machines that
+require a lot of energy. Second, energy consumption is a major contributor to greenhouse gas emissions,
+which are the leading cause of climate change. By reducing energy consumption, businesses can lower their
+carbon footprint and help mitigate the effects of climate change. Moreover, some governments, e.g., EU
+member states, are implementing regulations and incentives to encourage businesses to reduce their carbon
+emissions (Maris & Flouros, 2021). Further, rising energy costs, utility companies, and policymakers incen∗ Corresponding author
+
+Email addresses: ondrej.benedikt@cvut.cz (Ondřej Benedikt), istvan.modos@cvut.cz (István Módos),
+antonin.novak@cvut.cz (Antonin Novak), zdenek.hanzalek@cvut.cz (Zdeněk Hanzálek)
+
+tivize businesses to participate in demand-response programs and to plan their operations according to the
+use of their high-consumption machines to hedge against challenges in the energy market (Eid et al., 2016).
+With demand response programs such as Time-Of-Use (TOU) (Chen & Zhang, 2019; Minh Hung et al.,
+2020) tariffs and Real-Time Pricing (RTP) (Abikarram et al., 2019), businesses can lower their costs by
+rescheduling their production to hours with cheaper energy or by changing the speeds of the machines.
+Furthermore, efficient use of the alternative processing modes of the machines or turning them off altogether
+decreases energy consumption. Nevertheless, the turn-on of a machine also requires a considerable amount
+of energy; thus, keeping the machine idling is sometimes the right choice.
+Therefore, production scheduling with variable energy pricing and power-saving modes represents a very
+complex optimization problem that requires greater investigation.
+To address these challenges, we study a single-machine scheduling problem with time-of-use tariffs defining the cost of energy in each time interval. The scheduling resource is stateful and is described by a
+transition diagram, defining the duration and consumption of transits between off, processing, and idle
+states, as well as the consumption in these states. The goal is to process the set of jobs during processing
+states so that the total energy cost (TEC) consumed by job processing and transitions between the machine
+states is minimized. The problem denoted in an extended three-field notation as 1, TOU| states |TEC was
+originally introduced in Shrouf et al. (2014). Later on, it was shown to be strongly NP-hard in Aghelinejad
+et al. (2019).
+1.1. Paper Contributions and Outline
+We revisit the problem 1, TOU| states |TEC with new insights with the goal of developing a scalable, exact
+branch-and-bound algorithm called B&B-SPACES that achieves state-of-the-art results, outperforming the
+former mixed-integer linear programming models both of Shrouf et al. (2014) and Benedikt et al. (2020) by
+two orders of magnitude. Among these insights, recognizing the bin-packing structure of the problem (Grus
+et al., 2024) and utilizing it in different aspects of B&B-SPACES proves to be the major source of increased
+efficiency.
+More specifically, the main contributions are:
+1. a fast branch-and-bound algorithm able to solve instances with hundreds of jobs over more than a
+thousand time intervals, outperforming the former state-of-the-art method (see Section 4),
+2. employing instance pre-processing for lower bound computation, improving the complexity of the
+algorithm for a fixed sequence by Aghelinejad et al. (2019) (see Section 4.2),
+3. proposing a tighter lower bound for non-coprime processing times (see Section 4.3),
+4. new bin-packing primal heuristics for computing upper bounds inside the search tree (see Section 4.4),
+2
+
+5. new initialization heuristics based on the bin-finding problem (see Section 4.5).
+The rest of the paper is structured as follows. In Section 2, we formally define the statement of the
+scheduling problem under study together with the key notation and symbols used. The relevant literature
+surveying the related problem is given in Section 3. The two key concepts—the optimal switching problem
+and computing TEC for a given fixed sequence of the jobs are explained in Appendix A and Section 4.1.
+Further algorithmic components, i.e., lower and upper bounds of B&B-SPACES algorithm, are described
+in Section 4. Finally, we demonstrate the efficiency of the resulting method on the benchmark instances of
+various parameters in Section 5.
+
+2. Problem Statement
+We consider a scheduling problem whose horizon is divided into a set of h ∈ Z>0 non-overlapping intervals
+I = {1, 2, . . . , i, . . . , h}. It is assumed that every interval is one unit long.
+The physical representation of the time unit length can be different depending on the desired granularity.
+For example, most typically, a single interval will resemble 15-minute or 1-hour long intervals, as the energy
+markets operate on these scales. Scheduling over one thousand intervals resembles operations spanning over
+more than a week-long horizon, matching the real conditions commonly encountered on the market (such
+as OTE in the Czech Republic) regarding the forecast and auctions. For every interval i, the energy cost
+ci ∈ Q is given. The vector of energy costs is denoted by c, where c = (c1 , c2 , . . . , ch ).
+Note that we assume that the energy cost can be even negative. Although this is likely not to be the
+realistic case with, e.g., natural gas, with electricity, the situation is different. For example, due to the
+increasing amount of power deployed in renewable sources every year, from April to August 2024 in the
+Czech Republic, there were nearly 50 days with intervals having negative electricity cost—up to 3 times
+more than the year before.
+Interval i
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10 11 12 13 14 15 16 17 18 19 20
+
+Energy cost ci
+
+9
+
+7
+
+9
+
+13
+
+3
+
+11
+
+3
+
+13
+
+6
+
+7
+
+Processing
+
+60
+
+4
+
+10
+
+12 52
+
+6
+
+9
+
+3
+
+14
+
+0
+
+24 36 12 56
+
+0
+
+4
+
+6
+
+Idle
+Off
+
+0
+
+0
+
+0
+
+0
+
+0
+
+Turn-off (↘)
+Turn-on (↗)
+Schedule
+
+0
+
+0
+
+6
+
+4
+
+15 55
+off
+
+↗
+
+20 50
+J2
+
+↘
+
+off
+
+↗
+
+J1
+
+J3
+
+↘
+
+off
+
+Figure 1: Example of a schedule to illustrate the notation; optimal solution with the objective 342.
+
+During each interval, the machine operates in one of its states s ∈ S or transits from one state to another.
+We assume the existence of at least two states: the off state off ∈ S and the processing state proc ∈ S.
+3
+
+The machine is assumed to be operating in off state during the first and the last interval. Also, when a job
+is processed, the machine must be operating in proc state.
+The transition time function and the transition power function are denoted by T : S ×S → Z≥0 ∪{∞} and
+P : S × S → Q≥0 ∪ {∞}, respectively. The symbol ∞ is used to denote that the direct transition between
+states (s, s′ ) ∈ S × S does not exist. The transition from state s to state s′ lasts T (s, s′ ) intervals and has
+power consumption P (s, s′ ), which is the constant rate of the consumed energy at every time unit. Further,
+we assume that T (s, s) = 1, meaning that the power consumption of the machine while remaining in state
+s for the duration of one interval is P (s, s). Note that the transition time and power functions are general
+enough to represent different kinds of manufacturing machines, e.g., those studied in (Aghelinejad et al.,
+2018; Benedikt et al., 2020; Mouzon et al., 2007; Shrouf et al., 2014).
+Let J be a set of n jobs {J1 , J2 , . . . , Jj , . . . , Jn } to be scheduled. Each job Jj is characterized by its
+processing time pj ∈ Z>0 , given in the number of intervals. The cost of processing a job inside an interval i
+is the same for all jobs. Jobs are non-preemptive, and the machine can process at most one job at a time.
+All the jobs are available at the beginning of the scheduling horizon.
+A solution is defined by a pair (σ, Ω), where σ = (σ1 , σ2 , . . . , σn ) ∈ Zn≥0 represents start times of
+the jobs, and Ω = (Ω1 , Ω2 , . . . , Ωh ) ∈ (S × S)h captures the active state or transition in each interval,
+where Ωi = (off, proc) represents turning on, Ωi = (proc, proc) represents staying in the processing state,
+Ωi = (proc, idle) represents transition from processing into an idle state, Ωi = (idle, idle) staying in an
+idle state, Ωi = (idle, proc) is transition from idle to processing state while Ωi = (proc, off) represents
+the transition from the processing state to the off state.
+The solution is feasible if the following four conditions are satisfied:
+1. the machine processes at most one job at a time,
+2. the jobs are processed only when the machine is in proc state,
+3. the machine is in off state during the first and the last interval,
+4. transition between states s and s′ takes T (s, s′ ) time intervals.
+The total energy cost (TEC) of solution (σ, Ω) is calculated as
+X
+
+ci · P (Ωi ),
+
+(2.1)
+
+i∈I
+
+where P (Ωi ) represents P (s, s′ ) for Ωi = (s, s′ ). The goal of the scheduling problem is to find a feasible
+solution such that the total energy cost (2.1) is minimized.
+During the first and the last interval, the machine is assumed to be in off state off ∈ S (see 3. above).
+The machine has a single processing state proc ∈ S, which must be active during the processing of the
+4
+
+jobs (see 2. above). Due to the transition time from/to the initial/last off state, the machine cannot be
+in the proc state during (several) early/late intervals. Hence, we denote the earliest and the latest interval
+during which the machine can be in proc state by early and late, respectively. Consequently, the set of
+processing intervals is denoted as I proc = {early, early + 1, . . . , late}. The definition of the earliest and the
+latest processing intervals becomes useful later in the problem of the optimal TEC computation for a fixed
+job sequence in Section 4.1.
+Example 1: Let us consider a small example with three jobs, J = {J1 , J2 , J3 } with processing times
+p1 = 1, p2 = 2, and p3 = 4, respectively. Let the scheduling horizon contain 20 intervals, I = {1, . . . , 20},
+with energy costs c = (9, 7, 9, 13, 3, 11, 3, 13, 6, 7, 60, 4, 10, 6, 9, 3, 14, 0, 4, 6). Considering the machine states
+and transitions, let us use the transition graph proposed in Shrouf et al. (2014), which is also depicted in
+Fig. 2. The optimal solution to this instance is depicted in Fig. 1. Its TEC is equal to 342.
+s′
+s
+proc
+
+s′
+proc idle off
+
+4
+
+0
+
+1
+
+s
+proc
+
+1/4
+
+proc idle off
+
+1
+
+0
+
+proc
+
+1
+2/5
+
+idle
+
+0
+
+off
+
+5
+
+2
+
+∞
+
+idle
+
+0
+
+1
+
+∞
+
+∞
+
+0
+
+off
+
+2
+
+∞
+
+1
+
+′
+
+P (s, s )
+
+0/0
+1/1
+
+off
+1/0
+
+0/0
+
+idle
+1/2
+
+′
+
+T (s, s )
+
+Figure 2: Parameters of the transition power function P (s, s′ ) and transition time function T (s, s′ ), and the corresponding
+transition graph, where every edge from s to s′ is labeled by T (s, s′ )/P (s, s′ ).
+
+Note that the transition graph in Fig. 2 considers transitions between proc and idle states to take
+zero time and to consume zero energy while doing so. We argue that this is a rather physically unrealistic
+case that we follow from Shrouf et al. (2014), but it serves as an example of extreme behavior that can be
+modeled with transition graphs. In general, including an idle state into the model of a machine may be
+beneficial depending on the values of transition power and time functions, as demonstrated in the following
+example.
+Example 2: Consider an example of a machine modeled with two different transition diagrams. The
+option in Fig. 3a resembles a simplified model of the machine that neglects the possibility of utilizing its
+idle state, while the option Fig. 3b explicitly contains it. Each respective plot above the transition diagram
+displays TEC isolines (i.e., the areas with identical TEC values), depending on the values of the transition
+power function between {off, proc} states. The values are computed by sampling 20 × 20 pairs of parameter
+values in the considered range while constructing an optimal schedule for a set of 5 jobs with processing times
+{1, 2, 2, 4, 5} under the energy cost profile shown in Fig. 3c. The example shows (besides overall lower TEC
+in Fig. 3b) how introducing an idle state can change the landscape of TEC isolines, affecting trade-offs of
+5
+
+transition power function values between off and proc states.
+10
+
+10
+58
+4
+
+610
+
+620
+
+6
+580
+
+590
+
+570
+
+4
+54 55
+0 0
+
+0
+
+1
+2
+3
+P (proc, off)
+
+57
+
+54
+
+4
+
+52
+
+4
+
+6
+
+6
+4
+
+580
+
+560
+
+8
+568
+
+600
+
+560
+
+59
+0
+
+P (off, proc)
+
+8
+
+552
+
+P (off, proc)
+
+630
+
+53
+6
+
+8
+
+0
+
+55
+2
+
+560
+
+1
+2
+3
+P (proc, off)
+
+568
+
+4
+
+1/5
+2/P (off, proc)
+
+1/5
+
+proc
+2/P (off, proc)
+
+off
+
+1/0
+
+proc
+1/0
+
+1/P (proc, off)
+
+off
+
+1/P (proc, off) 1/1
+1/0
+
+1/1
+
+(b) Machine with idle state.
+
+(a) Machine without idle state.
+
+cost ci
+
+idle
+
+15
+10
+5
+0
+
+interval i [-]
+(c) Example cost vector c of TOU energy tariff.
+
+Figure 3: TEC isolines of a machine including and neglecting idle state.
+
+The above-defined problem was introduced in Shrouf et al. (2014) and is denoted in an extended Graham’s
+notation as 1, TOU| states |TEC. The problem was shown to be strongly NP-hard in Aghelinejad et al. (2019).
+
+3. Related work
+The scheduling literature on energy-efficient scheduling and sustainable manufacturing concentrates
+primarily on the problems concerning Time-of-Use energy tariffs and the minimization of total energy
+costs (Catanzaro et al., 2023). The fundamental setting in these problems is that we are given a finite
+time horizon discretized into time intervals (e.g., 15 minutes), each associated with a cost for processing jobs
+inside the interval. Jobs have processing time expressed in terms of an integer number of intervals. The goal
+is to schedule all jobs on a single machine such that the total energy consumption is minimized, possibly
+6
+
+subject to a constraint on the schedule makespan. This basic scheduling problem with the time-of-use costs
+was coined by Wan & Qi (2010).
+Even the basic problem is quite practical and can be used to obtain some cost savings. However, to match
+more complex use cases, many different variants were proposed. In that respect, the most prominent research
+lines consider developing more complex machine environments, such as parallel identical machines (Anghinolfi et al., 2021; Tian & Zheng, 2024; Gaggero et al., 2023), unrelated machines (Rego et al., 2022; Pei
+et al., 2021), storage resources (Ngueveu et al., 2022), flow shops (Ho et al., 2022; Aghelinejad et al., 2020b)
+or job shops (Park & Ham, 2022).
+Other extensions of the problem consider different objective functions beyond TEC, mostly to express
+also the timelines of the schedule. Among the most popular are bi-criteria and multi-objective approaches
+combining TEC with the makespan (Chen et al., 2021; Pei et al., 2021) and total (weighted) tardiness
+(Rocholl et al., 2020; Ding et al., 2021).
+Different approaches for bringing the scheduling models closer to reality consider more complex models
+of the job. For example, considering non-uniform energy consumption (Cheng et al., 2018), speed (Nattaf
+et al., 2017; Fatih Tasgetiren et al., 2018) (i.e., faster processing of the jobs in exchange for larger energy
+consumption), non-integer start times (Chen & Zhang, 2019), release times (Wu et al., 2023) or scheduling
+with disjoint setup operations of energy-demanding machine reconfigurations (Gnatowski et al., 2022). Typically, these were investigated in a single-machine setting first and later extended to more complex resource
+environments (Wang et al., 2020).
+The complexity of particular problems also depends on the assumed properties of the energy cost vector c.
+For example, if c takes a ”pyramidal” shape (i.e., increasing and then decreasing), then the problem can
+become solvable in polynomial time (Fang et al., 2016). However, in realistic costs, this shape typically does
+not occur. Further results of Chen & Zhang (2019) show that the problem complexity can depend on the
+number of ”valleys” of the energy cost vector c. The basic problem with makespan minimization, where
+energy consumption represents a hard constraint, does admit a 1.34-approximation algorithm (Li & Ou,
+2024).
+However, all the above extensions of the basic time-of-use scheduling problem disregard the fact that
+often the manufacturing resources are stateful machines (Aghelinejad et al., 2018; Benedikt et al., 2020;
+Mouzon et al., 2007; Shrouf et al., 2014)—meaning the machine has several operational modes, such as off,
+power saving, and processing mode. The transitions between machine states are governed by the control
+logic and machine dynamics. The operations on the jobs are performed only when the machine is in one
+of its processing states, while significant energy savings can be achieved by switching the machine to idle
+mode or even turning it off when the energy price is high. Switching between machine operational modes
+adds another layer of complexity to the already NP-hard scheduling problem with time-of-use costs. In this
+sense, the previous works that disregarded machine dynamics and operation modes can be seen as simplified
+7
+
+problems where one assumes that the machine operates only in its processing state uninterrupted over the
+whole scheduling horizon.
+The problem with simultaneous scheduling of jobs and switching operational states of the machine was
+first introduced by Shrouf et al. (2014), denoted in three-field scheduling notation as 1, TOU| states |TEC.
+The authors proposed an Integer Linear Programming (ILP) model for a single-machine environment and
+fixed order of the jobs. Later, Aghelinejad et al. (2019) proved the problem without fixed order is hard, but
+under the fixed order of the jobs, it becomes polynomial-time solvable. The restriction on the fixed order of
+jobs was lifted in Aghelinejad et al. (2018), where an ILP model was proposed to finally solve the original
+problem. However, this approach was able to solve instances with up to 35 jobs to optimality. Different
+variants of the problems were further studied. A case of the problem with preemptive jobs was studied in
+Aghelinejad et al. (2017) or extensions of the problem into flow shop setting (Aghelinejad et al., 2020a,c).
+Later, Benedikt et al. (2020) realized that the performance of ILP and Constraint Programming (CP)
+models can be greatly enhanced by utilizing a pre-processing technique called SPACES that precomputes
+the optimal switching behavior of the machine between different intervals (since the costs differ) in advance
+and using these precomputed sequences inside the ILP and CP models. This led to a new state-of-theart performance, and the proposed algorithms were able to solve instances with 190 jobs that were up to
+optimality. However, some of the problem structures were under-utilized and unexplored due to the limited
+flexibility of the mathematical programming models. For example, their ILP model could not exploit the
+result of Aghelinejad et al. (2019) that the problem is polynomially solvable under the fixed order of the
+jobs. However, perhaps more importantly, the way in which the SPACES algorithm determines the optimal
+switching behavior between every pair of intervals and states suggests that, although not apparent at first
+sight, the precomputed switching creates so-called spaces that can be used to form bins for a kind-of bin
+packing problem. Thus, the problem inherently consists of a packing problem that can be typically solved
+very efficiently in practice.
+In this paper, we further explore the properties of the 1, TOU| states |TEC problem. To exploit them
+inside an optimization algorithm fully, instead of formulating a new mathematical programming model, we
+design a custom branch-and-bound algorithm utilizing techniques of Aghelinejad et al. (2019); Benedikt
+et al. (2020) and new observations made in this work that gave us enough flexibility to reach 100× speedup
+over the former state-of-the-art algorithm (Benedikt et al., 2020). Furthermore, the proposed techniques are
+not only tied to this specific problem; thus, we believe they can be applied to similar problems considering
+time-of-use scheduling.
+
+8
+
+4. Branch-and-Bound Algorithm for 1, TOU| states |TEC
+For the scheduling problem 1, TOU| states |TEC defined in Section 2, we develop a fast, exact branch-andbound algorithm called B&B-SPACES. Generally, a Branch and Bound is an exact algorithm for solving
+combinatorial problems. It recursively partitions the solution space into a tree using specific branching
+rules. By employing a lower bound, parts of the solution space with an objective value that is worse than
+the currently best value can be pruned and excluded from the search.
+Before explaining details of B&B-SPACES, we discuss important properties of the problem required
+for designing the algorithm, namely the optimal TEC computation for a fixed jobs sequence presented in
+Section 4.1. Further, we rely on the technique of pre-processing the optimal state switching of Benedikt
+et al. (2020), with its details briefly summarized in Appendix A.
+To design an efficient branch-and-bound algorithm, multiple parts of the algorithm are important, especially (i) an efficient branching rule, (ii) a tight lower bound that can be obtained in a reasonable time, and
+(iii) a good initialization upper bound with primal heuristics to prune the tree as soon as possible. The rest
+of the section explains the individual components of B&B-SPACES.
+4.1. Optimal TEC Computation for a Fixed Jobs Sequence
+In Aghelinejad et al. (2019), the problem of computing the optimal TEC with machine states for a fixed
+sequence of jobs was shown to be polynomial. The authors solve this problem by finding the shortest path
+in a job-interval graph that models both the cost of scheduling the jobs and the cost of transiting between
+the machine states.
+In this work, instead of modeling the transitions between the machine states explicitly, we improve the
+approach proposed in Aghelinejad et al. (2019) by incorporating only the optimal switching costs found by
+solving the optimal switching problem by a technique called SPACES (Benedikt et al., 2020). This way, we
+obtain a job-interval graph with a size independent of the size of the transition graph. Thus, the optimal
+TEC can be found in a shorter time, which is critical for its usage inside a branch-and-bound algorithm,
+where it needs to be evaluated in every search node. See Appendix A for more details about the optimal
+switching problem and SPACES technique.
+Let π : {1, . . . , n} → {1, . . . , n} be a bijective function representing a fixed jobs sequence on the machine,
+i.e., π(ℓ) maps position ℓ in the sequence to job index j. Given fixed jobs sequence π, the set of intervals in
+which job on position ℓ ∈ {1, . . . , n} can be scheduled, is denoted as
+Iℓproc = {i ∈ I proc : early +
+
+ℓ−1
+X
+
+pπ(ℓ′ ) ≤ i ≤ late −
+
+ℓ′ =1
+
+n
+X
+
+pπ(ℓ′ ) + 1} .
+
+(4.1)
+
+proc
+
+takes into account
+
+ℓ′ =ℓ
+
+where early and late are indices of early and late, respectively. The definition of Iℓ
+
+early/late proc intervals (to start up and turn off the machine) and the time required for scheduling the
+jobs on positions before/after ℓ.
+9
+
+To find the optimal TEC for fixed jobs sequence π, let us define a job-interval graph Gji by a triplet
+Gji = (V ji , E ji , wji ), where V ji is the set of vertices, E ji is the set of edges and wji : E ji → Z≥0 are the
+weights of the edges. The set of the vertices and edges of the job-interval graph are defined as follows:
+ji
+ji
+},
+: ℓ ∈ {1, . . . , n}, i ∈ Iℓproc } ∪ {vn+1
+V ji = {v0ji } ∪ {vℓ,i
+
+(4.2)
+
+ji
+) : i ∈ I1proc }
+E ji = {(v0ji , v1,i
+proc ′
+proc
+ji
+ji
+∪ {(vℓ,i
+, vℓ+1,i
+, i ∈ Iℓ+1
+, i + pπ(ℓ) ≤ i′ },
+′ ) : ℓ ∈ {1, . . . , n − 1}, i ∈ Iℓ
+
+(4.3)
+
+ji
+ji
+) : i ∈ Inproc } .
+, vn+1
+∪ {(vn,i
+ji
+ji
+Informally, each edge (vℓ,i
+, vℓ+1,i
+′ ) represents a scheduling of job Jπ(ℓ) at the beginning of interval i and job
+ji
+correspond to the first and the last off state of the
+Jπ(ℓ+1) at beginning of interval i′ . Vertices v0ji and vn+1
+
+machine, respectively.
+The weights of the edges take both the jobs processing costs and the optimal switching costs into account,
+which is in contrast to the original idea presented in Aghelinejad et al. (2019), where the costs of transitions
+between machine states are considered. Different edge types have different weights:
+• edges from the first off state to the first job:
+ji
+wji (v0ji , v1,i
+) = c1 · P (off, off) + c⋆ (1, i) ;
+
+(4.4)
+
+• edges between two consecutive jobs:
+(job)
+
+ji
+ji
+⋆
+′
+wji (vℓ,i
+, vℓ+1,i
+′ ) = cj,π(ℓ) + c (i + pπ(n) − 1, i ) ,
+
+where
+
+(4.5)
+
+i+pj −1
+(job)
+
+cj,i
+
+=
+
+X
+
+ci′ · P (proc, proc)
+
+(4.6)
+
+i′ =i
+
+is the cost of scheduling job Jj at the beginning of interval i;
+• edges from the last job to the last off state:
+(job)
+
+ji
+ji
+wji (vn,i
+, vn+1
+) = cπ(n),i + c⋆ (i + pπ(n) − 1, h) + ch · P (off, off) .
+
+(4.7)
+
+To obtain the optimal TEC for the fixed jobs sequence, it suffices to find the cost of the shortest path
+ji
+. For a given sequence π, we denote the optimal TEC by cTEC (π). Notice that the
+from v0ji to vn+1
+
+job-interval graph is topologically ordered according to the lexicographic ordering of the labels (ℓ, i) of
+the vertices. Therefore, the shortest path can be found by processing the vertices along this topological
+ordering, which can be done in O(h2 · n) time by using, e.g., Bellman-Ford algorithm for DAGs that runs
+in O(|V ji | + |E ji |) time. The complexity of the pre-processing for obtaining the optimal switching costs
+10
+
+v0ji
+14
+
+4
+
+4
+
+J1
+
+16
+2
+
+6
+
+13
+
+44
+
+4
+
+6
+
+14
+
+12
+
+6
+2
+
+0
+
+24
+40
+
+50
+
+56
+
+66
+
+80
+
+344 350
+
+78
+308
+
+72
+
+37
+8
+
+6
+
+2
+9
+
+4
+
+9
+
+9
+
+1
+
+0
+19
+
+9
+
+1
+
+1
+21
+
+4
+
+0
+
+2
+
+3
+
+1
+20
+
+7
+19
+
+5
+
+10
+
+1
+
+4
+
+7
+
+18
+
+104
+
+8
+29
+
+4
+24
+
+2
+
+2
+21
+
+128
+116
+
+14
+
+36
+8
+
+2
+
+320
+25 262 2
+88
+0
+236
+25 2
+66
+2
+4
+116 40
+2
+120 2
+58 05
+15
+112 1 6 244
+148 44
+13
+6
+
+34
+0
+
+10
+
+6
+
+31
+
+97
+
+7
+10
+
+0
+
+6
+22
+
+1
+
+10
+
+0
+
+13
+
+336 362
+
+3
+3
+334 46 72
+
+0
+
+22
+
+4
+
+9
+
+40
+44
+24
+
+4
+19
+
+8
+
+8
+
+1
+
+1
+
+11
+
+334
+
+4
+
+4
+
+9
+8
+
+324
+
+1
+
+26 2
+25
+6 92
+4
+1
+240 1
+50 62
+13
+6 18
+16
+2
+16
+8
+48 15
+4
+52
+
+10
+
+12
+
+58
+
+60
+
+28
+
+52
+
+9
+2
+
+1
+1
+24
+32
+
+9
+
+36
+
+8
+
+34
+
+116
+
+13
+
+7
+
+J3
+
+3
+1
+
+5
+
+J2
+
+0
+
+15
+
+4
+
+ji
+vn+1
+
+Figure 4: Example job-interval graph.
+
+by SPACES is O(h2 · |S| · (|S| + log h + log |S|)) (for non-negative energy costs c, see Appendix A for
+more details). Hence, when added up, this represents an improvement over the job-interval graph proposed
+P
+in Aghelinejad et al. (2019), where finding the shortest path takes O(h2 · Jj ∈J pj ), since here we avoid
+the pseudo-polynomial factor in terms of the processing times. Also, note that since the graph is acyclic,
+we can still handle instances with negative energy costs as these are encapsulated inside weights wji of the
+job-interval graph.
+4.2. The branching strategy and the lower bound
+B&B-SPACES progressively constructs the jobs sequence π. In each node of the search tree, B&BSPACES keeps the current partial job sequence π
+b : {1, . . . , |Jb|} → Jb for some jobs subset Jb ⊆ J . The
+algorithm branches on the remaining un-fixed jobs J \ Jb, i.e., a new branch is created by appending one of
+the remaining jobs to the end of π
+b. To break the symmetries arising from the jobs having equal processing
+times, only one branch per unique remaining processing time is created in each node. To understand the
+branching, see an example of a branching subtree in Fig. 5 corresponding to the example in Section 2 with
+11
+
+three jobs J1 , J2 , J3 with processing times {1, 2, 4}, respectively.
+The lower bound for each node of the branching tree is computed using the method for a fixed sequence
+utilizing the job-interval graph described in Section 4.1. Let π
+b : {1, . . . , |Jb|} → Jb be the partial job sequence
+in a search tree node for some jobs subset Jb ⊆ J . To compute the lower bound, a new set of jobs J lb is
+created by splitting the remaining un-fixed jobs into unit processing times jobs, i.e.,
+J lb = Jb ∪ {Jj1 : j ∈ {1, . . . ,
+
+X
+
+pj ′ }} ,
+
+(4.8)
+
+Jj ′ ∈J \Jb
+
+where Jj1 is a new job with unit processing time. From J lb , a jobs sequence π
+blb is defined as follows
+π
+blb (ℓ) =
+
+
+π
+b(ℓ)
+
+ℓ ≤ |Jb|,
+
+J 1
+
+|Jb| < ℓ ≤ |J lb |.
+
+ℓ−|Jb|
+
+(4.9)
+
+π lb ) in the search tree node is then obtained by running the method from SecThe lower bound lb = cTEC (b
+tion 4.1 on jobs sequence π
+blb . See an example of the branching tree with computed lower bounds values in
+Fig. 5. The tree is traversed in a depth-first search, starting with the leftmost child. At the leaves of the
+search tree, we obtain a feasible solution with the objective value equal to ub, representing an upper bound
+on the optimal objective value that is used to prune subtrees with the lower bound lb ≥ ub. The following
+proposition formally states the lower bound.
+Proposition 1. Let π
+b : {1, . . . , |Jb|} → Jb be a partial sequence of jobs Jb ⊆ J , and π
+blb be the relaxed
+sequence defined by (4.9). Then, for any permutation π : {1, . . . , |J |} → J satisfying π(ℓ) = π
+b(ℓ), ∀ℓ ∈
+{1, . . . , |Jb|} it holds that cTEC (π) ≥ cTEC (b
+π lb ).
+Later in Section 4.3, we will prove a slightly stronger version of this proposition.
+Implementation remarks. The computation of the lower bound between the nodes can be performed efficiently using only a two-dimensional array of the costs. The rows of the array are called levels, and the array
+P
+contains Jj ∈J pj levels. The number of columns corresponds to |I proc |. Each element of the array can be
+seen as a corresponding vertex from the set V ji of the job-interval graph, where each job has a processing
+time of 1.
+When a job Jj ∈ J \ Jb is appended to the end of the π
+b in a search tree node, the levels
+P
+P
+{ J ′ ∈Jb pj ′ , . . . , pj + J ′ ∈Jb pj ′ } are joined together, i.e., as if the edges in the job-interval graph bej
+
+j
+
+tween these levels were removed. On the other hand, on backtracking from a node, the levels are split, i.e.,
+as if the edges in the job-interval graph between these levels are included again. For the better utilization
+of the data structures, i.e., no copies of the memory-intensive objects, the B&B-SPACES is implemented as
+a depth-first search.
+12
+
+lb = 339
+
+1
+lb = 339
+
+4
+
+lb = 339
+
+2
+lb = 339
+
+2
+
+4
+
+1
+
+lb = 364
+
+4
+
+lb = 360
+
+lb = 339
+
+2
+
+4
+
+1
+
+2
+
+lb = 342
+
+4
+
+1
+
+lb = 353
+
+lb = 342
+
+ub = 353 (J1 , J2 , J3 )
+
+ub = 342 (J2 , J1 , J3 )
+
+2
+
+1
+
+Figure 5: Branch-and-bound tree with lower bound π
+blb . The numbers on the edges correspond to the processing time of the
+job selected during the branching.
+
+gcd = 1
+lb = 339
+
+1
+gcd = 2
+lb = 353
+
+2
+
+2
+
+4
+
+gcd = 1
+lb = 339
+
+4
+
+1
+
+gcd = 4
+lb = 353
+
+gcd = 1
+lb = 360
+
+4
+
+1
+
+gcd = 4
+lb = 342
+
+4
+
+2
+
+2
+
+gcd = 1
+lb = 342
+
+4
+
+1
+
+gcd = ∅
+lb = 353
+
+gcd = ∅
+lb = 342
+
+ub = 353 (J1 , J2 , J3 )
+
+ub = 342 (J2 , J1 , J3 )
+
+2
+
+1
+
+lb improved with gcd of the unfixed jobs. Bounds that were improved with
+Figure 6: Branch-and-bound with lower bound π
+bgcd
+
+respect to Fig. 5 are highlighted in a rectangle.
+
+13
+
+4.3. Tightening the Lower Bound for Non-coprime Processing Times
+The lower bound introduced in Section 4.2 relies on the relaxation of the non-preemptive jobs into a set
+of jobs with unit processing times. Since these jobs are interchangeable, they can be scheduled optimally
+using the job-interval graph under an arbitrary permutation. The idea for improving this lower bound builds
+on the observation that particular sets of un-fixed jobs J \ Jb can be relaxed into jobs with processing times
+greater than one, thus improving the relaxation. We say that a set of positive integers is non-coprime if
+their greatest common divisor is greater than 1. In this section, we explain how a tighter lower bound for
+jobs having non-coprime processing times can be obtained.
+The idea of obtaining a tighter lower bound is similar to the one of cTEC (b
+π lb ). Let J \ Jb be a set of
+un-fixed jobs in some node of the search tree. Further, let
+gcd(J \ Jb) = gcd({pj ′ : Jj ′ ∈ J \ Jb})
+be the greatest common divisor of processing times of all un-fixed jobs. We define a set of jobs
+X
+
+lb
+Jgcd
+= Jb ∪ {Jjgcd : j ∈ {1, . . . , gcd(J \ Jb)−1 ·
+
+pj ′ }} ,
+
+(4.10)
+
+Jj ′ ∈J \Jb
+lb
+lb
+where Jjgcd is a new job with processing time equal to gcd(J \ Jb). Finally, the sequence π
+bgcd
+of jobs Jgcd
+
+is defined similarly as (4.9), that is
+
+lb
+π
+bgcd
+=
+
+
+
+π
+b(ℓ)
+
+ℓ ≤ |Jb|,
+
+
+J gcd b
+
+lb
+|Jb| < ℓ ≤ |Jgcd
+|.
+
+ℓ−|J |
+
+(4.11)
+
+Finally, a lower bound on TEC with respect to the partial solution Jb is obtained by solving the problem
+lb
+lb
+with the set of jobs Jgcd
+under sequence π
+bgcd
+on job-interval graph by a procedure given in Section 4.1.
+lb
+Proposition 2. Let π
+b : {1, . . . , |Jb|} → Jb be a partial sequence of jobs Jb ⊆ J , and π
+blb , π
+bgcd
+be the
+
+relaxed sequences defined by (4.9) and (4.11). Then, for any permutation π : {1, . . . , |J |} → J satisfying
+(a)
+
+(b)
+
+lb
+π(ℓ) = π
+b(ℓ), ∀ℓ ∈ {1, . . . , |Jb|} it holds that cTEC (π) ≥ cTEC (b
+πgcd
+) ≥ cTEC (b
+π lb ) with inequality (b) being
+
+strict for some inputs.
+lb
+Proof. The inequality (a) follows from the observation that Jgcd
+represents the problem that relaxes on the
+lb
+condition of non-preemptive jobs. To show cTEC (b
+πgcd
+) is indeed a lower bound on cTEC (π), one needs to
+lb
+ensure that sequence π
+bgcd
+is the optimal solution of the relaxed problem, that is whether
+lb
+π
+bgcd
+∈ arg
+
+min
+
+lb )
+π ′ ∈Π(Jgcd
+
+cTEC (π ′ ),
+
+lb
+lb
+lb
+) is the set of all permutations of jobs Jgcd
+. Focusing on the unfixed part of the jobs Jgcd
+\ Jb,
+where Π(Jgcd
+
+one can see that all jobs Jjgcd are identical with processing time equal to gcd(J \ Jb). Thus, all unfixed
+14
+
+jobs are completely interchangeable. Therefore, we can employ the method from Section 4.1 applied to a
+job-interval graph with a fixed sequence to obtain the optimal solution of the relaxed problem.
+Similarly, for inequality (b), sequence π
+blb can be seen as an optimal solution of a relaxed problem with
+lb
+Jgcd
+into unit-processing time jobs Jj1 and the same arguments as above apply. To see why the inequality (b)
+
+is strict for some instances (namely the ones with short sequences of intervals with low costs) when gcd > 1,
+see, e.g., example branching trees in Fig. 5 and Fig. 6. An illustrative example would consider an instance
+where gcd = 2, with one interval i having cost significantly smaller than its neighborhood intervals, i.e.,
+min{ci−1 , ci+1 } ≫ ci . The unit processing time lower bound π
+blb would exploit cheap interval i, whereas
+lb
+π
+bgcd
+avoids it, leading to a stronger bound.
+
+4.4. Bin-packing Primal Heuristic
+In order to find a good upper bound ub as soon as possible, so-called primal heuristics are often used
+during the search. These heuristics try to reconstruct a feasible solution early in the search tree (possibly
+in each node of the tree), hoping to further prune the branches that do not contain any better solution.
+In B&B-SPACES, we introduce a similar idea based on the observation that the solution to the relaxed
+problem can be, in some cases, used to recover a solution for the original problem that does not preempt
+the jobs. In such cases, the cost of the recovered solution matches the lower bound value, efficiently pruning
+the search subtree.
+In each node of the search tree, we first compute a lower bound for either jobs sequence given by π
+blb or
+lb
+using the method described in Section 4.2. From the solution of the relaxed instance, we extract the
+π
+bgcd
+
+maximal sequences of consecutive intervals during which the machine operates in the proc state. Let us
+denote these sequences by (Λ1 , Λ2 , . . . , Λk , . . . , Λn(bπlb ) ), where Λk ⊆ I proc and n(b
+π lb ) is the number of these
+lb
+maximal sequences in the optimal solution of the relaxed problem for π
+blb (or π
+bgcd
+). Now, we may formulate
+
+the following PBin-Pack bin-packing problem:
+PBin-Pack problem. Given the maximal processing intervals sequences (Λ1 , . . . , Λk , . . . , Λn(bπlb ) ) and given
+the jobs J , find a partition of J into disjoint sets J1 , . . . , Jk , . . . , Jn(bπlb ) such that
+∀k ∈ {1, . . . , n(b
+π lb )} :
+
+X
+
+pj ≤ |Λk | ,
+
+(4.12)
+
+Jj ∈Jk
+
+where |Λk | is the length of k-th sequence of consecutive processing intervals.
+The PBin-Pack problem resembles the decision version of a bin-packing problem with unequal bin sizes,
+which is known to be NP-complete. If the PBin-Pack problem instance is solved in a node of the branch and
+bound tree and is feasible, we obtain a feasible solution to 1, TOU| states |TEC with the objective value ub.
+The ub value is the total energy cost of that solution and is equal to the lower bound cTEC (b
+π lb ). Therefore,
+15
+
+gcd = 1
+lb = 339
+blocks: 3, 3, 1
+
+1
+
+gcd = 2
+lb = 353
+blocks: 2, 4
+
+2
+gcd = 1
+lb = 339
+blocks: 3, 3, 1
+
+4
+gcd = 1
+lb = 360
+
+ub = 353
+
+2
+
+4
+
+1
+
+gcd = 4
+lb = 342
+blocks: 2, 5
+
+4
+
+1
+
+2
+
+gcd = 1
+lb = 342
+
+ub = 342
+
+4
+
+2
+
+4
+
+1
+
+2
+
+1
+
+Figure 7: Branch-and-bound tree with the bin-packing primal heuristic. Feasible solutions are found earlier in the search tree.
+
+the whole sub-tree rooted in the current node can be pruned since the lower bound may only increase
+within the sub-tree. On the other hand, if the PBin-Pack problem is not solved, the B&B-SPACES continues
+branching.
+Example 3: Consider the node highlighted by a green rectangle in the branch and bound tree in Fig. 7.
+When computing a lower bound for the unfixed job with original processing times {1,4} relaxed into five
+unit-sized jobs Jj1 since gcd {1, 4} = 1. The shortest path on the job-interval graph from Section 4.1 leads to
+a solution considering the optimal switching behavior
+Ω⋆ (1, 20) = ((off, off), (off, off), (off, off), (off, proc), (proc, proc), (proc, proc), (proc, off),
+(off, proc), (proc, proc), (proc, proc), (proc, idle), (idle, proc), (proc, off), (off, off))
+with the cost of 339. This induces an instance of PBin-Pack problem with (Λ1 , Λ2 , Λ3 ) having |Λ1 | = 3,
+|Λ2 | = 3 and |Λ3 | = 1. Such an instance is infeasible. Thus, branching continues with the sequence (J2 , J1 ),
+where gcd of unfixed jobs is 4. Computing the lower bound at this node, i.e., the optimal solution for sequence
+lb
+π
+bgcd
+, yields a relaxed solution with blocks |Λ1 | = 2 and |Λ2 | = 5 (identical to the one shown in Fig. 1), which
+
+can be used to pack all jobs with processing times {1, 2, 4}, producing a feasible solution with cT EC equal to
+lb
+ub = 342, matching a lower bound value cTEC (b
+πgcd
+).
+
+Implementation remarks. The packing problem PBin-Pack can be tackled by any standard approach, including
+the heuristics or the exact algorithms. In our case, we solve PBin-Pack using IBM CP Optimizer with a single
+Pack global constraint. Since the bin-packing problem is NP-complete in general, the time limit has to be
+set for the solver to avoid stalling, although in practice, such problems are solved quickly.
+
+16
+
+4.5. Initial Heuristic based on the Blocks Found in the Root
+B&B-SPACES algorithm can initialized with an arbitrary feasible solution, allowing it to prune unpromising branches earlier in the tree. We propose a heuristic algorithm that provides such a feasible solution based
+on the root node relaxation performed by the lower bound calculation described in Section 4.3.
+The heuristic algorithm works on the following premise. Consider that the relaxation of the problem
+is solved in the root node, i.e., a lower bound sequence π
+blb is computed. At each node, we attempt to
+solve the PBin-Pack problem, aiming to pack the jobs within the set of consecutive processing intervals
+(Λ1 , Λ2 , . . . , Λn(bπlb ) ) that were computed for the relaxed solution π
+blb . If such a solution is found, then its
+objective value matches cTEC (b
+π lb ), and the problem is already solved at the root node. If this is not the
+case, then the set of intervals (Λ1 , Λ2 , . . . , Λn(bπlb ) ) cannot pack the jobs J and thus represents an infeasible
+instance of the PBin-Pack problem. Therefore, one could attempt to enlarge some of the processing intervals
+to accommodate all the jobs J , hoping that if the enlargement is done in a sensitive way, then the resulting
+packing should lead to a solution of a similar quality as the optimal solution found for the relaxed problem.
+We treat the enlargement of the original bins (Λ1 , Λ2 , . . . , Λn(bπlb ) ) as an optimization problem that we call
+the Bin-Finding problem:
+PBin-Find problem. Given block sizes b1 , . . . , bk solve the following ILP problem:
+min z
+
+(4.13)
+
+subject to
+z ≥ bi − si , ∀i ∈ {1, . . . , k}
+
+(4.14)
+
+z ≥ si − bi , ∀i ∈ {1, . . . , k}
+X
+si =
+xi,j · pj , ∀i ∈ {1, . . . , k}
+
+(4.15)
+(4.16)
+
+j∈J
+k
+X
+
+xi,j = 1, ∀j ∈ J
+
+(4.17)
+
+i=1
+
+where
+z ∈ R,
+
+(4.18)
+
+si ∈ R≥0 ∀i ∈ {1, . . . , k},
+
+(4.19)
+
+xi,j ∈ {0, 1} ∀i ∈ {1, . . . , k}, ∀j ∈ J .
+
+(4.20)
+
+The model assigns the jobs to blocks such that the maximal difference between the suggested block size bi
+and enlarged block size si found is minimized. Variable si represents the new size of the block i, considering
+all jobs Jj with xi,j = 1. To compute an initial upper bound for the B&B-SPACES, we use lengths of
+processing intervals |Λ1 |, . . . , |Λn(bπlb ) | as block sizes b1 , . . . , bn(bπlb ) obtained from the relaxed solution π
+blb
+17
+
+computed in the root node. This way, we obtain new ‘aggregated jobs’, which greatly reduce the size of the
+problem that can be then solved efficiently by finding an optimal schedule of aggregated jobs with processing
+times s1 , . . . , sn(bπlb ) using the job-interval graph from Section 4.1 under the sequence (1, . . . , n(b
+π lb )).
+
+5. Experiments
+In this section, we perform numerical experiments to evaluate the efficiency of the proposed B&BSPACES introduced above. Specifically, in Section 5.1, we compare B&B-SPACES with the ILP model
+of Aghelinejad et al. (2018) that does not exploit optimal state switching described in Appendix A and the
+former state-of-the-art ILP model introduced in Benedikt et al. (2020). Furthermore, in Section 5.2, we
+design larger and more complex instances with historical energy price profiles, and we investigate the effect
+of the different groups of the processing times.
+The experiments were conducted on Intel Xeon Silver 4110 CPU 2.10 GHz processor with 100 GB of
+RAM. The construction of the ILP models is done in Python 3.7, and the models are solved using the
+Gurobi solver. The algorithm for optimal state switching is written in C# while B&B-SPACES algorithm
+is written in C++. Please note that only the construction of the ILP model is performed in Python, whose
+runtime is negligible, while the actual solution of the model is carried out using the C++ code of the Gurobi
+solver. Furthermore, the C# implementation of the optimal state switching problem uses a Just-in-Time
+(JIT) compiler, so its performance is close to the native code.
+5.1. Comparison to the state-of-the-art
+In this experiment, we compare our B&B-SPACES algorithm with two former state-of-the-art ILP models. The first model in this comparison is ILP-REF proposed by Aghelinejad et al. (2018), which is the
+former state-of-the-art model that does not use pre-processing techniques described in Appendix A. Later,
+an ILP model utilizing the interval-state graph for pre-processing, denoted as ILP-SPACES, was coined
+by Benedikt et al. (2020) and currently represents the state-of-the-art solution method.
+For the comparison, we used instances with two different machine state diagrams. First, the NOSBY
+(i.e., no stand-by mode, depicted in Fig. 2) instances were proposed by Shrouf et al. (2014) and correspond to the state diagrams without a standby mode. Second, more complex instances with two different
+stand-by modes are denoted as TWOSBY, containing a total of 5 states (Benedikt et al., 2020, p. 12). For
+each type of machine state diagram, we generate instances with n ∈ {150, 170, 190} jobs, as this is roughly
+the frontier of the limit of efficient computations of ILP models ILP-REF (Aghelinejad et al., 2018) and
+ILP-SPACES (Benedikt et al., 2020). The scheme for the generation of the dataset follows standard benchmarks (Shrouf et al., 2014; Aghelinejad et al., 2018), i.e., processing times being drawn from the discrete
+uniform distribution pj ∼ U[1, 5] and the energy costs in each interval follows ci ∼ U[1, 10] distribution.
+18
+
+Table 1: Comparison of upper bound ub, lower bound lb and runtime t between the algorithms.
+Machine state transition diagram: NOSBY
+Instance
+
+ILP-REF (Aghelinejad et al., 2018)
+
+ILP-SPACES (Benedikt et al., 2020)
+
+n
+
+h
+
+ub [-]
+
+lb [-]
+
+t [s]
+
+ub [-]
+
+lb [-]
+
+t [s]
+
+ub [-]
+
+lb [-]
+
+t [s]
+
+t [s]
+
+150
+150
+150
+150
+170
+170
+170
+170
+190
+190
+190
+190
+
+527
+647
+767
+888
+650
+799
+948
+1 097
+757
+930
+1 104
+1 277
+
+8 582
+8 726
+8 557
+8 976
+10 596
+10 794
+10 940
+11 189
+12 555
+12 882
+12 791
+12 757
+
+8 567
+8 247
+7 787
+6 780
+9 628
+8 832
+8 343
+8 124
+11 206
+10 521
+9 949
+0
+
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+
+8 582
+8 409
+8 132
+8 078
+10 068
+9 820
+9 637
+9 620
+12 008
+11 758
+11 611
+11 465
+
+8 582
+8 409
+8 132
+8 078
+10 068
+9 820
+9 637
+9 620
+12 008
+11 758
+11 611
+11 465
+
+188
+279
+619
+521
+289
+939
+822
+1 281
+243
+951
+3 095
+1 319
+
+8 582
+8 409
+8 132
+8 078
+10 068
+9 820
+9 637
+9 620
+12 008
+11 758
+11 611
+11 465
+
+8 582
+8 409
+8 132
+8 078
+10 068
+9 820
+9 637
+9 620
+12 008
+11 758
+11 611
+11 465
+
+0.6
+0.9
+0.8
+1.1
+0.7
+0.8
+1.7
+2.4
+0.7
+1.1
+2.4
+2.0
+
+1.0
+2.9
+5.5
+9.1
+2.3
+4.6
+9.3
+13.4
+3.9
+6.9
+13.3
+22.7
+
+1.3
+0.00
+
+7.9
+
+Average time [s]:
+Average optimality gap [%]:
+
+>3600
+7.58
+
+B&B-SPACES
+
+879
+0.00
+
+P-P
+
+Machine state transition diagram: TWOSBY
+Instance
+
+ILP-REF (Aghelinejad et al., 2018)
+
+ILP-SPACES (Benedikt et al., 2020)
+
+n
+
+h
+
+ub [-]
+
+lb [-]
+
+t [s]
+
+ub [-]
+
+lb [-]
+
+t [s]
+
+ub [-]
+
+lb [-]
+
+t [s]
+
+t [s]
+
+150
+150
+150
+150
+170
+170
+170
+170
+190
+190
+190
+190
+
+529
+649
+769
+890
+651
+799
+948
+1 096
+756
+929
+1 102
+1 275
+
+21 910
+29 425
+37 764
+43 929
+27 862
+39 095
+46 083
+53 177
+38 471
+46 319
+53 751
+61 547
+
+21 562
+20 685
+18 140
+16 799
+25 015
+21 981
+20 709
+20 091
+27 984
+26 166
+24 630
+0
+
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+TLR
+
+21 910
+21 821
+21 353
+21 266
+25 807
+25 518
+25 279
+25 279
+30 563
+30 224
+30 224
+30 071
+
+21 910
+21 821
+21 353
+21 266
+25 807
+25 518
+25 279
+25 279
+30 563
+30 224
+30 224
+30 071
+
+133
+705
+957
+718
+811
+1 250
+2 925
+2 088
+808
+1 086
+2 050
+2 490
+
+21 910
+21 821
+21 353
+21 266
+25 807
+25 518
+25 279
+25 279
+30 563
+30 224
+30 224
+30 071
+
+21 910
+21 821
+21 353
+21 266
+25 807
+25 518
+25 279
+25 279
+30 563
+30 224
+30 224
+30 071
+
+0.9
+1.2
+1.3
+1.4
+0.8
+1.1
+2.2
+2.0
+0.9
+2.3
+1.9
+4.5
+
+1.1
+3.1
+5.2
+8.5
+2.6
+5.0
+8.5
+14.1
+4.2
+7.5
+13.6
+23.7
+
+1.7
+0.00
+
+8.1
+
+Average time [s]:
+Average optimality gap [%]:
+
+>3600
+34.23
+
+1 335
+0.00
+
+B&B-SPACES
+
+Note that even though processing times pj may seem very small, they, in fact, represent the number of
+intervals that are typically 15 minutes long, thus resembling a realistic benchmark. The number of intervals
+
+
+P
+I = {1, 2, . . . , h} in each instance is given as λ · T (off, proc) + j∈J pj + T (proc, off) where the term
+inside the brackets represents a lower bound on horizon length h (measured in the number of equidistant
+intervals) and λ ∈ {1.3, 1.6, 1.9, 2.2} is a scaling factor to inflate the scheduling horizon and to provide a
+room for optimization.
+The results are reported in Table 1. Each row corresponds to one problem instance. In the first column
+Instance, we report the specific parameters of the particular instance, and the following three columns
+account for the state-of-the-art methods included in the comparison. The last column P-P denotes the
+time spent in the pre-processing step involving the shortest path algorithm on the interval-state graph, as
+19
+
+P-P
+
+described in Appendix A. This time, although negligible, needs to be included in the runtimes of algorithms
+ILP-SPACES and B&B-SPACES as these two utilize the pre-processing step. The time limit for one instance
+was set to 3 600 s, TLR stands for the time limit reached. Optimal bound values are denoted in bold.
+The results clearly demonstrate the power of the pre-processing step—for the NOSBY state transition diagram, the model ILP-REF (Aghelinejad et al., 2018) cannot solve the considered instances up to optimality,
+reaching an average proved optimality gap 7.58%, whereas the algorithms ILP-SPACES and B&B-SPACES
+utilizing the pre-processing (P-P) solve all instances up to optimality. More significantly, the number of
+states |S| in the machine state transition diagram heavily affects the performance of ILP-REF. For example,
+in instances TWOSBY, the average optimality gap of ILP-REF increases to 34.23%, while the other algorithms are still able to solve all instances up to optimality within the time limit. However, it can be seen that
+compiling all possible state transitions into the optimal switching problem slightly increases the complexity
+of the resulting problem instance, reflected in increased runtime of ILP-SPACES wheres B&B-SPACES is
+largely unaffected.
+Comparing the runtimes, it can be seen that our proposed algorithm B&B-SPACES clearly improves on
+the result of ILP-SPACES about a factor of 10-100×. This demonstrates the efficiency of utilizing the binpacking structure of the problem, heavily exploited by B&B-SPACES. However, we note that the benchmark
+results reveal that, in fact, the existing strategy for dataset generation does not provide instances that are
+challenging enough since all of the instances were solved in less than 10 s by B&B-SPACES. Therefore, in the
+following sections, we focus on understanding which combination of instance parameters makes the problem
+difficult to solve, and we explore the empirical complexity of the instances utilizing real-life energy prices.
+5.2. Processing time groups with real energy costs
+In this section, we study the effect of different groups of jobs’ processing times on the computational
+times required by ILP-SPACES model and B&B-SPACES algorithm. In Section 5.1, we worked with the
+standard benchmark instances that assume the set of possible processing times is {1, 2, 3, 4, 5} (Shrouf et al.,
+2014). Here, we also test different groups of processing times, for example, all odd {2, 4, 6, 8, 10}, two primes
+{3, 7} or primes with unit job {1, 2, 3, 5, 7}. All tested processing time groups can be seen in Table 2. The
+state diagram of the resource used is TWOSBY (i.e., two stand-by states, five states in total, see description
+in Section 5.1). In addition, we also use real energy (electricity) prices extracted from the independent
+market operator (OTE) in the Czech Republic. A part of such profile that was used is shown in Fig. 8.
+The aggregated results for all instances with a fixed number of jobs n and processing time groups
+can be seen in Table 2. First, note that ILP model ILP-SPACES solves all instances with n = 50 jobs
+up to optimality but cannot solve all instances with n = 100 jobs. This also shows that former standard
+benchmarks used in Section 5.1 were not that challenging since there ILP-SPACES was able to solve instances
+with n = 190. Next, the results also suggest that the set of jobs’ processing times has a significant effect
+20
+
+cost ci [CZK]
+
+2,500
+2,000
+1,500
+1,000
+Fri 12AM
+
+Sat 12AM
+
+interval i [-]
+Figure 8: Example of a 48-hour part of the energy profile with real electricity costs.
+
+on the complexity of the instances, even for ILP-SPACES. For example, with n = 100 jobs, all instances
+with pj ∈ {2, 4} were solved up to optimality, wheres for pj ∈ {3, 7} just 7 out of 20. The computational
+times of B&B-SPACES remain almost unaffected, except the group of processing times {8, 10} with n ∈
+{150, 200} jobs, where 10 instances could not be solved up to the optimality. This surprising difficulty of
+these instances is also reflected in the performance of ILP-SPACES that could not find a feasible solution
+for any instance with pj ∈ {8, 10}. The detailed look on the instances where B&B-SPACES could not prove
+the optimality is given in Table 3. There, for each specific unsolved instance, we see the best objective
+found ub, best proven lower bound lb, and a number of expanded nodes by B&B-SPACES. In all cases, the
+found solutions are typically provably within 0.02% of the optimality. In any case, the observed difficulty of
+these instances is quite remarkable—for example, in instance id=348, the absolute gap between the proven
+lower bound and the best solution found was only 19 units of cost. We assume that one of the sources of
+the difficulty would be the fact that {8, 10} are two of the larger processing times used; thus, the relaxation
+procedure in lower bound computation from Section 4.3 has larger relaxation gap on average, even though
+gcd{8, 10} = 2 > 1. On the other hand, instances with pj ∈ {1, 2, . . . , 10} were solved up to the optimality
+even when gcd{1, 2, . . . , 10} = 1. It appears that these instances are, in fact, easier since larger variability in
+processing times allows us to solve the PBin-Pack problem involved in primal upper bound computation more
+frequently, thus obtaining primal solutions matching the spaces produced by the lower bound procedure and
+closing the search subtrees, which is a phenomenon described further in the following section.
+5.3. Instance hardness
+The varying difficulty of instances influenced by the specific processing time group revealed in Table 2
+motivates us to study average-case instance complexity in more detail. We created a new set of instances
+under the same protocol as in Section 5.2, however this time with n ∈ {100, 150, 200} and the following
+new groups of processing times: {9, 10}, {8, 9, 10}, {8, 9}, {7, 8, 9, 10}, {7, 8}, {10}, {7, 9}, {1, 2, 10}. For each
+value of n and a processing time group, we generated 20 instances. The resulting runtimes of B&B-SPACES
+with a time limit of 10 minutes are displayed in Fig. 9 with the logaritmic scale of the vertical axis. Each
+21
+
+Table 2: Comparison between ILP-SPACES and B&B-SPACES with respect to different processing times groups and numbers
+of jobs; t denotes the average runtime, #o is the number of optimally solved instances, #s is the number of instances for which
+a solution was found but was not proven optimal, and gap is the optimality gap for instances counted in #s column; P-P
+denotes the pre-processing used for both compared methods.
+Instance
+
+ILP-SPACES (Benedikt et al., 2020)
+
+n
+
+processing times
+
+t [s]
+
+#o [-]
+
+#s [-]
+
+gap [%]
+
+t [s]
+
+#o [-]
+
+#s [-]
+
+gap [%]
+
+t [s]
+
+50
+
+{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+{1, 2, 3, 5, 7}
+{2, 4, 6, 8, 10}
+{2, 4}
+{3, 5, 6, 7}
+{3, 7}
+{8, 10}
+{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+{1, 2, 3, 5, 7}
+{2, 4, 6, 8, 10}
+{2, 4}
+{3, 5, 6, 7}
+{3, 7}
+{8, 10}
+{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+{1, 2, 3, 5, 7}
+{2, 4, 6, 8, 10}
+{2, 4}
+{3, 5, 6, 7}
+{3, 7}
+{8, 10}
+{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+{1, 2, 3, 5, 7}
+{2, 4, 6, 8, 10}
+{2, 4}
+{3, 5, 6, 7}
+{3, 7}
+{8, 10}
+
+79.13
+21.05
+52.72
+6.31
+46.00
+46.17
+77.35
+444.72
+134.42
+315.68
+136.14
+471.05
+483.35
+525.80
+543.10
+466.84
+514.14
+278.49
+539.66
+581.41
+TLR
+TLR
+565.26
+577.29
+425.80
+576.54
+TLR
+TLR
+
+20
+20
+20
+20
+20
+20
+20
+11
+20
+17
+20
+9
+7
+5
+4
+9
+8
+14
+4
+2
+0
+0
+2
+1
+12
+1
+0
+0
+
+0
+0
+0
+0
+0
+0
+0
+9
+0
+2
+0
+11
+13
+15
+11
+11
+12
+6
+11
+18
+0
+7
+18
+3
+8
+15
+19
+0
+
+–
+–
+–
+–
+–
+–
+–
+0.16
+–
+0.01
+–
+0.19
+0.16
+0.07
+1.23
+0.10
+0.29
+0.03
+0.85
+0.29
+–
+7.66
+0.61
+9.39
+0.15
+2.74
+1.32
+–
+
+0.21
+0.18
+0.21
+0.18
+0.24
+0.24
+0.33
+0.48
+0.29
+0.48
+0.24
+0.44
+0.40
+0.89
+0.76
+0.43
+0.91
+0.40
+0.73
+0.69
+143.74
+1.30
+0.61
+1.46
+0.52
+1.17
+1.09
+132.99
+
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+20
+15
+20
+20
+20
+20
+20
+20
+15
+
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+0
+5
+0
+0
+0
+0
+0
+0
+5
+
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+–
+0.02
+–
+–
+–
+–
+–
+–
+0.02
+
+0.4
+0.1
+0.5
+0.1
+0.4
+0.3
+1.6
+3.0
+0.8
+3.7
+0.5
+2.9
+2.5
+10.6
+7.9
+3.1
+10.4
+1.8
+6.8
+6.1
+31.8
+21.1
+5.3
+25.2
+3.7
+19.7
+17.7
+78.7
+
+100
+
+150
+
+200
+
+B&B-SPACES
+
+P-P
+
+color represents one group of processing times, where all 60 instances belonging to each group are ordered
+with the increasing length of the horizon h, i.e., the number of intervals.
+Under visual inspection, the dependence of the runtime on the length of the horizon h can be seen in
+the form of a staircase function. This is due to how the instances are generated, i.e., h = 1.3 times the sum
+of all processing times. Thus, the three steps visible in each group correspond to instances with n = 100,
+150, and 200 jobs. However, when focusing on the instance group containing processing times 8, 9 and 10,
+we observe more frequently the sudden spikes in the runtime with the greatest intensity around processing
+time group {8, 9, 10}. The exact proportion of the instances that were not solved to the optimality (i.e.,
+time limit reached – TLR) is shown in Fig. 10.
+It appears to us that this phenomenon has an explanation following from a bin-packing structure of the
+problem. The real-life energy price profiles share a structure with more or less periodically repeating areas
+with lower average costs, interleaved by areas with intervals having higher average costs, as can be seen
+22
+
+Table 3: Detailed view the instances that were not solved by B&B-SPACES to optimality.
+
+time [s]
+
+Instance
+
+B&B-SPACES
+
+id
+
+n
+
+proc. times
+
+292
+320
+348
+376
+404
+432
+460
+488
+516
+544
+
+150
+150
+150
+150
+150
+200
+200
+200
+200
+200
+
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+{8, 10}
+
+ub [-]
+
+lb [-]
+
+gap [%]
+
+#nodes [-]
+
+12 352 437
+12 330 437
+12 288 440
+12 330 437
+12 074 142
+16 413 555
+16 293 105
+16 433 290
+16 123 137
+16 554 373
+
+12 349 218
+12 328 008
+12 288 421
+12 328 008
+12 071 713
+16 411 549
+16 290 676
+16 430 776
+16 120 217
+16 551 944
+
+0.026
+0.020
+0.000
+0.020
+0.020
+0.012
+0.015
+0.015
+0.018
+0.015
+
+57 457
+60 355
+52 854
+61 988
+55 328
+27 259
+30 450
+20 572
+26 673
+25 287
+
+{1, 2, 10}
+{7, 8, 9, 10}
+{7, 9}
+{8, 9}
+{8, 9, 10}
+{9, 10}
+{10}
+
+102
+
+100
+
+{1, 2, 3}
+
+{7, 8, 9, 10}
+
+{7, 9}
+
+{8, 9}
+
+{8, 9, 10}
+
+{9, 10}
+
+{10}
+
+instance [-]
+Figure 9: Running times sorted by horizon length, split by processing time group for n ∈ {100, 150, 200} jobs.
+
+in Fig. 8. The algorithm that optimizes TEC avoids areas with high-priced intervals. Depending on the
+specific values of transition time and power functions of the machine, the solution switches between off-peak
+intervals, in which the resource is typically in proc state, and peak intervals, where the resource is often in
+idle/off states. The sets of consecutive intervals where the machine is in proc state then form bins, as it
+was introduced in Section 4.4. The combinatorial nature of the problem is then hidden within the task of
+how to fit jobs with given processing times into the bins. This aspect shows that the considered problem
+has deeper connections to number partitioning and bin packing problems.
+Instance hardness in the context of the average-case complexity of the number partition problem (NPP)
+was studied by Mertens (2003). Mertens shows that NPP admits a sharp phase transition of the instances,
+where we quickly transition from instances that almost surely have a perfect partitioning to instances that
+very likely do not have one, which influences the empirical runtime of the algorithm. This transition
+is not directly related to the amount of the number itself, but to the specific structure of the numbers.
+Paradoxically, even larger problems may become easier to solve. Our problem better matches the similar
+analysis for parallel machine scheduling problem by Bauke et al. (2003). For P ||Cmax or bin-packing problem,
+it is notoriously known that, e.g., the presence of short jobs (items) leads to easier instances since it is easy
+
+23
+
+10
+5
+
+{10}
+
+{9, 10}
+
+{8, 9, 10}
+
+{8, 9}
+
+{7, 9}
+
+{7, 8, 9, 10}
+
+0
+{1, 2, 10}
+
+TLR percentage [%]
+
+15
+
+processing time group
+Figure 10: Proportion of instances that were not solved up to the optimality.
+
+to fill up the remaining space by the short jobs. The same applies to our problem — having larger variability
+in jobs’ processing times, especially combined with the presence of short jobs, increases the probability of
+perfect partitions, i.e., situations where primal upper bound heuristic based on a packing problem matches
+the bins proposed by the lower bound, allowing to close nodes in the search tree earlier. In our setting, the
+phase transition appears to be around the group {8, 9, 10}, where the probability of encountering a hard
+instance increases. On the opposite extreme, when all processing times are equal (i.e., the group pj ∈ {10}),
+all jobs become interchangeable, and since gcd = 10, the problem instances are easy again. Therefore,
+we conclude that the number of jobs n in the instance is not the main limiting factor of B&B-SPACES
+algorithm, but rather it is the presence of long jobs with low processing time variability within the group.
+
+6. Conclusion
+In this work, we addressed the problem of total energy cost minimization on a single machine with different states under time-of-use tariffs. This problem, arising in production scheduling with energy-intensive
+manufacturing operations, plays a critical role in reducing energy bills. The importance of the problem
+was recognized by Shrouf et al. (2014), who coined the problem with several authors to follow (Aghelinejad
+et al., 2018, 2019; Benedikt et al., 2020) to follow. The breakthrough came when Benedikt et al. (2020)
+showed that one can simplify state transitions of the machine by solving the optimal switching problem and
+use precomputed switching between any pair of intervals inside an ILP model without an explicit modeling.
+In this work, we took this idea one step further. We realized that the spaces suggested by the optimal
+switching problem could be seen as a kind of bins to which we allocate the jobs. This led to the design
+of a branch-and-bound algorithm B&B-SPACES that utilizes the bin packing structure by applying initial
+and primal heuristics and also a lower bound computation based on the polynomial-time solution of the
+problem for the fixed order of the jobs. We improved on the approach proposed in Aghelinejad et al. (2019)
+by incorporating only the optimal switching costs, leading to a much smaller job-interval graph, therefore
+24
+
+enabling fast lower bound computations. These insights and improvements led to achieving a new stateof-the-art performance on the standard benchmark set by two orders of magnitude, enabling the solutions
+of larger instances than ever possible. Furthermore, we have observed that the standard benchmark set is
+extremely well-suited for the bin packing structure utilized by B&B-SPACES; thus, we also designed new,
+much harder benchmarks considering true historical energy price profiles.
+The increased efficiency of B&B-SPACES algorithm enables its use in practice where we can solve
+problems with horizon well over a week considering a non-trivial number of jobs quickly, enabling online
+recalculation of the schedule when energy prices change. Nevertheless, we acknowledge one of the limitations
+of our approach, which is that the considered problem statement and our algorithm assume that the energy
+requirements of the jobs are proportional to their processing time, i.e., the uniform energy consumption.
+However, we believe that our approach might be extended to support these considerations—lower bound
+procedure could be recovered for non-uniform energy consumption (Fang et al., 2016; Aghelinejad et al.,
+2019), but the bigger challenge seems to be designing an efficient primal heuristic such that it frequently
+finds a solution matching the lower bound, which is the key to the efficiency of B&B-SPACES.
+We believe that other research may benefit from our results as well. For example, the idea of exposing
+the bin packing structure of the problem via the optimal switching problem and lower bound computation,
+suggesting the spaces that act as bins for the jobs, is particularly useful. Considering how well the bin
+packing problem is solvable in practice, similar problems could be accelerated as well, even when the packing
+structure of the problem is not exposed at first sight. Moreover, our idea of incorporating optimal switching
+costs into the job-interval graph led to improved complexity of the algorithm for the fixed ordering of the
+jobs, which could be applied to similar problems.
+Finally, we outline some ideas for the extension of the problem and the methods proposed.
+First, if the jobs have release times and deadlines, these would be reflected by pruning some of the edges
+in the job-interval graph, but some adjustments should be made to the lower and upper bound computation.
+Moreover, it seems to us that our approach could be extended to model machines with multiple dedicated
+processing states and job families, where each family could be processed only in its dedicated state (e.g.,
+workpieces requiring different hardening temperatures). These would likely require extending the intervalstate graph, but they also would introduce extra edges and vertices into the job-interval graph to model
+transitions between pairs of different processing states.
+
+Acknowledgement
+This work was co-funded by the European Union under the project ROBOPROX (reg. no.
+CZ.02.01.01/00/22 008/0004590) and the Grant Agency of the Czech Republic under the Project GACR
+25-17904S. Moreover, we would like to thank Theodor Krocan for his insightful comments.
+25
+
+Appendix
+A. Computation of the Optimal State Switching
+This section describes the problem of pre-computing the optimal switching between the machine states
+in given intervals while minimizing the power consumption introduced in Benedikt et al. (2020). After
+introducing the problem, we summarize the algorithm that computes the optimal switching costs in a
+polynomial time by finding the shortest paths in the so-called interval-state graph.
+Optimal switching problem. Given the state s in interval i and state s′ in interval i′ such that i < i′ , the
+problem finds the optimal transitions from (s, i) to (s′ , i′ ) over all possible states S with respect to the
+energy cost c. Formally, it represents the following optimization problem
+′
+iX
+−1
+
+min
+
+Ωi+1 ,Ωi+2 ,...,Ωi′ −1
+
+cj · P (Ωj ).
+
+(A1)
+
+j=i+1
+
+such that ((s, s), Ωi+1 , Ωi+2 , . . . , Ωi′ −1 , (s′ , s′ )) form permissible transitions according to transition time function T .
+Interval-state graph. It was shown that the optimal switching problem can be solved in polynomial time
+by finding the shortest path in an interval-state graph (Benedikt et al., 2020). The interval-state graph
+Gis is defined by a triplet Gis = (V is , E is , wis ), where V is is the set of vertices, E is is the set of edges and
+wis : E is → Z are the weights of the edges. Given time horizon h, the sets V is and E is are given as:
+is
+is
+is
+V is = {v1,off
+, vh+1,off
+} ∪ {vi,s
+: i ∈ I \ {1}, s ∈ S},
+
+(A2)
+
+is
+is
+is
+is
+E is = {(v1,off
+, v2,off
+)} ∪ {(vh,off
+, vh+1,off
+)}
+
+(A3)
+
+is
+is
+′
+′
+′
+∪ {(vi,s
+, vi+T
+(s,s′ ),s′ ) : s, s ∈ S, i ∈ I \ {1}, T (s, s ) ̸= ∞, (i − 1) + T (s, s ) ≤ h − 1} .
+is
+Each vertex vi,s
+∈ V is represents that at the beginning of interval i the machine is in state s. Each edge
+is
+(vi,s
+, viis′ ,s′ ) ∈ E is corresponds to the direct transition from state s to state s′ that lasts T (s, s′ ) = (i′ − i)
+
+intervals. The condition (i − 1) + T (s, s′ ) ≤ h − 1 ensures, that only transitions completing at most at the
+is
+beginning of interval h are present in the interval-state graph. Weight of edge (vi,s
+, viis′ ,s′ ) ∈ E is is defined as
+
+is
+wis (vi,s
+, viis′ ,s′ ) =
+
+′
+iX
+−1
+
+cj · P (s, s′ ) ,
+
+(A4)
+
+j=i
+
+i.e., the total energy cost of the corresponding transition with respect to the costs of energy in intervals.
+The optimal transitions from (s, i) to (s′ , i′ ) with respect to the energy cost can be obtained by finding
+is
+the shortest path from vi+1,s
+to viis′ ,s′ in the interval-state graph. We denote the cost of the optimal switching
+
+by function lis : V is × V is → Z ∪ {∞}, where the value ∞ is used whenever the path between the two vertices
+does not exist. Basically, the interval-state graph is a layered graph that can be seen as a time expansion
+26
+
+of the transition time function T along the horizon defined by intervals I, with weights derived from power
+function P and energy cost c. See (Benedikt et al., 2020) for an example of an interval-state graph.
+Example 4: Consider an interval-state graph representing problem instance from Fig. 1 with a transition
+graph from Example 1. For example, the optimal transition of the machine from proc state at interval 8 to
+proc state at interval 14 looks as follows. At first, the machine is turned off (during 9), then it remains off
+(during intervals 10 and 11), and finally, it is turned on (intervals 12, 13). The cost for this whole path is
+is
+is
+lis (v9,proc
+, v14,proc
+) = 76.
+
+The values of lis can be computed using the Floyd-Warshall algorithm that computes all-pairs shortest
+path between n vertices of the given directed graph in O(n3 ) steps by iteratively updating the length of
+the shortest path between every pair of vertices i and j, using only vertices {1, 2, . . . , k}. When k = n, the
+algorithm finishes with the optimal values of all-pairs shortest path. The interval-state graph Gis has at
+most h · |S| vertices, where h is the length of the horizon (number of considered intervals) and |S|, is the
+number of the states of the resource; therefore, the total running time can be upper bounded as O(h3 · |S|3 ).
+However, only some of the switchings can be considered for scheduling decisions. Since all the jobs need
+to be scheduled in the proc state of the machine, the optimal switchings have to be resolved only in (i)
+between two consecutive intervals with proc; (ii) between the first off and the first proc; and (iii) the last
+proc and the last off. The cost of the switchings between s, s′ ∈ {off, proc}2 are specified by function
+c⋆ : I 2 → Z defined as
+
+is
+
+lis (vi+1,proc
+, viis′ ,proc ) i > 1, i′ < h
+
+
+
+is
+c⋆ (i, i′ ) = lis (v2,off
+, viis′ ,proc )
+i = 1, i′ < h
+
+
+
+ is is
+is
+
+l (vi+1,proc , vh,off
+) i > 1, i′ = h
+
+case (i)
+case (ii)
+
+(A5)
+
+case (iii)
+
+for each pair of intervals i < i′ . The vector of states corresponding to c⋆ (i, i′ ), i.e., the optimal switching
+behavior of the machine between i and i′ , is denoted by Ω⋆ (i, i′ ).
+Example 4 (continued): For the illustration, see the Fig. 1. There, intervals {9, 10, . . . , 13} represent
+is
+is
+the space between two jobs J2 , J1 with cost c⋆ (8, 14) = lis (v9,proc
+, v14,proc
+) = 76.
+
+The optimal switching behavior is
+Ω⋆ (8, 14) = ((proc, off), (off, off), (off, off), (off, proc), (off, proc)).
+
+(A6)
+
+Values of c⋆ can be computed efficiently using the algorithm called the Shortest Path Algorithm for Cost
+Efficient Switchings (SPACES) (Benedikt et al., 2020). For each value i ∈ I \ {h}, SPACES computes all
+is
+is
+values c⋆ (i, i + 1), c⋆ (i, i + 2), . . . , c⋆ (i, h) by computing the shortest paths tree from vi+1,proc
+(or v2,off
+if
+
+i = 1) to all other vertices in the interval-state graph. If all weights wis happen to be nonnegative (e.g.,
+when energy cost c ≥ 0), then the shortest path tree is obtained with the Dijkstra algorithm that runs in
+
+27
+
+O(|E is | + |V is | · log |V is |). Since the Dijkstra algorithm is started h times, the total complexity is
+O(h · (|E is | + |V is | · log |V is |)) = O(h2 · |S| · (|S| + log h + log |S|)) .
+
+(A7)
+
+In case of the presence of negative weights wis , one has to resort to the Bellman-Ford algorithm with
+complexity O(|V is | · |E is |), thus in total, the complexity would be O(h3 · |S|3 ).
+
+References
+Abikarram, J. B., McConky, K., & Proano, R. (2019). Energy cost minimization for unrelated parallel machine scheduling
+under real time and demand charge pricing. Journal of Cleaner Production, 208 , 232 – 242. doi:https://doi.org/10.1016/
+j.jclepro.2018.10.048.
+Aghelinejad, M., Ouazene, Y., & Yalaoui, A. (2018). Production scheduling optimisation with machine state and time-dependent
+energy costs. International Journal of Production Research, 56 , 5558–5575. doi:10.1080/00207543.2017.1414969.
+Aghelinejad, M. et al. (2019). Complexity analysis of energy-efficient single machine scheduling problems. Operations Research
+Perspectives, 6 , 100105. URL: https://www.sciencedirect.com/science/article/pii/S2214716018301702. doi:https://
+doi.org/10.1016/j.orp.2019.100105.
+Aghelinejad,
+
+M. M.,
+
+Masmoudi,
+
+O.,
+
+Ouazene,
+
+Y.,
+
+& Yalaoui,
+
+A. (2020a).
+
+Multi-state two-machine permu-
+
+tation flow shop scheduling optimisation with time-dependent energy costs.
+
+IFAC-PapersOnLine, 53 , 11156–
+
+11161. URL: https://www.sciencedirect.com/science/article/pii/S2405896320305711. doi:https://doi.org/10.1016/
+j.ifacol.2020.12.291. 21st IFAC World Congress.
+Aghelinejad, M. M., Ouazene, Y., & Yalaoui, A. (2017). Preemptive scheduling of a single machine with finite states to minimize
+energy costs. In A. Sforza, & C. Sterle (Eds.), Optimization and Decision Science: Methodologies and Applications (pp.
+591–599). Cham: Springer International Publishing.
+Aghelinejad, M. M., Ouazene, Y., & Yalaoui, A. (2020b). Energy-cost-aware flow-shop scheduling systems with state-dependent
+energy consumptions. In IOP Conference Series: Earth and Environmental Science (p. 012163). IOP Publishing volume
+463.
+Aghelinejad, M. M., Ouazene, Y., & Yalaoui, A. (2020c). Energy-cost-aware flow-shop scheduling systems with state-dependent
+energy consumptions. IOP Conference Series: Earth and Environmental Science, 463 , 012163. URL: https://dx.doi.org/
+10.1088/1755-1315/463/1/012163. doi:10.1088/1755-1315/463/1/012163.
+Anghinolfi, D., Paolucci, M., & Ronco, R. (2021). A bi-objective heuristic approach for green identical parallel machine
+scheduling. European Journal of Operational Research, 289 , 416–434.
+Bauke, H., Mertens, S., & Engel, A. (2003). Phase transition in multiprocessor scheduling. Physical review letters, 90 , 158701.
+Benedikt, O., Alikoç, B., Šůcha, P., Čelikovský, S., & Hanzálek, Z. (2021).
+
+A polynomial-time scheduling approach to
+
+minimise idle energy consumption: An application to an industrial furnace. Computers & Operations Research, 128 ,
+105167. URL: https://www.sciencedirect.com/science/article/pii/S0305054820302847. doi:https://doi.org/10.1016/
+j.cor.2020.105167.
+Benedikt, O., Módos, I., & Hanzálek, Z. (2020). Power of pre-processing: production scheduling with variable energy pricing
+and power-saving states. Constraints, 25 , 300–318.
+Bukata, L., Šůcha, P., & Hanzálek, Z. (2019). Optimizing energy consumption of robotic cells by a branch & bound algorithm. Computers & Operations Research, 102 , 52–66. URL: https://www.sciencedirect.com/science/article/pii/
+S0305054818302533. doi:https://doi.org/10.1016/j.cor.2018.09.012.
+Catanzaro, D., Pesenti, R., & Ronco, R. (2023). Job scheduling under time-of-use energy tariffs for sustainable manufacturing:
+
+28
+
+a survey. European Journal of Operational Research, 308 , 1091–1109. URL: https://www.sciencedirect.com/science/
+article/pii/S0377221723000474. doi:https://doi.org/10.1016/j.ejor.2023.01.029.
+Chen, B., & Zhang, X. (2019). Scheduling with time-of-use costs. European Journal of Operational Research, 274 , 900–908.
+URL: https://www.sciencedirect.com/science/article/pii/S0377221718309275. doi:https://doi.org/10.1016/j.ejor.
+2018.11.002.
+Chen, L., Megow, N., Rischke, R., Stougie, L., & Verschae, J. (2021). Optimal algorithms for scheduling under time-of-use
+tariffs. Annals of Operations Research, 304 , 85–107.
+Cheng, J., Chu, F., & Zhou, M. (2018). An improved model for parallel machine scheduling under time-of-use electricity price.
+IEEE Transactions on Automation Science and Engineering, 15 , 896–899. doi:10.1109/TASE.2016.2631491.
+Ding, J., Schulz, S., Shen, L., Buscher, U., & Lü, Z. (2021). Energy aware scheduling in flexible flow shops with hybrid particle
+swarm optimization. Computers & Operations Research, 125 , 105088. URL: https://www.sciencedirect.com/science/
+article/pii/S0305054820302057. doi:https://doi.org/10.1016/j.cor.2020.105088.
+Eid, C., Koliou, E., Valles, M., Reneses, J., & Hakvoort, R. (2016). Time-based pricing and electricity demand response:
+Existing barriers and next steps. Utilities Policy, 40 , 15–25.
+Fang, K. et al. (2016). Scheduling on a single machine under time-of-use electricity tariffs. Annals of Operations Research,
+238 , 199–227. URL: https://doi.org/10.1007/s10479-015-2003-5. doi:10.1007/s10479-015-2003-5.
+Fatih Tasgetiren, M., Öztop, H., Eliiyi, U., Eliiyi, D. T., & Pan, Q.-K. (2018). Energy-efficient single machine total weighted
+tardiness problem with sequence-dependent setup times. In Intelligent Computing Theories and Application: 14th International Conference, ICIC 2018, Wuhan, China, August 15-18, 2018, Proceedings, Part I 14 (pp. 746–758). Springer.
+Gaggero, M., Paolucci, M., & Ronco, R. (2023). Exact and heuristic solution approaches for energy-efficient identical parallel
+machine scheduling with time-of-use costs. European Journal of Operational Research, 311 , 845–866.
+Gnatowski, A., Rudy, J., & Idzikowski, R. (2022). Scheduling disjoint setups in a single-server permutation flow shop manufacturing process. Processes, 10 , 1837.
+Grus, J., Hanen, C., & Hanzálek., Z. (2024). Packing-inspired algorithms for periodic scheduling problems with harmonic
+periods. In Proceedings of the 13th International Conference on Operations Research and Enterprise Systems - ICORES
+(pp. 101–112). INSTICC SciTePress. doi:10.5220/0012325800003639.
+Ho, M. H., Hnaien, F., & Dugardin, F. (2022). Exact method to optimize the total electricity cost in two-machine permutation
+flow shop scheduling problem under time-of-use tariff. Computers & Operations Research, 144 , 105788.
+Li, W., & Ou, J. (2024). Approximation algorithms for scheduling parallel machines with an energy constraint in green
+manufacturing. European Journal of Operational Research, 314 , 882–893. URL: https://www.sciencedirect.com/science/
+article/pii/S0377221723008470. doi:https://doi.org/10.1016/j.ejor.2023.11.008.
+Maris, G., & Flouros, F. (2021). The green deal, national energy and climate plans in Europe: Member States’ compliance
+and strategies. Administrative Sciences, 11 , 75.
+Mertens, S. (2003).
+
+The easiest hard problem: Number partitioning.
+
+URL: https://arxiv.org/abs/cond-mat/0310317.
+
+arXiv:cond-mat/0310317.
+Minh Hung, H., Hnaien, F., & Dugardin, F. (2020). Electricity cost minimisation for optimal makespan solution in flow shop
+scheduling under time-of-use tariffs. International Journal of Production Research, (pp. 1–27). doi:10.1080/00207543.2020.
+1715504.
+Mouzon, G., Yildirim, M. B., & Twomey, J. (2007). Operational methods for minimization of energy consumption of manufacturing equipment. International Journal of Production Research, 45 , 4247–4271. doi:10.1080/00207540701450013.
+Nattaf, M., Artigues, C., & Lopez, P. (2017). Cumulative scheduling with variable task profiles and concave piecewise linear
+processing rate functions. Constraints, 22 , 530–547.
+Ngueveu, S. U., Artigues, C., Absi, N., & Kedad-Sidhoum, S. (2022). Lower and upper bounds for scheduling energy-consuming
+
+29
+
+tasks with storage resources and piecewise linear costs. Journal of Heuristics, 28 , 93–120.
+Park, M.-J., & Ham, A. (2022). Energy-aware flexible job shop scheduling under time-of-use pricing. International Journal of
+Production Economics, 248 , 108507.
+Pei, Z., Wan, M., Jiang, Z.-Z., Wang, Z., & Dai, X. (2021). An approximation algorithm for unrelated parallel machine
+scheduling under tou electricity tariffs. IEEE Transactions on Automation Science and Engineering, 18 , 743–756. doi:10.
+1109/TASE.2020.2995078.
+Rego, M. F., Pinto, J. C. E., Cota, L. P., & Souza, M. J. (2022). A mathematical formulation and an nsga-ii algorithm for
+minimizing the makespan and energy cost under time-of-use electricity price in an unrelated parallel machine scheduling.
+PeerJ Computer Science, 8 , e844.
+Rocholl, J., Mönch, L., & Fowler, J. (2020). Bi-criteria parallel batch machine scheduling to minimize total weighted tardiness
+and electricity cost. Journal of Business Economics, 90 , 1345–1381.
+Shrouf, F., Ordieres-Meré, J., Garcı́a-Sánchez, A., & Ortega-Mier, M. (2014). Optimizing the production scheduling of a single
+machine to minimize total energy consumption costs. Journal of Cleaner Production, 67 , 197 – 207. doi:10.1016/j.jclepro.
+2013.12.024.
+Tian, Z., & Zheng, L. (2024). Single machine parallel-batch scheduling under time-of-use electricity prices: New formulations
+and optimisation approaches. European Journal of Operational Research, 312 , 512–524.
+Wan, G., & Qi, X. (2010). Scheduling with variable time slot costs. Naval Research Logistics (NRL), 57 , 159–171.
+Wang, L. et al. (2020). Multi-objective optimization based on decomposition for flexible job shop scheduling under time-of-use
+electricity prices. Knowledge-Based Systems, 204 , 106177.
+Wu, P. et al. (2023). Energy-efficient single-machine scheduling with release dates under time-of-use electricity tariffs. Journal of Cleaner Production, 393 , 136228. URL: https://www.sciencedirect.com/science/article/pii/S0959652623003864.
+doi:https://doi.org/10.1016/j.jclepro.2023.136228.
+
+30
+
+

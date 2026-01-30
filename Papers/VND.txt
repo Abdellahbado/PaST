@@ -1,0 +1,1459 @@
+Computers & Operations Research 170 (2024) 106754
+Available online 2 July 2024
+0305-0548/© 2024 Elsevier Ltd. All rights are reserved, including those for text and data mining, AI training, and similar technologies.
+Contents lists available at ScienceDirect
+Computers and Operations Research
+journal homepage: www.elsevier.com/locate/cor
+Epsilon Oscillation Algorithm for the bi-objective green identical parallel
+machine scheduling problem
+Bassem Jarboui 
+a
+, Malek Masmoudi 
+b,
+∗
+, Mansour Eddaly 
+c
+a 
+Université Polytechnique Hauts-de-France, LAMIH, CNRS, UMR-8201, Valencienne, 59313, France
+b 
+University of Sharjah, College of Engineering, Sharjah, United Arab Emirates
+c 
+Department of Operations Management, College of Business and Economics, Qassim University, Buraydah, 52571, Kingdom of Saudi Arabia
+A R T I C L E I N F O
+Keywords:
+Scheduling
+Green
+Identical parallel machines
+Bi-objective optimization
+Epsilon oscillation
+Variable neighborhood descent
+Dynamic programming
+A B S T R A C T
+This paper addresses the bi-objective optimization problem of scheduling jobs on multiple identical parallel
+machines to minimize both makespan and total energy consumption. The problem can be denoted as
+𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣ 𝐶
+𝑚𝑎𝑥
+, 𝑇 𝐸𝐶. A Pipe Variable Neighborhood Descent approach with Dynamic Programming,
+employing an Epsilon Constraint method and incorporating an Epsilon Oscillation technique that consists
+of alternating between ascending and descending ways to vary the epsilon value. This technique improves
+the pareto front by exploring new search space. A comparison is provided between the proposed Epsilon
+Oscillation Algorithm (EOA) and the state-of-the-art solving techniques. The experimental results as well as the
+statistical tests show the significant superiority of the EOA, motivating its adaptation to solve other bi-objective
+scheduling problems.
+1. Introduction
+Decision makers must change and evolve their companies and op-
+erations to be able to survive on the market in the long term. In fact,
+today’s companies are experiencing high levels of change in terms of
+both internal and external pressures, described by PESTELE factors.
+The Global Risks Report (2022), that reveals the top risks facing the
+world, is dominated by environmental risks, mainly the climate change
+that encompasses global warming. Regarding the high importance of
+the sustainability, the Sustainable Development Report (2024) reviews
+progress made each year on the Sustainable Development Goals (17
+SDGs) since their adoption by the 193 UN Member States in 2015.
+To help researchers and institutions track and demonstrate progress
+towards the targets of the SDGs, the Elsevier has generated a set of
+Scopus queries related to each of the SDGs (Elsevier BV, 2019). Ac-
+cording to UNIDO (2024), the industry is the responsible for more than
+one third of global primary energy consumption and energy-related
+carbon dioxide emissions. These issues have increased the interest in
+actions aiming at improving energy efficiency in industry (Despeisse
+et al., 2012). Furthermore, improving energy efficiency in industry
+is one of the most cost-effective measures to help supply-constrained
+developing and emerging countries meet their increasing energy de-
+mand and loosen the link between economic growth and environmental
+degradation, such as climate change. To pursue energy efficiency,
+∗ 
+Corresponding author.
+E-mail addresses: mmasmoudi@sharjah.ac.ae, malek.masmoudi@univ-st-etienne.fr (M. Masmoudi).
+the industrials suppliers/retailers of energy work on transitioning to
+renewable and clean energy e.g. transition towards net-zero emission
+and decarbonization with the use of clean energy such as solar energy,
+hydrogen energy, in addition to offering optimal pricing to balance
+the demand i.e. varying price of energy according to the time of use
+(TOU) (Hu et al., 2018; Mori et al., 2011; Summerbell et al., 2017).
+The other industrials, consumers of energy, they work on innovat-
+ing and designing products and processes in respect to the energy
+consumption e.g. circular economy, in addition to developing new
+operational management approaches to reduce the energy consumption
+e.g. energy efficient scheduling for production, based on TOU costs
+(Chen and Zhang, 2019; Fang et al., 2013; Wang et al., 2018). Opti-
+mization of machine scheduling problems is one of the most critical
+issues in manufacturing and has been widely studied by researchers in
+Operations Research and Management Science. In the last few years,
+an increasing attention has been devoted to the adoption of energy-
+efficient scheduling approaches (Safarzadeh and Niaki, 2019; Wang
+et al., 2018; Anghinolfi et al., 2021; Fang et al., 2016; Zhou et al.,
+2018; Masmoudi et al., 2019; Li and Wang, 2022). The energy-efficient
+scheduling approaches are also called green scheduling approaches
+and are mainly related to two SDGs: energy efficiency (SDG7) and
+sustainable industrialization (SDG9). In this paper we deal with the
+green scheduling problem, and study the parallel machine scheduling
+https://doi.org/10.1016/j.cor.2024.106754
+Received 9 October 2023; Received in revised form 18 May 2024; Accepted 24 June 2024
+
+Computers and Operations Research 170 (2024) 106754
+2
+B. Jarboui et al.
+problem, considering identical machines and both makespan and en-
+ergy consumption as objectives to be minimized like in da Jiang and
+Wang (2020), Anghinolfi et al. (2021), Wang et al. (2018) and Wang
+et al. (2020b). Referred to the notation of Graham et al. (1979), each
+problem is denoted by the standard three-field notation 𝛼 ∣ 𝛽 ∣ 𝛾, while
+the first field 𝛼 describes the scheduling type, the second field 𝛽 is
+reserved for the information and conditions of scheduling, and the third
+field 𝛾 contains the performance criteria. The problem of green identical
+parallel scheduling problem is studied in Anghinolfi et al. (2021) and
+Wang et al. (2018) and denoted 𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶. Since both
+𝑃 𝑚 ∣∣ 𝐶𝑚𝑎𝑥 (Garey and Johnson, 1978) and 1 ∣∣ 𝑇 𝐸𝐶 (Chen and Zhang,
+2019) are strongly 𝑁 P-hard, the problem 𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶
+is strongly NP-hard as well (Wang et al., 2018, Ronco, 2022) An
+efficient Local search method enhanced by Dynamic programming is
+provided to solve the 𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶 problem. The benchmark
+instances of (Wang et all 2018) is considered for the experimentation.
+A comparison to the existing techniques (Anghinolfi et al., 2021; Wang
+et al., 2018) is provided, and numerical results show the superiority of
+our approach. The rest of the paper is organized as follows: Section 2
+contains a literature review of multi-objective energy-efficient schedul-
+ing, minimizing Cmax and TEC under TOU prices. Section 3 contains
+the problem description. Section 4 contains the provided algorithm.
+Section 5 contains the experiments and results analysis. Conclusions
+and perspectives are provided in Section 6.
+2. Literature review
+Energy-efficient scheduling under TOU prices has been widely in-
+vestigated in various scheduling environments: single machine schedul-
+ing (Che et al., 2016; Fang et al., 2016), parallel machine (Che et al.,
+2017; Zhou et al., 2018), flow shop (Badri et al., 2021), job shop (Kur-
+niawan et al., 2020), and flexible Jobshop (Gong et al., 2019; da Jiang
+and Wang, 2020). For more studies on energy-efficient scheduling,
+please refer to the review article of Li and Wang (2022).
+Ronco (2022) proposed a systematic classification of the literature
+of TOU scheduling distinguishing the problems that are easily repre-
+sentable with the three-field notation and solvable to optimality with a
+polynomial or a pseudo-polynomial time algorithm and others NP-hard,
+from those that contain particular characteristics such as technological
+features or unusual objective functions or have applicative problems
+inspired by a practical case study. Ronco (2022) highlighted that the
+𝑃 𝑚 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶 studied in this paper is NP-hard and belongs to the
+first class. We mention in what below some relevant works on the ex-
+tensive field of multi-objective energy-efficient scheduling, minimizing
+Cmax and TEC under TOU prices in general before focusing on our
+specific problem 𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶.
+Regarding the single-machine TOU scheduling problem, Cheng et al.
+(2014) provided a bi-objective MILP formulation for the NP-hard prob-
+lem 1 ∣ 𝑏𝑎𝑡𝑐ℎ(𝑏) ∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶. The authors developed an algorithm
+based on the epsilon-constraint method for multi-objective optimization
+that is based on solving a sequence of single-objective formulations
+of the original problems. Cheng et al. (2016) and Wu et al. (2021)
+dealt with the same problem and proposed a faster optimal epsilon-
+constraint algorithm and two new fast epsilon-constraint-based con-
+structive heuristics, respectively. Rubaiee and Yildirim (2019) dealt
+with the denoted 1 ∣ 𝑝𝑟𝑚𝑝 ∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶, and proposed a mixed-
+integer multiobjective mathematical programming model and several
+new holistic ant colony optimization algorithms. Zhou et al. (2018)
+considered a batch scheduling problem with release dates denoted 1 ∣
+𝑏𝑎𝑡𝑐ℎ(𝑏), 𝑟𝑗 ∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶, and provided a mathematical formulation and
+a hybrid multi-objective meta-heuristic algorithm.
+Wang et al. (2020a) provided a Discrete optimization model for
+permutation flow shop under time-of-use electricity tariffs denoted
+𝐹 𝑚 ∣ 𝑝𝑟𝑚𝑢 ∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶. The optimization model uses central moment
+method modeling to ensure the continuity of job-processing and the
+uniqueness of processing time points. Wang et al. (2020b), got Inspired
+by a real-world glass-ceramics production process, investigated a bi-
+criteria energy-efficient two-stage hybrid flow shop scheduling problem
+denoted 𝐻𝐹 𝑆, 𝑇 𝑂𝑈 ∣ 𝐵 ∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶, and proposed a mixed integer
+programming (MIP), based on which an augmented epsilon-constraint
+method is adopted to obtain the exact Pareto front. They also proposed
+a problem-tailored constructive heuristic method with local search
+strategy, a bi-objective tabu search algorithm and a bi-objective ant
+colony optimization.
+Li et al. (2018) provided a new mixed-integer linear programming
+to deal with the 𝐽 𝑚 ∣ 𝑏𝑎𝑡𝑐ℎ(𝑏) ∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶. da Jiang and Wang (2020)
+consider a flexible job shop denoted 𝐹 𝐽 𝑐 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶 and proposed
+a mixed integer programming model and a hybrid multi-objective
+evolutionary algorithm based on decomposition.
+Wu and Che (2019) studied an energy-efficient bi-objective unre-
+lated parallel machine scheduling problem to minimize both makespan
+and total energy consumption. They addressed an integrated energy-
+efficient scheduling problem of production and shipping. The prob-
+lem is modeled as a mixed-integer quadratic program, and consider-
+ing its complexity, a memetic algorithm is proposed to incorporate a
+knowledge-driven local search strategy with a balance between explo-
+ration and exploitation. Pei et al. (2021) tackled the unrelated parallel
+machines problem with multiple objectives 𝑅𝑚 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶. The au-
+thors first linearly combined the two objectives and provided a MINLP
+formulation for the resulting single objective problem; and exploited a
+relaxation of the problem to develop an approximate algorithm.
+To the best of our knowledge, Wang et al. (2018) is the first
+study on bi-objective green identical parallel machine scheduling un-
+der TOU prices, derived from a real-world automobile stamping die
+manufacturing. They extended the single-objective model in Che et al.
+(2017) to a bi-objective mixed integer programming for minimiz-
+ing TEC and makespan simultaneously, by introducing two variables
+and three constraints related with the completion time of jobs. An
+augmented epsilon-constraint method is adapted to obtain the exact
+Pareto front. The problem is NP-hard since it can be reduced to 𝑃 𝑚 ∣∣
+𝐶𝑚𝑎𝑥 (Garey and Johnson, 1978). Owing that, Wang et al. (2018)
+proposed two methods: a constructive heuristic method with a local
+search strategy and an application of the NSGA-II algorithm to obtain
+good approximate Pareto fronts in a reasonable computation time.
+Subsequently, Anghinolfi et al. (2021) addressed the same problem and
+developed an ad-hoc heuristic method. The first part of the method,
+called Split-Greedy heuristic, consists in an improved and refined
+version of the constructive heuristic proposed in Wang et al. (2018) and
+the second part, called Exchange Search, is a novel local search proce-
+dure aimed at improving the quality of the Pareto optimal solutions.
+To the best of our knowledge, these two papers contain the best and
+most recent solving techniques for 𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣ 𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶 problem.
+Although, this problem requires further investigation as the efficiency
+of the existing solving techniques is limited and need to be improved
+to solve real-world instances. Therefore, the same problem 𝑃 𝑚, 𝑇 𝑂𝑈 ∣∣
+𝐶𝑚𝑎𝑥, 𝑇 𝐸𝐶 will be considered in this study, and an Epsilon Oscillation
+Algorithm (EOA) combining an epsilon constraint exploration strategy
+with a Pipe Variable Neighborhood Descent (Pipe-VND) and Dynamic
+Programming (DP) is provided and compared with Anghinolfi et al.
+(2021), and Wang et al. (2018).
+3. Problem description
+The studied problem is about processing 𝑁 independent and non-
+preemptive jobs on 𝑚 identical parallel machines in a given  time
+periods. All jobs are available at time period 0. Each machine 𝑗 (𝑗 =
+1, 2, … , 𝑚) can only process one job at a time, and each job 𝑖 (𝑖 =
+1, 2, … , 𝑁) is composed of one operation to be processed on one ma-
+chine. The processing time 𝑝
+𝑖 
+of job 𝑖 is same on any machine. Let 𝑛
+𝑗 
+the
+set of jobs to be processed on machine 𝑗, and 𝜎
+𝑗 
+the sequence of these
+jobs. Let 𝑝
+𝑗 
+(𝑖) the processing time on the machine 𝑗 of the job in the 𝑖th
+position in the sequence 𝜎
+𝑗 
+. The sequence solution 𝜎 = 𝑈
+𝑗=1..𝑚
+𝜎
+𝑗 
+is the
+
+Computers and Operations Research 170 (2024) 106754
+3
+B. Jarboui et al.
+union of partial sequences 𝜎
+𝑗 
+of 𝑛
+𝑗 
+jobs to be processed on machine
+𝑗 (𝑗 = 1, 2, … , 𝑚). Let 𝑆
+𝑗 
+(𝑖) the starting time of the job located on
+the 𝑖th position in the sequence𝜎
+𝑗 
+. Each machine 𝑗 is associated with
+a fixed energy consumption rate 𝑒
+𝑗 
+; Due to TOU policy, each period
+𝑡 
+{1
+, 2, … , 𝑇 
+} 
+has a positive energy price 𝑐
+𝑡 
+(𝑡 = 1, 2, … , 𝑇 ) and the
+energy consumption cost associated with the processing of the job in
+the 𝑖th position in the sequence 𝜎
+𝑗 
+is equal to 𝑒
+𝑗 
+× 
+∑
+𝑆
+𝑗 
+(𝑖)+𝑝
+𝑗 
+(𝑖)−1
+𝑡=𝑆
+𝑗 
+(𝑖) 
+𝑐
+𝑡
+.
+The energy consumption when machine is idle can be ignored. In this
+paper, we consider the multiobjective problem to minimize both the
+makespan and the total energy cost simultaneously. The first objective
+function: total energy cost 𝑇 𝐸𝐶, based on TOU policy is defined as
+𝑇 𝐸𝐶 = 
+∑
+𝑗=𝑚
+𝑗=1 
+𝑒
+𝑗 
+× 
+∑
+𝑖∈𝜎
+𝑗
+∑
+𝑆
+𝑗 
+(𝑖)+𝑝
+𝑗 
+(𝑖)−1
+𝑡=𝑆
+𝑗 
+(𝑖) 
+𝑐
+𝑡
+, and the second objective func-
+tion: makespan 𝐶
+𝑚𝑎𝑥
+, is the maximum among the completion times of
+all jobs. An equivalent description of the problem is provided in Wang
+et al. (2018) and Anghinolfi et al. (2021).
+4. Proposed algorithm: Epsilon Oscillation Algorithm (EOA)
+The proposed approach is a Pipe-VND approach with DP employ-
+ing an epsilon constraint and incorporating an Epsilon Oscillation
+technique. This technique alternates between ascending and descend-
+ing methods to adjust the epsilon value systematically. This dynamic
+adjustment enables the generation of diverse Pareto fronts at each
+iteration. The Pipe-VND is the local search used to generate different
+sequences of jobs on machines, and the DP used to generate the optimal
+schedule respecting the sequence on each machine. We used the 𝜀-
+constrain to deal with two objectives TEC and makespan 𝐶
+𝑚𝑎𝑥
+. This
+latter is applied multiple times, alternating between the ascending and
+descending methods to adjust the epsilon value systematically. This
+dynamic adjustment enables the generation of diverse Pareto front
+at each iteration. To better explore the search space, a perturbation
+procedure is applied at each iteration, which is necessary to avoid
+revisiting the same solutions, and thus generate a better pareto front,
+the 𝜀-constrain procedure is applied multiple times. The pseudo code
+of the proposed EOA algorithm is given in Algorithm 1.
+Algorithm 1: Pseudo code of the proposed EOA algorithm
+Output: Set 𝑃 𝐹 of non dominated solutions
+1 𝑃 𝐹 = ∅;
+2 𝐿𝐵 = ⌈
+∑
+𝑛
+𝑖=1
+𝑝
+𝑖
+𝑚 
+⌉ and 𝑈 𝐵 = 𝑇 ;
+3 Generate the initial solution;
+4 Update 𝑃 𝐹 ;
+5 𝑖𝑡𝑒𝑟 = 1;
+6 repeat
+7 𝑤 = 1; //𝑤 ∶ 1 (ascending way) and −1 (descending way) ;
+8 𝜀 = 𝐿𝐵;
+9 repeat
+10 if 𝑖𝑡𝑒𝑟 > 1 then
+Perturbation procedure with DP;
+11 Pipe-VND procedure with DP;
+12 𝜀 = 𝜀 + 𝑤 × 𝛥 ;
+13 if 𝜀 > 𝑈 𝐵 then
+𝑤 = −1 and 𝜀 = 𝑈 𝐵 + 𝑤 × 𝛥 ;
+until 𝜀 < 𝐿𝐵;
+14 𝑖𝑡𝑒𝑟 + + ;
+until 𝑖𝑡𝑒𝑟 > 𝑖𝑡𝑒𝑟
+max
+;
+The components of the EAO algorithm: solution representation, ini-
+tial solution, dynamic programming, epsilon Oscillating, perturbation
+and Pipe-VND, are detailed in the following sections.
+4.1. Solution representation and initial solution
+The solution representation is a relevant issue when it comes to
+developing a metaheuristic, as strongly influences the applied encoding
+scheme. The sequence of jobs at each machine is the information
+required, and represents the input and the output of the metaheuristic.
+We propose a representation composed by a vector of 𝑚 sets 𝜎
+𝑗 
+, 𝑗 =
+1, 2, … , 𝑚, one set per machine. Each set contains a partial sequence of
+jobs, indicating the order in which they have to be processed on the
+given machine. We denote by 𝜎
+𝑗(𝑖)
+, 𝑗 = 1, 2, … , 𝑚 and 𝑖 = 1, 2, … , 𝑛
+𝑗 
+the
+job located at the position 𝑖 on machine 𝑗 where 𝑛
+𝑗 
+denotes the number
+of jobs assigned to machine 𝑗.
+The initial sequence is generated as follows: all the machines are
+empty in the beginning, i.e, 𝑛
+𝑗 
+= 0, 𝑗 = 1, 2, … , 𝑚. Then, each job is
+assigned randomly to a machine 𝑗 in the position 𝑛
+𝑗 
+if the capacity
+of the latter allows it, and then 𝑛
+𝑗 
+is updated. This procedure will be
+repeated until all the jobs are assigned. To get the initial allocation
+of jobs to time periods, we process the sequences on related machines
+without idle times.
+Let 𝜎 = [{1 → 9 → 11}
+ 
+, 
+{2
+ → 10 → 8 → 5}
+ 
+, 
+{3
+ → 7}
+ 
+, 
+{4
+ → 6}] be the
+initial sequence for an illustrative example with 4 machines and 11
+jobs. Fig. 1 shows the initial solution with 𝑇 𝐸𝐶 = 40 (in cost unit)
+and 𝐶
+𝑚𝑎𝑥 
+= 7 (in period unit).
+4.2. Dynamic programming
+The Dynamic Programming (DP) is an exact method based on the
+Bellman principle: ‘‘An optimal policy has the property that whatever
+the initial state and initial decision are, the remaining decisions must
+constitute an optimal policy with regard to the state resulting from the
+first decision’’ (Bellman, 1957). In our problem, the DP procedure is
+applied to find the optimal energy cost on each machine based on a
+given sequence of jobs assigned to it. The TEC of the whole problem is
+the sum of energy costs over all machines. Therefore, to show the DP
+procedure, we consider one machine and use the following notations:
+• 𝑛: Number of jobs assigned to the machine;
+• 𝐸𝑆(𝑖), 𝑆(𝑖) and 𝐿𝑆(𝑖): Earliest starting time, Starting time and
+Latest starting time, respectively, of the job located at the 𝑖th
+position regarding the sequence of jobs assigned to the machine;
+• 𝛺(𝑖): Set of possible starting times of the job located on the 𝑖th
+position in the machine, i.e., all values of 𝑆(𝑖) such that 𝐸𝑆(𝑖) ≤
+𝑆(𝑖) ≤ 𝐿𝑆(𝑖), while:
+𝐸𝑆(1) = 0, 𝐸𝑆(𝑖) =
+𝑖−1
+∑
+𝑘=1
+𝑝(𝑘), 𝑖 = 2, … , 𝑛 
+(1)
+𝐿𝑆(𝑖) = 𝜀 −
+𝑛
+∑
+𝑘=𝑖
+𝑝(𝑘) 𝑖 = 1, 2, … , 𝑛 
+(2)
+where 𝜀 is the latest completion time of all jobs
+• 𝑇 𝐸𝐶
+∗
+(𝑖, 𝑡): minimum total energy consumed by the jobs scheduled
+until the position 𝑖, when the job at position 𝑖 starts at 𝑡.
+The procedure proceeds recurrently from the job at the first position
+to the job at the last position. It selects for the job at position 𝑖 the
+starting time 𝑡 that provides the minimal energy cost 𝑇 𝐸𝐶
+∗
+(𝑖, 𝑡), using
+the following recurrence:
+𝑇 𝐸𝐶
+∗
+(0, 0) = 0;
+𝑇 𝐸𝐶
+∗
+(𝑖, 𝑡) = min
+{
+𝑇 𝐸𝐶
+∗
+(𝑖 − 1, 𝑡
+′
+) +
+𝑆(𝑖)+𝑝(𝑖)−1
+∑
+𝑡=𝑆(𝑖)
+𝑐
+𝑡
+|𝑡
+′ 
+< 𝑡, 𝑡 ∈ 𝛺(𝑖)
+}
+;
+𝑖 = 1, 2, … , 𝑛
+(3)
+The procedure provides the allocation of jobs to time periods that
+minimize the total energy cost 𝑇 𝐸𝐶
+∗
+(𝑛, 𝑡),
+
+Computers and Operations Research 170 (2024) 106754
+4
+B. Jarboui et al.
+Fig. 1. Illustrative example: Initial solution representation.
+Table 1
+Data for the example.
+Job 𝑖 2 5 8 10
+𝑝
+𝑖 
+1 3 1 2
+Position in the sequence 1 4 3 2
+Period 𝑡 1 2 3 4 5 6 7 8 9
+𝑐
+𝑡 
+1 1 2 2 1 2 3 2 1
+Table 2
+Dynamic programming procedure.
+stage 0 Job 2 min
+Periods 1 2 3
+1 1 2 1
+stage 1 Job 10 min
+Periods 2 3 4
+2 4 5 4 4
+3 – 5 4 4
+4 – – 5 5
+stage 2 Job 8 min
+Periods 4 5 6
+4 6 5 6 5
+5 – 5 6 5
+6 – – 7 7
+stage 3 Job 5 min
+Periods 5 6 7
+5 11 12 11 11
+6 – 12 11 11
+7 – – 13 13
+Illustrative example. Let consider the same illustrative example in
+Fig. 1. Given the partial sequence 𝜎 = {2 → 10 → 8 → 5}
+ 
+on machine 2,
+and additional data provided in Table 1, we show in Table 2 how the
+DP procedure is applied to generate the optimal allocation of sequence
+of jobs to time periods, and how the minimum TEC is obtained. The
+optimal solution for the partial sequence on machine 2 is highlighted
+in bold.
+Fig. 2 shows the optimal allocation of jobs to time periods for the
+initial sequence (generated using the DP on all machines) respecting
+𝑇 𝐸𝐶 objective function, with 𝑇 𝐸𝐶 = 38 (in cost unit) and 𝐶
+𝑚𝑎𝑥 
+= 9 (in
+period unit).
+4.3. Epsilon oscillating
+To minimize two objectives at the same time, one efficient way is to
+apply use of the 𝜀-constraint method. In the identical parallel-machine
+TOU scheduling problem, it is coherent to consider the TEC as the main
+objective and the makespan 𝐶
+𝑚𝑎𝑥 
+as a constraint. To find the set of
+the non dominated solutions of the problem, the process of minimizing
+the TEC is repeated for different values of 𝜀 gradually relaxing the
+makespan constraint. The set PF of non-dominated solutions form the
+pareto front. The 𝜀-constraint approach requires us to provide the upper
+and lower bounds of 𝐶
+𝑚𝑎𝑥 
+the objective that will be used. In the lower
+bound of the makespan is set to 𝐿𝐵 = ⌈
+∑
+𝑛
+𝑖=1
+𝑝
+𝑖
+𝑚 
+⌉ and the upper bound
+is 𝑈 𝐵 = 𝑇 . To cover the whole solution space, the value of 𝜀 varies
+between the 𝐿𝐵 and 𝑈 𝐵, in descending way or ascending way, by
+a 𝛥 value fixed to 1 since the minimum unit of change value of the
+makespan is one. The descending way consists of varying the 𝜀 value
+from 𝑈 𝐵 to 𝐿𝐵 by going down by 1 each time, and the ascending way
+consists of varying the 𝜀 value from 𝐿𝐵 to 𝑈 𝐵 by going up by 1 each
+time. A common approach used in practice is to restart the algorithm
+and consider a perturbation procedure to guarantee that the algorithm
+does not get stuck on the same local optima every time (Li, 2005).
+In fact, the called Multi-start strategy improves the performance of
+heuristics (Yu and Lin, 2014). The Epsilon Oscillating is a new concept
+that we present here, and consists of alternating the ascending way
+and descending ways 𝑛 times instead of using only one way 2𝑛 times.
+The Epsilon Oscillating Strategy is an advanced optimization technique
+used primarily in multi-objective optimization to effectively manage
+the trade-offs between competing objectives. This strategy involves
+periodically adjusting the emphasis on each objective by modifying
+epsilon 𝜖 values, which represent small allowable deviations for the
+objectives. Initially, one objective may be prioritized by assigning it
+a stricter epsilon value. Over time, these values are systematically
+oscillated, shifting the algorithm’s focus among objectives either cycli-
+cally or adaptively based on the solution’s performance. This dynamic
+adjustment allows the exploration of different regions of the solution
+space, aiding in avoiding local optima and fostering a diverse set
+of Pareto-optimal solutions. The process continues until a predefined
+stopping criterion is met, such as a certain number of iterations or a
+convergence threshold.
+Through the experimentation, the Epsilon Oscillating offers a better
+exploration of the pareto front, Nevertheless, in addition to the oscil-
+lating epsilon, the use of a perturbation procedure remains necessary
+starting from the second iteration of the Epsilon Oscillation to guaran-
+tee generating different pareto front at each iteration. The perturbation
+procedure considered in our algorithm is presented in the next section
+(see Table 3).
+4.4. Perturbation procedure
+The solution provided at each iteration of the Epsilon Oscillating
+procedure is subjected to a perturbation phase using some random
+moves. The perturbation is used as a diversification mechanism to
+prevent that the Epsilon oscillation does not generate the same pareto
+front at each iteration. During the perturbation phase, one machine and
+one position are randomly selected and the job located at the selected
+position is inserted in all possible positions among all other machines.
+This process is repeated a certain number of times (fixed to three in our
+case) to guarantee the diversification (Fig. 3).
+4.5. Pipe-VND procedure
+Variable neighborhood descent (VND) is a metaheuristic optimiza-
+tion algorithm that was first introduced by Mladenović and Hansen in
+
+Computers and Operations Research 170 (2024) 106754
+5
+B. Jarboui et al.
+Fig. 2. Illustrative example: optimal schedule for the initial sequence according to 𝑇 𝐸𝐶.
+Fig. 3. Perturbation procedure.
+Table 3
+Computational results for small instances.
+ins 𝑃 
+∗ 
+MOEA/D NSGA-III SGS-ES EOA
+Card Card IGD Card IGD Card IGD Card IGD
+1 32 30.00 0.0043 30.10 0.0038 32.00 0.0000 32.00 0.0000
+2 37 36.00 0.0090 36.00 0.0092 37.00 0.0018 37.00 0.0000
+3 14 12.20 0.0281 12.70 0.0288 14.20 0.0239 14.00 0.0000
+4 17 17.00 0.0010 17.00 0.0006 17.50 0.0004 17.00 0.0000
+5 15 16.00 0.0036 16.00 0.0036 15.00 0.0004 15.00 0.0000
+6 17 17.00 0.0023 17.00 0.0023 17.00 0.0024 17.00 0.0000
+7 27 27.00 0.0020 27.00 0.0020 27.00 0.0003 27.00 0.0000
+8 37 34.00 0.0046 34.00 0.0045 36.80 0.0013 37.00 0.0000
+9 22 23.00 0.0208 23.40 0.0198 23.30 0.0088 22.00 0.0000
+10 27 27.00 0.0068 27.00 0.0068 27.00 0.0014 27.00 0.0000
+11 28 26.00 0.0031 26.00 0.0031 28.00 0.0000 28.00 0.0000
+12 31 30.00 0.0058 30.00 0.0058 31.00 0.0028 31.00 0.0000
+13 30 30.00 0.0047 30.00 0.0038 30.00 0.0000 30.00 0.0000
+14 40 35.10 0.0072 35.20 0.0070 39.40 0.0019 40.00 0.0000
+15 37 36.00 0.0068 36.10 0.0067 36.50 0.0015 37.00 0.0000
+16 48 44.00 0.0066 43.70 0.0065 45.70 0.0013 48.00 0.0000
+17 21 21.00 0.0057 21.00 0.0057 21.20 0.0006 21.00 0.0000
+18 43 42.10 0.0120 42.00 0.0122 42.80 0.0063 43.00 0.0000
+19 21 21.00 0.0066 21.00 0.0066 20.90 0.0011 21.00 0.0000
+20 40 38.10 0.0075 39.50 0.0073 40.00 0.0000 40.00 0.0000
+21 24 22.00 0.0038 22.00 0.0038 24.00 0.0004 24.00 0.0000
+22 48 48.00 0.0031 47.80 0.0031 49.00 0.0001 48.00 0.0000
+23 35 33.00 0.0126 32.50 0.0126 35.00 0.0043 35.00 0.0000
+24 42 30.00 0.0087 30.00 0.0087 40.60 0.0019 42.00 0.0000
+25 13 13.00 0.0023 13.00 0.0017 13.00 0.0000 13.00 0.0000
+26 14 14.00 0.0005 14.00 0.0000 14.00 0.0000 14.00 0.0000
+27 9 9.00 0.0000 9.00 0.0000 9.00 0.0000 9.00 0.0000
+28 12 12.00 0.0000 12.00 0.0000 12.00 0.0000 12.00 0.0000
+29 6 6.00 0.0000 6.00 0.0000 6.00 0.0000 6.00 0.0000
+30 9 9.00 0.0000 9.00 0.0000 9.00 0.0000 9.00 0.0000
+Average 0.0060 0.0059 0.0021 0.0000
+1997 (Hansen and Mladenović, 2001), with the idea to escape local
+optima by systematically varying the neighborhoods. Pipe-VND has
+been considered as independent metaheuristic and combined with other
+metaheuristics to enhance their performances (Masmoudi et al., 2023;
+Brimberg et al., 2023). Pipe-VND algorithm examines a set of neigh-
+borhood operations sequentially, such us swapping or insertion moves,
+to explore the search area. If there is an improvement with respect
+to a neighborhood, the exploration continues in that neighborhood,
+Table 4
+CPU times (in s) for small instances.
+ins MIP SGS-ES EOA
+1 5.5390 0.0078 0.0100
+2 10.9800 0.0114 0.1300
+3 3.0620 0.0093 0.0400
+4 11.5170 0.0197 0.0000
+5 6.5380 0.0099 0.1300
+6 10.2230 0.0226 0.0800
+7 6.7180 0.0055 0.0300
+8 13.2710 0.0134 0.3400
+9 4.1010 0.0087 0.8000
+10 28.3040 0.0210 0.1300
+11 12.5770 0.0121 0.0500
+12 22.0210 0.0288 1.3500
+13 5.1190 0.0060 0.0600
+14 13.9760 0.0170 2.4200
+15 10.8840 0.0119 0.2900
+16 33.5990 0.0339 1.8700
+17 12.5390 0.0151 0.1100
+18 37.1280 0.0400 3.7200
+19 5.5510 0.0068 0.8800
+20 42.6370 0.0142 0.5500
+21 7.4410 0.0144 0.4600
+22 65.0460 0.0230 0.9900
+23 13.8730 0.0128 0.3800
+24 31.3870 0.0365 4.6500
+25 2.7050 0.0028 0.0000
+26 5.0450 0.0063 0.0100
+27 3.0710 0.0044 0.0000
+28 4.6290 0.0100 0.0100
+29 1.8440 0.0061 0.0000
+30 4.9150 0.0126 0.0000
+Average 14.5413 0.0148 0.6497
+otherwise, the exploration continues in the next neighborhood from the
+list. If no improvement is found after examining all neighborhoods, the
+P-VND algorithm terminates. Here are the three local search procedures
+considered sequentially in our P-VND:
+- Swap-intra local search (
+1
+). : Swap move of jobs positions (𝑖, 𝑙)
+on the same machine 𝑗 where 1 < 𝑖 < 𝑙 < 𝑛
+𝑗 
+(Fig. 4). This
+neighborhood structure focuses on making small, localized changes to a
+current solution to explore the solution space around it, with the aim of
+finding an improved solution. The effectiveness of the Swap-intra local
+
+Computers and Operations Research 170 (2024) 106754
+6
+B. Jarboui et al.
+Table 5
+Computational results for medium instances in terms of cardinality and inverted generational distance.
+ins Best MOEA/D NSGA-III SGS-ES EOA1 EOA2 EOA3
+Card Card IGD Card IGD Card IGD Card IGD Card IGD Card IGD
+31 51 50.00 0.0119 50.00 0.0119 45.40 0.0036 48 0.0059 48 0.0040 47 0.0032
+32 61 53.00 0.0122 52.90 0.0122 57.50 0.0024 60 0.0071 56 0.0030 57 0.0028
+33 60 57.00 0.0045 57.00 0.0045 59.60 0.0009 58 0.0033 59 0.0009 59 0.0009
+34 62 61.00 0.0133 61.00 0.0133 61.70 0.0013 62 0.0154 60 0.0058 60 0.0058
+35 37 36.00 0.0151 36.00 0.0151 37.00 0.0000 36 0.0167 37 0.0085 37 0.0085
+36 20 23.00 0.0063 23.00 0.0059 23.20 0.0021 22 0.0071 23 0.0068 22 0.0028
+37 33 36.00 0.0075 35.80 0.0074 35.50 0.0032 36 0.0050 34 0.0036 32 0.0024
+38 62 62.00 0.0078 62.00 0.0078 62.00 0.0049 63 0.0064 61 0.0017 61 0.0016
+39 56 57.00 0.0063 57.00 0.0063 56.50 0.0021 56 0.0049 57 0.0004 56 0.0004
+40 49 48.00 0.0176 48.00 0.0176 52.80 0.0065 50 0.0029 50 0.0018 49 0.0010
+41 16 15.00 0.0054 15.00 0.0054 16.00 0.0042 18 0.0040 17 0.0036 17 0.0028
+42 28 28.00 0.0035 28.00 0.0034 28.00 0.0004 28 0.0024 28 0.0015 28 0.0012
+43 52 49.00 0.0100 49.00 0.0100 55.10 0.0019 52 0.0079 50 0.0036 50 0.0030
+44 66 63.00 0.0066 63.00 0.0066 66.00 0.0043 64 0.0063 67 0.0011 66 0.0010
+45 58 56.00 0.0103 56.00 0.0103 58.70 0.0026 62 0.0026 60 0.0016 59 0.0012
+46 28 28.00 0.0171 28.00 0.0167 29.00 0.0096 28 0.0022 28 0.0011 28 0.0000
+47 66 69.00 0.0070 69.00 0.0070 68.40 0.0041 66 0.0018 64 0.0011 66 0.0007
+48 88 84.00 0.0103 84.00 0.0103 86.00 0.0042 92 0.0020 90 0.0014 87 0.0007
+49 181 157.80 0.0178 157.40 0.0177 153.20 0.0030 182 0.0034 181 0.0014 185 0.0012
+50 103 99.00 0.0231 99.00 0.0231 95.60 0.0100 104 0.0018 104 0.0005 103 0.0002
+51 15 14.00 0.0756 14.00 0.0756 14.70 0.0671 17 0.0000 16 0.0667 17 0.0000
+52 18 21.00 0.0119 21.00 0.0119 22.00 0.0047 19 0.0055 19 0.0039 18 0.0022
+53 55 56.00 0.0082 56.00 0.0082 56.30 0.0039 55 0.0024 54 0.0013 56 0.0008
+54 55 51.00 0.0086 51.00 0.0086 55.50 0.0020 56 0.0042 56 0.0017 56 0.0014
+55 114 105.00 0.0091 105.00 0.0091 112.00 0.0089 114 0.0001 114 0.0001 112 0.0001
+56 19 18.00 0.0153 18.00 0.0153 21.10 0.0091 20 0.0033 19 0.0028 19 0.0008
+57 21 19.00 0.0140 19.00 0.0140 21.50 0.0084 23 0.0043 23 0.0039 22 0.0028
+58 29 29.00 0.0048 29.00 0.0048 30.60 0.0010 33 0.0048 35 0.0015 32 0.0011
+59 87 88.00 0.0072 88.00 0.0072 90.40 0.0038 89 0.0020 89 0.0006 88 0.0003
+60 61 61.00 0.0053 61.00 0.0053 64.10 0.0024 63 0.0028 63 0.0012 65 0.0007
+Average 0.0124 0.0124 0.0061 0.0046 0.0046 0.0017
+Fig. 4. Swap-intra local search.
+search comes from its ability to fine-tune the arrangement of jobs on
+a single machine without altering their assignment to machines, thus
+potentially improving the overall schedule.
+- Swap-inter local search (
+2
+). : Swap move of a job 𝑖 = 1, 2, … , 𝑛
+𝑗 
+on
+the machine 𝑗 with a job 𝑙 = 1, 2, … , 𝑛
+𝑘 
+on the machine 𝑘 (Fig. 5).
+Unlike the Swap-intra local search, which confines changes to within
+the same machine, the Swap-inter local search involves swapping jobs
+between different machines. This approach is designed to explore a
+broader range of potential solutions by modifying the fundamental
+job-machine assignment. This can be crucial in multi-machine envi-
+ronments where the balance of load between machines significantly
+impacts performance.
+- Insert-inter local search (
+3
+). : Insert a job from one machine in
+all the possible positions in all machines (Fig. 6). This neighborhood
+structure allows for extensive reorganization of the job distribution
+across different machines by moving a job from its current machine
+to a new position in another machine’s job sequence. Therefore, it
+explores a vast array of possible configurations, which can lead to
+finding significantly better solutions that might not be reachable via
+simpler local search moves like swaps.
+The local search performs 
+1
+, 
+2
+, and 
+3 
+in that order, strate-
+gically exploring neighborhood structures to effectively optimize the
+solution. Initially, 
+1 
+(Swap-intra local search) is used to make minor,
+less disruptive adjustments within the same machine, optimizing local
+configurations before any broader changes are considered. Follow-
+ing this, 
+2 
+(Swap-inter local search) is employed, where jobs are
+swapped between different machines. This step allows the algorithm
+to explore more significant changes in job distribution, which can
+potentially improve overall machine utilization and balance workloads
+across the system. Finally, 
+3 
+(Insert-inter local search) is applied as
+the most complex and impactful neighborhood. It radically alters job
+placements across all machines, providing a comprehensive shake-up
+of the solution space to escape deep local optima and discover new,
+potentially best configurations. This systematic progression from simple
+to complex neighborhood structures helps in balancing exploration
+and exploitation throughout the optimization process, enhancing the
+algorithm’s ability to find a global optimum.
+The first improvement rule is used: the first neighbor that is better
+than the current solution, immediately replaced the current solution,
+and the list of non dominated solutions 𝑃 𝐹 is updated. Each neighbor
+solution is evaluated using the dynamic programming procedure to
+obtain the optimal allocation of jobs to time periods respecting the
+
+Computers and Operations Research 170 (2024) 106754
+7
+B. Jarboui et al.
+Fig. 5. Swap-inter local search.
+Fig. 6. Insert-inter local search.
+sequence generating the minimum energy cost. The pseudo-code of the
+Pipe VND is presented in Algorithm 2.
+5. Computational results
+The provided EOA was coded in C++. All the experiments were
+executed in Linux on a laptop PC with a 5th Gen Intel(R) Core (TM)
+i7-5500U(2.40 GHz) processor and 8.0 GB RAM.
+5.1. Problem instances
+In our experimentation, we have used a set of benchmark instances
+provided by Wang et al. (2018) and subsequently extended by Angh-
+inolfi et al. (2021). Initially, Wang et al. (2018) introduced a set of
+60 instances, divided into 30 small instances with machine counts
+𝑚 ∈ 
+{3
+, 5, 7}, job numbers 𝑛 ∈ 
+{6
+, 10, 15, 20, 25}, and time horizons
+𝑇 ∈ {50, 80}, and 30 medium–large instances featuring 𝑚 ∈ {8, 16, 25},
+𝑛 ∈ {30, 60, 100, 150, 200}, and 𝑇 ∈ {100, 300}. The instances include
+uniformly distributed processing times 𝑝
+𝑖 
+∈ 𝑈 [1, 4], energy prices per
+time interval 𝑐
+𝑘 
+∈ {1, 2, 3, 4}, energy consumption rates of machines
+𝑒
+𝑗 
+∈ {1, 2, 3}, and time intervals 𝑇
+𝑘 
+∈ {2, 3, 5}. Building upon this, Angh-
+inolfi et al. (2021) added 30 very large instances to challenge larger
+scales, with 𝑚 ∈ 
+{25
+, 30, 40}, 𝑛 ∈ 
+{250
+, 300, 350, 400, 500}, and 𝑇 ∈
+350, 500. These new instances expanded the range of processing times
+to 𝑝
+𝑖 
+∈ 𝑈 [1, 12], energy prices to 𝑐
+𝑘 
+∈ 𝑈 [1, 8], and consumption rates to
+𝑒
+𝑗 
+∈ 𝑈 [1, 6], maintaining the original time intervals.
+5.2. Parameters of the algorithms and performance measures
+In the proposed algorithm, the parameters 𝑖𝑡𝑒𝑟
+max 
+was set experi-
+mentally. For the small instances 𝑖𝑡𝑒𝑟
+max 
+= 20, and for the medium
+
+Computers and Operations Research 170 (2024) 106754
+8
+B. Jarboui et al.
+Algorithm 2: Pseudo code of the proposed Pipe VND algorithm
+Input: 𝜎
+0 
+initial solution, 𝜀 input constraint.
+Output: Set 𝑃 𝐹 of non dominated solutions.
+1 𝑘 = 0 ;
+2 𝑐𝑜𝑢𝑛𝑡 = 0 ;
+do
+𝜎
+𝑘+1 
+= 𝐿𝑆(
+𝑘+1
+, 𝜎
+𝑘
+, 𝜀);
+3 if 𝑇 𝐸𝐶(𝜎
+𝑘+1
+, 𝜀) < 𝑇 𝐸𝐶(𝜎
+𝑘
+, 𝜀) then
+𝑐𝑜𝑢𝑛𝑡 = 0;
+else
+𝑐𝑜𝑢𝑛𝑡 + +;
+4 𝑘 + + ;
+if 𝑘 ≥ 3 then
+𝑘 = 0;
+while 𝑐𝑜𝑢𝑛𝑡 ≥ 3;
+instances three values are considered 𝑖𝑡𝑒𝑟
+max 
+= 1, 𝑖𝑡𝑒𝑟
+max 
+= 2 and
+𝑖𝑡𝑒𝑟
+max 
+= 3 which refer to EOA1, EAO2 and EOA3, respectively. For the
+large instances 𝑖𝑡𝑒𝑟
+max 
+= 1. It should be noted that the perturbation is
+not applied when 𝑖𝑡𝑒𝑟
+max 
+= 1. The proposed algorithms are compared to
+the NSGA-III, Multi-Objective Evolutionary Algorithm based on Decom-
+position (MOEAD) and Split-Greedy Scheduler with Exchange Search
+(SGS-ES) of Anghinolfi et al. (2021).
+In this section, we present the performance measures used in this
+paper to evaluate the quality of the proposed approach in comparison
+to the state-of-the-art algorithms.
+Cardinality (card). : the number of non-dominated solutions found.
+Inverted generational distance (IGD). is defined as the average distance
+between each point of the pareto front 𝑃
+𝐴 
+and the closest point of the
+optimal pareto front 𝑃 
+∗
+:
+𝐼𝐺𝐷 =
+∑
+𝑝∈𝑃 
+∗ 
+𝑑(𝑝, 𝑃
+𝐴
+)
+|𝑃 
+∗
+| 
+(4)
+where 𝑑(𝑝, 𝑃
+𝐴
+) is the minimum euclidean distance between 𝑝 ∈ 𝑃 
+∗
+and the pareto front obtained by the algorithm 𝐴, 𝑃
+𝐴
+. When there
+is no optimal pareto front, 𝑃 
+∗ 
+is given as the set of non dominated
+solutions in the union of the compared fronts (Anghinolfi et al., 2021).
+The low IGD value implies that the pareto front 𝑃
+𝐴 
+is very near to 𝑃 
+∗
+.
+The max–min normalization method for each objective is used for this
+metric.
+Coverage of two sets 𝐴 and 𝐵. this measure proposed by Zitzler and
+Thiele (1999) calculates the proportion of solutions obtained by the
+algorithm 𝐵 dominated by those of the algorithm 𝐴
+𝐶(𝐴, 𝐵) = 
+|𝑏 ∈ 𝑃
+𝐵 
+|∃𝑎 ∈ 𝑃
+𝐴 
+∶ 𝑎 ≻ 𝑏|
+|𝑃
+𝐵 
+| 
+(5)
+𝐶(𝐴, 𝐵) = 1 signifies that all the solutions of 𝐵 are dominated by those
+of 𝐴. Whereas 𝐶(𝐴, 𝐵) = 0 indicates that no solution of 𝐵 is dominated
+by a solution of 𝐴. As the dominance relation is not symmetrical,
+𝐶(𝐵, 𝐴) is not necessarily equal to 1 − 𝐶(𝐴, 𝐵).
+5.3. Computational results for small problem instances
+The results obtained by our algorithm EOA in comparison to the
+state-of-the-art solving techniques: MOEA/D, NSGA-III and SGS-ES,
+according to the exact pareto front generated by the MIP model,
+proposed by Anghinolfi et al. (2021), on the small instances, are shown
+in Table 3. We clearly noticed that the EOA algorithm is able to find
+all the optimal non dominated sets and outperforms all the algorithms
+in terms of IGD. The CPU times of the EOA and SGS-ES are displayed
+in Table 4, noting that the CPU time of the other algorithms are not
+provided in the corresponding papers. We remark that our algorithm
+requires a relatively higher computation time than the SGS-ES, in return
+for the high improvement in the quality of solutions.
+5.4. Computational results for medium problem instances
+Tables 5, 6, 7, 8, and 9 provide the obtained results for medium
+instances in terms of cardinality, IGD, coverage and CPU times. In this
+class of instances, our proposed algorithm is presented following three
+configurations EOA1, EOA2 and EOA3. The results in Table 5 show
+that, on average, the IGD metric values of the three configurations are
+the lowest among all the algorithms. The third algorithm EOA3 appears
+to be the best, whereas the EOA1 and EOA2 present near similar results.
+This implies that the pareto front given by the EOA3 algorithm is closest
+to the best pareto front obtained by the union of the compared fronts.
+With regard to coverage metrics, Table 6 shows that the EOA1
+dominates 58.28% of the solutions of the MOEA/D, 58.19% of the
+solutions of the NSGA-III and only 35.53% of the solutions of the
+SGS-ES. Table 7 displays the coverage metric values for the EOA2.
+We notice that the obtained results have been improved compared
+to EOA1. In fact, on average, the EOA2 dominates 68.51% of the
+solutions of the MOEA/D, 68.42% of the solutions of the NSGA-III
+and 40.73% of the solutions of the SGS-ES. Finally, according to the
+computational results given in Table 8, we remark that our results have
+further improved with the introduction of the third step considered in
+EOA3. In fact, the EOA3 dominates 70.12%, 70.02% and 42.93% of
+the solutions of MOEA/D, NSGA-III and SGS-ES, respectively. Although
+this high quality of solutions, the CPU time of our proposed algorithm
+is relatively high compared to the existing algorithms (see Table 9).
+5.5. Computational results for large problem instances
+Tables 10, 11 and 12 give the computational results of large in-
+stances. Due to the high CPU time requirements for EOA2 and EOA3,
+the two methods are abandoned in the experimentation to solve the
+large instances. In terms of IGD metric values reported in Table 10,
+results show that the EOA presents the best performance among all
+other algorithms with an average value of 0.00137. Moreover, in
+terms of coverage metric, on average, the solutions of EOA dominates
+99.02% of the MOEA/D’s solutions, 99.018% of the NSGA-III’s solutions
+and 73.73% of the EOA’s solutions (see Table 11). According to the
+CPU times displayed in Table 12, the high quality of solutions of our
+proposed algorithms comes at a relatively high CPU time cost.
+In order to further demonstrate the performance of the proposed
+epsilon oscillation algorithms (EOAs) according to the comparative
+algorithms on medium and large instances, the Wilcoxon signed-rank
+test was utilized because the normality hypothesis is not fulfilled
+(Fernandez-Viagas and Framinan, 2015) (see Table 13)). For medium
+instances, the results reveal that EOA1, EOA2, and EOA3 perform
+significantly better than MOEA and NSGA-III, as indicated by negative
+z-values and extremely small p-values (all less than 0.0001), suggest-
+ing substantial superiority. Interestingly, against GS-ES, EOA1 fails to
+obtain better results (𝑝 = 0.6434), while EOA2 and EOA3 demonstrate
+superior performance, supported by negative z-values and p-values of
+0.01191 and 0.0006864, respectively. Within the EOAs, EOA3 notably
+outperforms EOA1 and EOA2, as shown by the significantly negative z-
+values and small p-values. For large instances, the trend continues with
+EOA outperforming MOEA, NSGA-III, and GS-ES significantly, indicated
+by extremely low p-values, reinforcing the superior performance ob-
+served in medium instances. These results underscore the efficacy of
+EOAs, particularly EOA3, across various instance sizes.
+
+Computers and Operations Research 170 (2024) 106754
+9
+B. Jarboui et al.
+Table 6
+Computational results of EOA1 algorithm for medium instances in terms of coverage metric.
+ins C(EOA1, MOEAD) C(MOEAD, EOA1) C(EOA1, NSGA-III) C(NSGA-III, EOA1) C(EOA1, SGS-ES) C(SGS-ES, EOA1)
+31 0.8200 0.1667 0.8200 0.1667 0.2372 0.3667
+32 0.5849 0.3333 0.5841 0.3333 0.1318 0.4433
+33 0.4737 0.2414 0.4737 0.2414 0.1256 0.4121
+34 0.4098 0.5000 0.4098 0.5000 0.0097 0.8758
+35 0.3611 0.5833 0.3611 0.5833 0.0081 0.8889
+36 0.4348 0.2727 0.4348 0.2727 0.2099 0.4000
+37 0.6111 0.1944 0.6089 0.1944 0.3600 0.3556
+38 0.6129 0.3333 0.6129 0.3333 0.5240 0.3984
+39 0.4035 0.3750 0.4035 0.3750 0.3058 0.4304
+40 0.8542 0.0400 0.8542 0.0400 0.5301 0.2880
+41 0.2000 0.3889 0.2000 0.3889 0.1875 0.3889
+42 0.1786 0.2857 0.1786 0.2857 0.0107 0.2857
+43 0.3878 0.5385 0.3878 0.5385 0.2285 0.6923
+44 0.5556 0.3438 0.5556 0.3438 0.5590 0.4328
+45 0.7857 0.1129 0.7857 0.1129 0.4478 0.4387
+46 0.8214 0.0357 0.7964 0.0393 0.6856 0.1143
+47 0.8116 0.0152 0.8116 0.0152 0.5584 0.1530
+48 0.8214 0.1087 0.8214 0.1087 0.5812 0.2717
+49 0.9873 0.0055 0.9873 0.0055 0.3803 0.3626
+50 0.7172 0.1923 0.7172 0.1923 0.6501 0.2106
+51 0.3571 0.2353 0.3571 0.2353 0.4001 0.4000
+52 0.5714 0.2105 0.5714 0.2105 0.4797 0.2684
+53 0.7321 0.1091 0.7321 0.1091 0.5860 0.2691
+54 0.7451 0.1429 0.7451 0.1429 0.2932 0.5518
+55 0.5619 0.1754 0.5619 0.1754 0.2160 0.2281
+56 0.5000 0.0500 0.5000 0.0500 0.4919 0.1050
+57 0.6316 0.1304 0.6316 0.1304 0.4424 0.3696
+58 0.2759 0.3333 0.2759 0.3333 0.0515 0.6303
+59 0.6705 0.1685 0.6705 0.1685 0.5838 0.2180
+60 0.6066 0.2857 0.6066 0.2857 0.3829 0.4159
+Average 0.5828 0.2303 0.5819 0.2304 0.3553 0.3889
+Table 7
+Computational results of EOA2 algorithm for medium instances in terms of coverage metric.
+ins C(EOA2, MOEAD) C(MOEAD,EOA2) C(EOA2, NSGA-III) C(NSGA-III,EOA2) C(EOA2, SGS-ES) C(SGS-ES,EOA2)
+31 0.8600 0.0625 0.8600 0.0625 0.2726 0.2479
+32 0.7547 0.0893 0.7542 0.0911 0.1891 0.2446
+33 0.6491 0.0169 0.6491 0.0169 0.1357 0.1983
+34 0.8361 0.1000 0.8361 0.1000 0.1766 0.5833
+35 0.6111 0.2162 0.6111 0.2162 0.0081 0.6486
+36 0.4348 0.2609 0.4348 0.2609 0.2099 0.4217
+37 0.6111 0.1176 0.6089 0.1176 0.4048 0.2559
+38 0.7581 0.0984 0.7581 0.0984 0.5836 0.2885
+39 0.6140 0.0351 0.6140 0.0351 0.3660 0.1719
+40 0.9167 0.0000 0.9167 0.0000 0.5753 0.1900
+41 0.2000 0.2941 0.2000 0.2941 0.1875 0.2941
+42 0.2500 0.1786 0.2500 0.1786 0.0357 0.2036
+43 0.7347 0.1200 0.7347 0.1200 0.2861 0.5200
+44 0.7302 0.1045 0.7302 0.1045 0.6681 0.2418
+45 0.8750 0.0333 0.8750 0.0333 0.5210 0.2617
+46 0.8214 0.0357 0.7964 0.0393 0.7442 0.0571
+47 0.8261 0.0000 0.8261 0.0000 0.6390 0.1109
+48 0.8690 0.1000 0.8690 0.1000 0.6615 0.1978
+49 1.0000 0.0000 1.0000 0.0000 0.4862 0.2580
+50 0.7172 0.0962 0.7172 0.0962 0.6501 0.1048
+51 0.5000 0.1875 0.5000 0.1875 0.4063 0.3500
+52 0.7143 0.1053 0.7143 0.1053 0.5254 0.1579
+53 0.7679 0.0556 0.7679 0.0556 0.5894 0.1685
+54 0.7843 0.0536 0.7843 0.0536 0.4209 0.3411
+55 0.5905 0.0351 0.5905 0.0351 0.2187 0.0579
+56 0.5556 0.0000 0.5556 0.0000 0.5394 0.0579
+57 0.6316 0.1304 0.6316 0.1304 0.4796 0.3304
+58 0.5172 0.1143 0.5172 0.1143 0.1367 0.4029
+59 0.7500 0.0899 0.7500 0.0899 0.6525 0.1303
+60 0.6721 0.1746 0.6721 0.1746 0.4503 0.2937
+Average 0.6851 0.0968 0.6842 0.0970 0.4073 0.2597
+
+Computers and Operations Research 170 (2024) 106754
+10
+B. Jarboui et al.
+Table 8
+Computational results of EOA3 algorithm for medium instances in terms of coverage metric.
+ins C(EOA3, MOEAD) C(MOEAD,EOA3) C(EOA3, NSGA-III) C(NSGA-III,EOA3) C(EOA3, SGS-ES) C(SGS-ES,EOA3)
+31 0.8600 0.0426 0.8600 0.0426 0.3275 0.2021
+32 0.7547 0.1053 0.7542 0.1070 0.1891 0.2281
+33 0.6491 0.0169 0.6491 0.0169 0.1357 0.1983
+34 0.8361 0.1000 0.8361 0.1000 0.1766 0.5833
+35 0.6111 0.2162 0.6111 0.2162 0.0081 0.6486
+36 0.4783 0.1364 0.4783 0.1364 0.2444 0.2545
+37 0.6111 0.1250 0.6089 0.1250 0.5060 0.1844
+38 0.7581 0.0984 0.7581 0.0984 0.5852 0.2885
+39 0.6316 0.0357 0.6316 0.0357 0.3660 0.1393
+40 0.9167 0.0000 0.9167 0.0000 0.6226 0.1755
+41 0.2000 0.2353 0.2000 0.2353 0.1875 0.2353
+42 0.2500 0.1786 0.2500 0.1786 0.0464 0.2036
+43 0.7959 0.1000 0.7959 0.1000 0.3152 0.4620
+44 0.7460 0.1061 0.7460 0.1061 0.6802 0.2348
+45 0.8929 0.0339 0.8929 0.0339 0.5500 0.2051
+46 0.8929 0.0000 0.8643 0.0000 0.8233 0.0000
+47 0.8261 0.0000 0.8261 0.0000 0.6551 0.0879
+48 0.8929 0.0575 0.8929 0.0575 0.7253 0.1494
+49 1.0000 0.0000 1.0000 0.0000 0.4934 0.2578
+50 0.7172 0.0874 0.7172 0.0874 0.6501 0.0961
+51 0.5000 0.1176 0.5000 0.1176 0.4188 0.2941
+52 0.7143 0.0556 0.7143 0.0556 0.5254 0.1667
+53 0.7857 0.0536 0.7857 0.0536 0.5966 0.1482
+54 0.8039 0.0536 0.8039 0.0536 0.4246 0.3357
+55 0.5905 0.0357 0.5905 0.0357 0.2312 0.0411
+56 0.6111 0.0000 0.6111 0.0000 0.5532 0.0579
+57 0.7368 0.0909 0.7368 0.0909 0.5078 0.2636
+58 0.5517 0.0938 0.5517 0.0938 0.1892 0.2719
+59 0.7500 0.0909 0.7500 0.0909 0.6670 0.1182
+60 0.6721 0.1538 0.6721 0.1538 0.4784 0.2323
+Average 0.7012 0.0807 0.7002 0.0807 0.4293 0.2255
+Table 9
+CPU times (in s) for medium instances.
+ins NSGA-III MOEA SGS-ES EOA1 EOA2 EOA3
+31 14.006 2.8346 0.0518 0.2810 0.6926 0.7976
+32 14.933 3.3755 0.0738 1.0723 3.0280 2.8882
+33 15.1787 4.9112 0.0937 3.5404 8.6200 7.8421
+34 16.0313 6.4969 0.122 6.9266 16.7442 15.3903
+35 17.3539 8.2203 0.0586 4.9446 12.2028 11.1766
+36 15.189 3.0904 0.081 0.1338 0.6058 0.5802
+37 15.3972 4.3526 0.1202 1.3407 3.1572 3.5822
+38 16.1686 5.9278 0.1838 3.7450 9.6473 9.5127
+39 17.0252 8.3602 0.2712 8.8897 23.1946 30.5421
+40 17.669 10.3599 0.3673 16.7773 40.9999 52.7308
+41 14.7031 3.4379 0.0815 0.1915 0.6559 0.6341
+42 15.3369 4.8556 0.1289 0.4362 3.3409 3.1016
+43 15.7598 6.4588 0.1995 4.0340 10.1811 11.7939
+44 16.7421 8.9836 0.3085 9.7596 23.2325 24.5412
+45 18.461 12.3467 0.5005 16.6173 37.1117 45.2066
+46 16.9153 5.2404 0.4204 0.1681 5.9374 5.6207
+47 17.0613 6.1811 0.7459 6.1873 44.9575 42.7771
+48 17.7563 7.576 0.9804 71.4434 161.4629 163.2677
+49 21.1909 11.8035 1.4556 157.6352 358.2196 424.4130
+50 19.4386 10.7617 1.8296 311.5040 789.0715 936.4629
+51 19.7377 8.4114 0.7754 0.0381 5.9039 6.6818
+52 20.4408 9.6556 1.185 0.8777 21.8116 23.4432
+53 20.8525 11.3704 1.6191 25.0027 99.3933 130.9497
+54 22.1008 12.8782 2.1862 68.7461 236.6472 307.4991
+55 22.7618 15.9638 3.3929 325.9030 705.9541 1159.5352
+56 23.041 12.5976 1.1292 0.1845 5.7484 6.1921
+57 23.5395 13.008 1.7694 0.2020 40.4619 57.0340
+58 24.5284 15.3027 2.4266 13.1635 84.7929 99.5859
+59 25.4301 18.2997 4.6183 139.9668 362.7533 644.4907
+60 26.9437 20.87 4.2915 58.7083 537.5574 804.2601
+Average 18.7231 9.1311 1.0489 41.9474 121.8029 167.7511
+6. Conclusions and perspectives
+This study investigated a bi-objective optimization problem of
+scheduling jobs on multiple identical parallel machines to minimize
+both makespan and total energy consumption. The provided approach
+denoted EOA combines a Pipe-VND with DP, and employs an Epsilon
+Constraint method that incorporates an Epsilon Oscillation technique
+that alternates between ascending and descending variations of the
+epsilon value. Extensive experiments are conducted on a benchmark
+instances and performance measures are employed to assess the quality
+of the proposed approach against state-of-the-art algorithms. The re-
+sults demonstrate that our approach yields high-quality solutions with
+the enhancement by the Oscillation technique that serves to further
+explore the search space, and improves the Pareto front approximation.
+However, it is worth noting that when solving large instances, our
+method encounters challenges in terms of CPU times due to the use
+of the DP to optimally solve each sequence generated by the Pipe-
+VND. Looking ahead, our method can be further explored and applied
+to solve other scheduling problems, such as bi-objective optimization
+problem of green flowshop scheduling. As perspective, we expect better
+solving the looping problem by addressing a Tabu list instead of using
+the perturbation procedure.
+CRediT authorship contribution statement
+Bassem Jarboui: Conceptualization, Methodology, Software. Malek
+Masmoudi: Conceptualization, Formal analysis, Project administra-
+tion, Writing – original draft, Writing – review & editing. Mansour
+Eddaly: Formal analysis, Methodology, Software, Validation, Writing
+– review & editing.
+Data availability
+Data will be made available on request.
+
+Computers and Operations Research 170 (2024) 106754
+11
+B. Jarboui et al.
+Table 10
+Computational results for large instances in terms of cardinality and inverted generational distance.
+ins Best MOEA/D NSGA-III SGS-ES EOA
+Card Card IGD Card IGD Card IGD Card IGD
+61 263 239 0.01374 238.3 0.01374 237.8 0.00236 264 0.00197
+62 374 320 0.01159 317.9 0.01159 309.9 0.00248 375 0.00104
+63 267 227 0.01372 227 0.01372 251.6 0.00164 266 0.00221
+64 394 333.4 0.01403 334.6 0.01379 358.3 0.00244 393 0.00051
+65 253 232 0.01882 231.5 0.01881 228.3 0.00274 256 0.00297
+66 395 346 0.01646 345.7 0.01645 314.7 0.00306 401 0.00115
+67 231 208.1 0.01285 209 0.01267 229.1 0.00104 230 0.00209
+68 387 327.2 0.02082 329.1 0.02074 348.8 0.00213 388 0.00140
+69 217 190 0.01603 190 0.01603 211.9 0.00172 214 0.00280
+70 365 312.4 0.02086 313.4 0.02084 314.7 0.00369 366 0.00098
+71 261 218 0.01382 217.9 0.01374 220 0.00368 259 0.00155
+72 253 226 0.01071 225.6 0.01070 236.1 0.00311 250 0.00164
+73 262 217.3 0.01485 218 0.01473 241.9 0.00264 259 0.00101
+74 297 265 0.00911 264.9 0.00911 281.3 0.00239 294 0.00133
+75 247 218.6 0.01379 218.7 0.01375 230 0.00211 243 0.00149
+76 277 240.7 0.01057 242 0.01043 253.6 0.00330 275 0.00075
+77 261 228 0.02026 227.9 0.02026 246.9 0.00160 263 0.00158
+78 402 349 0.01525 349 0.01525 338 0.00246 404 0.00162
+79 241 220.5 0.01657 221 0.01644 234.2 0.00167 241 0.00200
+80 321 271.6 0.01257 272.9 0.01240 296.5 0.00219 315 0.00142
+81 230 207.9 0.00490 207.8 0.00489 215.3 0.00474 225 0.00012
+82 325 296 0.01072 295.9 0.01072 260.5 0.00408 326 0.00091
+83 270 215 0.01503 215 0.01503 245.3 0.00308 270 0.00140
+84 344 299 0.01118 298.9 0.01117 311.6 0.00240 344 0.00062
+85 263 221.6 0.01232 221.9 0.01211 224.6 0.00248 260 0.00120
+86 329 297 0.01116 296.9 0.01115 301.6 0.00336 319 0.00075
+87 236 214 0.01016 214 0.01016 223.9 0.00227 233 0.00148
+88 335 296 0.01150 295.5 0.01150 297.8 0.00264 328 0.00099
+89 262 225 0.01887 224.1 0.01885 233.7 0.00384 263 0.00160
+90 382 312 0.01323 311.6 0.01323 324.2 0.00306 382 0.00051
+Average 0.01385 0.01380 0.00268 0.00137
+Table 11
+Computational results of EOA algorithm for large instances in terms of coverage metric.
+ins C(EOA, MOEAD) C(MOEAD,EOA) C(EOA, NSGA-III) C(NSGA-III,EOA) C(EOA, SGS-ES) C(SGS-ES,EOA)
+61 0.96653 0.03030 0.96643 0.03030 0.61306 0.35455
+62 0.99375 0.00267 0.99371 0.00267 0.79736 0.16373
+63 0.97357 0.02256 0.97357 0.02256 0.53853 0.43459
+64 1.00000 0.00000 1.00000 0.00000 0.87245 0.11654
+65 1.00000 0.00000 1.00000 0.00000 0.51945 0.44688
+66 0.98266 0.00998 0.98264 0.00998 0.78423 0.17232
+67 1.00000 0.00000 1.00000 0.00000 0.52900 0.46044
+68 1.00000 0.00000 1.00000 0.00000 0.67197 0.30206
+69 0.94737 0.04673 0.94737 0.04673 0.52618 0.46449
+70 1.00000 0.00000 1.00000 0.00000 0.77819 0.18880
+71 1.00000 0.00000 1.00000 0.00000 0.71497 0.24633
+72 1.00000 0.00000 1.00000 0.00000 0.79665 0.19200
+73 1.00000 0.00000 1.00000 0.00000 0.83256 0.15599
+74 0.94340 0.05102 0.94338 0.05102 0.75785 0.22789
+75 1.00000 0.00000 1.00000 0.00000 0.71472 0.26749
+76 1.00000 0.00000 1.00000 0.00000 0.88960 0.09818
+77 1.00000 0.00000 1.00000 0.00000 0.61518 0.35970
+78 1.00000 0.00000 1.00000 0.00000 0.66443 0.28960
+79 1.00000 0.00000 1.00000 0.00000 0.67760 0.30415
+80 1.00000 0.00000 1.00000 0.00000 0.66842 0.30857
+81 1.00000 0.00000 1.00000 0.00000 0.78956 0.19733
+82 0.93243 0.06135 0.93241 0.06135 0.86629 0.10460
+83 1.00000 0.00000 1.00000 0.00000 0.83900 0.14519
+84 1.00000 0.00000 1.00000 0.00000 0.84175 0.13954
+85 0.98195 0.01539 0.98152 0.01539 0.76400 0.20269
+86 1.00000 0.00000 1.00000 0.00000 0.91803 0.07649
+87 1.00000 0.00000 1.00000 0.00000 0.74625 0.24206
+88 0.99324 0.00610 0.99323 0.00610 0.77900 0.19634
+89 0.99111 0.00761 0.99108 0.00761 0.71362 0.26882
+90 1.00000 0.00000 1.00000 0.00000 0.90131 0.07880
+Average 0.99020 0.00846 0.99018 0.00846 0.73737 0.24020
+
+Computers and Operations Research 170 (2024) 106754
+12
+B. Jarboui et al.
+Table 12
+CPU times (in s) for large instances.
+ins NSGA-III MOEA GS-ES EOA
+61 58.8327 66.7168 21.7450 372.7958
+62 327.7931 488.7253 62.3640 863.1700
+63 51.8122 58.2162 25.8207 551.2488
+64 312.8328 476.2118 57.0123 1258.7542
+65 61.1699 67.6016 30.4711 935.0124
+66 215.1681 314.6727 75.7831 1891.6389
+67 73.8247 86.6843 25.9146 1216.1688
+68 244.1829 344.4683 84.7852 2705.0160
+69 81.8046 99.3700 25.9769 1665.7363
+70 254.6311 362.0777 90.3612 6487.8327
+71 77.8492 94.0222 25.2129 340.6047
+72 108.7024 147.3442 65.3719 924.1919
+73 64.4688 75.9908 30.7839 503.6651
+74 145.0289 206.7596 77.8728 1199.2884
+75 65.9283 77.1399 34.7806 701.6168
+76 94.9817 124.1663 92.2981 1786.2688
+77 86.5105 105.8310 37.2449 1070.0079
+78 267.8694 405.3375 107.1587 3490.6639
+79 71.6422 83.8278 45.8857 2482.3096
+80 187.8734 261.1875 101.0368 5469.6332
+81 60.3279 75.1196 37.5365 403.1288
+82 254.6415 389.2578 92.0232 882.2504
+83 77.4552 98.9680 42.3040 668.5416
+84 248.0501 375.9355 113.6161 1654.7588
+85 72.6152 89.6216 49.3493 719.6538
+86 145.6146 207.6757 129.1932 1757.6295
+87 119.3945 156.4167 52.3694 947.6255
+88 229.4651 330.7565 149.7154 2339.3652
+89 68.8165 83.1229 72.6986 1789.0934
+90 220.1420 323.1561 161.0501 3964.3779
+Average 144.9810 202.5461 67.2579 1701.4016
+Table 13
+Wilcoxon signed-rank test results for medium and large Instances.
+Comparison 𝑧-value 𝑝-value
+Results for medium instances
+EOA1 < MOEA −4.2814 0.00001
+EOA2 < MOEA −4.7515 0.000001
+EOA3 < MOEA −0.8712 9.12E−07
+EOA1 < NSGA-III −4.2168 0.00001239
+EOA2 < NSGA-III −4.7515 0.000001009
+EOA3 < NSGA-III −6.0094 9.31E−10
+EOA1 < GS-ES 0.3676 0.6434
+EOA2 < GS-ES −2.2599 0.01191
+EOA3 < GS-ES −3.2003 0.0006864
+EOA3 < EOA2 −4.3601 0.0000065
+EOA3 < EOA1 −4.6709 0.0000015
+Results for large instances
+EOA < MOEA −6.0094 9.31E−10
+EOA < NSGA-III −6.0094 9.31E−10
+EOA < GS-ES −2.4066 0.008052
+References
+Anghinolfi, D., Paolucci, M., Ronco, R., 2021. A bi-objective heuristic approach for
+green identical parallel machine scheduling. European J. Oper. Res. 289 (2),
+416–434. http://dx.doi.org/10.1016/j.ejor.2020.07.020.
+Badri, S.A., Daghbandan, A., Aghabeiginiyay Fatalaki, Z., Mirzazadeh, M., 2021. Flow
+shop scheduling under Time-Of-Use electricity tariffs using fuzzy multi-objective
+linear programming approach. J. Math. Model. 9 (2), 215–227.
+Bellman, R., 1957. Dynamic Programming, first ed. Princeton University Press,
+Princeton, NJ, USA.
+Brimberg, J., Salhi, S., Todosijević, R., Urošević, D., 2023. Variable neighborhood
+search: The power of change and simplicity. Comput. Oper. Res. 155, 106221.
+http://dx.doi.org/10.1016/j.cor.2023.106221.
+Che, A., Zeng, Y., Lyu, K., 2016. An efficient greedy insertion heuristic for energy-
+conscious single machine scheduling problem under time-of-use electricity tariffs.
+J. Clean. Prod. 129, 565–577.
+Che, A., Zhang, S., Wu, X., 2017. Energy-conscious unrelated parallel machine
+scheduling under time-of-use electricity tariffs. J. Clean. Prod. 156, 688–697.
+Chen, B., Zhang, X., 2019. Scheduling with time-of-use costs. European J. Oper. Res.
+274 (3), 900–908. http://dx.doi.org/10.1016/j.ejor.2018.11.002.
+Cheng, J., Chu, F., Chu, C., Xia, W., 2016. Bi-objective optimization of single-machine
+batch scheduling under time-of-use electricity prices. RAIRO - Oper. Res. 50 (4–5),
+http://dx.doi.org/10.1051/ro/2015063.
+Cheng, J., Chu, F., Xia, W., Ding, J., Ling, X., 2014. Bi-objective optimization
+for single-machine batch scheduling considering energy cost. In: 2014 Interna-
+tional Conference on Control, Decision and Information Technologies. CoDIT, pp.
+236–241. http://dx.doi.org/10.1109/CoDIT.2014.6996899.
+Despeisse, M., Ball, P., Evans, S., Levers, A., 2012. Industrial ecology at factory level –
+a conceptual model. J. Clean. Prod. 31, 30–39. http://dx.doi.org/10.1016/j.jclepro.
+2012.02.027.
+Elsevier BV. 2019. URL elsevier.digitalcommonsdata.com/datasets/87txkw7khs/1.
+Fang, K., Uhan, N., Zhao, F., Sutherland, J., 2013. Flow shop scheduling with peak
+power consumption constraints. Ann. Oper. Res. 206 (1), 115–145.
+Fang, K., Uhan, N.A., Zhao, F., Sutherland, J.W., 2016. Scheduling on a single machine
+under time-of-use electricity tariffs. Ann. Oper. Res. 238 (1), 199–227.
+Fernandez-Viagas, V., Framinan, J.M., 2015. NEH-based heuristics for the permutation
+flowshop scheduling problem to minimise total tardiness. Comput. Oper. Res. 60,
+27–36. http://dx.doi.org/10.1016/j.cor.2015.02.002.
+Garey, M.R., Johnson, D.S., 1978. Strong NP-completeness results: Motivation,
+examples, and implications. J. ACM 25, 499–508.
+Global Risks Report. 2022. URL https://www.weforum.org/reports/global-risks-report-
+2022.
+Gong, X., De Pessemier, T., Martens, L., Joseph, W., 2019. Energy- and labor-aware
+flexible job shop scheduling under dynamic electricity pricing: A many-objective
+optimization investigation. J. Clean. Prod. 209, 1078–1094. http://dx.doi.org/10.
+1016/j.jclepro.2018.10.289.
+Graham, R., Lawler, E., Lenstra, J., Kan, A., 1979. Optimization and approximation in
+deterministic sequencing and scheduling: a survey. In: Hammer, P., Johnson, E.,
+Korte, B. (Eds.), Discrete Optimization II. In: Annals of Discrete Mathematics, vol.
+5, Elsevier, pp. 287–326.
+Hansen, P., Mladenović, N., 2001. Variable neighborhood search: Principles and
+applications. European J. Oper. Res. 130 (3), 449–467. http://dx.doi.org/10.1016/
+S0377-2217(00)00100-4.
+Hu, F., Feng, X., Cao, H., 2018. A short-term decision model for electricity retailers:
+Electricity procurement and time-of-use pricing. Energies 11 (12), 1–18.
+da Jiang, E., Wang, L., 2020. Multi-objective optimization based on decomposition for
+flexible job shop scheduling under time-of-use electricity prices. Knowl.-Based Syst.
+204, 106177. http://dx.doi.org/10.1016/j.knosys.2020.106177.
+Kurniawan, B., Song, W., Weng, W., Fujimura, S., 2020. Distributed-elite local search
+based on a genetic algorithm for bi-objective job-shop scheduling under time-of-use
+tariffs. Evol. Intell. 1–15.
+Li, V.C., 2005. Tight oscillations tabu search for multidimensional knapsack problems
+with generalized upper bound constraints. Comput. Oper. Res. 32 (11), 2843–2852.
+http://dx.doi.org/10.1016/j.cor.2004.04.020, URL https://www.sciencedirect.com/
+science/article/pii/S0305054804000814.
+Li, M., Li, T., Peng, S., Guo, Y., 2018. Batch scheduling of remanufacturing flexible
+job shop for minimal electricity- and time-cost. In: Recent Advances in Intelligent
+Manufacturing. pp. 300–307. http://dx.doi.org/10.1007/978-981-13-2396-6-28.
+Li, M., Wang, G.-G., 2022. A review of green shop scheduling problem. Inform. Sci.
+589, 478–496. http://dx.doi.org/10.1016/j.ins.2021.12.122.
+Masmoudi, O., Delorme, X., Gianessi, P., 2019. Job-shop scheduling problem with
+energy consideration. Int. J. Prod. Econ. 216 (C), 12–22.
+Masmoudi, M., Jarboui, B., Borchani, R., 2023. Efficient metaheuristics for the home
+(health)-care routing and scheduling problem with time windows and synchronized
+visits. Optim. Lett..
+Mori, M., Fujishima, M., Inamasu, Y., Oda, Y., 2011. A study on energy efficiency
+improvement for machine tools. CIRP Ann 60 (1), 145–148. http://dx.doi.org/10.
+1016/j.cirp.2011.03.099.
+Pei, Z., Wan, M., Jiang, Z.-Z., Wang, Z., Dai, X., 2021. An approximation algorithm
+for unrelated parallel machine scheduling under TOU electricity tariffs. IEEE Trans.
+Autom. Sci. Eng. 18 (2), 743–756. http://dx.doi.org/10.1109/TASE.2020.2995078.
+Ronco, R., 2022. Exact and heuristic algorithms for energy-efficient scheduling. http:
+//dx.doi.org/10.48550/ARXIV.2203.14070.
+Rubaiee, S., Yildirim, M.B., 2019. An energy-aware multiobjective ant colony algorithm
+to minimize total completion time and energy cost on a single-machine preemptive
+scheduling. Comput. Ind. Eng. 127, 240–252.
+Safarzadeh, H., Niaki, S.T.A., 2019. Bi-objective green scheduling in uniform parallel
+machine environments. J. Clean. Prod. 217, 559–572. http://dx.doi.org/10.1016/
+j.jclepro.2019.01.166.
+Summerbell, D.L., Khripko, D., Barlow, C., Hesselbach, J., 2017. Cost and carbon
+reductions from industrial demand-side management: Study of potential savings at
+a cement plant. Appl. Energy 197, 100–113. http://dx.doi.org/10.1016/j.apenergy.
+2017.03.083.
+Sustainable Development Report. 2024. URL https://dashboards.sdgindex.org.
+UNIDO. 2024. URL unido.org/our-focus/safeguarding-environment/clean-energy-
+access-productive-use/industrial-energy-efficiency-and-climate-change.
+Wang, F., Qin, P., You, J., 2020a. Discrete optimization model for permutation flow
+shop under time-of-use electricity tariffs. 1633 (1) 012146. http://dx.doi.org/10.
+1088/1742-6596/1633/1/012146.
+
+Computers and Operations Research 170 (2024) 106754
+13
+B. Jarboui et al.
+Wang, S., Wang, X., Chu, F., Yu, J., 2020b. An energy-efficient two-stage hybrid flow
+shop scheduling problem in a glass production. Int. J. Prod. Res. 58 (8), 2283–2314.
+http://dx.doi.org/10.1080/00207543.2019.1624857.
+Wang, S., Wang, X., Yu, J., Ma, S., Liu, M., 2018. Bi-objective identical parallel machine
+scheduling to minimize total energy consumption and makespan. J. Clean. Prod.
+193, 424–440. http://dx.doi.org/10.1016/j.jclepro.2018.05.056.
+Wu, X., Che, A., 2019. A memetic differential evolution algorithm for energy-efficient
+parallel machine scheduling. Omega 82, 155–165. http://dx.doi.org/10.1016/j.
+omega.2018.01.001.
+Wu, P., Cheng, J., Chu, F., 2021. Large-scale energy-conscious bi-objective single-
+machine batch scheduling under time-of-use electricity tariffs via effective iterative
+heuristics. Ann. Oper. Res. 296 (1), 471–494. http://dx.doi.org/10.1007/s10479-
+019-03494.
+Yu, V.F., Lin, S.-W., 2014. Multi-start simulated annealing heuristic for the location
+routing problem with simultaneous pickup and delivery. Appl. Soft Comput. 24,
+284–290.
+Zhou, S., Li, X., Du, N., Pang, Y., Chen, H., 2018. A multi-objective differential evolution
+algorithm for parallel batch processing machine scheduling considering electricity
+consumption cost. Comput. Oper. Res. 96, 55–68. http://dx.doi.org/10.1016/j.cor.
+2018.04.009.
+Zitzler, E., Thiele, L., 1999. Multiobjective evolutionary algorithms: a comparative case
+study and the strength Pareto approach. IEEE Trans. Evol. Comput. 3 (4), 257–271.
+http://dx.doi.org/10.1109/4235.797969.
