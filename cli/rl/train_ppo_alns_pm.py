@@ -284,6 +284,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--destroy_frac", type=float, default=0.12)
     p.add_argument("--destroy_max", type=int, default=80)
 
+    p.add_argument(
+        "--alns_use_torch_batch_dp_in_repair",
+        action="store_true",
+        help="Enable torch batched DP in greedy repair (faster when there are many insertion candidates).",
+    )
+    p.add_argument(
+        "--alns_torch_dp_device",
+        type=str,
+        default="cpu",
+        choices=("cpu", "cuda", "auto"),
+        help=(
+            "Device for torch batched DP inside ALNS repair. "
+            "Default cpu (recommended for multi-worker rollouts)."
+        ),
+    )
+    p.add_argument(
+        "--alns_torch_batch_min_total_candidates",
+        type=int,
+        default=512,
+        help="Only use batched DP if total insertion candidates >= this threshold.",
+    )
+
     p.add_argument("--hidden", type=int, default=128)
 
     p.add_argument("--workers", type=int, default=0)
@@ -388,6 +410,13 @@ def main() -> None:
         "verify_cost": False,
     }
 
+    if bool(getattr(args, "alns_use_torch_batch_dp_in_repair", False)) is True:
+        alns_cfg_dict["use_torch_batch_dp_in_repair"] = True
+        alns_cfg_dict["torch_dp_device"] = str(args.alns_torch_dp_device)
+        alns_cfg_dict["torch_batch_min_total_candidates"] = int(
+            args.alns_torch_batch_min_total_candidates
+        )
+
     envs_per_worker = int(args.envs_per_worker)
     rollout_len = int(args.rollout_len)
 
@@ -444,6 +473,15 @@ def main() -> None:
         f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker}",
         flush=True,
     )
+    if bool(alns_cfg_dict.get("use_torch_batch_dp_in_repair", False)):
+        print(
+            "ALNS: torch_batched_dp_in_repair=1 "
+            f"torch_dp_device={alns_cfg_dict.get('torch_dp_device')} "
+            f"min_total_candidates={alns_cfg_dict.get('torch_batch_min_total_candidates')}",
+            flush=True,
+        )
+    else:
+        print("ALNS: torch_batched_dp_in_repair=0", flush=True)
     print(f"Metrics: {metrics_path_p}", flush=True)
 
     # Touch metrics file early so monitoring (tail -f) works immediately.
