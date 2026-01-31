@@ -1,0 +1,24 @@
+nohup: ignoring input
+Training PPO device=cuda act_dim=14 workers=32 envs/worker=4
+update=1/1000000 avg_step_reward=+0.8214 batch_envs=128
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/jovyan/PaST/cli/rl/train_ppo_alns_pm.py", line 515, in <module>
+    main()
+  File "/home/jovyan/PaST/cli/rl/train_ppo_alns_pm.py", line 467, in main
+    dist = torch.distributions.Categorical(logits=logits)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/conda/lib/python3.11/site-packages/torch/distributions/categorical.py", line 84, in __init__
+    super().__init__(batch_shape, validate_args=validate_args)
+  File "/opt/conda/lib/python3.11/site-packages/torch/distributions/distribution.py", line 78, in __init__
+    raise ValueError(
+ValueError: Expected parameter logits (Tensor of shape (1024, 14)) of distribution Categorical(logits: torch.Size([1024, 14])) to satisfy the constraint IndependentConstraint(Real(), 1), but found invalid values:
+tensor([[nan, nan, nan,  ..., nan, nan, nan],
+        [nan, nan, nan,  ..., nan, nan, nan],
+        [nan, nan, nan,  ..., nan, nan, nan],
+        ...,
+        [nan, nan, nan,  ..., nan, nan, nan],
+        [nan, nan, nan,  ..., nan, nan, nan],
+        [nan, nan, nan,  ..., nan, nan, nan]], device='cuda:0',
+       grad_fn=<SubBackward0>)

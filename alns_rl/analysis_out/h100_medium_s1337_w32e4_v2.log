@@ -1,0 +1,30 @@
+nohup: ignoring input
+Training PPO device=cuda act_dim=14 workers=32 envs/worker=4
+Metrics: analysis_out/h100_medium_s1337_w32e4_v2_metrics.jsonl
+update=1/1000000 avg_step_reward=+0.3971 rollout_s=3024.7 steps/s=2.7 accept=0.552 feasible=1.000 bestE(p10/p50/p90)=117.5/520.5/1299.6 bestImprove(p10/p50/p90)=5.00/41.50/120.60
+update=2/1000000 avg_step_reward=+0.3922 rollout_s=2448.8 steps/s=3.3 accept=0.565 feasible=0.999 bestE(p10/p50/p90)=108.0/610.0/1874.4 bestImprove(p10/p50/p90)=5.70/35.50/167.40
+update=3/1000000 avg_step_reward=+0.4554 rollout_s=3967.1 steps/s=2.1 accept=0.608 feasible=1.000 bestE(p10/p50/p90)=111.4/628.5/1423.7 bestImprove(p10/p50/p90)=7.70/47.00/169.10
+update=4/1000000 avg_step_reward=+0.4434 rollout_s=2768.4 steps/s=3.0 accept=0.588 feasible=1.000 bestE(p10/p50/p90)=93.4/510.5/1463.3 bestImprove(p10/p50/p90)=6.00/38.50/143.10
+update=5/1000000 avg_step_reward=+0.4683 rollout_s=2643.5 steps/s=3.1 accept=0.634 feasible=1.000 bestE(p10/p50/p90)=106.4/480.0/1467.8 bestImprove(p10/p50/p90)=6.00/33.00/165.00
+Saved checkpoint: analysis_out/h100_medium_s1337_w32e4_v2_latest.pt
+update=6/1000000 avg_step_reward=+0.3339 rollout_s=3052.6 steps/s=2.7 accept=0.649 feasible=1.000 bestE(p10/p50/p90)=103.4/401.0/1263.3 bestImprove(p10/p50/p90)=6.00/28.00/117.90
+update=7/1000000 avg_step_reward=+0.5272 rollout_s=3367.8 steps/s=2.4 accept=0.643 feasible=1.000 bestE(p10/p50/p90)=100.4/592.0/1316.5 bestImprove(p10/p50/p90)=5.70/37.50/150.30
+update=8/1000000 avg_step_reward=+0.4066 rollout_s=2543.3 steps/s=3.2 accept=0.627 feasible=0.999 bestE(p10/p50/p90)=89.4/450.5/1330.8 bestImprove(p10/p50/p90)=4.70/22.00/142.60
+update=9/1000000 avg_step_reward=+0.5254 rollout_s=2732.3 steps/s=3.0 accept=0.643 feasible=1.000 bestE(p10/p50/p90)=86.4/512.0/1539.6 bestImprove(p10/p50/p90)=6.00/41.00/145.80
+update=10/1000000 avg_step_reward=+0.4314 rollout_s=1410.3 steps/s=5.8 accept=0.670 feasible=1.000 bestE(p10/p50/p90)=81.7/416.5/1251.2 bestImprove(p10/p50/p90)=5.00/22.50/108.30
+Saved checkpoint: analysis_out/h100_medium_s1337_w32e4_v2_latest.pt
+update=11/1000000 avg_step_reward=+0.4736 rollout_s=1939.5 steps/s=4.2 accept=0.742 feasible=0.998 bestE(p10/p50/p90)=77.0/397.0/1130.4 bestImprove(p10/p50/p90)=4.00/25.00/166.50
+update=12/1000000 avg_step_reward=+0.4934 rollout_s=1934.2 steps/s=4.2 accept=0.757 feasible=1.000 bestE(p10/p50/p90)=86.8/436.5/1299.2 bestImprove(p10/p50/p90)=5.70/28.00/135.20
+update=13/1000000 avg_step_reward=+0.5961 rollout_s=2913.7 steps/s=2.8 accept=0.802 feasible=1.000 bestE(p10/p50/p90)=103.1/501.0/1361.4 bestImprove(p10/p50/p90)=4.70/34.00/149.60
+update=14/1000000 avg_step_reward=+0.5454 rollout_s=1895.7 steps/s=4.3 accept=0.873 feasible=1.000 bestE(p10/p50/p90)=116.2/489.5/1242.6 bestImprove(p10/p50/p90)=6.00/33.00/137.30
+update=15/1000000 avg_step_reward=+0.4747 rollout_s=1798.8 steps/s=4.6 accept=0.875 feasible=1.000 bestE(p10/p50/p90)=93.5/464.0/1324.0 bestImprove(p10/p50/p90)=6.00/26.00/142.70
+Saved checkpoint: analysis_out/h100_medium_s1337_w32e4_v2_latest.pt
+update=16/1000000 avg_step_reward=+0.5321 rollout_s=1822.2 steps/s=4.5 accept=0.901 feasible=1.000 bestE(p10/p50/p90)=90.3/437.5/1570.9 bestImprove(p10/p50/p90)=4.70/27.50/153.70
+update=17/1000000 avg_step_reward=+0.6044 rollout_s=1500.1 steps/s=5.5 accept=0.929 feasible=1.000 bestE(p10/p50/p90)=109.2/440.0/1132.8 bestImprove(p10/p50/p90)=4.00/28.50/141.10
+update=18/1000000 avg_step_reward=+0.5486 rollout_s=1885.9 steps/s=4.3 accept=0.937 feasible=1.000 bestE(p10/p50/p90)=109.4/493.5/1362.3 bestImprove(p10/p50/p90)=6.00/34.50/130.10
+update=19/1000000 avg_step_reward=+0.5625 rollout_s=2128.5 steps/s=3.8 accept=0.938 feasible=1.000 bestE(p10/p50/p90)=110.8/475.5/1451.8 bestImprove(p10/p50/p90)=3.70/33.50/147.20
+update=20/1000000 avg_step_reward=+0.5404 rollout_s=1568.9 steps/s=5.2 accept=0.948 feasible=1.000 bestE(p10/p50/p90)=79.7/390.0/1338.0 bestImprove(p10/p50/p90)=4.70/20.00/161.40
+Saved checkpoint: analysis_out/h100_medium_s1337_w32e4_v2_latest.pt
+update=21/1000000 avg_step_reward=+0.5156 rollout_s=1577.7 steps/s=5.2 accept=0.952 feasible=1.000 bestE(p10/p50/p90)=76.7/474.5/1390.9 bestImprove(p10/p50/p90)=5.00/32.50/100.20
+Stop requested; saved checkpoint: analysis_out/h100_medium_s1337_w32e4_v2_latest.pt
+Saved analysis_out/h100_medium_s1337_w32e4_v2.pt

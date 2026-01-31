@@ -1,0 +1,2 @@
+nohup: ignoring input
+Training PPO device=cuda act_dim=14 workers=128 envs/worker=1
