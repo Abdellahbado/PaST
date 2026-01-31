@@ -665,6 +665,15 @@ def main() -> None:
             net.train()
             opt_state_before = copy.deepcopy(opt.state_dict())
             bad_update = False
+
+            # PPO diagnostics (to verify that learning is actually happening).
+            diag_policy_loss = 0.0
+            diag_value_loss = 0.0
+            diag_entropy = 0.0
+            diag_approx_kl = 0.0
+            diag_clip_frac = 0.0
+            diag_mb = 0
+
             for _ in range(int(ppo.ppo_epochs)):
                 idx = torch.randperm(batch_size)
                 for start in range(0, batch_size, mb):
@@ -689,6 +698,12 @@ def main() -> None:
                     value_loss = ((v - ret_f[j]) ** 2).mean()
                     entropy = dist.entropy().mean()
 
+                    # Approx KL and clip fraction are standard PPO stability signals.
+                    approx_kl = (logp_old_f[j] - logp).mean()
+                    clip_frac = (
+                        (torch.abs(ratio - 1.0) > float(ppo.clip_eps)).float().mean()
+                    )
+
                     loss = (
                         policy_loss
                         + ppo.value_coef * value_loss
@@ -706,6 +721,13 @@ def main() -> None:
                     )
                     opt.step()
 
+                    diag_policy_loss += float(policy_loss.detach().cpu().item())
+                    diag_value_loss += float(value_loss.detach().cpu().item())
+                    diag_entropy += float(entropy.detach().cpu().item())
+                    diag_approx_kl += float(approx_kl.detach().cpu().item())
+                    diag_clip_frac += float(clip_frac.detach().cpu().item())
+                    diag_mb += 1
+
                 if bad_update:
                     break
 
@@ -721,6 +743,19 @@ def main() -> None:
                     flush=True,
                 )
                 continue
+
+            if diag_mb > 0:
+                diag_policy_loss /= float(diag_mb)
+                diag_value_loss /= float(diag_mb)
+                diag_entropy /= float(diag_mb)
+                diag_approx_kl /= float(diag_mb)
+                diag_clip_frac /= float(diag_mb)
+            else:
+                diag_policy_loss = float("nan")
+                diag_value_loss = float("nan")
+                diag_entropy = float("nan")
+                diag_approx_kl = float("nan")
+                diag_clip_frac = float("nan")
 
             avg_r = float(rewards.mean().item())
 
@@ -759,16 +794,52 @@ def main() -> None:
                 f"avg_step_reward={avg_r:+.4f} "
                 f"rollout_s={rollout_seconds:.1f} steps/s={steps_per_sec:.1f} "
                 f"accept={accept_rate:.3f} feasible={feasible_rate:.3f} "
+                f"ent={diag_entropy:.3f} kl={diag_approx_kl:.4f} clip={diag_clip_frac:.3f} "
                 f"bestE(p10/p50/p90)={eb_p10:.1f}/{eb_p50:.1f}/{eb_p90:.1f} "
                 f"bestImprove(p10/p50/p90)={bi_p10:.2f}/{bi_p50:.2f}/{bi_p90:.2f}"
             )
             print(msg, flush=True)
+
+            # Reward diagnostics: avg_step_reward can look "low" because reward is sparse
+            # (0 on reject) and measured in raw energy units.
+            r_np = rewards.detach().cpu().numpy().reshape(-1)
+            r_f = r_np[np.isfinite(r_np)]
+            if r_f.size > 0:
+                r_mean = float(np.mean(r_f))
+                r_p10, r_p50, r_p90 = (
+                    float(x) for x in np.quantile(r_f, [0.1, 0.5, 0.9])
+                )
+                r_nonzero = r_f[r_f != 0.0]
+                r_nonzero_rate = float(r_nonzero.size / float(r_f.size))
+                r_nonzero_mean = float(np.mean(r_nonzero)) if r_nonzero.size else 0.0
+                r_pos_rate = float(np.mean(r_f > 0.0))
+                r_neg_rate = float(np.mean(r_f < 0.0))
+            else:
+                r_mean = float("nan")
+                r_p10 = r_p50 = r_p90 = float("nan")
+                r_nonzero_rate = float("nan")
+                r_nonzero_mean = float("nan")
+                r_pos_rate = float("nan")
+                r_neg_rate = float("nan")
 
             # Append JSONL metrics for offline plotting.
             rec = {
                 "time": time.time(),
                 "update": int(upd + 1),
                 "avg_step_reward": float(avg_r),
+                "ppo_policy_loss": float(diag_policy_loss),
+                "ppo_value_loss": float(diag_value_loss),
+                "ppo_entropy": float(diag_entropy),
+                "ppo_approx_kl": float(diag_approx_kl),
+                "ppo_clip_frac": float(diag_clip_frac),
+                "reward_mean": float(r_mean),
+                "reward_p10": float(r_p10),
+                "reward_p50": float(r_p50),
+                "reward_p90": float(r_p90),
+                "reward_nonzero_rate": float(r_nonzero_rate),
+                "reward_nonzero_mean": float(r_nonzero_mean),
+                "reward_pos_rate": float(r_pos_rate),
+                "reward_neg_rate": float(r_neg_rate),
                 "rollout_seconds": float(rollout_seconds),
                 "steps_per_sec": float(steps_per_sec),
                 "accepted": int(accepted_cnt),
