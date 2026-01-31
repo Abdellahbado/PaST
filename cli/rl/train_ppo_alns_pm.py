@@ -32,6 +32,9 @@ class PPOCfg:
     max_grad_norm: float = 1.0
     ppo_epochs: int = 4
     minibatches: int = 8
+    # Optional PPO safety valve: stop early when updates get too large.
+    # Typical values are ~0.01-0.05. None disables.
+    target_kl: float | None = None
 
 
 class PolicyValueNet(nn.Module):
@@ -103,6 +106,9 @@ def _rollout_worker(
     envs_per_worker: int,
     rollout_len: int,
     slack_ratio: float,
+    reward_scale: float,
+    reward_power: float,
+    best_improve_bonus: float,
     alns_cfg_dict: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
     # Limit BLAS threads inside each worker to avoid oversubscription.
@@ -136,6 +142,9 @@ def _rollout_worker(
                 slack_ratio=float(slack_ratio),
                 alns_cfg=alns_cfg,
                 action_set=str(action_set),
+                reward_scale=float(reward_scale),
+                reward_power=float(reward_power),
+                best_improve_bonus=float(best_improve_bonus),
             )
         )
 
@@ -273,6 +282,202 @@ def _compute_gae(
     return adv, returns
 
 
+def _safe_quantiles(x: np.ndarray, qs: List[float]) -> List[float]:
+    xf = np.asarray(x, dtype=np.float64)
+    xf = xf[np.isfinite(xf)]
+    if xf.size == 0:
+        return [float("nan") for _ in qs]
+    return [float(v) for v in np.quantile(xf, qs)]
+
+
+def _eval_policy_vs_random(
+    *,
+    net: PolicyValueNet,
+    act_dim: int,
+    scales: List[str],
+    action_set: str,
+    alns_cfg_dict: Dict[str, Any],
+    slack_ratio: float,
+    reward_scale: float,
+    reward_power: float,
+    best_improve_bonus: float,
+    eval_seed: int,
+    eval_num_envs: int,
+    eval_rollout_len: int,
+    eval_instance_offset: int,
+    deterministic: bool,
+    device: torch.device,
+) -> Dict[str, Any]:
+    """Evaluate current policy against a uniform-random policy on a fixed instance set.
+
+    This is designed as a lightweight sanity-check that learning is beating random,
+    and is stable across resume because it depends only on CLI args.
+    """
+
+    scales = [str(s).strip().lower() for s in (scales or []) if str(s).strip()]
+    if not scales:
+        scales = ["medium"]
+
+    alns_cfg = ALNSConfig(**alns_cfg_dict)
+    n = int(eval_num_envs)
+    T = int(eval_rollout_len)
+
+    # Two independent env sets with identical seeds/instance_ids so their initial
+    # states match (to the extent the environment is deterministic under seed).
+    envs_pol: List[PMALNSEnv] = []
+    envs_rnd: List[PMALNSEnv] = []
+    for i in range(n):
+        inst_id = int(eval_instance_offset) + i
+        scale_i = scales[int(inst_id) % int(len(scales))]
+        seed_i = int(eval_seed) + 1009 * i
+        envs_pol.append(
+            PMALNSEnv(
+                scale=str(scale_i),
+                seed=int(seed_i),
+                instance_id=int(inst_id),
+                slack_ratio=float(slack_ratio),
+                alns_cfg=alns_cfg,
+                action_set=str(action_set),
+                reward_scale=float(reward_scale),
+                reward_power=float(reward_power),
+                best_improve_bonus=float(best_improve_bonus),
+            )
+        )
+        envs_rnd.append(
+            PMALNSEnv(
+                scale=str(scale_i),
+                seed=int(seed_i),
+                instance_id=int(inst_id),
+                slack_ratio=float(slack_ratio),
+                alns_cfg=alns_cfg,
+                action_set=str(action_set),
+                reward_scale=float(reward_scale),
+                reward_power=float(reward_power),
+                best_improve_bonus=float(best_improve_bonus),
+            )
+        )
+
+    obs_pol = np.stack([e.reset() for e in envs_pol], axis=0).astype(np.float32)
+    obs_rnd = np.stack([e.reset() for e in envs_rnd], axis=0).astype(np.float32)
+    obs_pol = _normalize_obs_np(obs_pol)
+    obs_rnd = _normalize_obs_np(obs_rnd)
+
+    init_pol = [e.get_state_summary() for e in envs_pol]
+    init_rnd = [e.get_state_summary() for e in envs_rnd]
+    init_best_pol = np.asarray([s["best_energy"] for s in init_pol], dtype=np.float64)
+    init_best_rnd = np.asarray([s["best_energy"] for s in init_rnd], dtype=np.float64)
+
+    rng = np.random.default_rng(int(eval_seed) + 424242)
+
+    alive_pol = np.ones((n,), dtype=bool)
+    alive_rnd = np.ones((n,), dtype=bool)
+
+    accepted_pol = feasible_pol = steps_pol = 0
+    accepted_rnd = feasible_rnd = steps_rnd = 0
+
+    net.eval()
+    with torch.no_grad():
+        for _t in range(T):
+            # Policy actions (vectorized)
+            if bool(alive_pol.any()):
+                obs_t = torch.from_numpy(obs_pol).to(device)
+                logits, _v = net(obs_t)
+                if bool(deterministic):
+                    act_pol = torch.argmax(logits, dim=-1).detach().cpu().numpy()
+                else:
+                    dist = torch.distributions.Categorical(
+                        logits=logits, validate_args=False
+                    )
+                    act_pol = dist.sample().detach().cpu().numpy()
+            else:
+                act_pol = np.zeros((n,), dtype=np.int64)
+
+            # Random actions
+            act_rnd = rng.integers(low=0, high=int(act_dim), size=(n,), dtype=np.int64)
+
+            # Step envs
+            for i, e in enumerate(envs_pol):
+                if not bool(alive_pol[i]):
+                    continue
+                o2, _r, d, info = e.step(int(act_pol[i]))
+                s = info.get("step", {}) if isinstance(info, dict) else {}
+                if bool(s.get("accepted", False)):
+                    accepted_pol += 1
+                if bool(s.get("feasible_cand", False)):
+                    feasible_pol += 1
+                steps_pol += 1
+                if bool(d):
+                    alive_pol[i] = False
+                else:
+                    obs_pol[i] = np.asarray(o2, dtype=np.float32)
+
+            for i, e in enumerate(envs_rnd):
+                if not bool(alive_rnd[i]):
+                    continue
+                o2, _r, d, info = e.step(int(act_rnd[i]))
+                s = info.get("step", {}) if isinstance(info, dict) else {}
+                if bool(s.get("accepted", False)):
+                    accepted_rnd += 1
+                if bool(s.get("feasible_cand", False)):
+                    feasible_rnd += 1
+                steps_rnd += 1
+                if bool(d):
+                    alive_rnd[i] = False
+                else:
+                    obs_rnd[i] = np.asarray(o2, dtype=np.float32)
+
+            if bool(alive_pol.any()):
+                obs_pol = _normalize_obs_np(obs_pol)
+            if bool(alive_rnd.any()):
+                obs_rnd = _normalize_obs_np(obs_rnd)
+
+            if (not bool(alive_pol.any())) and (not bool(alive_rnd.any())):
+                break
+
+    end_pol = [e.get_state_summary() for e in envs_pol]
+    end_rnd = [e.get_state_summary() for e in envs_rnd]
+    end_best_pol = np.asarray([s["best_energy"] for s in end_pol], dtype=np.float64)
+    end_best_rnd = np.asarray([s["best_energy"] for s in end_rnd], dtype=np.float64)
+
+    # Lower energy is better; report gaps as (random - policy) so positive => policy better.
+    gap = end_best_rnd - end_best_pol
+    improve_pol = init_best_pol - end_best_pol
+    improve_rnd = init_best_rnd - end_best_rnd
+
+    pol_p10, pol_p50, pol_p90 = _safe_quantiles(end_best_pol, [0.1, 0.5, 0.9])
+    rnd_p10, rnd_p50, rnd_p90 = _safe_quantiles(end_best_rnd, [0.1, 0.5, 0.9])
+    gap_p10, gap_p50, gap_p90 = _safe_quantiles(gap, [0.1, 0.5, 0.9])
+
+    imp_pol_p50 = _safe_quantiles(improve_pol, [0.5])[0]
+    imp_rnd_p50 = _safe_quantiles(improve_rnd, [0.5])[0]
+
+    return {
+        "eval_seed": int(eval_seed),
+        "eval_num_envs": int(n),
+        "eval_rollout_len": int(T),
+        "eval_instance_offset": int(eval_instance_offset),
+        "eval_deterministic": bool(deterministic),
+        "eval_policy_best_energy_mean": float(np.nanmean(end_best_pol)),
+        "eval_policy_best_energy_p10": float(pol_p10),
+        "eval_policy_best_energy_p50": float(pol_p50),
+        "eval_policy_best_energy_p90": float(pol_p90),
+        "eval_random_best_energy_mean": float(np.nanmean(end_best_rnd)),
+        "eval_random_best_energy_p10": float(rnd_p10),
+        "eval_random_best_energy_p50": float(rnd_p50),
+        "eval_random_best_energy_p90": float(rnd_p90),
+        "eval_gap_random_minus_policy_mean": float(np.nanmean(gap)),
+        "eval_gap_random_minus_policy_p10": float(gap_p10),
+        "eval_gap_random_minus_policy_p50": float(gap_p50),
+        "eval_gap_random_minus_policy_p90": float(gap_p90),
+        "eval_policy_improve_p50": float(imp_pol_p50),
+        "eval_random_improve_p50": float(imp_rnd_p50),
+        "eval_policy_accept_rate": float(accepted_pol) / float(max(1, steps_pol)),
+        "eval_policy_feasible_rate": float(feasible_pol) / float(max(1, steps_pol)),
+        "eval_random_accept_rate": float(accepted_rnd) / float(max(1, steps_rnd)),
+        "eval_random_feasible_rate": float(feasible_rnd) / float(max(1, steps_rnd)),
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     p.add_argument("--scale", type=str, default="medium")
@@ -375,6 +580,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--clip", type=float, default=0.2)
     p.add_argument("--ppo_epochs", type=int, default=4)
     p.add_argument("--minibatches", type=int, default=8)
+    p.add_argument(
+        "--target_kl",
+        type=float,
+        default=None,
+        help=(
+            "Optional PPO early stopping threshold on |approx_kl|. "
+            "Helps prevent unstable updates (reward bouncing / entropy collapse). "
+            "Suggested: 0.03."
+        ),
+    )
 
     p.add_argument(
         "--reward_clip",
@@ -382,10 +597,96 @@ def build_parser() -> argparse.ArgumentParser:
         default=10.0,
         help="Clip per-step rewards to [-reward_clip, +reward_clip] to improve stability.",
     )
+
+    p.add_argument(
+        "--reward_scale",
+        type=float,
+        default=1.0,
+        help="Multiply environment rewards by this factor (after shaping).",
+    )
+    p.add_argument(
+        "--reward_power",
+        type=float,
+        default=1.0,
+        help=(
+            "Apply a signed power transform to non-zero rewards: sign(r)*|r|^reward_power. "
+            "Use <1.0 to make small improvements relatively more salient."
+        ),
+    )
+    p.add_argument(
+        "--best_improve_bonus",
+        type=float,
+        default=0.0,
+        help=(
+            "Add this constant bonus when an action proposes a feasible candidate that improves the best-so-far energy "
+            "(even if the candidate was rejected by SA)."
+        ),
+    )
     p.add_argument(
         "--no_obs_norm",
         action="store_true",
         help="Disable observation normalization (not recommended).",
+    )
+
+    # Periodic evaluation against a uniform-random policy (fixed instance set).
+    p.add_argument(
+        "--eval_every",
+        type=int,
+        default=0,
+        help="If >0, run evaluation every N updates (logs policy vs random).",
+    )
+    p.add_argument(
+        "--eval_seed",
+        type=int,
+        default=1337,
+        help="Seed used for evaluation instance generation and random baseline.",
+    )
+    p.add_argument(
+        "--eval_num_envs",
+        type=int,
+        default=32,
+        help="Number of fixed evaluation instances per eval step.",
+    )
+    p.add_argument(
+        "--eval_rollout_len",
+        type=int,
+        default=128,
+        help="Number of ALNS steps to run during evaluation.",
+    )
+    p.add_argument(
+        "--eval_instance_offset",
+        type=int,
+        default=9000000,
+        help="Base instance_id for eval instances (instance_id = offset + i).",
+    )
+    p.add_argument(
+        "--eval_stochastic",
+        action="store_true",
+        help="Use stochastic sampling for the policy during eval (default: deterministic argmax).",
+    )
+
+    p.add_argument(
+        "--save_best",
+        action="store_true",
+        help=(
+            "If set, save a *_best.pt checkpoint whenever the chosen eval metric improves. "
+            "Requires --eval_every > 0."
+        ),
+    )
+    p.add_argument(
+        "--best_metric",
+        type=str,
+        default="eval_policy_best_energy_p50",
+        choices=(
+            "eval_policy_best_energy_p50",
+            "eval_policy_best_energy_mean",
+            "eval_gap_random_minus_policy_p50",
+            "eval_gap_random_minus_policy_mean",
+        ),
+        help=(
+            "Metric used to decide whether to save *_best.pt. "
+            "Energy metrics are minimized; gap metrics are maximized."
+        ),
     )
 
     return p
@@ -399,7 +700,14 @@ def _atomic_torch_save(obj: Dict[str, Any], path: str) -> None:
 
 
 def _load_checkpoint(path: str, device: torch.device) -> Dict[str, Any]:
-    ckpt = torch.load(path, map_location=device)
+    # PyTorch 2.6 changed torch.load default weights_only from False -> True.
+    # Our checkpoints intentionally store optimizer/RNG state (and are produced by this script),
+    # so we need a full load. We explicitly request weights_only=False when supported.
+    try:
+        ckpt = torch.load(path, map_location=device, weights_only=False)
+    except TypeError:
+        # Older torch versions don't have the weights_only kwarg.
+        ckpt = torch.load(path, map_location=device)
     if not isinstance(ckpt, dict) or "state_dict" not in ckpt:
         raise ValueError(f"Invalid checkpoint file: {path}")
     return ckpt
@@ -424,6 +732,7 @@ def main() -> None:
         run_name = f"ppo_alns_pm_{args.scale}_seed{args.seed}"
     os.makedirs(out_dir, exist_ok=True)
     ckpt_latest = os.path.join(out_dir, f"{run_name}_latest.pt")
+    ckpt_best = os.path.join(out_dir, f"{run_name}_best.pt")
     metrics_path = str(args.metrics_jsonl).strip()
     if not metrics_path:
         metrics_path = os.path.join(out_dir, f"{run_name}_metrics.jsonl")
@@ -466,6 +775,7 @@ def main() -> None:
         clip_eps=float(args.clip),
         ppo_epochs=int(args.ppo_epochs),
         minibatches=int(args.minibatches),
+        target_kl=(None if args.target_kl is None else float(args.target_kl)),
     )
 
     alns_cfg_dict = {
@@ -507,6 +817,8 @@ def main() -> None:
     start_time = time.time()
     start_update = 0
 
+    best_metric_value: float | None = None
+
     if str(args.resume).strip():
         ckpt_path = str(args.resume).strip()
         ckpt = _load_checkpoint(ckpt_path, device=device)
@@ -515,6 +827,12 @@ def main() -> None:
             opt.load_state_dict(ckpt["opt_state"])
         if "update" in ckpt:
             start_update = int(ckpt["update"])
+        if "best_metric_value" in ckpt:
+            try:
+                v = ckpt.get("best_metric_value")
+                best_metric_value = None if v is None else float(v)
+            except Exception:
+                best_metric_value = None
         if "py_random_state" in ckpt:
             try:
                 random.setstate(ckpt["py_random_state"])
@@ -536,6 +854,17 @@ def main() -> None:
             except Exception:
                 pass
         print(f"Resumed from {ckpt_path} at update={start_update}")
+
+    # If we weren't able to restore best metric from the resumed checkpoint,
+    # try restoring it from the best checkpoint file.
+    if best_metric_value is None and bool(getattr(args, "save_best", False)):
+        try:
+            if os.path.exists(ckpt_best):
+                bckpt = _load_checkpoint(ckpt_best, device=torch.device("cpu"))
+                v = bckpt.get("best_metric_value")
+                best_metric_value = None if v is None else float(v)
+        except Exception:
+            pass
 
     print(
         f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker} scales={','.join(scales_list)} action_set={action_set}",
@@ -578,6 +907,10 @@ def main() -> None:
             "update": int(update),
             "args": vars(args),
             "last_metrics": last_metrics,
+            "best_metric": str(
+                getattr(args, "best_metric", "eval_policy_best_energy_p50")
+            ),
+            "best_metric_value": best_metric_value,
             "py_random_state": random.getstate(),
             "np_random_state": np.random.get_state(),
             "torch_rng_state": torch.get_rng_state(),
@@ -589,6 +922,31 @@ def main() -> None:
                 pass
         _atomic_torch_save(payload, ckpt_latest)
         return ckpt_latest
+
+    def _save_best_checkpoint(update: int, metric_value: float) -> str:
+        payload: Dict[str, Any] = {
+            "state_dict": {k: v.detach().cpu() for k, v in net.state_dict().items()},
+            "opt_state": opt.state_dict(),
+            "act_dim": int(act_dim),
+            "obs_dim": int(obs_dim),
+            "update": int(update),
+            "args": vars(args),
+            "last_metrics": last_metrics,
+            "best_metric": str(
+                getattr(args, "best_metric", "eval_policy_best_energy_p50")
+            ),
+            "best_metric_value": float(metric_value),
+            "py_random_state": random.getstate(),
+            "np_random_state": np.random.get_state(),
+            "torch_rng_state": torch.get_rng_state(),
+        }
+        if torch.cuda.is_available():
+            try:
+                payload["torch_cuda_rng_state"] = torch.cuda.get_rng_state_all()
+            except Exception:
+                pass
+        _atomic_torch_save(payload, ckpt_best)
+        return ckpt_best
 
     total_updates = int(args.updates)
     ex = ProcessPoolExecutor(max_workers=workers)
@@ -625,6 +983,9 @@ def main() -> None:
                         envs_per_worker=int(envs_per_worker),
                         rollout_len=int(rollout_len),
                         slack_ratio=float(args.slack_ratio),
+                        reward_scale=float(args.reward_scale),
+                        reward_power=float(args.reward_power),
+                        best_improve_bonus=float(args.best_improve_bonus),
                         alns_cfg_dict=alns_cfg_dict,
                     )
                 )
@@ -743,6 +1104,8 @@ def main() -> None:
             diag_clip_frac = 0.0
             diag_mb = 0
 
+            early_stop = False
+
             for _ in range(int(ppo.ppo_epochs)):
                 idx = torch.randperm(batch_size)
                 for start in range(0, batch_size, mb):
@@ -773,6 +1136,18 @@ def main() -> None:
                         (torch.abs(ratio - 1.0) > float(ppo.clip_eps)).float().mean()
                     )
 
+                    # Early stop if KL indicates the update is getting too large.
+                    # Use absolute value because this approx can be slightly negative due to noise.
+                    if ppo.target_kl is not None:
+                        try:
+                            if float(
+                                torch.abs(approx_kl).detach().cpu().item()
+                            ) > float(ppo.target_kl):
+                                early_stop = True
+                                break
+                        except Exception:
+                            pass
+
                     loss = (
                         policy_loss
                         + ppo.value_coef * value_loss
@@ -797,8 +1172,11 @@ def main() -> None:
                     diag_clip_frac += float(clip_frac.detach().cpu().item())
                     diag_mb += 1
 
-                if bad_update:
+                if bad_update or early_stop:
                     break
+
+            # If we early-stopped, we keep the partial update (standard PPO practice)
+            # but report it as a stability signal.
 
             if bad_update:
                 # Revert to pre-update weights to avoid poisoning the run.
@@ -827,6 +1205,82 @@ def main() -> None:
                 diag_clip_frac = float("nan")
 
             avg_r = float(rewards.mean().item())
+
+            # Optional periodic evaluation (policy vs uniform-random) on a fixed instance set.
+            eval_metrics: Dict[str, Any] | None = None
+            if int(getattr(args, "eval_every", 0)) > 0 and (
+                int(upd + 1) % int(args.eval_every) == 0
+            ):
+                t_eval0 = time.time()
+                try:
+                    eval_metrics = _eval_policy_vs_random(
+                        net=net,
+                        act_dim=int(act_dim),
+                        scales=scales_list,
+                        action_set=str(action_set),
+                        alns_cfg_dict=alns_cfg_dict,
+                        slack_ratio=float(args.slack_ratio),
+                        reward_scale=float(args.reward_scale),
+                        reward_power=float(args.reward_power),
+                        best_improve_bonus=float(args.best_improve_bonus),
+                        eval_seed=int(args.eval_seed),
+                        eval_num_envs=int(args.eval_num_envs),
+                        eval_rollout_len=int(args.eval_rollout_len),
+                        eval_instance_offset=int(args.eval_instance_offset),
+                        deterministic=(
+                            not bool(getattr(args, "eval_stochastic", False))
+                        ),
+                        device=device,
+                    )
+                    eval_metrics["eval_seconds"] = float(time.time() - t_eval0)
+                    print(
+                        "[Eval] "
+                        f"policy_p50={eval_metrics.get('eval_policy_best_energy_p50'):.1f} "
+                        f"random_p50={eval_metrics.get('eval_random_best_energy_p50'):.1f} "
+                        f"gap_p50(random-policy)={eval_metrics.get('eval_gap_random_minus_policy_p50'):.2f} "
+                        f"secs={eval_metrics.get('eval_seconds'):.1f}",
+                        flush=True,
+                    )
+                except Exception as e:
+                    print(
+                        f"[Eval] failed: {type(e).__name__}: {e}",
+                        flush=True,
+                    )
+
+            # Save best checkpoint if requested (based on eval metrics).
+            if bool(getattr(args, "save_best", False)) and isinstance(
+                eval_metrics, dict
+            ):
+                metric_key = str(
+                    getattr(args, "best_metric", "eval_policy_best_energy_p50")
+                )
+                try:
+                    metric_val = float(eval_metrics.get(metric_key, float("nan")))
+                except Exception:
+                    metric_val = float("nan")
+
+                if math.isfinite(metric_val):
+                    maximize = metric_key.startswith("eval_gap_")
+                    improved = False
+                    if best_metric_value is None or not math.isfinite(
+                        best_metric_value
+                    ):
+                        improved = True
+                    else:
+                        if maximize:
+                            improved = metric_val > float(best_metric_value)
+                        else:
+                            improved = metric_val < float(best_metric_value)
+
+                    if improved:
+                        best_metric_value = float(metric_val)
+                        p_best = _save_best_checkpoint(
+                            update=upd + 1, metric_value=metric_val
+                        )
+                        print(
+                            f"[Best] Saved {os.path.basename(p_best)} ({metric_key}={metric_val:.4f})",
+                            flush=True,
+                        )
 
             accept_rate = float(accepted_cnt) / float(max(1, step_cnt))
             feasible_rate = float(feasible_cnt) / float(max(1, step_cnt))
@@ -901,6 +1355,10 @@ def main() -> None:
                 "ppo_entropy": float(diag_entropy),
                 "ppo_approx_kl": float(diag_approx_kl),
                 "ppo_clip_frac": float(diag_clip_frac),
+                "ppo_target_kl": (
+                    None if ppo.target_kl is None else float(ppo.target_kl)
+                ),
+                "ppo_early_stop": bool(early_stop),
                 "reward_mean": float(r_mean),
                 "reward_p10": float(r_p10),
                 "reward_p50": float(r_p50),
@@ -925,6 +1383,16 @@ def main() -> None:
                 "best_energy_nonfinite": int(eb_nonfinite),
                 "best_improve_nonfinite": int(bi_nonfinite),
             }
+
+            rec["best_metric"] = str(
+                getattr(args, "best_metric", "eval_policy_best_energy_p50")
+            )
+            rec["best_metric_value"] = (
+                None if best_metric_value is None else float(best_metric_value)
+            )
+
+            if isinstance(eval_metrics, dict):
+                rec.update(eval_metrics)
             last_metrics = rec
             metrics_path_p.parent.mkdir(parents=True, exist_ok=True)
             with metrics_path_p.open("a", encoding="utf-8") as f:

@@ -97,6 +97,9 @@ class PMALNSEnv:
         top_k_cwp: int = 80,
         fail_penalty: float = 1.0,
         infeasible_penalty: float = 1.0,
+        reward_scale: float = 1.0,
+        reward_power: float = 1.0,
+        best_improve_bonus: float = 0.0,
     ):
         self.scale = str(scale)
         self.seed = int(seed)
@@ -107,6 +110,10 @@ class PMALNSEnv:
         self.top_k_cwp = int(top_k_cwp)
         self.fail_penalty = float(fail_penalty)
         self.infeasible_penalty = float(infeasible_penalty)
+
+        self.reward_scale = float(reward_scale)
+        self.reward_power = float(reward_power)
+        self.best_improve_bonus = float(best_improve_bonus)
 
         self.action_list: List[ALNSAction] = _build_action_list_by_name(self.action_set)
 
@@ -256,16 +263,33 @@ class PMALNSEnv:
                     prob = 0.0
                 accepted = self._rng.random() < prob
 
+            old_best_energy = float(self._best_ev.total_energy)
+
             if accepted:
                 self._cur_sol, self._cur_ev = cand_sol, cand_ev
+                # Base reward: accepted energy improvement.
                 reward = -(float(self._cur_ev.total_energy) - prev_energy)
 
-            improved_best = float(cand_energy) < float(self._best_ev.total_energy)
+            improved_best = float(cand_energy) < float(old_best_energy)
             if improved_best:
                 self._best_sol, self._best_ev = cand_sol, cand_ev
                 self._no_improve = 0
             else:
                 self._no_improve += 1
+
+            # Optional shaping: reward good proposals even if rejected.
+            if improved_best and float(self.best_improve_bonus) != 0.0:
+                reward += float(self.best_improve_bonus)
+
+            # Optional shaping: apply a signed power transform and global scale.
+            # Using reward_power in (0, 1) compresses large improvements and makes
+            # small-but-consistent improvements relatively more salient.
+            if reward != 0.0:
+                p = float(self.reward_power)
+                if p <= 0.0:
+                    p = 1.0
+                reward = math.copysign((abs(float(reward)) ** p), float(reward))
+            reward *= float(self.reward_scale)
 
         self._it += 1
         self._tau *= float(self.alns_cfg.sa_decay)
