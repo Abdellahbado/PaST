@@ -446,6 +446,21 @@ def main() -> None:
     )
     print(f"Metrics: {metrics_path_p}", flush=True)
 
+    # Touch metrics file early so monitoring (tail -f) works immediately.
+    metrics_path_p.parent.mkdir(parents=True, exist_ok=True)
+    with metrics_path_p.open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps(
+                {
+                    "time": time.time(),
+                    "event": "start",
+                    "run_name": run_name,
+                    "args": vars(args),
+                }
+            )
+            + "\n"
+        )
+
     last_metrics: Dict[str, Any] | None = None
 
     def _save_checkpoint(update: int) -> str:
@@ -470,22 +485,23 @@ def main() -> None:
         return ckpt_latest
 
     total_updates = int(args.updates)
-    for upd in range(int(start_update), total_updates):
-        if stop_requested["flag"]:
-            p = _save_checkpoint(update=upd)
-            print(f"Stop requested; saved checkpoint: {p}")
-            break
-        if float(args.max_seconds) > 0.0:
-            if (time.time() - start_time) >= float(args.max_seconds):
+    ex = ProcessPoolExecutor(max_workers=workers)
+    try:
+        for upd in range(int(start_update), total_updates):
+            if stop_requested["flag"]:
                 p = _save_checkpoint(update=upd)
-                print(f"Walltime reached; saved checkpoint: {p}")
+                print(f"Stop requested; saved checkpoint: {p}", flush=True)
                 break
+            if float(args.max_seconds) > 0.0:
+                if (time.time() - start_time) >= float(args.max_seconds):
+                    p = _save_checkpoint(update=upd)
+                    print(f"Walltime reached; saved checkpoint: {p}", flush=True)
+                    break
 
-        net.eval()
-        state = {k: v.cpu() for k, v in net.state_dict().items()}
+            net.eval()
+            state = {k: v.cpu() for k, v in net.state_dict().items()}
 
-        rollout_t0 = time.time()
-        with ProcessPoolExecutor(max_workers=workers) as ex:
+            rollout_t0 = time.time()
             futs = []
             for wid in range(workers):
                 futs.append(
@@ -515,207 +531,236 @@ def main() -> None:
                     rollout_error = e
                     break
 
-        if rollout_error is not None:
-            p = _save_checkpoint(update=upd)
-            print(
-                f"update={upd+1}: rollout worker failed ({type(rollout_error).__name__}); saved checkpoint: {p}",
-                flush=True,
-            )
-            print(traceback.format_exc(), flush=True)
-            break
-
-        rollout_seconds = max(1e-9, float(time.time() - rollout_t0))
-
-        # Concatenate along env dimension
-        obs = torch.from_numpy(np.concatenate([b["obs"] for b in batches], axis=1)).to(
-            device
-        )
-        actions = torch.from_numpy(
-            np.concatenate([b["actions"] for b in batches], axis=1)
-        ).to(device)
-        logp_old = torch.from_numpy(
-            np.concatenate([b["logp"] for b in batches], axis=1)
-        ).to(device)
-        values = torch.from_numpy(
-            np.concatenate([b["values"] for b in batches], axis=1)
-        ).to(device)
-        rewards = torch.from_numpy(
-            np.concatenate([b["rewards"] for b in batches], axis=1)
-        ).to(device)
-        dones = torch.from_numpy(
-            np.concatenate([b["dones"] for b in batches], axis=1)
-        ).to(device)
-        last_values = torch.from_numpy(
-            np.concatenate([b["last_values"] for b in batches], axis=0)
-        ).to(device)
-
-        accepted_cnt = int(np.sum([int(b["accepted_cnt"][0]) for b in batches]))
-        feasible_cnt = int(np.sum([int(b["feasible_cnt"][0]) for b in batches]))
-        step_cnt = int(np.sum([int(b["step_cnt"][0]) for b in batches]))
-
-        end_best_energy = np.concatenate(
-            [b["end_best_energy"] for b in batches], axis=0
-        )
-        best_improve = np.concatenate([b["best_improve"] for b in batches], axis=0)
-
-        T, B, _ = obs.shape
-
-        # Safety: sanitize/clip rewards; NaNs in rewards/returns can blow up PPO.
-        rewards = _torch_sanitize(rewards)
-        rclip = float(args.reward_clip)
-        if rclip > 0:
-            rewards = torch.clamp(rewards, -rclip, rclip)
-
-        # Optional obs normalization (should already be normalized in worker, but keep robust).
-        if bool(getattr(args, "no_obs_norm", False)) is False:
-            # obs is [T,B,F] on device; normalize in numpy on CPU once for speed.
-            obs_np = obs.detach().cpu().numpy()
-            obs = torch.from_numpy(_normalize_obs_np(obs_np)).to(device)
-
-        adv, returns = _compute_gae(
-            rewards=rewards,
-            values=values,
-            dones=dones,
-            last_values=last_values,
-            gamma=float(ppo.gamma),
-            lam=float(ppo.gae_lambda),
-        )
-
-        # If anything went non-finite, skip update and keep going.
-        if not (
-            torch.isfinite(adv).all()
-            and torch.isfinite(returns).all()
-            and torch.isfinite(values).all()
-            and torch.isfinite(logp_old).all()
-            and torch.isfinite(obs).all()
-        ):
-            net.load_state_dict(state)
-            print(
-                f"update={upd+1}: non-finite rollout tensors; skipping PPO update",
-                flush=True,
-            )
-            continue
-
-        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
-
-        # Flatten
-        obs_f = obs.reshape(T * B, obs_dim)
-        act_f = actions.reshape(T * B)
-        logp_old_f = logp_old.reshape(T * B)
-        adv_f = adv.reshape(T * B)
-        ret_f = returns.reshape(T * B)
-
-        batch_size = T * B
-        mb = max(1, int(batch_size // int(ppo.minibatches)))
-
-        net.train()
-        opt_state_before = copy.deepcopy(opt.state_dict())
-        bad_update = False
-        for _ in range(int(ppo.ppo_epochs)):
-            idx = torch.randperm(batch_size)
-            for start in range(0, batch_size, mb):
-                j = idx[start : start + mb]
-                logits, v = net(obs_f[j])
-                if not (torch.isfinite(logits).all() and torch.isfinite(v).all()):
-                    bad_update = True
-                    break
-                dist = torch.distributions.Categorical(
-                    logits=logits, validate_args=False
+            if rollout_error is not None:
+                p = _save_checkpoint(update=upd)
+                print(
+                    f"update={upd+1}: rollout worker failed ({type(rollout_error).__name__}); saved checkpoint: {p}",
+                    flush=True,
                 )
-                logp = dist.log_prob(act_f[j])
-                log_ratio = torch.clamp(logp - logp_old_f[j], -20.0, 20.0)
-                ratio = torch.exp(log_ratio)
-                surr1 = ratio * adv_f[j]
-                surr2 = (
-                    torch.clamp(ratio, 1.0 - ppo.clip_eps, 1.0 + ppo.clip_eps)
-                    * adv_f[j]
-                )
-                policy_loss = -torch.min(surr1, surr2).mean()
-
-                value_loss = ((v - ret_f[j]) ** 2).mean()
-                entropy = dist.entropy().mean()
-
-                loss = (
-                    policy_loss
-                    + ppo.value_coef * value_loss
-                    - ppo.entropy_coef * entropy
-                )
-
-                if not torch.isfinite(loss):
-                    bad_update = True
-                    break
-
-                opt.zero_grad()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(
-                    net.parameters(), float(ppo.max_grad_norm)
-                )
-                opt.step()
-
-            if bad_update:
+                print(traceback.format_exc(), flush=True)
                 break
 
-        if bad_update:
-            # Revert to pre-update weights to avoid poisoning the run.
-            net.load_state_dict(state)
-            try:
-                opt.load_state_dict(opt_state_before)
-            except Exception:
-                pass
-            print(
-                f"update={upd+1}: non-finite logits/loss encountered; reverted and skipped",
-                flush=True,
+            rollout_seconds = max(1e-9, float(time.time() - rollout_t0))
+
+            # Concatenate along env dimension
+            obs = torch.from_numpy(
+                np.concatenate([b["obs"] for b in batches], axis=1)
+            ).to(device)
+            actions = torch.from_numpy(
+                np.concatenate([b["actions"] for b in batches], axis=1)
+            ).to(device)
+            logp_old = torch.from_numpy(
+                np.concatenate([b["logp"] for b in batches], axis=1)
+            ).to(device)
+            values = torch.from_numpy(
+                np.concatenate([b["values"] for b in batches], axis=1)
+            ).to(device)
+            rewards = torch.from_numpy(
+                np.concatenate([b["rewards"] for b in batches], axis=1)
+            ).to(device)
+            dones = torch.from_numpy(
+                np.concatenate([b["dones"] for b in batches], axis=1)
+            ).to(device)
+            last_values = torch.from_numpy(
+                np.concatenate([b["last_values"] for b in batches], axis=0)
+            ).to(device)
+
+            accepted_cnt = int(np.sum([int(b["accepted_cnt"][0]) for b in batches]))
+            feasible_cnt = int(np.sum([int(b["feasible_cnt"][0]) for b in batches]))
+            step_cnt = int(np.sum([int(b["step_cnt"][0]) for b in batches]))
+
+            end_best_energy = np.concatenate(
+                [b["end_best_energy"] for b in batches], axis=0
             )
-            continue
+            best_improve = np.concatenate([b["best_improve"] for b in batches], axis=0)
 
-        avg_r = float(rewards.mean().item())
+            T, B, _ = obs.shape
 
-        accept_rate = float(accepted_cnt) / float(max(1, step_cnt))
-        feasible_rate = float(feasible_cnt) / float(max(1, step_cnt))
-        steps_per_sec = float(step_cnt) / float(max(1e-9, rollout_seconds))
+            # Safety: sanitize/clip rewards; NaNs in rewards/returns can blow up PPO.
+            rewards = _torch_sanitize(rewards)
+            rclip = float(args.reward_clip)
+            if rclip > 0:
+                rewards = torch.clamp(rewards, -rclip, rclip)
 
-        eb = np.asarray(end_best_energy, dtype=np.float64)
-        bi = np.asarray(best_improve, dtype=np.float64)
-        eb_p10, eb_p50, eb_p90 = (float(x) for x in np.quantile(eb, [0.1, 0.5, 0.9]))
-        bi_p10, bi_p50, bi_p90 = (float(x) for x in np.quantile(bi, [0.1, 0.5, 0.9]))
+            # Optional obs normalization (should already be normalized in worker, but keep robust).
+            if bool(getattr(args, "no_obs_norm", False)) is False:
+                # obs is [T,B,F] on device; normalize in numpy on CPU once for speed.
+                obs_np = obs.detach().cpu().numpy()
+                obs = torch.from_numpy(_normalize_obs_np(obs_np)).to(device)
 
-        msg = (
-            f"update={upd+1}/{int(args.updates)} "
-            f"avg_step_reward={avg_r:+.4f} "
-            f"rollout_s={rollout_seconds:.1f} steps/s={steps_per_sec:.1f} "
-            f"accept={accept_rate:.3f} feasible={feasible_rate:.3f} "
-            f"bestE(p10/p50/p90)={eb_p10:.1f}/{eb_p50:.1f}/{eb_p90:.1f} "
-            f"bestImprove(p10/p50/p90)={bi_p10:.2f}/{bi_p50:.2f}/{bi_p90:.2f}"
-        )
-        print(msg, flush=True)
+            adv, returns = _compute_gae(
+                rewards=rewards,
+                values=values,
+                dones=dones,
+                last_values=last_values,
+                gamma=float(ppo.gamma),
+                lam=float(ppo.gae_lambda),
+            )
 
-        # Append JSONL metrics for offline plotting.
-        rec = {
-            "time": time.time(),
-            "update": int(upd + 1),
-            "avg_step_reward": float(avg_r),
-            "rollout_seconds": float(rollout_seconds),
-            "steps_per_sec": float(steps_per_sec),
-            "accepted": int(accepted_cnt),
-            "feasible": int(feasible_cnt),
-            "steps": int(step_cnt),
-            "accept_rate": float(accept_rate),
-            "feasible_rate": float(feasible_rate),
-            "best_energy_mean": float(np.mean(eb)),
-            "best_energy_p10": float(eb_p10),
-            "best_energy_p50": float(eb_p50),
-            "best_energy_p90": float(eb_p90),
-            "best_improve_mean": float(np.mean(bi)),
-            "best_improve_p50": float(bi_p50),
-        }
-        last_metrics = rec
-        metrics_path_p.parent.mkdir(parents=True, exist_ok=True)
-        with metrics_path_p.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
+            # If anything went non-finite, skip update and keep going.
+            if not (
+                torch.isfinite(adv).all()
+                and torch.isfinite(returns).all()
+                and torch.isfinite(values).all()
+                and torch.isfinite(logp_old).all()
+                and torch.isfinite(obs).all()
+            ):
+                net.load_state_dict(state)
+                print(
+                    f"update={upd+1}: non-finite rollout tensors; skipping PPO update",
+                    flush=True,
+                )
+                continue
 
-        if int(args.save_every) > 0 and ((upd + 1) % int(args.save_every) == 0):
-            p = _save_checkpoint(update=upd + 1)
-            print(f"Saved checkpoint: {p}", flush=True)
+            adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+            # Flatten
+            obs_f = obs.reshape(T * B, obs_dim)
+            act_f = actions.reshape(T * B)
+            logp_old_f = logp_old.reshape(T * B)
+            adv_f = adv.reshape(T * B)
+            ret_f = returns.reshape(T * B)
+
+            batch_size = T * B
+            mb = max(1, int(batch_size // int(ppo.minibatches)))
+
+            net.train()
+            opt_state_before = copy.deepcopy(opt.state_dict())
+            bad_update = False
+            for _ in range(int(ppo.ppo_epochs)):
+                idx = torch.randperm(batch_size)
+                for start in range(0, batch_size, mb):
+                    j = idx[start : start + mb]
+                    logits, v = net(obs_f[j])
+                    if not (torch.isfinite(logits).all() and torch.isfinite(v).all()):
+                        bad_update = True
+                        break
+                    dist = torch.distributions.Categorical(
+                        logits=logits, validate_args=False
+                    )
+                    logp = dist.log_prob(act_f[j])
+                    log_ratio = torch.clamp(logp - logp_old_f[j], -20.0, 20.0)
+                    ratio = torch.exp(log_ratio)
+                    surr1 = ratio * adv_f[j]
+                    surr2 = (
+                        torch.clamp(ratio, 1.0 - ppo.clip_eps, 1.0 + ppo.clip_eps)
+                        * adv_f[j]
+                    )
+                    policy_loss = -torch.min(surr1, surr2).mean()
+
+                    value_loss = ((v - ret_f[j]) ** 2).mean()
+                    entropy = dist.entropy().mean()
+
+                    loss = (
+                        policy_loss
+                        + ppo.value_coef * value_loss
+                        - ppo.entropy_coef * entropy
+                    )
+
+                    if not torch.isfinite(loss):
+                        bad_update = True
+                        break
+
+                    opt.zero_grad()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        net.parameters(), float(ppo.max_grad_norm)
+                    )
+                    opt.step()
+
+                if bad_update:
+                    break
+
+            if bad_update:
+                # Revert to pre-update weights to avoid poisoning the run.
+                net.load_state_dict(state)
+                try:
+                    opt.load_state_dict(opt_state_before)
+                except Exception:
+                    pass
+                print(
+                    f"update={upd+1}: non-finite logits/loss encountered; reverted and skipped",
+                    flush=True,
+                )
+                continue
+
+            avg_r = float(rewards.mean().item())
+
+            accept_rate = float(accepted_cnt) / float(max(1, step_cnt))
+            feasible_rate = float(feasible_cnt) / float(max(1, step_cnt))
+            steps_per_sec = float(step_cnt) / float(max(1e-9, rollout_seconds))
+
+            eb = np.asarray(end_best_energy, dtype=np.float64)
+            bi = np.asarray(best_improve, dtype=np.float64)
+            eb_f = eb[np.isfinite(eb)]
+            bi_f = bi[np.isfinite(bi)]
+
+            eb_nonfinite = int(eb.size - eb_f.size)
+            bi_nonfinite = int(bi.size - bi_f.size)
+
+            if eb_f.size > 0:
+                eb_p10, eb_p50, eb_p90 = (
+                    float(x) for x in np.quantile(eb_f, [0.1, 0.5, 0.9])
+                )
+                eb_mean = float(np.mean(eb_f))
+            else:
+                eb_p10 = eb_p50 = eb_p90 = float("nan")
+                eb_mean = float("nan")
+
+            if bi_f.size > 0:
+                bi_p10, bi_p50, bi_p90 = (
+                    float(x) for x in np.quantile(bi_f, [0.1, 0.5, 0.9])
+                )
+                bi_mean = float(np.mean(bi_f))
+            else:
+                bi_p10 = bi_p50 = bi_p90 = float("nan")
+                bi_mean = float("nan")
+
+            msg = (
+                f"update={upd+1}/{int(args.updates)} "
+                f"avg_step_reward={avg_r:+.4f} "
+                f"rollout_s={rollout_seconds:.1f} steps/s={steps_per_sec:.1f} "
+                f"accept={accept_rate:.3f} feasible={feasible_rate:.3f} "
+                f"bestE(p10/p50/p90)={eb_p10:.1f}/{eb_p50:.1f}/{eb_p90:.1f} "
+                f"bestImprove(p10/p50/p90)={bi_p10:.2f}/{bi_p50:.2f}/{bi_p90:.2f}"
+            )
+            print(msg, flush=True)
+
+            # Append JSONL metrics for offline plotting.
+            rec = {
+                "time": time.time(),
+                "update": int(upd + 1),
+                "avg_step_reward": float(avg_r),
+                "rollout_seconds": float(rollout_seconds),
+                "steps_per_sec": float(steps_per_sec),
+                "accepted": int(accepted_cnt),
+                "feasible": int(feasible_cnt),
+                "steps": int(step_cnt),
+                "accept_rate": float(accept_rate),
+                "feasible_rate": float(feasible_rate),
+                "best_energy_mean": float(eb_mean),
+                "best_energy_p10": float(eb_p10),
+                "best_energy_p50": float(eb_p50),
+                "best_energy_p90": float(eb_p90),
+                "best_improve_mean": float(bi_mean),
+                "best_improve_p50": float(bi_p50),
+                "best_energy_nonfinite": int(eb_nonfinite),
+                "best_improve_nonfinite": int(bi_nonfinite),
+            }
+            last_metrics = rec
+            metrics_path_p.parent.mkdir(parents=True, exist_ok=True)
+            with metrics_path_p.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(rec) + "\n")
+
+            if int(args.save_every) > 0 and ((upd + 1) % int(args.save_every) == 0):
+                p = _save_checkpoint(update=upd + 1)
+                print(f"Saved checkpoint: {p}", flush=True)
+
+    finally:
+        try:
+            ex.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
 
     # Save final weights (policy only)
     out_final = os.path.join(out_dir, f"{run_name}.pt")
