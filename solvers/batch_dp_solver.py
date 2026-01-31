@@ -12,6 +12,96 @@ class BatchSequenceDPSolver:
     """Computes optimal scheduling cost for fixed job sequences using DP."""
 
     @staticmethod
+    def solve_with_end_time(
+        job_sequences: torch.Tensor,
+        processing_times: torch.Tensor,
+        ct: torch.Tensor,
+        e_single: torch.Tensor,
+        T_limit: torch.Tensor,
+        sequence_lengths: torch.Tensor = None,
+        tol: float = 1e-5,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Like `solve`, but also returns the (earliest) completion time.
+
+        The DP maintains `min_prev[t] = min cost to finish the processed prefix
+        by time t` (prefix-min over end times). The final cost at deadline
+        `T_limit` is therefore the min cost achievable by the deadline.
+
+        We recover a makespan proxy by selecting the *earliest* time t <= T_limit
+        such that min_prev[t] matches the final cost (within `tol`).
+
+        Returns:
+            (final_cost, end_time) where:
+            - final_cost: (B,) float tensor
+            - end_time: (B,) long tensor with 0..T_limit, or (T_limit+1) if infeasible
+        """
+        B, N = job_sequences.shape
+        device = job_sequences.device
+        T_max = ct.shape[1]
+
+        assert processing_times.shape == (B, N)
+        assert T_limit.shape == (B,)
+
+        if sequence_lengths is None:
+            sequence_lengths = torch.full((B,), N, device=device, dtype=torch.long)
+
+        price_prefix = torch.zeros((B, T_max + 1), dtype=torch.float32, device=device)
+        price_prefix[:, 1:] = torch.cumsum(ct.float(), dim=1)
+
+        min_prev = torch.zeros((B, T_max + 1), dtype=torch.float32, device=device)
+        t_indices = torch.arange(T_max + 1, device=device).unsqueeze(0)  # (1, T+1)
+
+        for i in range(N):
+            active = i < sequence_lengths
+            job_idx = job_sequences[:, i]
+            p = torch.gather(processing_times, 1, job_idx.unsqueeze(1)).squeeze(1)
+
+            p_expanded = p.unsqueeze(1)
+            t_start = t_indices - p_expanded
+            valid_mask = t_start >= 0
+            safe_t_start = t_start.clamp(min=0).long()
+
+            cost_prev = torch.gather(min_prev, 1, safe_t_start)
+
+            price_end = torch.gather(price_prefix, 1, t_indices)
+            price_start = torch.gather(price_prefix, 1, safe_t_start)
+
+            e = e_single
+            if e.ndim == 1:
+                e = e.unsqueeze(1)
+            energy_cost = (price_end - price_start) * e
+            total_cost_at_end = cost_prev + energy_cost
+
+            total_cost_at_end = torch.where(
+                valid_mask,
+                total_cost_at_end,
+                torch.tensor(float("inf"), device=device),
+            )
+
+            min_curr, _ = torch.cummin(total_cost_at_end, dim=1)
+            min_prev = torch.where(active.unsqueeze(1), min_curr, min_prev)
+
+        safe_T_limit = T_limit.clamp(max=T_max).long().unsqueeze(1)
+        final_cost = torch.gather(min_prev, 1, safe_T_limit).squeeze(1)
+
+        # Recover earliest end time achieving the final cost within the deadline.
+        t_grid = t_indices.expand(B, -1)
+        within_deadline = t_grid <= safe_T_limit
+        # If final_cost is inf, treat as infeasible.
+        finite = torch.isfinite(final_cost)
+        thresh = final_cost.unsqueeze(1) + float(tol)
+        mask = within_deadline & finite.unsqueeze(1) & (min_prev <= thresh)
+        has = mask.any(dim=1)
+        earliest = mask.long().argmax(dim=1)
+        end_time = torch.where(
+            has,
+            earliest,
+            safe_T_limit.squeeze(1) + 1,
+        ).long()
+
+        return final_cost, end_time
+
+    @staticmethod
     def solve(
         job_sequences: torch.Tensor,
         processing_times: torch.Tensor,
@@ -29,7 +119,7 @@ class BatchSequenceDPSolver:
             ct: (B, T_max_pad) Tensor of price curve.
             e_single: (B,) Tensor of energy per unit time.
             T_limit: (B,) Tensor of deadlines.
-            sequence_lengths: (B,) Tensor of valid jobs per sequence. 
+            sequence_lengths: (B,) Tensor of valid jobs per sequence.
                               If None, assumes all N jobs are valid.
 
         Returns:
@@ -42,15 +132,13 @@ class BatchSequenceDPSolver:
         # Check inputs
         assert processing_times.shape == (B, N)
         assert T_limit.shape == (B,)
-        
+
         if sequence_lengths is None:
             sequence_lengths = torch.full((B,), N, device=device, dtype=torch.long)
 
         # Precompute prefix sum of prices for O(1) interval cost
         # P[b, t] = sum(ct[b, :t])
-        price_prefix = torch.zeros(
-            (B, T_max + 1), dtype=torch.float32, device=device
-        )
+        price_prefix = torch.zeros((B, T_max + 1), dtype=torch.float32, device=device)
         price_prefix[:, 1:] = torch.cumsum(ct.float(), dim=1)
 
         # Initialize DP state: min cost to have finished 0 jobs by time t.
@@ -63,15 +151,17 @@ class BatchSequenceDPSolver:
         # Process jobs in sequence (sequential loop over N, vectorized over B and T)
         for i in range(N):
             # Check which sequences are still active (i < length)
-            active = (i < sequence_lengths)  # (B,)
-            
+            active = i < sequence_lengths  # (B,)
+
             # Gather processing time for the current job in the sequence
             job_idx = job_sequences[:, i]  # (B,)
-            
+
             # Map sequence job index to original job properties
             # processing_times is (B, N), where N is number of total jobs
             # job_idx are indices 0..N-1
-            p = torch.gather(processing_times, 1, job_idx.unsqueeze(1)).squeeze(1)  # (B,)
+            p = torch.gather(processing_times, 1, job_idx.unsqueeze(1)).squeeze(
+                1
+            )  # (B,)
 
             # We want to compute cost for job starting at t_start.
             # t_end = t_start + p  =>  t_start = t_end - p
@@ -95,12 +185,12 @@ class BatchSequenceDPSolver:
             # P_start: gather at safe_t_start
             price_end = torch.gather(price_prefix, 1, t_indices)
             price_start = torch.gather(price_prefix, 1, safe_t_start)
-            
+
             # e_single might be (B,) or (B,1)
             e = e_single
             if e.ndim == 1:
                 e = e.unsqueeze(1)
-            
+
             energy_cost = (price_end - price_start) * e
 
             # 5. Total cost to finish at exactly t_end
@@ -109,25 +199,19 @@ class BatchSequenceDPSolver:
             # Apply validity mask (t_start >= 0)
             # Use float('inf') for invalid transitions
             total_cost_at_end = torch.where(
-                valid_mask,
-                total_cost_at_end,
-                torch.tensor(float('inf'), device=device)
+                valid_mask, total_cost_at_end, torch.tensor(float("inf"), device=device)
             )
 
             # 6. Compute new min_prev (Prefix Min)
             # min_prev[t] = min(total_cost_at_end[row, 0...t])
             # Use torch.cummin if available (PyTorch 1.11+), else scan.
-            
+
             min_curr, _ = torch.cummin(total_cost_at_end, dim=1)
-            
+
             # UPDATE STEP:
             # If active, min_prev = min_curr
             # If inactive, min_prev remains same (identity for cost)
-            min_prev = torch.where(
-                active.unsqueeze(1),
-                min_curr,
-                min_prev
-            )
+            min_prev = torch.where(active.unsqueeze(1), min_curr, min_prev)
 
         # Final result: min cost to finish all N jobs by T_limit
         # Clamp T_limit to be within bounds

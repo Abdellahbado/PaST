@@ -31,6 +31,17 @@ from PaST.data.sm_benchmark_data import RawInstance
 from PaST.solvers.baselines_sequence_dp import _dp_schedule_fixed_order
 from PaST.solvers.cwp_solver import construct_schedule_CWP, get_machine_job_sets
 
+try:
+    import torch
+
+    from PaST.solvers.batch_dp_solver import BatchSequenceDPSolver
+
+    _TORCH_DP_OK = True
+except Exception:
+    torch = None  # type: ignore
+    BatchSequenceDPSolver = None  # type: ignore
+    _TORCH_DP_OK = False
+
 
 @dataclass(frozen=True)
 class MachineDP:
@@ -91,6 +102,171 @@ class ALNSConfig:
     verify_cost: bool = False
     oracle_dataset: bool = False
     oracle_max_states: int = 256
+
+    # Optional acceleration: batch DP evaluations in greedy repair.
+    use_torch_batch_dp_in_repair: bool = True
+    # Use torch device for batched DP: auto|cpu|cuda
+    torch_dp_device: str = "auto"
+    # Minimum total candidates to batch (across all machines) before using torch DP.
+    # Keep this reasonably high because CPU->GPU transfers can dominate when batches are tiny.
+    torch_batch_min_total_candidates: int = 64
+
+
+def _torch_choose_device(cfg: ALNSConfig) -> str:
+    dev = (cfg.torch_dp_device or "auto").strip().lower()
+    if dev not in ("auto", "cpu", "cuda"):
+        dev = "auto"
+    if dev == "cpu":
+        return "cpu"
+    if dev == "cuda":
+        return "cuda"
+    # auto
+    if _TORCH_DP_OK and torch is not None and torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
+
+def _torch_get_ct_tensor(raw: RawInstance, epsilon: int, device: str):
+    """Cache `ct[:epsilon]` tensor on the requested device for this instance."""
+    if not _TORCH_DP_OK:
+        raise RuntimeError("Torch DP not available")
+
+    key = (int(epsilon), str(device))
+    cache = getattr(raw, "_torch_ct_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(raw, "_torch_ct_cache", cache)
+
+    v = cache.get(key)
+    if v is not None:
+        return v
+
+    ct_np = np.asarray(raw.ct[: int(epsilon)], dtype=np.int32)
+    ct_t = torch.tensor(
+        ct_np, dtype=torch.int32, device=torch.device(device)
+    ).unsqueeze(0)
+    cache[key] = ct_t
+    return ct_t
+
+
+def _batch_dp_eval_candidates(
+    raw: RawInstance,
+    epsilon: int,
+    candidates: List[Tuple[int, int, List[int]]],
+    cfg: ALNSConfig,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Batch-evaluate many candidate *job sequences* via Torch DP.
+
+    Args:
+        candidates: list of (machine_idx, pos, job_sequence) where job_sequence is
+            the full per-machine job order after insertion.
+    Returns:
+        (energies, makespans) arrays aligned with `candidates`.
+    """
+    if not _TORCH_DP_OK:
+        raise RuntimeError("Torch DP not available")
+
+    B = int(len(candidates))
+    if B == 0:
+        return np.zeros((0,), dtype=np.float64), np.zeros((0,), dtype=np.int64)
+
+    device = _torch_choose_device(cfg)
+    dev = torch.device(device)
+
+    lengths = [len(seq) for (_mi, _pos, seq) in candidates]
+    maxN = int(max(lengths))
+
+    # Build padded processing time matrix. Padding uses 0-duration jobs,
+    # and we pass `sequence_lengths` to ensure only the real prefix counts.
+    proc_batch = np.zeros((B, maxN), dtype=np.int64)
+    seq_lens = np.asarray(lengths, dtype=np.int64)
+    e_single = np.zeros((B,), dtype=np.int64)
+
+    for i, (mi, _pos, seq) in enumerate(candidates):
+        for j, job_id in enumerate(seq):
+            proc_batch[i, j] = int(raw.p[int(job_id)])
+        e_single[i] = int(raw.e[int(mi)])
+
+    # Identity job order [0..maxN-1] for all rows; durations already in sequence order.
+    job_sequences = (
+        torch.arange(maxN, dtype=torch.long, device=dev).unsqueeze(0).repeat(B, 1)
+    )
+    processing_times = torch.tensor(proc_batch, dtype=torch.long, device=dev)
+    e_t = torch.tensor(e_single, dtype=torch.long, device=dev)
+    T_t = torch.full((B,), int(epsilon), dtype=torch.long, device=dev)
+    seq_len_t = torch.tensor(seq_lens, dtype=torch.long, device=dev)
+
+    # Reuse cached ct tensor on device.
+    ct_t = _torch_get_ct_tensor(raw, epsilon, device).repeat(B, 1)
+
+    costs_t, end_t = BatchSequenceDPSolver.solve_with_end_time(
+        job_sequences=job_sequences,
+        processing_times=processing_times,
+        ct=ct_t,
+        e_single=e_t,
+        T_limit=T_t,
+        sequence_lengths=seq_len_t,
+    )
+
+    energies = costs_t.detach().to("cpu").numpy().astype(np.float64)
+    makespans = end_t.detach().to("cpu").numpy().astype(np.int64)
+    return energies, makespans
+
+
+def _batch_dp_eval_insertions_for_machine(
+    raw: RawInstance,
+    epsilon: int,
+    machine_idx: int,
+    base_seq: Sequence[int],
+    job: int,
+    positions: Sequence[int],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Batch-evaluate candidate insertions on one machine.
+
+    Returns:
+        (energies, makespans) arrays of shape (len(positions),)
+
+    Notes:
+        This evaluates *processing-time sequences* using `BatchSequenceDPSolver`.
+        It does not reconstruct per-job start times; we only need energy and
+        completion time (makespan) for ALNS decisions.
+    """
+    if not _TORCH_DP_OK:
+        raise RuntimeError("Torch DP not available")
+
+    base_seq_list = list(int(x) for x in base_seq)
+    positions_list = list(int(p) for p in positions)
+    B = int(len(positions_list))
+    N = int(len(base_seq_list) + 1)
+    if B <= 0:
+        return np.zeros((0,), dtype=np.float64), np.zeros((0,), dtype=np.int64)
+
+    proc_batch: List[List[int]] = []
+    for pos in positions_list:
+        seq = base_seq_list.copy()
+        seq.insert(int(pos), int(job))
+        proc_batch.append([int(raw.p[j]) for j in seq])
+
+    # Identity job order [0..N-1]; durations already in sequence order per row.
+    job_sequences = torch.arange(N, dtype=torch.long).unsqueeze(0).repeat(B, 1)
+    processing_times = torch.tensor(proc_batch, dtype=torch.long)
+
+    ct_np = np.asarray(raw.ct[: int(epsilon)], dtype=np.int32)
+    ct_t = torch.tensor(ct_np, dtype=torch.int32).unsqueeze(0).repeat(B, 1)
+    e_t = torch.full((B,), int(raw.e[int(machine_idx)]), dtype=torch.long)
+    T_t = torch.full((B,), int(epsilon), dtype=torch.long)
+
+    costs_t, end_t = BatchSequenceDPSolver.solve_with_end_time(
+        job_sequences=job_sequences,
+        processing_times=processing_times,
+        ct=ct_t,
+        e_single=e_t,
+        T_limit=T_t,
+    )
+
+    energies = costs_t.detach().cpu().numpy().astype(np.float64)
+    makespans = end_t.detach().cpu().numpy().astype(np.int64)
+    return energies, makespans
 
 
 ALNSAction = Tuple[str, float, str]  # (destroy_name, k_mult, repair_name)
@@ -421,7 +597,102 @@ def _best_insertion_for_job(
     best_mi = None
     best_total = float("inf")
 
-    # Try all machines; insertion position candidates per machine.
+    # Optional: batch all candidates across all machines into one DP call.
+    # This makes GPU usage worthwhile (bigger batch, fewer kernel launches).
+    use_batch_all = bool(cfg.use_torch_batch_dp_in_repair) and _TORCH_DP_OK
+    if use_batch_all:
+        # Build candidate list once.
+        candidates: List[Tuple[int, int, List[int]]] = []
+        for mi in range(int(raw.m)):
+            base_seq = sol.sequences[mi]
+            positions = _candidate_positions(len(base_seq), cfg, rng)
+            for pos in positions:
+                seq = list(int(x) for x in base_seq)
+                seq.insert(int(pos), int(job))
+                candidates.append((int(mi), int(pos), seq))
+
+        if len(candidates) >= int(cfg.torch_batch_min_total_candidates):
+            energies, makespans = _batch_dp_eval_candidates(
+                raw=raw,
+                epsilon=epsilon,
+                candidates=candidates,
+                cfg=cfg,
+            )
+
+            # Precompute other-machines info for delta totals.
+            eval_total_finite = np.isfinite(float(eval_.total_energy))
+            per_machine = list(eval_.per_machine)
+            other_makespan_by_m: List[int] = []
+            for mi in range(int(raw.m)):
+                ms_other = 0
+                feasible_other = True
+                for k, md in enumerate(per_machine):
+                    if k == mi:
+                        continue
+                    if not np.isfinite(float(md.energy)):
+                        feasible_other = False
+                        break
+                    ms_other = max(ms_other, int(md.makespan))
+                other_makespan_by_m.append(
+                    int(ms_other) if feasible_other else int(epsilon) + 1
+                )
+
+            for (mi, pos, seq), new_energy, new_ms in zip(
+                candidates, energies, makespans
+            ):
+                if not np.isfinite(float(new_energy)):
+                    continue
+
+                makespan = max(int(other_makespan_by_m[int(mi)]), int(new_ms))
+                if makespan > int(epsilon):
+                    continue
+
+                old_mdp = per_machine[int(mi)]
+                if eval_total_finite and np.isfinite(float(old_mdp.energy)):
+                    total = (
+                        float(eval_.total_energy)
+                        - float(old_mdp.energy)
+                        + float(new_energy)
+                    )
+                    feasible = True
+                else:
+                    feasible = True
+                    total = 0.0
+                    for k, md in enumerate(per_machine):
+                        if k == int(mi):
+                            continue
+                        if not np.isfinite(float(md.energy)):
+                            feasible = False
+                            break
+                        total += float(md.energy)
+                    if feasible:
+                        total += float(new_energy)
+
+                if (not feasible) or (not np.isfinite(float(total))):
+                    continue
+
+                if float(total) < best_total:
+                    trial_sol = Solution(sequences=[list(s) for s in sol.sequences])
+                    trial_sol.sequences[int(mi)].insert(int(pos), int(job))
+                    per_machine2 = list(per_machine)
+                    per_machine2[int(mi)] = MachineDP(
+                        energy=float(new_energy),
+                        makespan=int(new_ms),
+                        start_times=[],
+                    )
+                    best_total = float(total)
+                    best_sol = trial_sol
+                    best_eval = FullEval(
+                        total_energy=float(total),
+                        makespan=int(makespan),
+                        feasible=True,
+                        per_machine=per_machine2,
+                    )
+                    best_mi = int(mi)
+
+            return best_sol, best_eval, best_mi
+
+    # Fallback: try all machines; insertion position candidates per machine.
     for mi in range(raw.m):
         base_seq = sol.sequences[mi]
         positions = _candidate_positions(len(base_seq), cfg, rng)
