@@ -111,6 +111,15 @@ class ALNSConfig:
     # Keep this reasonably high because CPU->GPU transfers can dominate when batches are tiny.
     torch_batch_min_total_candidates: int = 64
 
+    # Feasibility helpers for RL training:
+    # When an action yields an infeasible candidate, retry with smaller destruction and/or greedy repair.
+    feasibility_retries: int = 2
+    feasibility_retry_shrink: float = 0.5
+    feasibility_force_greedy_on_retry: bool = True
+    # Avoid destroy_all when we're close to the deadline (high risk of infeasibility).
+    avoid_destroy_all_when_tight: bool = True
+    avoid_destroy_all_slack_threshold: float = 0.05
+
 
 def _torch_choose_device(cfg: ALNSConfig) -> str:
     dev = (cfg.torch_dp_device or "auto").strip().lower()
@@ -859,18 +868,34 @@ def _repair_random(
 
 def default_action_list() -> List[ALNSAction]:
     """Default discrete action set for RL/control experiments."""
-    destroy_ops = ["random", "worst_machine", "longest", "all"]
-    repair_ops = ["greedy", "random"]
-    k_mults = [0.5, 1.0]
+    return build_action_list(
+        destroy_ops=["random", "worst_machine", "longest", "all"],
+        repair_ops=["greedy", "random"],
+        k_mults=[0.5, 1.0],
+    )
+
+
+def build_action_list(
+    *,
+    destroy_ops: List[str],
+    repair_ops: List[str],
+    k_mults: List[float],
+) -> List[ALNSAction]:
+    """Build a discrete action list.
+
+    Notes:
+        - `destroy_all` ignores `k_mults` (it removes all jobs).
+        - This function is used by the RL environment to select safer action sets.
+    """
 
     actions: List[ALNSAction] = []
     for d in destroy_ops:
         for rname in repair_ops:
             if d == "all":
-                actions.append((d, 1.0, rname))
+                actions.append(("all", 1.0, str(rname)))
             else:
                 for km in k_mults:
-                    actions.append((d, float(km), rname))
+                    actions.append((str(d), float(km), str(rname)))
     return actions
 
 
@@ -929,76 +954,138 @@ def alns_apply_action(
     # Make destruction gentler when we're close to the deadline.
     slack = max(0, int(epsilon) - int(ev.makespan))
     slack_norm = float(slack) / float(max(1, int(epsilon)))
-    slack_mult = 0.5 + 0.5 * max(0.0, min(1.0, slack_norm))
+    slack_norm = max(0.0, min(1.0, float(slack_norm)))
+    slack_mult = 0.5 + 0.5 * slack_norm
 
-    if dname == "all":
-        partial, removed, touched = _destroy_all(sol)
-    else:
-        k_base = float(cfg.destroy_frac) * float(raw.n) * float(km) * float(slack_mult)
-        k = int(max(cfg.destroy_min, min(cfg.destroy_max, int(round(k_base)))))
-        if dname == "random":
-            partial, removed, touched = _destroy_random(sol, k, rng)
-        elif dname == "worst_machine":
-            partial, removed, touched = _destroy_worst_machine(sol, ev, k, rng)
-        elif dname == "longest":
-            partial, removed, touched = _destroy_longest_jobs(raw, sol, k, rng)
+    def _one_attempt(
+        *,
+        destroy_name: str,
+        k_mult: float,
+        repair_name: str,
+        k_override: Optional[int],
+    ) -> Tuple[Optional[Solution], Optional[FullEval], List[int], List[int]]:
+        if destroy_name == "all":
+            partial, removed, touched = _destroy_all(sol)
         else:
-            raise ValueError(f"Unknown destroy op: {dname}")
+            if k_override is None:
+                k_base = (
+                    float(cfg.destroy_frac)
+                    * float(raw.n)
+                    * float(k_mult)
+                    * float(slack_mult)
+                )
+                k = int(max(cfg.destroy_min, min(cfg.destroy_max, int(round(k_base)))))
+            else:
+                k = int(max(cfg.destroy_min, min(cfg.destroy_max, int(k_override))))
 
-    partial_ev = _update_eval_for_machines(
-        raw=raw,
-        epsilon=epsilon,
-        sol=partial,
-        prev=ev,
-        machine_indices=touched,
-    )
+            if destroy_name == "random":
+                partial, removed, touched = _destroy_random(sol, k, rng)
+            elif destroy_name == "worst_machine":
+                partial, removed, touched = _destroy_worst_machine(sol, ev, k, rng)
+            elif destroy_name == "longest":
+                partial, removed, touched = _destroy_longest_jobs(raw, sol, k, rng)
+            else:
+                raise ValueError(f"Unknown destroy op: {destroy_name}")
 
-    if rname == "greedy":
-        repaired, repaired_ev, touched2 = _repair_greedy(
+        partial_ev = _update_eval_for_machines(
             raw=raw,
             epsilon=epsilon,
-            partial=partial,
-            partial_eval=partial_ev,
-            removed_jobs=removed,
-            cfg=cfg,
-            rng=rng,
+            sol=partial,
+            prev=ev,
+            machine_indices=touched,
         )
-    elif rname == "random":
-        repaired, repaired_ev, touched2 = _repair_random(
-            raw=raw,
-            epsilon=epsilon,
-            partial=partial,
-            partial_eval=partial_ev,
-            removed_jobs=removed,
-            cfg=cfg,
-            rng=rng,
+
+        if repair_name == "greedy":
+            repaired, repaired_ev, touched2 = _repair_greedy(
+                raw=raw,
+                epsilon=epsilon,
+                partial=partial,
+                partial_eval=partial_ev,
+                removed_jobs=removed,
+                cfg=cfg,
+                rng=rng,
+            )
+        elif repair_name == "random":
+            repaired, repaired_ev, touched2 = _repair_random(
+                raw=raw,
+                epsilon=epsilon,
+                partial=partial,
+                partial_eval=partial_ev,
+                removed_jobs=removed,
+                cfg=cfg,
+                rng=rng,
+            )
+        else:
+            raise ValueError(f"Unknown repair op: {repair_name}")
+
+        if repaired is None or repaired_ev is None:
+            return None, None, touched, removed
+        return repaired, repaired_ev, sorted(set(touched).union(touched2)), removed
+
+    # Reduce the likelihood of catastrophic infeasibility close to the deadline.
+    destroy_name0 = str(dname)
+    if (
+        bool(cfg.avoid_destroy_all_when_tight)
+        and destroy_name0 == "all"
+        and float(slack_norm) < float(cfg.avoid_destroy_all_slack_threshold)
+    ):
+        destroy_name0 = "worst_machine"
+
+    # Attempt the requested action; if infeasible, retry with smaller destruction and/or greedy repair.
+    max_retries = int(max(0, cfg.feasibility_retries))
+    shrink = float(cfg.feasibility_retry_shrink)
+    shrink = float(shrink) if np.isfinite(shrink) else 0.5
+    shrink = float(max(0.1, min(0.9, shrink)))
+
+    # We only compute a k_override for non-"all" destroys.
+    k_base0 = float(cfg.destroy_frac) * float(raw.n) * float(km) * float(slack_mult)
+    k0 = int(max(cfg.destroy_min, min(cfg.destroy_max, int(round(k_base0)))))
+
+    last_touched: List[int] = []
+    last_removed: List[int] = []
+    for attempt in range(max_retries + 1):
+        if destroy_name0 == "all":
+            k_override = None
+        else:
+            k_override = int(max(1, int(round(float(k0) * (shrink**attempt)))))
+
+        repair_name = str(rname)
+        if attempt > 0 and bool(cfg.feasibility_force_greedy_on_retry):
+            repair_name = "greedy"
+
+        repaired, repaired_ev, touched_all, removed = _one_attempt(
+            destroy_name=str(destroy_name0),
+            k_mult=float(km),
+            repair_name=str(repair_name),
+            k_override=k_override,
         )
-    else:
-        raise ValueError(f"Unknown repair op: {rname}")
+        last_touched, last_removed = list(touched_all), list(removed)
 
-    if repaired is None or repaired_ev is None:
-        return None, None, touched, removed
+        if repaired is None or repaired_ev is None:
+            continue
+        if repaired_ev is None or (not bool(repaired_ev.feasible)):
+            continue
 
-    _assert_solution_valid(repaired, n_jobs=raw.n, m=raw.m)
+        _assert_solution_valid(repaired, n_jobs=raw.n, m=raw.m)
 
-    if cfg.verify_cost:
-        for mi in touched:
-            _eval_machine_sequence(
-                raw,
-                int(mi),
-                repaired.sequences[int(mi)],
-                epsilon,
-                verify_cost=True,
+        if cfg.verify_cost:
+            for mi in touched_all:
+                _eval_machine_sequence(
+                    raw,
+                    int(mi),
+                    repaired.sequences[int(mi)],
+                    epsilon,
+                    verify_cost=True,
+                )
+
+        if cfg.local_search:
+            repaired, repaired_ev = _try_local_intra_swap(
+                raw, epsilon, repaired, repaired_ev, touched_all, cfg, rng
             )
 
-    touched_all = sorted(set(touched).union(touched2))
+        return repaired, repaired_ev, touched_all, removed
 
-    if cfg.local_search:
-        repaired, repaired_ev = _try_local_intra_swap(
-            raw, epsilon, repaired, repaired_ev, touched_all, cfg, rng
-        )
-
-    return repaired, repaired_ev, touched_all, removed
+    return None, None, last_touched, last_removed
 
 
 # -------------------------

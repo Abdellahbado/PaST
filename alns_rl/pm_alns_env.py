@@ -18,8 +18,36 @@ from PaST.solvers.alns_parallel import (
     alns_apply_action,
     alns_state_features,
     build_initial_solution_cwp_spt,
+    build_action_list,
     default_action_list,
 )
+
+
+def _build_action_list_by_name(action_set: str) -> List[ALNSAction]:
+    """Select a discrete action set for PPO.
+
+    Rationale:
+        - `destroy_all` is very likely to produce infeasible candidates when epsilon is tight.
+        - `repair_random` increases expressiveness but can be noisy early; we keep it in
+          the default `balanced` set.
+    """
+
+    name = str(action_set or "").strip().lower()
+    if name in {"", "balanced"}:
+        return build_action_list(
+            destroy_ops=["random", "worst_machine", "longest"],
+            repair_ops=["greedy", "random"],
+            k_mults=[0.5, 1.0],
+        )
+    if name in {"safe", "feasible"}:
+        return build_action_list(
+            destroy_ops=["random", "worst_machine", "longest"],
+            repair_ops=["greedy"],
+            k_mults=[0.25, 0.5, 1.0],
+        )
+    if name in {"full", "default"}:
+        return default_action_list()
+    raise ValueError("action_set must be one of: balanced, safe, full")
 
 
 def _ensure_scale_choices(cfg: DataConfig, scale: str) -> None:
@@ -65,6 +93,7 @@ class PMALNSEnv:
         instance_id: int,
         slack_ratio: float,
         alns_cfg: ALNSConfig,
+        action_set: str = "balanced",
         top_k_cwp: int = 80,
         fail_penalty: float = 1.0,
         infeasible_penalty: float = 1.0,
@@ -74,11 +103,12 @@ class PMALNSEnv:
         self.instance_id = int(instance_id)
         self.slack_ratio = float(slack_ratio)
         self.alns_cfg = alns_cfg
+        self.action_set = str(action_set)
         self.top_k_cwp = int(top_k_cwp)
         self.fail_penalty = float(fail_penalty)
         self.infeasible_penalty = float(infeasible_penalty)
 
-        self.action_list: List[ALNSAction] = default_action_list()
+        self.action_list: List[ALNSAction] = _build_action_list_by_name(self.action_set)
 
         self._rng = random.Random(self.seed)
         self._raw: Optional[RawInstance] = None
@@ -132,10 +162,20 @@ class PMALNSEnv:
         if self._raw is None or self._cur_ev is None or self._best_ev is None:
             raise RuntimeError("Environment not reset yet")
 
+        eps = int(self._epsilon)
+        cur_ms = int(self._cur_ev.makespan)
+        best_ms = int(self._best_ev.makespan)
+        slack = int(eps - cur_ms)
+        slack_norm = float(slack) / float(max(1, eps))
+
         return {
             "cur_energy": float(self._cur_ev.total_energy),
             "best_energy": float(self._best_ev.total_energy),
             "epsilon": float(self._epsilon),
+            "cur_makespan": float(cur_ms),
+            "best_makespan": float(best_ms),
+            "slack": float(slack),
+            "slack_norm": float(slack_norm),
             "it": float(self._it),
             "no_improve": float(self._no_improve),
             "tau": float(self._tau),
@@ -188,15 +228,22 @@ class PMALNSEnv:
         reward = 0.0
         accepted = False
         feasible_cand = bool(cand_ev is not None and cand_ev.feasible)
+        failure_mode = "ok"
+        if step_exception:
+            failure_mode = "exception"
 
         if cand_sol is None or cand_ev is None:
             # Repair failed
             self._no_improve += 1
             reward = -float(self.fail_penalty)
+            if failure_mode == "ok":
+                failure_mode = "repair_failed"
         elif not feasible_cand:
             # Candidate violates epsilon / DP infeasible
             self._no_improve += 1
             reward = -float(self.infeasible_penalty)
+            if failure_mode == "ok":
+                failure_mode = "infeasible"
         else:
             cand_energy = float(cand_ev.total_energy)
             delta = float(cand_energy - prev_energy)
@@ -247,5 +294,9 @@ class PMALNSEnv:
             self._obs(),
             float(reward),
             done,
-            {"step": info.__dict__, "exception": bool(step_exception)},
+            {
+                "step": info.__dict__,
+                "exception": bool(step_exception),
+                "failure_mode": str(failure_mode),
+            },
         )

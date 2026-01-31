@@ -96,7 +96,8 @@ def _rollout_worker(
     obs_dim: int,
     act_dim: int,
     hidden: int,
-    scale: str,
+    scales: List[str],
+    action_set: str,
     base_seed: int,
     start_instance_id: int,
     envs_per_worker: int,
@@ -118,16 +119,23 @@ def _rollout_worker(
 
     alns_cfg = ALNSConfig(**alns_cfg_dict)
 
+    scales = [str(s).strip().lower() for s in (scales or []) if str(s).strip()]
+    if not scales:
+        scales = ["medium"]
+
     envs: List[PMALNSEnv] = []
     for i in range(int(envs_per_worker)):
         inst_id = int(start_instance_id) + int(worker_id) * int(envs_per_worker) + i
+        # Deterministic multi-scale assignment so each update has a stable mix.
+        scale_i = scales[int(inst_id) % int(len(scales))]
         envs.append(
             PMALNSEnv(
-                scale=str(scale),
+                scale=str(scale_i),
                 seed=int(base_seed) + 17 * int(worker_id) + i,
                 instance_id=int(inst_id),
                 slack_ratio=float(slack_ratio),
                 alns_cfg=alns_cfg,
+                action_set=str(action_set),
             )
         )
 
@@ -148,6 +156,9 @@ def _rollout_worker(
     accepted_cnt = 0
     feasible_cnt = 0
     step_cnt = 0
+    fail_cnt = 0
+    infeasible_cnt = 0
+    exception_cnt = 0
 
     for t in range(T):
         obs_t = torch.from_numpy(obs)
@@ -173,6 +184,15 @@ def _rollout_worker(
                 accepted_cnt += 1
             if bool(s.get("feasible_cand", False)):
                 feasible_cnt += 1
+
+            if isinstance(info, dict):
+                if bool(info.get("exception", False)):
+                    exception_cnt += 1
+                fm = str(info.get("failure_mode", ""))
+                if fm == "repair_failed":
+                    fail_cnt += 1
+                elif fm == "infeasible":
+                    infeasible_cnt += 1
             step_cnt += 1
 
             if d:
@@ -192,6 +212,14 @@ def _rollout_worker(
     end_best = np.asarray([s["best_energy"] for s in end_summaries], dtype=np.float64)
     best_improve = init_best - end_best
 
+    # Deadline tightness diagnostics
+    init_eps = np.asarray([s["epsilon"] for s in init_summaries], dtype=np.float64)
+    init_ms = np.asarray([s["cur_makespan"] for s in init_summaries], dtype=np.float64)
+    init_slack = np.asarray([s["slack"] for s in init_summaries], dtype=np.float64)
+    init_slack_norm = np.asarray(
+        [s["slack_norm"] for s in init_summaries], dtype=np.float64
+    )
+
     return {
         "obs": obs_buf,
         "actions": act_buf,
@@ -203,8 +231,15 @@ def _rollout_worker(
         "accepted_cnt": np.asarray([accepted_cnt], dtype=np.int64),
         "feasible_cnt": np.asarray([feasible_cnt], dtype=np.int64),
         "step_cnt": np.asarray([step_cnt], dtype=np.int64),
+        "fail_cnt": np.asarray([fail_cnt], dtype=np.int64),
+        "infeasible_cnt": np.asarray([infeasible_cnt], dtype=np.int64),
+        "exception_cnt": np.asarray([exception_cnt], dtype=np.int64),
         "end_best_energy": end_best.astype(np.float64),
         "best_improve": best_improve.astype(np.float64),
+        "init_epsilon": init_eps.astype(np.float64),
+        "init_makespan": init_ms.astype(np.float64),
+        "init_slack": init_slack.astype(np.float64),
+        "init_slack_norm": init_slack_norm.astype(np.float64),
     }
 
 
@@ -241,8 +276,30 @@ def _compute_gae(
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     p.add_argument("--scale", type=str, default="medium")
+    p.add_argument(
+        "--scales",
+        type=str,
+        default="",
+        help=(
+            "Optional comma-separated list of scales to mix in one run, e.g. 'small,medium'. "
+            "If set, overrides --scale."
+        ),
+    )
     p.add_argument("--seed", type=int, default=1337)
     p.add_argument("--slack_ratio", type=float, default=0.25)
+
+    p.add_argument(
+        "--action_set",
+        type=str,
+        default="balanced",
+        choices=["balanced", "safe", "full"],
+        help=(
+            "Discrete ALNS action set for PPO. "
+            "balanced: avoids destroy_all but keeps greedy+random repair; "
+            "safe: greedy repair only (highest feasibility); "
+            "full: includes destroy_all."
+        ),
+    )
 
     p.add_argument("--out_dir", type=str, default="analysis_out")
     p.add_argument("--run_name", type=str, default="")
@@ -351,6 +408,16 @@ def _load_checkpoint(path: str, device: torch.device) -> Dict[str, Any]:
 def main() -> None:
     args = build_parser().parse_args()
 
+    scales_raw = str(getattr(args, "scales", "") or "").strip()
+    if scales_raw:
+        scales_list = [s.strip().lower() for s in scales_raw.split(",") if s.strip()]
+    else:
+        scales_list = [str(args.scale).strip().lower()]
+
+    action_set = (
+        str(getattr(args, "action_set", "balanced") or "balanced").strip().lower()
+    )
+
     out_dir = str(args.out_dir)
     run_name = str(args.run_name).strip()
     if not run_name:
@@ -370,11 +437,12 @@ def main() -> None:
     obs_dim = 10
     # action_dim determined by env
     tmp_env = PMALNSEnv(
-        scale=str(args.scale),
+        scale=str(scales_list[0]),
         seed=int(args.seed),
         instance_id=0,
         slack_ratio=float(args.slack_ratio),
         alns_cfg=ALNSConfig(max_iters=1, no_improve_limit=1),
+        action_set=str(action_set),
     )
     act_dim = tmp_env.action_dim
 
@@ -470,7 +538,7 @@ def main() -> None:
         print(f"Resumed from {ckpt_path} at update={start_update}")
 
     print(
-        f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker}",
+        f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker} scales={','.join(scales_list)} action_set={action_set}",
         flush=True,
     )
     if bool(alns_cfg_dict.get("use_torch_batch_dp_in_repair", False)):
@@ -550,7 +618,8 @@ def main() -> None:
                         obs_dim=obs_dim,
                         act_dim=act_dim,
                         hidden=int(args.hidden),
-                        scale=str(args.scale),
+                        scales=scales_list,
+                        action_set=str(action_set),
                         base_seed=int(args.seed) + 1000 * upd,
                         start_instance_id=int(base_instance) + 100000 * upd,
                         envs_per_worker=int(envs_per_worker),
