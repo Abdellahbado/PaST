@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import math
 import os
 import random
 import signal
+import json
 import time
+import traceback
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
@@ -47,6 +51,42 @@ class PolicyValueNet(nn.Module):
         logits = self.pi(h)
         value = self.v(h).squeeze(-1)
         return logits, value
+
+
+def _normalize_obs_np(obs: np.ndarray) -> np.ndarray:
+    """Lightweight observation normalization to improve PPO stability.
+
+    The raw ALNS features include large-magnitude energy values; compress them
+    with log1p and scale time/load terms to O(1).
+    """
+
+    x = np.asarray(obs, dtype=np.float32)
+    y = x.copy()
+
+    # Indices are defined by alns_state_features (10 dims).
+    # 0: it_frac, 1: no_improve_frac, 2: tau
+    # 3: cur_energy, 4: best_energy, 5: gap
+    # 6: makespan, 7: slack, 8: load_mean, 9: load_cv
+    for idx in (3, 4):
+        y[..., idx] = np.log1p(np.maximum(0.0, y[..., idx])) / 10.0
+
+    gap = y[..., 5]
+    y[..., 5] = np.sign(gap) * (np.log1p(np.abs(gap)) / 10.0)
+
+    y[..., 2] = np.clip(y[..., 2], 0.0, 10.0)
+    for idx in (6, 7, 8):
+        y[..., idx] = y[..., idx] / 300.0
+
+    return np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+
+def _torch_sanitize(x: torch.Tensor) -> torch.Tensor:
+    """Replace non-finite values with 0.0 (works across torch versions)."""
+
+    if hasattr(torch, "nan_to_num"):
+        return torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    finite = torch.isfinite(x)
+    return torch.where(finite, x, torch.zeros_like(x))
 
 
 def _rollout_worker(
@@ -92,6 +132,8 @@ def _rollout_worker(
         )
 
     obs = np.stack([e.reset() for e in envs], axis=0).astype(np.float32)  # [B,F]
+    obs = _normalize_obs_np(obs)
+    init_summaries = [e.get_state_summary() for e in envs]
 
     T = int(rollout_len)
     B = int(envs_per_worker)
@@ -103,11 +145,15 @@ def _rollout_worker(
     rew_buf = np.zeros((T, B), dtype=np.float32)
     done_buf = np.zeros((T, B), dtype=np.float32)
 
+    accepted_cnt = 0
+    feasible_cnt = 0
+    step_cnt = 0
+
     for t in range(T):
         obs_t = torch.from_numpy(obs)
         with torch.no_grad():
             logits, values = net(obs_t)
-            dist = torch.distributions.Categorical(logits=logits)
+            dist = torch.distributions.Categorical(logits=logits, validate_args=False)
             actions = dist.sample()
             logp = dist.log_prob(actions)
 
@@ -118,18 +164,33 @@ def _rollout_worker(
 
         next_obs = []
         for b, e in enumerate(envs):
-            o2, r, d, _ = e.step(int(act_buf[t, b]))
+            o2, r, d, info = e.step(int(act_buf[t, b]))
             rew_buf[t, b] = float(r)
             done_buf[t, b] = float(d)
+
+            s = info.get("step", {}) if isinstance(info, dict) else {}
+            if bool(s.get("accepted", False)):
+                accepted_cnt += 1
+            if bool(s.get("feasible_cand", False)):
+                feasible_cnt += 1
+            step_cnt += 1
+
             if d:
                 o2 = e.reset()
             next_obs.append(o2)
         obs = np.stack(next_obs, axis=0).astype(np.float32)
+        obs = _normalize_obs_np(obs)
 
     # Bootstrap value
     with torch.no_grad():
         _, last_v = net(torch.from_numpy(obs))
     last_v = last_v.cpu().numpy().astype(np.float32)
+
+    end_summaries = [e.get_state_summary() for e in envs]
+
+    init_best = np.asarray([s["best_energy"] for s in init_summaries], dtype=np.float64)
+    end_best = np.asarray([s["best_energy"] for s in end_summaries], dtype=np.float64)
+    best_improve = init_best - end_best
 
     return {
         "obs": obs_buf,
@@ -139,6 +200,11 @@ def _rollout_worker(
         "rewards": rew_buf,
         "dones": done_buf,
         "last_values": last_v,
+        "accepted_cnt": np.asarray([accepted_cnt], dtype=np.int64),
+        "feasible_cnt": np.asarray([feasible_cnt], dtype=np.int64),
+        "step_cnt": np.asarray([step_cnt], dtype=np.int64),
+        "end_best_energy": end_best.astype(np.float64),
+        "best_improve": best_improve.astype(np.float64),
     }
 
 
@@ -206,6 +272,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a checkpoint .pt to resume from.",
     )
 
+    p.add_argument(
+        "--metrics_jsonl",
+        type=str,
+        default="",
+        help="Optional JSONL metrics output path (defaults to <out_dir>/<run_name>_metrics.jsonl).",
+    )
+
     p.add_argument("--max_iters", type=int, default=200)
     p.add_argument("--no_improve", type=int, default=80)
     p.add_argument("--destroy_frac", type=float, default=0.12)
@@ -223,6 +296,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--clip", type=float, default=0.2)
     p.add_argument("--ppo_epochs", type=int, default=4)
     p.add_argument("--minibatches", type=int, default=8)
+
+    p.add_argument(
+        "--reward_clip",
+        type=float,
+        default=10.0,
+        help="Clip per-step rewards to [-reward_clip, +reward_clip] to improve stability.",
+    )
+    p.add_argument(
+        "--no_obs_norm",
+        action="store_true",
+        help="Disable observation normalization (not recommended).",
+    )
 
     return p
 
@@ -250,6 +335,10 @@ def main() -> None:
         run_name = f"ppo_alns_pm_{args.scale}_seed{args.seed}"
     os.makedirs(out_dir, exist_ok=True)
     ckpt_latest = os.path.join(out_dir, f"{run_name}_latest.pt")
+    metrics_path = str(args.metrics_jsonl).strip()
+    if not metrics_path:
+        metrics_path = os.path.join(out_dir, f"{run_name}_metrics.jsonl")
+    metrics_path_p = Path(metrics_path)
 
     if int(args.workers) <= 0:
         workers = max(1, os.cpu_count() or 1)
@@ -352,8 +441,12 @@ def main() -> None:
         print(f"Resumed from {ckpt_path} at update={start_update}")
 
     print(
-        f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker}"
+        f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker}",
+        flush=True,
     )
+    print(f"Metrics: {metrics_path_p}", flush=True)
+
+    last_metrics: Dict[str, Any] | None = None
 
     def _save_checkpoint(update: int) -> str:
         payload: Dict[str, Any] = {
@@ -363,6 +456,7 @@ def main() -> None:
             "obs_dim": int(obs_dim),
             "update": int(update),
             "args": vars(args),
+            "last_metrics": last_metrics,
             "py_random_state": random.getstate(),
             "np_random_state": np.random.get_state(),
             "torch_rng_state": torch.get_rng_state(),
@@ -390,6 +484,7 @@ def main() -> None:
         net.eval()
         state = {k: v.cpu() for k, v in net.state_dict().items()}
 
+        rollout_t0 = time.time()
         with ProcessPoolExecutor(max_workers=workers) as ex:
             futs = []
             for wid in range(workers):
@@ -410,7 +505,26 @@ def main() -> None:
                         alns_cfg_dict=alns_cfg_dict,
                     )
                 )
-            batches = [f.result() for f in futs]
+
+            batches = []
+            rollout_error = None
+            for f in futs:
+                try:
+                    batches.append(f.result())
+                except Exception as e:
+                    rollout_error = e
+                    break
+
+        if rollout_error is not None:
+            p = _save_checkpoint(update=upd)
+            print(
+                f"update={upd+1}: rollout worker failed ({type(rollout_error).__name__}); saved checkpoint: {p}",
+                flush=True,
+            )
+            print(traceback.format_exc(), flush=True)
+            break
+
+        rollout_seconds = max(1e-9, float(time.time() - rollout_t0))
 
         # Concatenate along env dimension
         obs = torch.from_numpy(np.concatenate([b["obs"] for b in batches], axis=1)).to(
@@ -435,7 +549,28 @@ def main() -> None:
             np.concatenate([b["last_values"] for b in batches], axis=0)
         ).to(device)
 
+        accepted_cnt = int(np.sum([int(b["accepted_cnt"][0]) for b in batches]))
+        feasible_cnt = int(np.sum([int(b["feasible_cnt"][0]) for b in batches]))
+        step_cnt = int(np.sum([int(b["step_cnt"][0]) for b in batches]))
+
+        end_best_energy = np.concatenate(
+            [b["end_best_energy"] for b in batches], axis=0
+        )
+        best_improve = np.concatenate([b["best_improve"] for b in batches], axis=0)
+
         T, B, _ = obs.shape
+
+        # Safety: sanitize/clip rewards; NaNs in rewards/returns can blow up PPO.
+        rewards = _torch_sanitize(rewards)
+        rclip = float(args.reward_clip)
+        if rclip > 0:
+            rewards = torch.clamp(rewards, -rclip, rclip)
+
+        # Optional obs normalization (should already be normalized in worker, but keep robust).
+        if bool(getattr(args, "no_obs_norm", False)) is False:
+            # obs is [T,B,F] on device; normalize in numpy on CPU once for speed.
+            obs_np = obs.detach().cpu().numpy()
+            obs = torch.from_numpy(_normalize_obs_np(obs_np)).to(device)
 
         adv, returns = _compute_gae(
             rewards=rewards,
@@ -445,6 +580,21 @@ def main() -> None:
             gamma=float(ppo.gamma),
             lam=float(ppo.gae_lambda),
         )
+
+        # If anything went non-finite, skip update and keep going.
+        if not (
+            torch.isfinite(adv).all()
+            and torch.isfinite(returns).all()
+            and torch.isfinite(values).all()
+            and torch.isfinite(logp_old).all()
+            and torch.isfinite(obs).all()
+        ):
+            net.load_state_dict(state)
+            print(
+                f"update={upd+1}: non-finite rollout tensors; skipping PPO update",
+                flush=True,
+            )
+            continue
 
         adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
@@ -459,14 +609,22 @@ def main() -> None:
         mb = max(1, int(batch_size // int(ppo.minibatches)))
 
         net.train()
+        opt_state_before = copy.deepcopy(opt.state_dict())
+        bad_update = False
         for _ in range(int(ppo.ppo_epochs)):
             idx = torch.randperm(batch_size)
             for start in range(0, batch_size, mb):
                 j = idx[start : start + mb]
                 logits, v = net(obs_f[j])
-                dist = torch.distributions.Categorical(logits=logits)
+                if not (torch.isfinite(logits).all() and torch.isfinite(v).all()):
+                    bad_update = True
+                    break
+                dist = torch.distributions.Categorical(
+                    logits=logits, validate_args=False
+                )
                 logp = dist.log_prob(act_f[j])
-                ratio = torch.exp(logp - logp_old_f[j])
+                log_ratio = torch.clamp(logp - logp_old_f[j], -20.0, 20.0)
+                ratio = torch.exp(log_ratio)
                 surr1 = ratio * adv_f[j]
                 surr2 = (
                     torch.clamp(ratio, 1.0 - ppo.clip_eps, 1.0 + ppo.clip_eps)
@@ -483,6 +641,10 @@ def main() -> None:
                     - ppo.entropy_coef * entropy
                 )
 
+                if not torch.isfinite(loss):
+                    bad_update = True
+                    break
+
                 opt.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
@@ -490,14 +652,70 @@ def main() -> None:
                 )
                 opt.step()
 
+            if bad_update:
+                break
+
+        if bad_update:
+            # Revert to pre-update weights to avoid poisoning the run.
+            net.load_state_dict(state)
+            try:
+                opt.load_state_dict(opt_state_before)
+            except Exception:
+                pass
+            print(
+                f"update={upd+1}: non-finite logits/loss encountered; reverted and skipped",
+                flush=True,
+            )
+            continue
+
         avg_r = float(rewards.mean().item())
-        print(
-            f"update={upd+1}/{int(args.updates)} avg_step_reward={avg_r:+.4f} batch_envs={B}"
+
+        accept_rate = float(accepted_cnt) / float(max(1, step_cnt))
+        feasible_rate = float(feasible_cnt) / float(max(1, step_cnt))
+        steps_per_sec = float(step_cnt) / float(max(1e-9, rollout_seconds))
+
+        eb = np.asarray(end_best_energy, dtype=np.float64)
+        bi = np.asarray(best_improve, dtype=np.float64)
+        eb_p10, eb_p50, eb_p90 = (float(x) for x in np.quantile(eb, [0.1, 0.5, 0.9]))
+        bi_p10, bi_p50, bi_p90 = (float(x) for x in np.quantile(bi, [0.1, 0.5, 0.9]))
+
+        msg = (
+            f"update={upd+1}/{int(args.updates)} "
+            f"avg_step_reward={avg_r:+.4f} "
+            f"rollout_s={rollout_seconds:.1f} steps/s={steps_per_sec:.1f} "
+            f"accept={accept_rate:.3f} feasible={feasible_rate:.3f} "
+            f"bestE(p10/p50/p90)={eb_p10:.1f}/{eb_p50:.1f}/{eb_p90:.1f} "
+            f"bestImprove(p10/p50/p90)={bi_p10:.2f}/{bi_p50:.2f}/{bi_p90:.2f}"
         )
+        print(msg, flush=True)
+
+        # Append JSONL metrics for offline plotting.
+        rec = {
+            "time": time.time(),
+            "update": int(upd + 1),
+            "avg_step_reward": float(avg_r),
+            "rollout_seconds": float(rollout_seconds),
+            "steps_per_sec": float(steps_per_sec),
+            "accepted": int(accepted_cnt),
+            "feasible": int(feasible_cnt),
+            "steps": int(step_cnt),
+            "accept_rate": float(accept_rate),
+            "feasible_rate": float(feasible_rate),
+            "best_energy_mean": float(np.mean(eb)),
+            "best_energy_p10": float(eb_p10),
+            "best_energy_p50": float(eb_p50),
+            "best_energy_p90": float(eb_p90),
+            "best_improve_mean": float(np.mean(bi)),
+            "best_improve_p50": float(bi_p50),
+        }
+        last_metrics = rec
+        metrics_path_p.parent.mkdir(parents=True, exist_ok=True)
+        with metrics_path_p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec) + "\n")
 
         if int(args.save_every) > 0 and ((upd + 1) % int(args.save_every) == 0):
             p = _save_checkpoint(update=upd + 1)
-            print(f"Saved checkpoint: {p}")
+            print(f"Saved checkpoint: {p}", flush=True)
 
     # Save final weights (policy only)
     out_final = os.path.join(out_dir, f"{run_name}.pt")
@@ -508,7 +726,7 @@ def main() -> None:
         },
         out_final,
     )
-    print("Saved", out_final)
+    print("Saved", out_final, flush=True)
 
 
 if __name__ == "__main__":

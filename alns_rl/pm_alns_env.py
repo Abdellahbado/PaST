@@ -123,6 +123,24 @@ class PMALNSEnv:
 
         return self._obs()
 
+    def get_state_summary(self) -> Dict[str, float]:
+        """Return a compact snapshot of the current search state.
+
+        Useful for long HPC runs where you want to verify progress from logs.
+        """
+
+        if self._raw is None or self._cur_ev is None or self._best_ev is None:
+            raise RuntimeError("Environment not reset yet")
+
+        return {
+            "cur_energy": float(self._cur_ev.total_energy),
+            "best_energy": float(self._best_ev.total_energy),
+            "epsilon": float(self._epsilon),
+            "it": float(self._it),
+            "no_improve": float(self._no_improve),
+            "tau": float(self._tau),
+        }
+
     def _obs(self) -> np.ndarray:
         assert self._raw is not None
         assert self._cur_sol is not None and self._cur_ev is not None
@@ -150,15 +168,22 @@ class PMALNSEnv:
 
         prev_energy = float(self._cur_ev.total_energy)
 
-        cand_sol, cand_ev, _, _ = alns_apply_action(
-            self._raw,
-            int(self._epsilon),
-            self._cur_sol,
-            self._cur_ev,
-            action,
-            self.alns_cfg,
-            self._rng,
-        )
+        step_exception = False
+        try:
+            cand_sol, cand_ev, _, _ = alns_apply_action(
+                self._raw,
+                int(self._epsilon),
+                self._cur_sol,
+                self._cur_ev,
+                action,
+                self.alns_cfg,
+                self._rng,
+            )
+        except Exception:
+            # In long PPO runs we want robustness: treat unexpected solver errors as
+            # a failed repair attempt rather than crashing the entire training job.
+            cand_sol, cand_ev = None, None
+            step_exception = True
 
         reward = 0.0
         accepted = False
@@ -218,4 +243,9 @@ class PMALNSEnv:
             tau=float(self._tau),
         )
 
-        return self._obs(), float(reward), done, {"step": info.__dict__}
+        return (
+            self._obs(),
+            float(reward),
+            done,
+            {"step": info.__dict__, "exception": bool(step_exception)},
+        )
