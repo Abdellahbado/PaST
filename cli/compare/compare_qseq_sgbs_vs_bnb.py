@@ -54,6 +54,7 @@ from PaST.cli.eval.run_eval_q_sequence import (
     _load_checkpoint as _load_q_ckpt,
     sgbs_q_sequence,
 )
+from PaST.cli.eval.random_q_baseline import RandomQModel
 from PaST.sm_benchmark_data import (
     generate_raw_instance,
     make_single_machine_episode,
@@ -441,6 +442,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--out_dir", type=str, default="analysis_out")
 
+    p.add_argument(
+        "--include_random_q",
+        action="store_true",
+        default=True,
+        help="Include random Q baseline in comparison.",
+    )
+    p.add_argument(
+        "--random_q_seed",
+        type=int,
+        default=42,
+        help="Random seed for random Q baseline.",
+    )
+
     return p
 
 
@@ -545,6 +559,24 @@ def main() -> None:
         total_qseq_time += float(t_q_total)
         q_time_per_inst = float(t_q_total) / max(1, len(episodes))
 
+        # --- Random Q baseline (if enabled) ---
+        random_q_results = None
+        total_random_q_time = 0.0
+        if args.include_random_q:
+            random_model = RandomQModel(seed=int(args.random_q_seed))
+            t0 = time.perf_counter()
+            random_q_results = sgbs_q_sequence(
+                model=random_model,
+                variant_config=q_cfg,
+                batch_data=batch,
+                device=device,
+                beta=int(args.beta),
+                gamma=int(args.gamma),
+            )
+            t_random_q = time.perf_counter() - t0
+            total_random_q_time += float(t_random_q)
+            random_q_time_per_inst = float(t_random_q) / max(1, len(episodes))
+
         # Prepare BnB inputs.
         bnb_inputs: List[Tuple[int, np.ndarray, int, np.ndarray]] = []
         singles: List[Dict[str, Any]] = []
@@ -637,23 +669,36 @@ def main() -> None:
 
             # For batched SGBS we report average per-instance time.
             # For parallel BnB we may not have per-instance timing.
-            rows.append(
-                {
-                    "ratio": float(ratio),
-                    "instance_idx": int(idx),
-                    "n_jobs": int(n_jobs),
-                    "T_limit": int(T),
-                    "qseq_sgbs_energy": q_energy,
-                    "qseq_sgbs_time_s": float(q_time_per_inst),
-                    "bnb_energy": bnb_energy,
-                    "bnb_energy_dp_check": bnb_energy_dp,
-                    "bnb_time_s": float(t_b),
-                    "bnb_nodes_explored": int(stats.get("nodes_explored", -1)),
-                    "bnb_binpack_attempts": int(stats.get("binpack_attempts", -1)),
-                    "bnb_pruned_by_binpack": int(stats.get("pruned_by_binpack", -1)),
-                    "gap_rel_q_minus_opt": gap,
-                }
-            )
+            # Random Q metrics (if enabled)
+            random_q_energy = float("nan")
+            gap_random = float("nan")
+            if random_q_results is not None:
+                random_q_energy = float(random_q_results[idx].total_energy)
+                if _finite(random_q_energy) and _finite(bnb_energy) and bnb_energy > 0:
+                    gap_random = float((random_q_energy - bnb_energy) / bnb_energy)
+
+            row_data = {
+                "ratio": float(ratio),
+                "instance_idx": int(idx),
+                "n_jobs": int(n_jobs),
+                "T_limit": int(T),
+                "qseq_sgbs_energy": q_energy,
+                "qseq_sgbs_time_s": float(q_time_per_inst),
+                "bnb_energy": bnb_energy,
+                "bnb_energy_dp_check": bnb_energy_dp,
+                "bnb_time_s": float(t_b),
+                "bnb_nodes_explored": int(stats.get("nodes_explored", -1)),
+                "bnb_binpack_attempts": int(stats.get("binpack_attempts", -1)),
+                "bnb_pruned_by_binpack": int(stats.get("pruned_by_binpack", -1)),
+                "gap_rel_q_minus_opt": gap,
+            }
+            
+            if args.include_random_q:
+                row_data["random_q_sgbs_energy"] = random_q_energy
+                row_data["random_q_sgbs_time_s"] = float(random_q_time_per_inst)
+                row_data["gap_rel_random_q_minus_opt"] = gap_random
+            
+            rows.append(row_data)
 
             # Progress print.
             if (idx + 1) % 5 == 0:
@@ -714,6 +759,42 @@ def main() -> None:
             ),
         },
     }
+
+    # Add random Q statistics if enabled
+    if args.include_random_q:
+        random_gaps = np.array(
+            [r.get("gap_rel_random_q_minus_opt", float("nan")) for r in rows],
+            dtype=np.float64,
+        )
+        random_finite_mask = np.isfinite(random_gaps)
+        
+        summary["timing"]["total_random_q_sgbs_time_s"] = float(total_random_q_time)
+        summary["timing"]["avg_random_q_sgbs_time_s"] = float(
+            total_random_q_time / max(1, len(rows))
+        )
+        
+        summary["quality_random_q"] = {
+            "mean_gap_rel": (
+                float(np.mean(random_gaps[random_finite_mask]))
+                if random_finite_mask.any()
+                else float("nan")
+            ),
+            "median_gap_rel": (
+                float(np.median(random_gaps[random_finite_mask]))
+                if random_finite_mask.any()
+                else float("nan")
+            ),
+            "max_gap_rel": (
+                float(np.max(random_gaps[random_finite_mask]))
+                if random_finite_mask.any()
+                else float("nan")
+            ),
+            "min_gap_rel": (
+                float(np.min(random_gaps[random_finite_mask]))
+                if random_finite_mask.any()
+                else float("nan")
+            ),
+        }
 
     _write_csv(out_csv, rows)
     _write_json(out_json, summary)

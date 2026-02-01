@@ -109,6 +109,7 @@ def _rollout_worker(
     reward_scale: float,
     reward_power: float,
     best_improve_bonus: float,
+    no_obs_norm: bool,
     alns_cfg_dict: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
     # Limit BLAS threads inside each worker to avoid oversubscription.
@@ -149,7 +150,8 @@ def _rollout_worker(
         )
 
     obs = np.stack([e.reset() for e in envs], axis=0).astype(np.float32)  # [B,F]
-    obs = _normalize_obs_np(obs)
+    if bool(no_obs_norm) is False:
+        obs = _normalize_obs_np(obs)
     init_summaries = [e.get_state_summary() for e in envs]
 
     T = int(rollout_len)
@@ -208,7 +210,8 @@ def _rollout_worker(
                 o2 = e.reset()
             next_obs.append(o2)
         obs = np.stack(next_obs, axis=0).astype(np.float32)
-        obs = _normalize_obs_np(obs)
+        if bool(no_obs_norm) is False:
+            obs = _normalize_obs_np(obs)
 
     # Bootstrap value
     with torch.no_grad():
@@ -290,6 +293,14 @@ def _safe_quantiles(x: np.ndarray, qs: List[float]) -> List[float]:
     return [float(v) for v in np.quantile(xf, qs)]
 
 
+def _safe_mean(x: np.ndarray) -> float:
+    xf = np.asarray(x, dtype=np.float64)
+    xf = xf[np.isfinite(xf)]
+    if xf.size == 0:
+        return float("nan")
+    return float(np.mean(xf))
+
+
 def _eval_policy_vs_random(
     *,
     net: PolicyValueNet,
@@ -301,6 +312,7 @@ def _eval_policy_vs_random(
     reward_scale: float,
     reward_power: float,
     best_improve_bonus: float,
+    no_obs_norm: bool,
     eval_seed: int,
     eval_num_envs: int,
     eval_rollout_len: int,
@@ -359,8 +371,10 @@ def _eval_policy_vs_random(
 
     obs_pol = np.stack([e.reset() for e in envs_pol], axis=0).astype(np.float32)
     obs_rnd = np.stack([e.reset() for e in envs_rnd], axis=0).astype(np.float32)
-    obs_pol = _normalize_obs_np(obs_pol)
-    obs_rnd = _normalize_obs_np(obs_rnd)
+    # Eval uses the same feature preprocessing as rollouts.
+    if bool(no_obs_norm) is False:
+        obs_pol = _normalize_obs_np(obs_pol)
+        obs_rnd = _normalize_obs_np(obs_rnd)
 
     init_pol = [e.get_state_summary() for e in envs_pol]
     init_rnd = [e.get_state_summary() for e in envs_rnd]
@@ -426,10 +440,11 @@ def _eval_policy_vs_random(
                 else:
                     obs_rnd[i] = np.asarray(o2, dtype=np.float32)
 
-            if bool(alive_pol.any()):
-                obs_pol = _normalize_obs_np(obs_pol)
-            if bool(alive_rnd.any()):
-                obs_rnd = _normalize_obs_np(obs_rnd)
+            if bool(no_obs_norm) is False:
+                if bool(alive_pol.any()):
+                    obs_pol = _normalize_obs_np(obs_pol)
+                if bool(alive_rnd.any()):
+                    obs_rnd = _normalize_obs_np(obs_rnd)
 
             if (not bool(alive_pol.any())) and (not bool(alive_rnd.any())):
                 break
@@ -441,6 +456,33 @@ def _eval_policy_vs_random(
 
     # Lower energy is better; report gaps as (random - policy) so positive => policy better.
     gap = end_best_rnd - end_best_pol
+
+    # One-number "is training healthy?" metric: win rate vs random.
+    # win = policy strictly better (lower energy) than random.
+    # We treat non-finite energies as losses unless only the opponent is non-finite.
+    pol_f = np.isfinite(end_best_pol)
+    rnd_f = np.isfinite(end_best_rnd)
+    win = np.zeros((n,), dtype=bool)
+    tie = np.zeros((n,), dtype=bool)
+    eps = 1e-9
+    for i in range(int(n)):
+        if bool(pol_f[i]) and bool(rnd_f[i]):
+            if float(end_best_pol[i]) < float(end_best_rnd[i]) - eps:
+                win[i] = True
+            elif float(end_best_pol[i]) > float(end_best_rnd[i]) + eps:
+                win[i] = False
+            else:
+                tie[i] = True
+        elif bool(pol_f[i]) and (not bool(rnd_f[i])):
+            win[i] = True
+        elif (not bool(pol_f[i])) and bool(rnd_f[i]):
+            win[i] = False
+        else:
+            tie[i] = True
+
+    win_rate = float(np.mean(win))
+    tie_rate = float(np.mean(tie))
+    loss_rate = float(max(0.0, 1.0 - win_rate - tie_rate))
     improve_pol = init_best_pol - end_best_pol
     improve_rnd = init_best_rnd - end_best_rnd
 
@@ -457,18 +499,21 @@ def _eval_policy_vs_random(
         "eval_rollout_len": int(T),
         "eval_instance_offset": int(eval_instance_offset),
         "eval_deterministic": bool(deterministic),
-        "eval_policy_best_energy_mean": float(np.nanmean(end_best_pol)),
+        "eval_policy_best_energy_mean": float(_safe_mean(end_best_pol)),
         "eval_policy_best_energy_p10": float(pol_p10),
         "eval_policy_best_energy_p50": float(pol_p50),
         "eval_policy_best_energy_p90": float(pol_p90),
-        "eval_random_best_energy_mean": float(np.nanmean(end_best_rnd)),
+        "eval_random_best_energy_mean": float(_safe_mean(end_best_rnd)),
         "eval_random_best_energy_p10": float(rnd_p10),
         "eval_random_best_energy_p50": float(rnd_p50),
         "eval_random_best_energy_p90": float(rnd_p90),
-        "eval_gap_random_minus_policy_mean": float(np.nanmean(gap)),
+        "eval_gap_random_minus_policy_mean": float(_safe_mean(gap)),
         "eval_gap_random_minus_policy_p10": float(gap_p10),
         "eval_gap_random_minus_policy_p50": float(gap_p50),
         "eval_gap_random_minus_policy_p90": float(gap_p90),
+        "eval_vs_random_win_rate": float(win_rate),
+        "eval_vs_random_tie_rate": float(tie_rate),
+        "eval_vs_random_loss_rate": float(loss_rate),
         "eval_policy_improve_p50": float(imp_pol_p50),
         "eval_random_improve_p50": float(imp_rnd_p50),
         "eval_policy_accept_rate": float(accepted_pol) / float(max(1, steps_pol)),
@@ -552,6 +597,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Enable torch batched DP in greedy repair (faster when there are many insertion candidates).",
     )
     p.add_argument(
+        "--alns_torch_batch_dp_always",
+        action="store_true",
+        help=(
+            "Force torch batched DP in greedy repair regardless of candidate count "
+            "(sets --alns_torch_batch_min_total_candidates=0 and implies --alns_use_torch_batch_dp_in_repair)."
+        ),
+    )
+    p.add_argument(
         "--alns_torch_dp_device",
         type=str,
         default="cpu",
@@ -565,7 +618,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--alns_torch_batch_min_total_candidates",
         type=int,
         default=512,
-        help="Only use batched DP if total insertion candidates >= this threshold.",
+        help=(
+            "Only use batched DP if total insertion candidates >= this threshold. "
+            "Set to 0 to always use batched DP."
+        ),
     )
 
     p.add_argument("--hidden", type=int, default=128)
@@ -663,6 +719,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--eval_stochastic",
         action="store_true",
         help="Use stochastic sampling for the policy during eval (default: deterministic argmax).",
+    )
+
+    p.add_argument(
+        "--eval_health_threshold",
+        type=float,
+        default=0.55,
+        help=(
+            "Threshold for eval health metric vs random. "
+            "Health metric is eval_vs_random_win_rate (fraction of eval instances where policy beats random). "
+            "Suggested: 0.55 (better than random with margin)."
+        ),
     )
 
     p.add_argument(
@@ -788,11 +855,20 @@ def main() -> None:
         "verify_cost": False,
     }
 
-    if bool(getattr(args, "alns_use_torch_batch_dp_in_repair", False)) is True:
+    use_torch_batch_dp = bool(
+        getattr(args, "alns_use_torch_batch_dp_in_repair", False)
+    ) or bool(getattr(args, "alns_torch_batch_dp_always", False))
+    if use_torch_batch_dp:
         alns_cfg_dict["use_torch_batch_dp_in_repair"] = True
         alns_cfg_dict["torch_dp_device"] = str(args.alns_torch_dp_device)
-        alns_cfg_dict["torch_batch_min_total_candidates"] = int(
-            args.alns_torch_batch_min_total_candidates
+
+        if bool(getattr(args, "alns_torch_batch_dp_always", False)):
+            min_total_candidates = 0
+        else:
+            min_total_candidates = int(args.alns_torch_batch_min_total_candidates)
+
+        alns_cfg_dict["torch_batch_min_total_candidates"] = max(
+            0, int(min_total_candidates)
         )
 
     envs_per_worker = int(args.envs_per_worker)
@@ -986,6 +1062,7 @@ def main() -> None:
                         reward_scale=float(args.reward_scale),
                         reward_power=float(args.reward_power),
                         best_improve_bonus=float(args.best_improve_bonus),
+                        no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
                         alns_cfg_dict=alns_cfg_dict,
                     )
                 )
@@ -1050,11 +1127,9 @@ def main() -> None:
             if rclip > 0:
                 rewards = torch.clamp(rewards, -rclip, rclip)
 
-            # Optional obs normalization (should already be normalized in worker, but keep robust).
-            if bool(getattr(args, "no_obs_norm", False)) is False:
-                # obs is [T,B,F] on device; normalize in numpy on CPU once for speed.
-                obs_np = obs.detach().cpu().numpy()
-                obs = torch.from_numpy(_normalize_obs_np(obs_np)).to(device)
+            # IMPORTANT: obs and logp_old must be consistent.
+            # Rollout workers already apply the same preprocessing used during action sampling.
+            # Do NOT renormalize here, or approx_kl/clip_frac will explode and trigger target_kl early-stop.
 
             adv, returns = _compute_gae(
                 rewards=rewards,
@@ -1136,6 +1211,18 @@ def main() -> None:
                         (torch.abs(ratio - 1.0) > float(ppo.clip_eps)).float().mean()
                     )
 
+                    # Record diagnostics even if we early-stop before stepping.
+                    # This avoids NaNs in logs when target_kl triggers on the first minibatch.
+                    try:
+                        diag_policy_loss += float(policy_loss.detach().cpu().item())
+                        diag_value_loss += float(value_loss.detach().cpu().item())
+                        diag_entropy += float(entropy.detach().cpu().item())
+                        diag_approx_kl += float(approx_kl.detach().cpu().item())
+                        diag_clip_frac += float(clip_frac.detach().cpu().item())
+                        diag_mb += 1
+                    except Exception:
+                        pass
+
                     # Early stop if KL indicates the update is getting too large.
                     # Use absolute value because this approx can be slightly negative due to noise.
                     if ppo.target_kl is not None:
@@ -1164,13 +1251,6 @@ def main() -> None:
                         net.parameters(), float(ppo.max_grad_norm)
                     )
                     opt.step()
-
-                    diag_policy_loss += float(policy_loss.detach().cpu().item())
-                    diag_value_loss += float(value_loss.detach().cpu().item())
-                    diag_entropy += float(entropy.detach().cpu().item())
-                    diag_approx_kl += float(approx_kl.detach().cpu().item())
-                    diag_clip_frac += float(clip_frac.detach().cpu().item())
-                    diag_mb += 1
 
                 if bad_update or early_stop:
                     break
@@ -1223,6 +1303,7 @@ def main() -> None:
                         reward_scale=float(args.reward_scale),
                         reward_power=float(args.reward_power),
                         best_improve_bonus=float(args.best_improve_bonus),
+                        no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
                         eval_seed=int(args.eval_seed),
                         eval_num_envs=int(args.eval_num_envs),
                         eval_rollout_len=int(args.eval_rollout_len),
@@ -1233,11 +1314,26 @@ def main() -> None:
                         device=device,
                     )
                     eval_metrics["eval_seconds"] = float(time.time() - t_eval0)
+
+                    # One-number health metric you can watch.
+                    try:
+                        health = float(eval_metrics.get("eval_vs_random_win_rate"))
+                    except Exception:
+                        health = float("nan")
+                    thr = float(getattr(args, "eval_health_threshold", 0.55))
+                    eval_metrics["eval_health"] = float(health)
+                    eval_metrics["eval_health_threshold"] = float(thr)
+                    eval_metrics["eval_health_pass"] = bool(
+                        math.isfinite(health) and (health >= thr)
+                    )
+
                     print(
                         "[Eval] "
                         f"policy_p50={eval_metrics.get('eval_policy_best_energy_p50'):.1f} "
                         f"random_p50={eval_metrics.get('eval_random_best_energy_p50'):.1f} "
                         f"gap_p50(random-policy)={eval_metrics.get('eval_gap_random_minus_policy_p50'):.2f} "
+                        f"win_rate={eval_metrics.get('eval_vs_random_win_rate'):.3f} "
+                        f"health_pass={int(bool(eval_metrics.get('eval_health_pass', False)))} "
                         f"secs={eval_metrics.get('eval_seconds'):.1f}",
                         flush=True,
                     )
