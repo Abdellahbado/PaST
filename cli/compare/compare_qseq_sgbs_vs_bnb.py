@@ -380,8 +380,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--variant_id",
         type=str,
-        default=VariantID.Q_SEQUENCE.value,
-        help="VariantID string for Q_Seq (e.g. 'q_sequence', 'q_sequence_cwe')",
+        default="q_sequence_cwe_ctx13",
+        help="Model variant ID (default: q_sequence_cwe_ctx13)",
     )
 
     p.add_argument(
