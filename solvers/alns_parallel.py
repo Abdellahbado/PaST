@@ -559,6 +559,89 @@ def _destroy_worst_machine(
     return new_sol, removed, [worst]
 
 
+def _destroy_expensive_jobs(
+    raw: RawInstance,
+    epsilon: int,
+    sol: Solution,
+    eval_: FullEval,
+    k: int,
+    rng: random.Random,
+) -> Tuple[Solution, List[int], List[int]]:
+    """Remove jobs that contribute high energy cost under the current schedule.
+
+    Cost proxy per job:
+        score = e[m] * sum_{t in [start, start+p_j)} ct[t]
+
+    We rely on machine start times; if they are missing (e.g., some fast eval paths),
+    we recompute them for the machines we inspect.
+    """
+
+    eps = int(max(1, epsilon))
+    ct = np.asarray(raw.ct[:eps], dtype=np.float64)
+    if ct.size == 0:
+        return _destroy_random(sol, k, rng)
+    prefix = np.zeros((int(ct.size) + 1,), dtype=np.float64)
+    prefix[1:] = np.cumsum(ct)
+
+    candidates: List[Tuple[float, int, int]] = []  # (score, mi, pos)
+    for mi, seq in enumerate(sol.sequences):
+        if not seq:
+            continue
+
+        st = []
+        if int(mi) < int(len(eval_.per_machine)):
+            st = list(getattr(eval_.per_machine[int(mi)], "start_times", []) or [])
+        if int(len(st)) != int(len(seq)):
+            mdp = _eval_machine_sequence(raw, int(mi), list(seq), int(eps))
+            st = list(mdp.start_times or [])
+        if int(len(st)) != int(len(seq)):
+            # Fallback: can't reliably score; skip this machine.
+            continue
+
+        e_rate = float(raw.e[int(mi)])
+        for pos, (j, s0) in enumerate(zip(seq, st)):
+            s = int(s0)
+            p = int(raw.p[int(j)])
+            end = int(min(int(eps), int(s + p)))
+            if end <= s:
+                continue
+            price_sum = float(prefix[end] - prefix[s])
+            score = float(e_rate) * float(price_sum)
+            candidates.append((score, int(mi), int(pos)))
+
+    if not candidates:
+        return _destroy_random(sol, k, rng)
+
+    # Random tie-break then sort by score desc.
+    rng.shuffle(candidates)
+    candidates.sort(key=lambda x: float(x[0]), reverse=True)
+    k = int(min(int(k), int(len(candidates))))
+
+    pos_by_m: Dict[int, List[int]] = {}
+    for _, mi, pos in candidates[:k]:
+        pos_by_m.setdefault(int(mi), []).append(int(pos))
+
+    new_sol = Solution(sequences=[list(s) for s in sol.sequences])
+    removed: List[int] = []
+    touched: List[int] = []
+    for mi, poses in pos_by_m.items():
+        if not poses:
+            continue
+        poses_sorted = sorted(set(int(p) for p in poses), reverse=True)
+        if int(mi) < 0 or int(mi) >= int(len(new_sol.sequences)):
+            continue
+        seq2 = new_sol.sequences[int(mi)]
+        for pos in poses_sorted:
+            if 0 <= int(pos) < int(len(seq2)):
+                removed.append(int(seq2.pop(int(pos))))
+        if removed:
+            touched.append(int(mi))
+
+    if not removed:
+        return _destroy_random(sol, k, rng)
+    return new_sol, removed, sorted(set(touched))
+
+
 def _destroy_all(sol: Solution) -> Tuple[Solution, List[int], List[int]]:
     """Remove *all* jobs.
 
@@ -984,6 +1067,10 @@ def alns_apply_action(
                 partial, removed, touched = _destroy_worst_machine(sol, ev, k, rng)
             elif destroy_name == "longest":
                 partial, removed, touched = _destroy_longest_jobs(raw, sol, k, rng)
+            elif destroy_name == "expensive":
+                partial, removed, touched = _destroy_expensive_jobs(
+                    raw, int(epsilon), sol, ev, k, rng
+                )
             else:
                 raise ValueError(f"Unknown destroy op: {destroy_name}")
 

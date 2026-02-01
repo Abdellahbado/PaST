@@ -47,7 +47,157 @@ def _build_action_list_by_name(action_set: str) -> List[ALNSAction]:
         )
     if name in {"full", "default"}:
         return default_action_list()
-    raise ValueError("action_set must be one of: balanced, safe, full")
+    if name in {"energy_aware", "energy"}:
+        return build_action_list(
+            destroy_ops=["random", "worst_machine", "longest", "expensive"],
+            repair_ops=["greedy", "random"],
+            k_mults=[0.5, 1.0],
+        )
+    raise ValueError("action_set must be one of: balanced, safe, full, energy_aware")
+
+
+_ENERGY_AWARE_STATIC_FEATS_DIM = 18
+_ENERGY_AWARE_DYNAMIC_FEATS_DIM = 2
+_ENERGY_AWARE_EXTRA_FEATS_DIM = (
+    _ENERGY_AWARE_STATIC_FEATS_DIM + _ENERGY_AWARE_DYNAMIC_FEATS_DIM
+)
+
+
+def _safe_cv(x: np.ndarray) -> float:
+    x = np.asarray(x, dtype=np.float64).reshape(-1)
+    if x.size == 0:
+        return 0.0
+    m = float(np.mean(x))
+    s = float(np.std(x))
+    return float(s / (m + 1e-9))
+
+
+def _compute_energy_aware_instance_features(
+    raw: RawInstance, epsilon: int
+) -> np.ndarray:
+    """Problem-structure features (static per instance).
+
+    Default-off. Designed to expose the structure that matters for this problem:
+    - machine energy rates (e)
+    - price horizon segmentation (Tk, ck) and per-slot prices (ct)
+
+    Returns a fixed-size float32 vector.
+    """
+
+    eps = int(max(1, epsilon))
+    e = np.asarray(raw.e, dtype=np.float64).reshape(-1)
+    ck = np.asarray(raw.ck, dtype=np.float64).reshape(-1)
+    Tk = np.asarray(raw.Tk, dtype=np.float64).reshape(-1)
+    ct = np.asarray(raw.ct[:eps], dtype=np.float64).reshape(-1)
+    p = np.asarray(raw.p, dtype=np.float64).reshape(-1)
+
+    # Basic sizes (log-compressed so mixed-scale training is feasible).
+    logm = float(np.log1p(max(0, int(raw.m))))
+    logn = float(np.log1p(max(0, int(raw.n))))
+    logT = float(np.log1p(max(0, int(eps))))
+
+    # Machine energy-rate statistics.
+    e_min = float(np.min(e)) if e.size else 0.0
+    e_mean = float(np.mean(e)) if e.size else 0.0
+    e_max = float(np.max(e)) if e.size else 0.0
+    e_cv = _safe_cv(e)
+
+    # Period price statistics.
+    ck_min = float(np.min(ck)) if ck.size else 0.0
+    ck_mean = float(np.mean(ck)) if ck.size else 0.0
+    ck_max = float(np.max(ck)) if ck.size else 0.0
+    ck_cv = _safe_cv(ck)
+
+    # Period structure.
+    K = float(max(1, int(len(Tk))))
+    K_norm = float(K) / float(max(1.0, float(eps)))
+    Tk_mean = float(np.mean(Tk)) if Tk.size else 0.0
+    Tk_cv = _safe_cv(Tk)
+    Tk_mean_norm = float(Tk_mean) / float(max(1.0, float(eps)))
+
+    # Per-slot price distribution (cheap/expensive density).
+    if ct.size:
+        q10, q90 = np.quantile(ct, [0.1, 0.9]).tolist()
+        cheap_frac = float(np.mean(ct <= float(q10)))
+        expensive_frac = float(np.mean(ct >= float(q90)))
+    else:
+        cheap_frac = 0.0
+        expensive_frac = 0.0
+
+    # Job duration statistics (normalized by epsilon; captures problem scale/tightness).
+    if p.size:
+        p_mean = float(np.mean(p))
+        p_mean_norm = float(p_mean) / float(max(1.0, float(eps)))
+        p_cv = _safe_cv(p)
+    else:
+        p_mean_norm = 0.0
+        p_cv = 0.0
+
+    feats = np.asarray(
+        [
+            logm,
+            logn,
+            logT,
+            e_min,
+            e_mean,
+            e_max,
+            e_cv,
+            ck_min,
+            ck_mean,
+            ck_max,
+            ck_cv,
+            K_norm,
+            Tk_mean_norm,
+            Tk_cv,
+            cheap_frac,
+            expensive_frac,
+            p_mean_norm,
+            p_cv,
+        ],
+        dtype=np.float32,
+    )
+    if int(feats.size) != int(_ENERGY_AWARE_STATIC_FEATS_DIM):
+        raise RuntimeError("energy-aware static feature dim mismatch")
+    return feats
+
+
+def _compute_energy_aware_dynamic_features(
+    raw: RawInstance, sol: Solution
+) -> np.ndarray:
+    """Dynamic, solution-dependent structure features (cheap to compute).
+
+    Designed to reflect whether the current assignment puts more load on low-energy machines.
+    """
+
+    p = np.asarray(raw.p, dtype=np.float64)
+    e = np.asarray(raw.e, dtype=np.float64)
+    m = int(max(0, int(raw.m)))
+    if m <= 0 or e.size == 0:
+        return np.zeros((int(_ENERGY_AWARE_DYNAMIC_FEATS_DIM),), dtype=np.float32)
+
+    loads = np.zeros((m,), dtype=np.float64)
+    for mi, seq in enumerate(sol.sequences):
+        if 0 <= int(mi) < m and len(seq) > 0:
+            loads[int(mi)] = float(np.sum(p[np.asarray(seq, dtype=np.int64)]))
+
+    # Weighted mean energy rate (by assigned processing load), normalized by global mean.
+    total_load = float(np.sum(loads))
+    e_mean = float(np.mean(e)) if e.size else 0.0
+    if total_load > 1e-12 and e.size >= m:
+        wmean = float(np.sum(loads * e[:m]) / total_load)
+        wmean_norm = float(wmean / (e_mean + 1e-9))
+    else:
+        wmean_norm = 0.0
+
+    # Correlation between machine load and energy rate (negative is good).
+    if m >= 2 and float(np.std(loads)) > 1e-12 and float(np.std(e[:m])) > 1e-12:
+        corr = float(np.corrcoef(loads, e[:m])[0, 1])
+        if not np.isfinite(corr):
+            corr = 0.0
+    else:
+        corr = 0.0
+
+    return np.asarray([wmean_norm, corr], dtype=np.float32)
 
 
 def _ensure_scale_choices(cfg: DataConfig, scale: str) -> None:
@@ -102,6 +252,7 @@ class PMALNSEnv:
         best_improve_bonus: float = 0.0,
         reward_best_coef: float = 1.0,
         reward_accept_coef: float = 0.25,
+        state_variant: str = "base",
         sa_worse_accept_penalty_coef: float = 0.0,
         sa_worse_accept_penalty_power: float = 1.0,
         reject_penalty: float = 0.0,
@@ -127,6 +278,11 @@ class PMALNSEnv:
         self.best_improve_bonus = float(best_improve_bonus)
         self.reward_best_coef = float(reward_best_coef)
         self.reward_accept_coef = float(reward_accept_coef)
+
+        self.state_variant = str(state_variant or "base").strip().lower()
+        if self.state_variant not in {"base", "energy_aware"}:
+            raise ValueError("state_variant must be one of: base, energy_aware")
+        self._inst_extra_feats: Optional[np.ndarray] = None
 
         # Optional shaping: explicitly penalize SA accepting *worse* candidates.
         # This is useful when energy deltas are small relative to tau, causing near-always-accept.
@@ -184,7 +340,10 @@ class PMALNSEnv:
     @property
     def obs_dim(self) -> int:
         # Base ALNS features (10) + operator usage frequencies.
-        return 10 + int(len(self.destroy_choices)) + int(len(self.repair_choices))
+        base = 10 + int(len(self.destroy_choices)) + int(len(self.repair_choices))
+        if str(self.state_variant) == "energy_aware":
+            base += int(_ENERGY_AWARE_EXTRA_FEATS_DIM)
+        return int(base)
 
     @property
     def action_dim(self) -> int:
@@ -210,6 +369,13 @@ class PMALNSEnv:
             cfg, gen_rng, instance_id=int(self.instance_id)
         )
         self._epsilon = _compute_epsilon(self._raw, float(self.slack_ratio))
+
+        if str(self.state_variant) == "energy_aware":
+            self._inst_extra_feats = _compute_energy_aware_instance_features(
+                self._raw, int(self._epsilon)
+            )
+        else:
+            self._inst_extra_feats = None
 
         self._it = 0
         self._no_improve = 0
@@ -295,6 +461,22 @@ class PMALNSEnv:
             ],
             axis=0,
         )
+
+        if str(self.state_variant) == "energy_aware":
+            extra = (
+                self._inst_extra_feats
+                if self._inst_extra_feats is not None
+                else np.zeros((int(_ENERGY_AWARE_STATIC_FEATS_DIM),), dtype=np.float32)
+            )
+            dyn = _compute_energy_aware_dynamic_features(self._raw, self._cur_sol)
+            out = np.concatenate(
+                [
+                    out,
+                    np.asarray(extra, dtype=np.float32),
+                    np.asarray(dyn, dtype=np.float32),
+                ],
+                axis=0,
+            )
         return out.astype(np.float32)
 
     def step(self, action: Any) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:

@@ -148,6 +148,7 @@ def _rollout_worker(
     hidden: int,
     scales: List[str],
     action_set: str,
+    state_variant: str,
     base_seed: int,
     start_instance_id: int,
     envs_per_worker: int,
@@ -200,6 +201,7 @@ def _rollout_worker(
                 slack_ratio=float(slack_ratio),
                 alns_cfg=alns_cfg,
                 action_set=str(action_set),
+                state_variant=str(state_variant),
                 reward_scale=float(reward_scale),
                 reward_power=float(reward_power),
                 best_improve_bonus=float(best_improve_bonus),
@@ -418,6 +420,7 @@ def _eval_policy_vs_random(
     act_dims: List[int],
     scales: List[str],
     action_set: str,
+    state_variant: str,
     alns_cfg_dict: Dict[str, Any],
     slack_ratio: float,
     reward_scale: float,
@@ -473,6 +476,7 @@ def _eval_policy_vs_random(
                 slack_ratio=float(slack_ratio),
                 alns_cfg=alns_cfg,
                 action_set=str(action_set),
+                state_variant=str(state_variant),
                 reward_scale=float(reward_scale),
                 reward_power=float(reward_power),
                 best_improve_bonus=float(best_improve_bonus),
@@ -496,6 +500,7 @@ def _eval_policy_vs_random(
                 slack_ratio=float(slack_ratio),
                 alns_cfg=alns_cfg,
                 action_set=str(action_set),
+                state_variant=str(state_variant),
                 reward_scale=float(reward_scale),
                 reward_power=float(reward_power),
                 best_improve_bonus=float(best_improve_bonus),
@@ -731,12 +736,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--action_set",
         type=str,
         default="balanced",
-        choices=["balanced", "safe", "full"],
+        choices=["balanced", "safe", "full", "energy_aware"],
         help=(
             "Discrete ALNS action set for PPO. "
             "balanced: avoids destroy_all but keeps greedy+random repair; "
             "safe: greedy repair only (highest feasibility); "
-            "full: includes destroy_all."
+            "full: includes destroy_all; "
+            "energy_aware: adds an energy-aware destroy operator (expensive)."
+        ),
+    )
+
+    p.add_argument(
+        "--state_variant",
+        type=str,
+        default="base",
+        choices=["base", "energy_aware"],
+        help=(
+            "Observation variant. 'base' keeps the original state exactly; "
+            "'energy_aware' appends static problem-structure features (machine energy rates + price horizon stats)."
         ),
     )
 
@@ -1094,6 +1111,9 @@ def main() -> None:
     action_set = (
         str(getattr(args, "action_set", "balanced") or "balanced").strip().lower()
     )
+    state_variant = (
+        str(getattr(args, "state_variant", "base") or "base").strip().lower()
+    )
 
     out_dir = str(args.out_dir)
     run_name = str(args.run_name).strip()
@@ -1120,6 +1140,7 @@ def main() -> None:
         slack_ratio=float(args.slack_ratio),
         alns_cfg=ALNSConfig(max_iters=1, no_improve_limit=1),
         action_set=str(action_set),
+        state_variant=str(state_variant),
     )
     obs_dim = int(tmp_env.obs_dim)
     act_dims = list(getattr(tmp_env, "action_dims", [int(tmp_env.action_dim)]))
@@ -1368,6 +1389,7 @@ def main() -> None:
                         hidden=int(args.hidden),
                         scales=scales_list,
                         action_set=str(action_set),
+                        state_variant=str(state_variant),
                         base_seed=int(args.seed) + 1000 * upd,
                         start_instance_id=int(base_instance) + 100000 * upd,
                         envs_per_worker=int(envs_per_worker),
@@ -1650,6 +1672,7 @@ def main() -> None:
                         act_dims=[int(x) for x in act_dims],
                         scales=scales_list,
                         action_set=str(action_set),
+                        state_variant=str(state_variant),
                         alns_cfg_dict=alns_cfg_dict,
                         slack_ratio=float(args.slack_ratio),
                         reward_scale=float(args.reward_scale),
