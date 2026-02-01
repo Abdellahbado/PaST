@@ -158,6 +158,8 @@ def _rollout_worker(
     best_improve_bonus: float,
     reward_best_coef: float,
     reward_accept_coef: float,
+    sa_worse_accept_penalty_coef: float,
+    sa_worse_accept_penalty_power: float,
     reject_penalty: float,
     reject_worse_penalty_coef: float,
     reject_worse_penalty_power: float,
@@ -203,6 +205,8 @@ def _rollout_worker(
                 best_improve_bonus=float(best_improve_bonus),
                 reward_best_coef=float(reward_best_coef),
                 reward_accept_coef=float(reward_accept_coef),
+                sa_worse_accept_penalty_coef=float(sa_worse_accept_penalty_coef),
+                sa_worse_accept_penalty_power=float(sa_worse_accept_penalty_power),
                 reject_penalty=float(reject_penalty),
                 reject_worse_penalty_coef=float(reject_worse_penalty_coef),
                 reject_worse_penalty_power=float(reject_worse_penalty_power),
@@ -421,6 +425,8 @@ def _eval_policy_vs_random(
     best_improve_bonus: float,
     reward_best_coef: float,
     reward_accept_coef: float,
+    sa_worse_accept_penalty_coef: float,
+    sa_worse_accept_penalty_power: float,
     reject_penalty: float,
     reject_worse_penalty_coef: float,
     reject_worse_penalty_power: float,
@@ -472,6 +478,8 @@ def _eval_policy_vs_random(
                 best_improve_bonus=float(best_improve_bonus),
                 reward_best_coef=float(reward_best_coef),
                 reward_accept_coef=float(reward_accept_coef),
+                sa_worse_accept_penalty_coef=float(sa_worse_accept_penalty_coef),
+                sa_worse_accept_penalty_power=float(sa_worse_accept_penalty_power),
                 reject_penalty=float(reject_penalty),
                 reject_worse_penalty_coef=float(reject_worse_penalty_coef),
                 reject_worse_penalty_power=float(reject_worse_penalty_power),
@@ -493,6 +501,8 @@ def _eval_policy_vs_random(
                 best_improve_bonus=float(best_improve_bonus),
                 reward_best_coef=float(reward_best_coef),
                 reward_accept_coef=float(reward_accept_coef),
+                sa_worse_accept_penalty_coef=float(sa_worse_accept_penalty_coef),
+                sa_worse_accept_penalty_power=float(sa_worse_accept_penalty_power),
                 reject_penalty=float(reject_penalty),
                 reject_worse_penalty_coef=float(reject_worse_penalty_coef),
                 reject_worse_penalty_power=float(reject_worse_penalty_power),
@@ -886,6 +896,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--sa_worse_accept_penalty_coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional extra penalty when SA (accept_idx=0) accepts a worse move (delta>0). "
+            "Penalty uses a relative delta: coef * ((delta/|cur_energy|) ** power). Default 0 (off)."
+        ),
+    )
+    p.add_argument(
+        "--sa_worse_accept_penalty_power",
+        type=float,
+        default=1.0,
+        help=(
+            "Power for sa_worse_accept_penalty: coef * ((delta/|cur_energy|) ** power). Default 1.0."
+        ),
+    )
+
+    p.add_argument(
         "--reject_penalty",
         type=float,
         default=0.0,
@@ -908,6 +936,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=1.0,
         help="Power for reject_worse_penalty: coef * (delta ** power). Default 1.0.",
+    )
+
+    # SA schedule (used when accept_idx=0). Defaults match ALNSConfig.
+    p.add_argument(
+        "--sa_tau0",
+        type=float,
+        default=1.0,
+        help="Initial SA temperature (tau0) used when accept_idx=0. Default 1.0.",
+    )
+    p.add_argument(
+        "--sa_decay",
+        type=float,
+        default=0.995,
+        help="SA temperature decay per iteration when accept_idx=0. Default 0.995.",
     )
 
     # Paper-style: include termination as an action and (optionally) add a terminal reward.
@@ -1111,6 +1153,8 @@ def main() -> None:
         "no_improve_limit": int(args.no_improve),
         "destroy_frac": float(args.destroy_frac),
         "destroy_max": int(args.destroy_max),
+        "sa_tau0": float(getattr(args, "sa_tau0", 1.0)),
+        "sa_decay": float(getattr(args, "sa_decay", 0.995)),
         "keep_iter_log": False,
         "oracle_dataset": False,
         "verify_cost": False,
@@ -1335,6 +1379,12 @@ def main() -> None:
                         reward_best_coef=float(getattr(args, "reward_best_coef", 1.0)),
                         reward_accept_coef=float(
                             getattr(args, "reward_accept_coef", 0.25)
+                        ),
+                        sa_worse_accept_penalty_coef=float(
+                            getattr(args, "sa_worse_accept_penalty_coef", 0.0)
+                        ),
+                        sa_worse_accept_penalty_power=float(
+                            getattr(args, "sa_worse_accept_penalty_power", 1.0)
                         ),
                         reject_penalty=float(getattr(args, "reject_penalty", 0.0)),
                         reject_worse_penalty_coef=float(
@@ -1608,6 +1658,12 @@ def main() -> None:
                         reward_best_coef=float(getattr(args, "reward_best_coef", 1.0)),
                         reward_accept_coef=float(
                             getattr(args, "reward_accept_coef", 0.25)
+                        ),
+                        sa_worse_accept_penalty_coef=float(
+                            getattr(args, "sa_worse_accept_penalty_coef", 0.0)
+                        ),
+                        sa_worse_accept_penalty_power=float(
+                            getattr(args, "sa_worse_accept_penalty_power", 1.0)
                         ),
                         reject_penalty=float(getattr(args, "reject_penalty", 0.0)),
                         reject_worse_penalty_coef=float(

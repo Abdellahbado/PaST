@@ -102,6 +102,8 @@ class PMALNSEnv:
         best_improve_bonus: float = 0.0,
         reward_best_coef: float = 1.0,
         reward_accept_coef: float = 0.25,
+        sa_worse_accept_penalty_coef: float = 0.0,
+        sa_worse_accept_penalty_power: float = 1.0,
         reject_penalty: float = 0.0,
         reject_worse_penalty_coef: float = 0.0,
         reject_worse_penalty_power: float = 1.0,
@@ -125,6 +127,12 @@ class PMALNSEnv:
         self.best_improve_bonus = float(best_improve_bonus)
         self.reward_best_coef = float(reward_best_coef)
         self.reward_accept_coef = float(reward_accept_coef)
+
+        # Optional shaping: explicitly penalize SA accepting *worse* candidates.
+        # This is useful when energy deltas are small relative to tau, causing near-always-accept.
+        # The penalty uses a relative delta (delta / |cur_energy|) for scale stability.
+        self.sa_worse_accept_penalty_coef = float(sa_worse_accept_penalty_coef)
+        self.sa_worse_accept_penalty_power = float(sa_worse_accept_penalty_power)
 
         # Optional shaping to discourage proposing candidates that SA will reject.
         # Keep these default-off; over-penalizing rejection can make the policy overly conservative.
@@ -400,6 +408,22 @@ class PMALNSEnv:
                 reward += float(self.reward_accept_coef) * (
                     float(prev_energy) - float(self._cur_ev.total_energy)
                 )
+
+                # Optional extra penalty when SA accepts a worse move.
+                # accept_idx==0 => SA mode; delta>0 means worse; accepted=True means we took it.
+                if (
+                    int(accept_idx) == 0
+                    and float(delta) > 0.0
+                    and float(self.sa_worse_accept_penalty_coef) != 0.0
+                ):
+                    p = float(self.sa_worse_accept_penalty_power)
+                    if not np.isfinite(p) or p <= 0.0:
+                        p = 1.0
+                    denom = float(max(1e-9, abs(float(prev_energy))))
+                    rel = float(delta) / denom
+                    reward -= float(self.sa_worse_accept_penalty_coef) * (
+                        float(rel) ** float(p)
+                    )
             else:
                 # Optional rejection penalties.
                 # 1) Constant penalty for any feasible rejection.
