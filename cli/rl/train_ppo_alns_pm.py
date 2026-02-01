@@ -1099,6 +1099,76 @@ def _load_checkpoint(path: str, device: torch.device) -> Dict[str, Any]:
     return ckpt
 
 
+def _load_state_dict_compat(
+    net: nn.Module, ckpt_state: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Best-effort load for older checkpoints.
+
+    Supports:
+      - old policy head keys: pi.weight/pi.bias (ignored; new multi-head policy is reinit)
+      - observation dim changes: copy overlapping columns for the first linear layer
+
+    Returns:
+      (new_state_dict, report)
+    """
+
+    cur = net.state_dict()
+    out = {k: v.clone() for k, v in cur.items()}
+
+    loaded: List[str] = []
+    skipped: List[str] = []
+    partial: List[str] = []
+
+    for k, v in ckpt_state.items():
+        # Ignore legacy single-head actor keys.
+        if k in {"pi.weight", "pi.bias"}:
+            skipped.append(k)
+            continue
+        if k not in out:
+            skipped.append(k)
+            continue
+
+        try:
+            src = v
+            dst = out[k]
+            if (
+                hasattr(src, "shape")
+                and hasattr(dst, "shape")
+                and tuple(src.shape) == tuple(dst.shape)
+            ):
+                out[k] = src
+                loaded.append(k)
+                continue
+
+            # Special-case: first layer input dim changed (obs augmentation).
+            # Copy overlapping input columns.
+            if (
+                k.endswith("body.0.weight")
+                and hasattr(src, "ndim")
+                and hasattr(dst, "ndim")
+                and int(getattr(src, "ndim", 0)) == 2
+                and int(getattr(dst, "ndim", 0)) == 2
+                and int(src.shape[0]) == int(dst.shape[0])
+            ):
+                n_in = int(min(int(src.shape[1]), int(dst.shape[1])))
+                dst2 = dst.clone()
+                dst2[:, :n_in] = src[:, :n_in]
+                out[k] = dst2
+                partial.append(f"{k} (copied {n_in}/{int(dst.shape[1])} in_features)")
+                continue
+
+            skipped.append(k)
+        except Exception:
+            skipped.append(k)
+
+    report = {
+        "loaded": loaded,
+        "skipped": skipped,
+        "partial": partial,
+    }
+    return out, report
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -1224,7 +1294,30 @@ def main() -> None:
     if str(args.resume).strip():
         ckpt_path = str(args.resume).strip()
         ckpt = _load_checkpoint(ckpt_path, device=device)
-        net.load_state_dict(ckpt["state_dict"])
+        try:
+            net.load_state_dict(ckpt["state_dict"])  # strict by default
+        except Exception as e:
+            # Backward-compat for older checkpoints (e.g., before factorized policy heads or
+            # before obs augmentation with operator usage frequencies).
+            try:
+                new_sd, rep = _load_state_dict_compat(net, ckpt["state_dict"])
+                net.load_state_dict(new_sd, strict=True)
+                print(
+                    "[Resume] Warning: checkpoint architecture mismatch; loaded compatible weights only. "
+                    f"loaded={len(rep.get('loaded', []))} partial={len(rep.get('partial', []))} skipped={len(rep.get('skipped', []))}.",
+                    flush=True,
+                )
+                if rep.get("partial"):
+                    # Print a small hint (not the full list) to keep logs readable.
+                    print(
+                        f"[Resume] Partial loads (sample): {rep['partial'][:3]}",
+                        flush=True,
+                    )
+            except Exception:
+                # Re-raise the original error for clarity.
+                raise RuntimeError(
+                    f"Failed to load checkpoint {ckpt_path}: {type(e).__name__}: {e}"
+                )
         if not bool(getattr(args, "resume_policy_only", False)):
             if "opt_state" in ckpt and isinstance(ckpt["opt_state"], dict):
                 opt.load_state_dict(ckpt["opt_state"])
