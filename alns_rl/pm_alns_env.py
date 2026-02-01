@@ -100,6 +100,11 @@ class PMALNSEnv:
         reward_scale: float = 1.0,
         reward_power: float = 1.0,
         best_improve_bonus: float = 0.0,
+        reward_best_coef: float = 1.0,
+        reward_accept_coef: float = 0.25,
+        reject_penalty: float = 0.0,
+        reject_worse_penalty_coef: float = 0.0,
+        reject_worse_penalty_power: float = 1.0,
     ):
         self.scale = str(scale)
         self.seed = int(seed)
@@ -114,6 +119,14 @@ class PMALNSEnv:
         self.reward_scale = float(reward_scale)
         self.reward_power = float(reward_power)
         self.best_improve_bonus = float(best_improve_bonus)
+        self.reward_best_coef = float(reward_best_coef)
+        self.reward_accept_coef = float(reward_accept_coef)
+
+        # Optional shaping to discourage proposing candidates that SA will reject.
+        # Keep these default-off; over-penalizing rejection can make the policy overly conservative.
+        self.reject_penalty = float(reject_penalty)
+        self.reject_worse_penalty_coef = float(reject_worse_penalty_coef)
+        self.reject_worse_penalty_power = float(reject_worse_penalty_power)
 
         self.action_list: List[ALNSAction] = _build_action_list_by_name(self.action_set)
 
@@ -214,6 +227,7 @@ class PMALNSEnv:
         action = self.action_list[action_idx]
 
         prev_energy = float(self._cur_ev.total_energy)
+        old_best_energy = float(self._best_ev.total_energy)
 
         step_exception = False
         try:
@@ -263,12 +277,25 @@ class PMALNSEnv:
                     prob = 0.0
                 accepted = self._rng.random() < prob
 
-            old_best_energy = float(self._best_ev.total_energy)
-
             if accepted:
                 self._cur_sol, self._cur_ev = cand_sol, cand_ev
-                # Base reward: accepted energy improvement.
-                reward = -(float(self._cur_ev.total_energy) - prev_energy)
+                # Reward accepted move improvement (can be negative if accepted worse).
+                reward += float(self.reward_accept_coef) * (
+                    float(prev_energy) - float(self._cur_ev.total_energy)
+                )
+            else:
+                # Optional rejection penalties.
+                # 1) Constant penalty for any feasible rejection.
+                if float(self.reject_penalty) != 0.0:
+                    reward -= float(self.reject_penalty)
+                # 2) Penalize proposing *worse* candidates that get rejected.
+                if float(self.reject_worse_penalty_coef) != 0.0 and float(delta) > 0.0:
+                    p = float(self.reject_worse_penalty_power)
+                    if not np.isfinite(p) or p <= 0.0:
+                        p = 1.0
+                    reward -= float(self.reject_worse_penalty_coef) * (
+                        float(delta) ** float(p)
+                    )
 
             improved_best = float(cand_energy) < float(old_best_energy)
             if improved_best:
@@ -276,6 +303,13 @@ class PMALNSEnv:
                 self._no_improve = 0
             else:
                 self._no_improve += 1
+
+            # Primary shaping: reward improvement in best-so-far energy.
+            # This aligns training with evaluation, which measures final best energy.
+            new_best_energy = float(self._best_ev.total_energy)
+            best_delta = float(old_best_energy) - float(new_best_energy)
+            if float(self.reward_best_coef) != 0.0 and best_delta != 0.0:
+                reward += float(self.reward_best_coef) * float(best_delta)
 
             # Optional shaping: reward good proposals even if rejected.
             if improved_best and float(self.best_improve_bonus) != 0.0:

@@ -109,6 +109,11 @@ def _rollout_worker(
     reward_scale: float,
     reward_power: float,
     best_improve_bonus: float,
+    reward_best_coef: float,
+    reward_accept_coef: float,
+    reject_penalty: float,
+    reject_worse_penalty_coef: float,
+    reject_worse_penalty_power: float,
     no_obs_norm: bool,
     alns_cfg_dict: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
@@ -146,6 +151,11 @@ def _rollout_worker(
                 reward_scale=float(reward_scale),
                 reward_power=float(reward_power),
                 best_improve_bonus=float(best_improve_bonus),
+                reward_best_coef=float(reward_best_coef),
+                reward_accept_coef=float(reward_accept_coef),
+                reject_penalty=float(reject_penalty),
+                reject_worse_penalty_coef=float(reject_worse_penalty_coef),
+                reject_worse_penalty_power=float(reject_worse_penalty_power),
             )
         )
 
@@ -301,6 +311,33 @@ def _safe_mean(x: np.ndarray) -> float:
     return float(np.mean(xf))
 
 
+def _action_count_stats(counts: np.ndarray) -> Dict[str, Any]:
+    c = np.asarray(counts, dtype=np.float64)
+    c = np.where(np.isfinite(c), c, 0.0)
+    c = np.maximum(c, 0.0)
+    tot = float(np.sum(c))
+    if tot <= 0.0:
+        return {
+            "counts": [int(0) for _ in range(int(c.size))],
+            "max_frac": float("nan"),
+            "entropy": float("nan"),
+            "top3": [],
+        }
+    p = c / tot
+    # Entropy of empirical action distribution (nats).
+    eps = 1e-12
+    ent = float(-np.sum(p * np.log(p + eps)))
+    max_frac = float(np.max(p))
+    top = np.argsort(-p)[: min(3, int(p.size))]
+    top3 = [(int(i), float(p[int(i)])) for i in top]
+    return {
+        "counts": [int(x) for x in c.astype(np.int64).tolist()],
+        "max_frac": float(max_frac),
+        "entropy": float(ent),
+        "top3": top3,
+    }
+
+
 def _eval_policy_vs_random(
     *,
     net: PolicyValueNet,
@@ -312,6 +349,11 @@ def _eval_policy_vs_random(
     reward_scale: float,
     reward_power: float,
     best_improve_bonus: float,
+    reward_best_coef: float,
+    reward_accept_coef: float,
+    reject_penalty: float,
+    reject_worse_penalty_coef: float,
+    reject_worse_penalty_power: float,
     no_obs_norm: bool,
     eval_seed: int,
     eval_num_envs: int,
@@ -353,6 +395,11 @@ def _eval_policy_vs_random(
                 reward_scale=float(reward_scale),
                 reward_power=float(reward_power),
                 best_improve_bonus=float(best_improve_bonus),
+                reward_best_coef=float(reward_best_coef),
+                reward_accept_coef=float(reward_accept_coef),
+                reject_penalty=float(reject_penalty),
+                reject_worse_penalty_coef=float(reject_worse_penalty_coef),
+                reject_worse_penalty_power=float(reject_worse_penalty_power),
             )
         )
         envs_rnd.append(
@@ -366,6 +413,11 @@ def _eval_policy_vs_random(
                 reward_scale=float(reward_scale),
                 reward_power=float(reward_power),
                 best_improve_bonus=float(best_improve_bonus),
+                reward_best_coef=float(reward_best_coef),
+                reward_accept_coef=float(reward_accept_coef),
+                reject_penalty=float(reject_penalty),
+                reject_worse_penalty_coef=float(reject_worse_penalty_coef),
+                reject_worse_penalty_power=float(reject_worse_penalty_power),
             )
         )
 
@@ -389,9 +441,16 @@ def _eval_policy_vs_random(
     accepted_pol = feasible_pol = steps_pol = 0
     accepted_rnd = feasible_rnd = steps_rnd = 0
 
+    # Action histograms (counts over attempted steps).
+    act_counts_pol = np.zeros((int(act_dim),), dtype=np.int64)
+    act_counts_rnd = np.zeros((int(act_dim),), dtype=np.int64)
+
     net.eval()
     with torch.no_grad():
         for _t in range(T):
+            alive_pol_step = alive_pol.copy()
+            alive_rnd_step = alive_rnd.copy()
+
             # Policy actions (vectorized)
             if bool(alive_pol.any()):
                 obs_t = torch.from_numpy(obs_pol).to(device)
@@ -408,6 +467,18 @@ def _eval_policy_vs_random(
 
             # Random actions
             act_rnd = rng.integers(low=0, high=int(act_dim), size=(n,), dtype=np.int64)
+
+            # Action histograms (only count actions for envs that are still alive this step).
+            if bool(alive_pol_step.any()):
+                act_counts_pol += np.bincount(
+                    act_pol[alive_pol_step].astype(np.int64),
+                    minlength=int(act_dim),
+                )
+            if bool(alive_rnd_step.any()):
+                act_counts_rnd += np.bincount(
+                    act_rnd[alive_rnd_step].astype(np.int64),
+                    minlength=int(act_dim),
+                )
 
             # Step envs
             for i, e in enumerate(envs_pol):
@@ -493,6 +564,9 @@ def _eval_policy_vs_random(
     imp_pol_p50 = _safe_quantiles(improve_pol, [0.5])[0]
     imp_rnd_p50 = _safe_quantiles(improve_rnd, [0.5])[0]
 
+    pol_act_stats = _action_count_stats(act_counts_pol)
+    rnd_act_stats = _action_count_stats(act_counts_rnd)
+
     return {
         "eval_seed": int(eval_seed),
         "eval_num_envs": int(n),
@@ -520,6 +594,15 @@ def _eval_policy_vs_random(
         "eval_policy_feasible_rate": float(feasible_pol) / float(max(1, steps_pol)),
         "eval_random_accept_rate": float(accepted_rnd) / float(max(1, steps_rnd)),
         "eval_random_feasible_rate": float(feasible_rnd) / float(max(1, steps_rnd)),
+        # Action histograms
+        "eval_policy_action_counts": pol_act_stats["counts"],
+        "eval_policy_action_max_frac": float(pol_act_stats["max_frac"]),
+        "eval_policy_action_entropy": float(pol_act_stats["entropy"]),
+        "eval_policy_action_top3": pol_act_stats["top3"],
+        "eval_random_action_counts": rnd_act_stats["counts"],
+        "eval_random_action_max_frac": float(rnd_act_stats["max_frac"]),
+        "eval_random_action_entropy": float(rnd_act_stats["entropy"]),
+        "eval_random_action_top3": rnd_act_stats["top3"],
     }
 
 
@@ -577,6 +660,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="",
         help="Path to a checkpoint .pt to resume from.",
+    )
+    p.add_argument(
+        "--resume_policy_only",
+        action="store_true",
+        help=(
+            "When used with --resume, load model weights only (do NOT load optimizer/RNG/update). "
+            "Useful when changing reward shaping or other training dynamics and you want a fresh optimizer."
+        ),
     )
 
     p.add_argument(
@@ -677,6 +768,50 @@ def build_parser() -> argparse.ArgumentParser:
             "Add this constant bonus when an action proposes a feasible candidate that improves the best-so-far energy "
             "(even if the candidate was rejected by SA)."
         ),
+    )
+
+    p.add_argument(
+        "--reward_best_coef",
+        type=float,
+        default=1.0,
+        help=(
+            "Coefficient for best-so-far energy improvement shaping: (best_old - best_new). "
+            "This aligns training with eval (final best energy). Default 1.0."
+        ),
+    )
+    p.add_argument(
+        "--reward_accept_coef",
+        type=float,
+        default=0.25,
+        help=(
+            "Coefficient for accepted-move improvement: (cur_old - cur_new) when accepted. "
+            "Can be negative if SA accepts worse. Default 0.25."
+        ),
+    )
+
+    p.add_argument(
+        "--reject_penalty",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional constant penalty applied when a feasible candidate is rejected by SA. "
+            "Default 0 (off). Be careful: too large makes policy overly conservative."
+        ),
+    )
+    p.add_argument(
+        "--reject_worse_penalty_coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional penalty coefficient for proposing a *worse* (delta>0) candidate that gets rejected. "
+            "Penalty is coef * (delta ** power). Default 0 (off)."
+        ),
+    )
+    p.add_argument(
+        "--reject_worse_penalty_power",
+        type=float,
+        default=1.0,
+        help="Power for reject_worse_penalty: coef * (delta ** power). Default 1.0.",
     )
     p.add_argument(
         "--no_obs_norm",
@@ -899,37 +1034,42 @@ def main() -> None:
         ckpt_path = str(args.resume).strip()
         ckpt = _load_checkpoint(ckpt_path, device=device)
         net.load_state_dict(ckpt["state_dict"])
-        if "opt_state" in ckpt and isinstance(ckpt["opt_state"], dict):
-            opt.load_state_dict(ckpt["opt_state"])
-        if "update" in ckpt:
-            start_update = int(ckpt["update"])
-        if "best_metric_value" in ckpt:
-            try:
-                v = ckpt.get("best_metric_value")
-                best_metric_value = None if v is None else float(v)
-            except Exception:
-                best_metric_value = None
-        if "py_random_state" in ckpt:
-            try:
-                random.setstate(ckpt["py_random_state"])
-            except Exception:
-                pass
-        if "np_random_state" in ckpt:
-            try:
-                np.random.set_state(ckpt["np_random_state"])
-            except Exception:
-                pass
-        if "torch_rng_state" in ckpt:
-            try:
-                torch.set_rng_state(ckpt["torch_rng_state"].cpu())
-            except Exception:
-                pass
-        if device.type == "cuda" and "torch_cuda_rng_state" in ckpt:
-            try:
-                torch.cuda.set_rng_state_all(ckpt["torch_cuda_rng_state"])
-            except Exception:
-                pass
-        print(f"Resumed from {ckpt_path} at update={start_update}")
+        if not bool(getattr(args, "resume_policy_only", False)):
+            if "opt_state" in ckpt and isinstance(ckpt["opt_state"], dict):
+                opt.load_state_dict(ckpt["opt_state"])
+            if "update" in ckpt:
+                start_update = int(ckpt["update"])
+            if "best_metric_value" in ckpt:
+                try:
+                    v = ckpt.get("best_metric_value")
+                    best_metric_value = None if v is None else float(v)
+                except Exception:
+                    best_metric_value = None
+            if "py_random_state" in ckpt:
+                try:
+                    random.setstate(ckpt["py_random_state"])
+                except Exception:
+                    pass
+            if "np_random_state" in ckpt:
+                try:
+                    np.random.set_state(ckpt["np_random_state"])
+                except Exception:
+                    pass
+            if "torch_rng_state" in ckpt:
+                try:
+                    torch.set_rng_state(ckpt["torch_rng_state"].cpu())
+                except Exception:
+                    pass
+            if device.type == "cuda" and "torch_cuda_rng_state" in ckpt:
+                try:
+                    torch.cuda.set_rng_state_all(ckpt["torch_cuda_rng_state"])
+                except Exception:
+                    pass
+            print(f"Resumed from {ckpt_path} at update={start_update}")
+        else:
+            start_update = 0
+            best_metric_value = None
+            print(f"Loaded weights from {ckpt_path} (policy-only resume)")
 
     # If we weren't able to restore best metric from the resumed checkpoint,
     # try restoring it from the best checkpoint file.
@@ -1062,6 +1202,17 @@ def main() -> None:
                         reward_scale=float(args.reward_scale),
                         reward_power=float(args.reward_power),
                         best_improve_bonus=float(args.best_improve_bonus),
+                        reward_best_coef=float(getattr(args, "reward_best_coef", 1.0)),
+                        reward_accept_coef=float(
+                            getattr(args, "reward_accept_coef", 0.25)
+                        ),
+                        reject_penalty=float(getattr(args, "reject_penalty", 0.0)),
+                        reject_worse_penalty_coef=float(
+                            getattr(args, "reject_worse_penalty_coef", 0.0)
+                        ),
+                        reject_worse_penalty_power=float(
+                            getattr(args, "reject_worse_penalty_power", 1.0)
+                        ),
                         no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
                         alns_cfg_dict=alns_cfg_dict,
                     )
@@ -1303,6 +1454,17 @@ def main() -> None:
                         reward_scale=float(args.reward_scale),
                         reward_power=float(args.reward_power),
                         best_improve_bonus=float(args.best_improve_bonus),
+                        reward_best_coef=float(getattr(args, "reward_best_coef", 1.0)),
+                        reward_accept_coef=float(
+                            getattr(args, "reward_accept_coef", 0.25)
+                        ),
+                        reject_penalty=float(getattr(args, "reject_penalty", 0.0)),
+                        reject_worse_penalty_coef=float(
+                            getattr(args, "reject_worse_penalty_coef", 0.0)
+                        ),
+                        reject_worse_penalty_power=float(
+                            getattr(args, "reject_worse_penalty_power", 1.0)
+                        ),
                         no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
                         eval_seed=int(args.eval_seed),
                         eval_num_envs=int(args.eval_num_envs),
@@ -1479,6 +1641,18 @@ def main() -> None:
                 "best_energy_nonfinite": int(eb_nonfinite),
                 "best_improve_nonfinite": int(bi_nonfinite),
             }
+
+            # Rollout action histogram (debug policy collapse / bad operator preference).
+            try:
+                act_np = actions.detach().cpu().numpy().reshape(-1).astype(np.int64)
+                act_counts = np.bincount(act_np, minlength=int(act_dim))
+                act_stats = _action_count_stats(act_counts)
+                rec["rollout_action_counts"] = act_stats["counts"]
+                rec["rollout_action_max_frac"] = float(act_stats["max_frac"])
+                rec["rollout_action_entropy"] = float(act_stats["entropy"])
+                rec["rollout_action_top3"] = act_stats["top3"]
+            except Exception:
+                pass
 
             rec["best_metric"] = str(
                 getattr(args, "best_metric", "eval_policy_best_energy_p50")
