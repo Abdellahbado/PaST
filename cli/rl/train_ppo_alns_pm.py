@@ -38,7 +38,7 @@ class PPOCfg:
 
 
 class PolicyValueNet(nn.Module):
-    def __init__(self, obs_dim: int, act_dim: int, hidden: int = 128):
+    def __init__(self, obs_dim: int, act_dims: List[int], hidden: int = 128):
         super().__init__()
         self.body = nn.Sequential(
             nn.Linear(obs_dim, hidden),
@@ -46,14 +46,61 @@ class PolicyValueNet(nn.Module):
             nn.Linear(hidden, hidden),
             nn.Tanh(),
         )
-        self.pi = nn.Linear(hidden, act_dim)
+        self.pi_heads = nn.ModuleList([nn.Linear(hidden, int(d)) for d in act_dims])
         self.v = nn.Linear(hidden, 1)
 
-    def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, obs: torch.Tensor) -> Tuple[List[torch.Tensor], torch.Tensor]:
         h = self.body(obs)
-        logits = self.pi(h)
+        logits = [head(h) for head in self.pi_heads]
         value = self.v(h).squeeze(-1)
         return logits, value
+
+
+def _multi_categorical_logprob(
+    logits_list: List[torch.Tensor], actions: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Total log-prob and entropy for a factorized categorical policy.
+
+    Args:
+        logits_list: list of [B, A_i] tensors
+        actions: [B, H] int tensor, where H == len(logits_list)
+    Returns:
+        (logp_total [B], entropy_total [B]) summed across heads.
+    """
+
+    if actions.ndim != 2 or int(actions.size(1)) != int(len(logits_list)):
+        raise ValueError("actions must have shape [B, num_heads]")
+
+    logps: List[torch.Tensor] = []
+    ents: List[torch.Tensor] = []
+    for i, lg in enumerate(logits_list):
+        dist = torch.distributions.Categorical(logits=lg, validate_args=False)
+        ai = actions[:, i]
+        logps.append(dist.log_prob(ai))
+        ents.append(dist.entropy())
+    logp_total = torch.stack(logps, dim=0).sum(dim=0)
+    ent_total = torch.stack(ents, dim=0).sum(dim=0)
+    return logp_total, ent_total
+
+
+def _flatten_factor_action(act: np.ndarray, act_dims: List[int]) -> np.ndarray:
+    """Flatten factorized actions into a joint index (for histograms/debug only)."""
+
+    a = np.asarray(act, dtype=np.int64)
+    if a.ndim == 1:
+        if int(a.size) != int(len(act_dims)):
+            raise ValueError("action vector must have len(act_dims)")
+        a = a.reshape(1, -1)
+    if a.ndim != 2 or int(a.shape[1]) != int(len(act_dims)):
+        raise ValueError("actions must be [N, num_heads]")
+
+    idx = np.zeros((a.shape[0],), dtype=np.int64)
+    mult = 1
+    for i in reversed(range(int(len(act_dims)))):
+        di = int(act_dims[i])
+        idx += np.clip(a[:, i], 0, di - 1) * int(mult)
+        mult *= di
+    return idx
 
 
 def _normalize_obs_np(obs: np.ndarray) -> np.ndarray:
@@ -97,7 +144,7 @@ def _rollout_worker(
     worker_id: int,
     policy_state: Dict[str, Any],
     obs_dim: int,
-    act_dim: int,
+    act_dims: List[int],
     hidden: int,
     scales: List[str],
     action_set: str,
@@ -114,6 +161,9 @@ def _rollout_worker(
     reject_penalty: float,
     reject_worse_penalty_coef: float,
     reject_worse_penalty_power: float,
+    min_stop_iters: int,
+    terminal_best_coef: float,
+    terminal_time_coef: float,
     no_obs_norm: bool,
     alns_cfg_dict: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
@@ -125,7 +175,7 @@ def _rollout_worker(
 
     torch.set_num_threads(1)
 
-    net = PolicyValueNet(obs_dim=obs_dim, act_dim=act_dim, hidden=hidden)
+    net = PolicyValueNet(obs_dim=obs_dim, act_dims=act_dims, hidden=hidden)
     net.load_state_dict(policy_state)
     net.eval()
 
@@ -156,6 +206,9 @@ def _rollout_worker(
                 reject_penalty=float(reject_penalty),
                 reject_worse_penalty_coef=float(reject_worse_penalty_coef),
                 reject_worse_penalty_power=float(reject_worse_penalty_power),
+                min_stop_iters=int(min_stop_iters),
+                terminal_best_coef=float(terminal_best_coef),
+                terminal_time_coef=float(terminal_time_coef),
             )
         )
 
@@ -166,13 +219,17 @@ def _rollout_worker(
 
     T = int(rollout_len)
     B = int(envs_per_worker)
+    H = int(len(act_dims))
+    act_dim_total = int(np.prod(np.asarray(act_dims, dtype=np.int64)))
 
     obs_buf = np.zeros((T, B, obs_dim), dtype=np.float32)
-    act_buf = np.zeros((T, B), dtype=np.int64)
+    act_buf = np.zeros((T, B, H), dtype=np.int64)
     logp_buf = np.zeros((T, B), dtype=np.float32)
     val_buf = np.zeros((T, B), dtype=np.float32)
     rew_buf = np.zeros((T, B), dtype=np.float32)
     done_buf = np.zeros((T, B), dtype=np.float32)
+
+    joint_action_counts = np.zeros((int(act_dim_total),), dtype=np.int64)
 
     accepted_cnt = 0
     feasible_cnt = 0
@@ -184,10 +241,16 @@ def _rollout_worker(
     for t in range(T):
         obs_t = torch.from_numpy(obs)
         with torch.no_grad():
-            logits, values = net(obs_t)
-            dist = torch.distributions.Categorical(logits=logits, validate_args=False)
-            actions = dist.sample()
-            logp = dist.log_prob(actions)
+            logits_list, values = net(obs_t)
+            acts: List[torch.Tensor] = []
+            logps: List[torch.Tensor] = []
+            for lg in logits_list:
+                dist = torch.distributions.Categorical(logits=lg, validate_args=False)
+                a = dist.sample()
+                acts.append(a)
+                logps.append(dist.log_prob(a))
+            actions = torch.stack(acts, dim=-1)
+            logp = torch.stack(logps, dim=0).sum(dim=0)
 
         obs_buf[t] = obs
         act_buf[t] = actions.cpu().numpy()
@@ -196,7 +259,7 @@ def _rollout_worker(
 
         next_obs = []
         for b, e in enumerate(envs):
-            o2, r, d, info = e.step(int(act_buf[t, b]))
+            o2, r, d, info = e.step(act_buf[t, b].tolist())
             rew_buf[t, b] = float(r)
             done_buf[t, b] = float(d)
 
@@ -222,6 +285,12 @@ def _rollout_worker(
         obs = np.stack(next_obs, axis=0).astype(np.float32)
         if bool(no_obs_norm) is False:
             obs = _normalize_obs_np(obs)
+
+        # Joint-action histogram for collapse diagnostics.
+        joint_idx = _flatten_factor_action(act_buf[t].reshape(B, H), act_dims)
+        joint_action_counts += np.bincount(
+            joint_idx.astype(np.int64), minlength=int(act_dim_total)
+        )
 
     # Bootstrap value
     with torch.no_grad():
@@ -250,6 +319,7 @@ def _rollout_worker(
         "rewards": rew_buf,
         "dones": done_buf,
         "last_values": last_v,
+        "rollout_joint_action_counts": joint_action_counts.astype(np.int64),
         "accepted_cnt": np.asarray([accepted_cnt], dtype=np.int64),
         "feasible_cnt": np.asarray([feasible_cnt], dtype=np.int64),
         "step_cnt": np.asarray([step_cnt], dtype=np.int64),
@@ -341,7 +411,7 @@ def _action_count_stats(counts: np.ndarray) -> Dict[str, Any]:
 def _eval_policy_vs_random(
     *,
     net: PolicyValueNet,
-    act_dim: int,
+    act_dims: List[int],
     scales: List[str],
     action_set: str,
     alns_cfg_dict: Dict[str, Any],
@@ -354,6 +424,9 @@ def _eval_policy_vs_random(
     reject_penalty: float,
     reject_worse_penalty_coef: float,
     reject_worse_penalty_power: float,
+    min_stop_iters: int,
+    terminal_best_coef: float,
+    terminal_time_coef: float,
     no_obs_norm: bool,
     eval_seed: int,
     eval_num_envs: int,
@@ -375,6 +448,8 @@ def _eval_policy_vs_random(
     alns_cfg = ALNSConfig(**alns_cfg_dict)
     n = int(eval_num_envs)
     T = int(eval_rollout_len)
+    H = int(len(act_dims))
+    act_dim_total = int(np.prod(np.asarray(act_dims, dtype=np.int64)))
 
     # Two independent env sets with identical seeds/instance_ids so their initial
     # states match (to the extent the environment is deterministic under seed).
@@ -400,6 +475,9 @@ def _eval_policy_vs_random(
                 reject_penalty=float(reject_penalty),
                 reject_worse_penalty_coef=float(reject_worse_penalty_coef),
                 reject_worse_penalty_power=float(reject_worse_penalty_power),
+                min_stop_iters=int(min_stop_iters),
+                terminal_best_coef=float(terminal_best_coef),
+                terminal_time_coef=float(terminal_time_coef),
             )
         )
         envs_rnd.append(
@@ -418,6 +496,9 @@ def _eval_policy_vs_random(
                 reject_penalty=float(reject_penalty),
                 reject_worse_penalty_coef=float(reject_worse_penalty_coef),
                 reject_worse_penalty_power=float(reject_worse_penalty_power),
+                min_stop_iters=int(min_stop_iters),
+                terminal_best_coef=float(terminal_best_coef),
+                terminal_time_coef=float(terminal_time_coef),
             )
         )
 
@@ -441,9 +522,9 @@ def _eval_policy_vs_random(
     accepted_pol = feasible_pol = steps_pol = 0
     accepted_rnd = feasible_rnd = steps_rnd = 0
 
-    # Action histograms (counts over attempted steps).
-    act_counts_pol = np.zeros((int(act_dim),), dtype=np.int64)
-    act_counts_rnd = np.zeros((int(act_dim),), dtype=np.int64)
+    # Joint action histograms (counts over attempted steps).
+    act_counts_pol = np.zeros((int(act_dim_total),), dtype=np.int64)
+    act_counts_rnd = np.zeros((int(act_dim_total),), dtype=np.int64)
 
     net.eval()
     with torch.no_grad():
@@ -454,37 +535,52 @@ def _eval_policy_vs_random(
             # Policy actions (vectorized)
             if bool(alive_pol.any()):
                 obs_t = torch.from_numpy(obs_pol).to(device)
-                logits, _v = net(obs_t)
+                logits_list, _v = net(obs_t)
                 if bool(deterministic):
-                    act_pol = torch.argmax(logits, dim=-1).detach().cpu().numpy()
-                else:
-                    dist = torch.distributions.Categorical(
-                        logits=logits, validate_args=False
+                    act_pol = np.stack(
+                        [
+                            torch.argmax(lg, dim=-1).detach().cpu().numpy()
+                            for lg in logits_list
+                        ],
+                        axis=-1,
                     )
-                    act_pol = dist.sample().detach().cpu().numpy()
+                else:
+                    acts = []
+                    for lg in logits_list:
+                        dist = torch.distributions.Categorical(
+                            logits=lg, validate_args=False
+                        )
+                        acts.append(dist.sample().detach().cpu().numpy())
+                    act_pol = np.stack(acts, axis=-1)
             else:
-                act_pol = np.zeros((n,), dtype=np.int64)
+                act_pol = np.zeros((n, H), dtype=np.int64)
 
-            # Random actions
-            act_rnd = rng.integers(low=0, high=int(act_dim), size=(n,), dtype=np.int64)
+            # Random actions (independent uniform over each factor => uniform over joint).
+            act_rnd = np.stack(
+                [
+                    rng.integers(low=0, high=int(d), size=(n,), dtype=np.int64)
+                    for d in act_dims
+                ],
+                axis=-1,
+            )
 
-            # Action histograms (only count actions for envs that are still alive this step).
+            # Joint action histograms (only count actions for envs that are alive this step).
             if bool(alive_pol_step.any()):
+                ji = _flatten_factor_action(act_pol[alive_pol_step], act_dims)
                 act_counts_pol += np.bincount(
-                    act_pol[alive_pol_step].astype(np.int64),
-                    minlength=int(act_dim),
+                    ji.astype(np.int64), minlength=int(act_dim_total)
                 )
             if bool(alive_rnd_step.any()):
+                ji = _flatten_factor_action(act_rnd[alive_rnd_step], act_dims)
                 act_counts_rnd += np.bincount(
-                    act_rnd[alive_rnd_step].astype(np.int64),
-                    minlength=int(act_dim),
+                    ji.astype(np.int64), minlength=int(act_dim_total)
                 )
 
             # Step envs
             for i, e in enumerate(envs_pol):
                 if not bool(alive_pol[i]):
                     continue
-                o2, _r, d, info = e.step(int(act_pol[i]))
+                o2, _r, d, info = e.step(act_pol[i].tolist())
                 s = info.get("step", {}) if isinstance(info, dict) else {}
                 if bool(s.get("accepted", False)):
                     accepted_pol += 1
@@ -499,7 +595,7 @@ def _eval_policy_vs_random(
             for i, e in enumerate(envs_rnd):
                 if not bool(alive_rnd[i]):
                     continue
-                o2, _r, d, info = e.step(int(act_rnd[i]))
+                o2, _r, d, info = e.step(act_rnd[i].tolist())
                 s = info.get("step", {}) if isinstance(info, dict) else {}
                 if bool(s.get("accepted", False)):
                     accepted_rnd += 1
@@ -594,15 +690,15 @@ def _eval_policy_vs_random(
         "eval_policy_feasible_rate": float(feasible_pol) / float(max(1, steps_pol)),
         "eval_random_accept_rate": float(accepted_rnd) / float(max(1, steps_rnd)),
         "eval_random_feasible_rate": float(feasible_rnd) / float(max(1, steps_rnd)),
-        # Action histograms
-        "eval_policy_action_counts": pol_act_stats["counts"],
-        "eval_policy_action_max_frac": float(pol_act_stats["max_frac"]),
-        "eval_policy_action_entropy": float(pol_act_stats["entropy"]),
-        "eval_policy_action_top3": pol_act_stats["top3"],
-        "eval_random_action_counts": rnd_act_stats["counts"],
-        "eval_random_action_max_frac": float(rnd_act_stats["max_frac"]),
-        "eval_random_action_entropy": float(rnd_act_stats["entropy"]),
-        "eval_random_action_top3": rnd_act_stats["top3"],
+        # Joint action histograms (debugging policy collapse)
+        "eval_policy_joint_action_counts": pol_act_stats["counts"],
+        "eval_policy_joint_action_max_frac": float(pol_act_stats["max_frac"]),
+        "eval_policy_joint_action_entropy": float(pol_act_stats["entropy"]),
+        "eval_policy_joint_action_top3": pol_act_stats["top3"],
+        "eval_random_joint_action_counts": rnd_act_stats["counts"],
+        "eval_random_joint_action_max_frac": float(rnd_act_stats["max_frac"]),
+        "eval_random_joint_action_entropy": float(rnd_act_stats["entropy"]),
+        "eval_random_joint_action_top3": rnd_act_stats["top3"],
     }
 
 
@@ -813,6 +909,35 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help="Power for reject_worse_penalty: coef * (delta ** power). Default 1.0.",
     )
+
+    # Paper-style: include termination as an action and (optionally) add a terminal reward.
+    p.add_argument(
+        "--min_stop_iters",
+        type=int,
+        default=5,
+        help=(
+            "Minimum ALNS iterations before the policy can end the episode via stop action. "
+            "Default 5."
+        ),
+    )
+    p.add_argument(
+        "--terminal_best_coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional terminal reward coefficient: add terminal_best_coef * (init_best - final_best)/|init_best| "
+            "when an episode ends. Default 0 (off)."
+        ),
+    )
+    p.add_argument(
+        "--terminal_time_coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional terminal time penalty coefficient: subtract terminal_time_coef * (iters/max_iters) "
+            "when an episode ends. Default 0 (off)."
+        ),
+    )
     p.add_argument(
         "--no_obs_norm",
         action="store_true",
@@ -945,8 +1070,7 @@ def main() -> None:
     else:
         workers = int(args.workers)
 
-    obs_dim = 10
-    # action_dim determined by env
+    # obs_dim / action dimensions are determined by the env.
     tmp_env = PMALNSEnv(
         scale=str(scales_list[0]),
         seed=int(args.seed),
@@ -955,7 +1079,9 @@ def main() -> None:
         alns_cfg=ALNSConfig(max_iters=1, no_improve_limit=1),
         action_set=str(action_set),
     )
-    act_dim = tmp_env.action_dim
+    obs_dim = int(tmp_env.obs_dim)
+    act_dims = list(getattr(tmp_env, "action_dims", [int(tmp_env.action_dim)]))
+    act_dim_total = int(np.prod(np.asarray(act_dims, dtype=np.int64)))
 
     if str(args.device) == "cuda" and torch.cuda.is_available():
         device = torch.device("cuda")
@@ -966,9 +1092,9 @@ def main() -> None:
     np.random.seed(int(args.seed))
     random.seed(int(args.seed))
 
-    net = PolicyValueNet(obs_dim=obs_dim, act_dim=act_dim, hidden=int(args.hidden)).to(
-        device
-    )
+    net = PolicyValueNet(
+        obs_dim=obs_dim, act_dims=act_dims, hidden=int(args.hidden)
+    ).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=float(args.lr))
 
     ppo = PPOCfg(
@@ -1083,7 +1209,9 @@ def main() -> None:
             pass
 
     print(
-        f"Training PPO device={device.type} act_dim={act_dim} workers={workers} envs/worker={envs_per_worker} scales={','.join(scales_list)} action_set={action_set}",
+        "Training PPO "
+        f"device={device.type} obs_dim={obs_dim} act_dims={act_dims} act_dim_total={act_dim_total} "
+        f"workers={workers} envs/worker={envs_per_worker} scales={','.join(scales_list)} action_set={action_set}",
         flush=True,
     )
     if bool(alns_cfg_dict.get("use_torch_batch_dp_in_repair", False)):
@@ -1118,7 +1246,8 @@ def main() -> None:
         payload: Dict[str, Any] = {
             "state_dict": {k: v.detach().cpu() for k, v in net.state_dict().items()},
             "opt_state": opt.state_dict(),
-            "act_dim": int(act_dim),
+            "act_dims": [int(x) for x in act_dims],
+            "act_dim_total": int(act_dim_total),
             "obs_dim": int(obs_dim),
             "update": int(update),
             "args": vars(args),
@@ -1143,7 +1272,8 @@ def main() -> None:
         payload: Dict[str, Any] = {
             "state_dict": {k: v.detach().cpu() for k, v in net.state_dict().items()},
             "opt_state": opt.state_dict(),
-            "act_dim": int(act_dim),
+            "act_dims": [int(x) for x in act_dims],
+            "act_dim_total": int(act_dim_total),
             "obs_dim": int(obs_dim),
             "update": int(update),
             "args": vars(args),
@@ -1190,7 +1320,7 @@ def main() -> None:
                         worker_id=int(wid),
                         policy_state=state,
                         obs_dim=obs_dim,
-                        act_dim=act_dim,
+                        act_dims=[int(x) for x in act_dims],
                         hidden=int(args.hidden),
                         scales=scales_list,
                         action_set=str(action_set),
@@ -1212,6 +1342,13 @@ def main() -> None:
                         ),
                         reject_worse_penalty_power=float(
                             getattr(args, "reject_worse_penalty_power", 1.0)
+                        ),
+                        min_stop_iters=int(getattr(args, "min_stop_iters", 5)),
+                        terminal_best_coef=float(
+                            getattr(args, "terminal_best_coef", 0.0)
+                        ),
+                        terminal_time_coef=float(
+                            getattr(args, "terminal_time_coef", 0.0)
                         ),
                         no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
                         alns_cfg_dict=alns_cfg_dict,
@@ -1270,6 +1407,20 @@ def main() -> None:
             )
             best_improve = np.concatenate([b["best_improve"] for b in batches], axis=0)
 
+            rollout_joint_action_counts = np.sum(
+                [
+                    np.asarray(
+                        b.get(
+                            "rollout_joint_action_counts",
+                            np.zeros((int(act_dim_total),), dtype=np.int64),
+                        ),
+                        dtype=np.int64,
+                    )
+                    for b in batches
+                ],
+                axis=0,
+            ).astype(np.int64)
+
             T, B, _ = obs.shape
 
             # Safety: sanitize/clip rewards; NaNs in rewards/returns can blow up PPO.
@@ -1310,7 +1461,7 @@ def main() -> None:
 
             # Flatten
             obs_f = obs.reshape(T * B, obs_dim)
-            act_f = actions.reshape(T * B)
+            act_f = actions.reshape(T * B, int(len(act_dims)))
             logp_old_f = logp_old.reshape(T * B)
             adv_f = adv.reshape(T * B)
             ret_f = returns.reshape(T * B)
@@ -1336,14 +1487,14 @@ def main() -> None:
                 idx = torch.randperm(batch_size)
                 for start in range(0, batch_size, mb):
                     j = idx[start : start + mb]
-                    logits, v = net(obs_f[j])
-                    if not (torch.isfinite(logits).all() and torch.isfinite(v).all()):
+                    logits_list, v = net(obs_f[j])
+                    if not (
+                        all(torch.isfinite(lg).all() for lg in logits_list)
+                        and torch.isfinite(v).all()
+                    ):
                         bad_update = True
                         break
-                    dist = torch.distributions.Categorical(
-                        logits=logits, validate_args=False
-                    )
-                    logp = dist.log_prob(act_f[j])
+                    logp, ent = _multi_categorical_logprob(logits_list, act_f[j])
                     log_ratio = torch.clamp(logp - logp_old_f[j], -20.0, 20.0)
                     ratio = torch.exp(log_ratio)
                     surr1 = ratio * adv_f[j]
@@ -1354,7 +1505,7 @@ def main() -> None:
                     policy_loss = -torch.min(surr1, surr2).mean()
 
                     value_loss = ((v - ret_f[j]) ** 2).mean()
-                    entropy = dist.entropy().mean()
+                    entropy = ent.mean()
 
                     # Approx KL and clip fraction are standard PPO stability signals.
                     approx_kl = (logp_old_f[j] - logp).mean()
@@ -1446,7 +1597,7 @@ def main() -> None:
                 try:
                     eval_metrics = _eval_policy_vs_random(
                         net=net,
-                        act_dim=int(act_dim),
+                        act_dims=[int(x) for x in act_dims],
                         scales=scales_list,
                         action_set=str(action_set),
                         alns_cfg_dict=alns_cfg_dict,
@@ -1464,6 +1615,13 @@ def main() -> None:
                         ),
                         reject_worse_penalty_power=float(
                             getattr(args, "reject_worse_penalty_power", 1.0)
+                        ),
+                        min_stop_iters=int(getattr(args, "min_stop_iters", 5)),
+                        terminal_best_coef=float(
+                            getattr(args, "terminal_best_coef", 0.0)
+                        ),
+                        terminal_time_coef=float(
+                            getattr(args, "terminal_time_coef", 0.0)
                         ),
                         no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
                         eval_seed=int(args.eval_seed),
@@ -1642,15 +1800,13 @@ def main() -> None:
                 "best_improve_nonfinite": int(bi_nonfinite),
             }
 
-            # Rollout action histogram (debug policy collapse / bad operator preference).
+            # Rollout joint-action histogram (debug policy collapse / operator preference).
             try:
-                act_np = actions.detach().cpu().numpy().reshape(-1).astype(np.int64)
-                act_counts = np.bincount(act_np, minlength=int(act_dim))
-                act_stats = _action_count_stats(act_counts)
-                rec["rollout_action_counts"] = act_stats["counts"]
-                rec["rollout_action_max_frac"] = float(act_stats["max_frac"])
-                rec["rollout_action_entropy"] = float(act_stats["entropy"])
-                rec["rollout_action_top3"] = act_stats["top3"]
+                act_stats = _action_count_stats(rollout_joint_action_counts)
+                rec["rollout_joint_action_counts"] = act_stats["counts"]
+                rec["rollout_joint_action_max_frac"] = float(act_stats["max_frac"])
+                rec["rollout_joint_action_entropy"] = float(act_stats["entropy"])
+                rec["rollout_joint_action_top3"] = act_stats["top3"]
             except Exception:
                 pass
 
@@ -1683,7 +1839,8 @@ def main() -> None:
     _atomic_torch_save(
         {
             "state_dict": {k: v.detach().cpu() for k, v in net.state_dict().items()},
-            "act_dim": int(act_dim),
+            "act_dims": [int(x) for x in act_dims],
+            "act_dim_total": int(act_dim_total),
         },
         out_final,
     )
