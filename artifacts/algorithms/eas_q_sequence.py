@@ -562,81 +562,101 @@ class EASQSequenceRunner:
                 best_sequence = list(sgbs_result.job_sequence)
                 incumbent_sequence = best_sequence.copy()
             
-            # === Sample M solutions ===
-            all_log_probs = []
-            all_energies = []
+            # === Sample M solutions IN PARALLEL ===
+            M = config.samples_per_iter
             
-            env = GPUBatchSequenceEnv(
+            # Repeat single_data M times for batched sampling
+            batch_data_m = {}
+            for k, v in single_data.items():
+                if isinstance(v, np.ndarray):
+                    batch_data_m[k] = np.repeat(v, M, axis=0)
+                elif torch.is_tensor(v):
+                    batch_data_m[k] = v.repeat(M, *([1] * (v.dim() - 1)))
+                else:
+                    batch_data_m[k] = v
+            
+            # Create batched env for M parallel samples
+            env_batch = GPUBatchSequenceEnv(
+                batch_size=M,
+                env_config=self.variant_config.env,
+                device=self.device,
+            )
+            env_batch.reset(batch_data_m)
+            
+            # Collect log probs for each sample [M, n_jobs]
+            all_log_probs_t = []
+            
+            for step in range(n_jobs):
+                obs = env_batch._get_obs()
+                job_mask = obs.get("job_mask", env_batch.job_available)
+                job_mask = job_mask < 0.5 if job_mask.dtype != torch.bool else ~job_mask
+                
+                logits = self.eas_model.get_logits(
+                    jobs=obs["jobs"],
+                    periods_local=obs["periods"],
+                    ctx=obs["ctx"],
+                    job_mask=job_mask,
+                    temperature=config.sample_temperature,
+                )
+                
+                dist = torch.distributions.Categorical(logits=logits)
+                actions = dist.sample()  # [M]
+                log_probs = dist.log_prob(actions)  # [M]
+                
+                all_log_probs_t.append(log_probs)
+                
+                _, _, done, _ = env_batch.step(actions)
+                if done.all():
+                    break
+            
+            # Stack log probs: [n_steps, M] -> sum over steps for each sample
+            log_probs_stacked = torch.stack(all_log_probs_t, dim=0)  # [n_steps, M]
+            episode_log_probs = log_probs_stacked.sum(dim=0)  # [M]
+            
+            # Score all M sequences at once using BatchSequenceDPSolver
+            energies = BatchSequenceDPSolver.solve(
+                job_sequences=env_batch.job_sequences,
+                processing_times=env_batch.p_subset,
+                ct=env_batch.ct,
+                e_single=env_batch.e_single,
+                T_limit=env_batch.T_limit,
+                sequence_lengths=env_batch.n_jobs.long(),
+            )  # [M]
+            
+            # Find best and update incumbent
+            best_sample_idx = int(energies.argmin().item())
+            best_sample_energy = float(energies[best_sample_idx].item())
+            
+            if best_sample_energy < best_energy:
+                best_energy = best_sample_energy
+                best_seq_t = env_batch.job_sequences[best_sample_idx, :n_jobs].detach().cpu().long()
+                best_sequence = [int(x) for x in best_seq_t.tolist()]
+                incumbent_sequence = best_sequence.copy()
+            
+            # === Compute losses (vectorized) ===
+            # Baseline
+            if config.baseline_type == "incumbent":
+                baseline = -best_energy
+            else:
+                baseline = -energies.mean().item()
+            
+            # RL loss (REINFORCE) - vectorized
+            returns = -energies  # [M], lower energy = higher return
+            advantages = returns - baseline  # [M]
+            rl_loss = -(advantages * episode_log_probs).mean()
+            
+            # IL loss (imitation on incumbent) - still sequential but only 1 trajectory
+            env_il = GPUBatchSequenceEnv(
                 batch_size=1,
                 env_config=self.variant_config.env,
                 device=self.device,
             )
-            
-            for _ in range(config.samples_per_iter):
-                env.reset(single_data)
-                
-                step_log_probs = []
-                seq = []
-                
-                for step in range(n_jobs):
-                    obs = env._get_obs()
-                    job_mask = obs.get("job_mask", env.job_available)
-                    job_mask = job_mask < 0.5 if job_mask.dtype != torch.bool else ~job_mask
-                    
-                    logits = self.eas_model.get_logits(
-                        jobs=obs["jobs"],
-                        periods_local=obs["periods"],
-                        ctx=obs["ctx"],
-                        job_mask=job_mask,
-                        temperature=config.sample_temperature,
-                    )
-                    
-                    dist = torch.distributions.Categorical(logits=logits)
-                    action = dist.sample()
-                    log_prob = dist.log_prob(action)
-                    
-                    step_log_probs.append(log_prob[0])
-                    seq.append(int(action.item()))
-                    
-                    _, _, done, _ = env.step(action)
-                    if done.all():
-                        break
-                
-                # Compute energy with DP
-                result = dp_schedule_for_job_sequence(single_data, seq)
-                energy = float(result.total_energy)
-                
-                all_log_probs.append(step_log_probs)
-                all_energies.append(energy)
-                
-                if energy < best_energy:
-                    best_energy = energy
-                    best_sequence = seq.copy()
-                    incumbent_sequence = seq.copy()
-            
-            # === Compute losses ===
-            # Baseline
-            if config.baseline_type == "incumbent":
-                baseline = -best_energy  # Return convention
-            else:
-                baseline = -sum(all_energies) / len(all_energies)
-            
-            # RL loss (REINFORCE)
-            rl_loss = torch.tensor(0.0, device=self.device)
-            for step_lps, energy in zip(all_log_probs, all_energies):
-                ret = -energy  # Return = -cost
-                advantage = ret - baseline
-                episode_log_prob = sum(step_lps)
-                rl_loss = rl_loss - advantage * episode_log_prob
-            rl_loss = rl_loss / len(all_log_probs)
-            
-            # IL loss (imitation on incumbent)
-            env.reset(single_data)
+            env_il.reset(single_data)
             il_loss = torch.tensor(0.0, device=self.device)
             
             for target_action in incumbent_sequence:
-                obs = env._get_obs()
-                job_mask = obs.get("job_mask", env.job_available)
+                obs = env_il._get_obs()
+                job_mask = obs.get("job_mask", env_il.job_available)
                 job_mask = job_mask < 0.5 if job_mask.dtype != torch.bool else ~job_mask
                 
                 logits = self.eas_model.get_logits(
@@ -651,7 +671,7 @@ class EASQSequenceRunner:
                 log_prob = dist.log_prob(action_t)
                 il_loss = il_loss - log_prob[0]
                 
-                env.step(action_t)
+                env_il.step(action_t)
             
             # Combined loss
             total_loss = rl_loss + config.il_weight * il_loss

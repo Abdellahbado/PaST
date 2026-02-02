@@ -42,7 +42,6 @@ from PaST.config import VariantID, get_variant_config
 from PaST.sm_benchmark_data import generate_episode_batch
 from PaST.baselines_sequence_dp import spt_lpt_with_dp
 
-# Import EAS Q-sequence components
 from PaST.artifacts.algorithms.eas_q_sequence import (
     EASQConfig,
     EASQSequenceRunner,
@@ -146,6 +145,12 @@ def parse_args():
     # Output
     p.add_argument("--out_dir", type=str, default="eas_q_results")
     
+    # Random baseline
+    p.add_argument("--include_random", action="store_true", default=True,
+                   help="Include random baseline in comparison")
+    p.add_argument("--random_seed", type=int, default=42,
+                   help="Random seed for random baseline")
+    
     return p.parse_args()
 
 
@@ -218,6 +223,18 @@ def main():
         
         print(f"\n=== Instance {i+1}/{args.num_instances}: n={n_jobs}, T={T_limit} ===")
         
+        # --- Random baseline (run first for comparison) ---
+        random_energy = float("nan")
+        random_gap = float("nan")
+        if args.include_random:
+            import random as py_random
+            from PaST.baselines_sequence_dp import dp_schedule_for_job_sequence
+            py_rng = py_random.Random(args.random_seed + i)
+            random_seq = list(range(n_jobs))
+            py_rng.shuffle(random_seq)
+            random_result = dp_schedule_for_job_sequence(single_data, random_seq)
+            random_energy = float(random_result.total_energy)
+        
         # Create EAS runner for this instance
         runner = EASQSequenceRunner(q_model, q_cfg, device, eas_config)
         
@@ -246,13 +263,18 @@ def main():
         spt_results = spt_lpt_with_dp(q_cfg.env, device, single_data, "spt")
         spt_result = spt_results[0]
         
-        # Compute gaps
-        best_energy = min(eas_result.best_energy, sgbs_result.total_energy, spt_result.total_energy)
+        # Compute gaps - include random in best if available
+        candidates = [eas_result.best_energy, sgbs_result.total_energy, spt_result.total_energy]
+        if args.include_random and not np.isnan(random_energy):
+            candidates.append(random_energy)
+        best_energy = min(candidates)
         
         greedy_gap = (eas_result.greedy_energy - best_energy) / best_energy if best_energy > 0 else 0
         sgbs_gap = (sgbs_result.total_energy - best_energy) / best_energy if best_energy > 0 else 0
         eas_gap = (eas_result.best_energy - best_energy) / best_energy if best_energy > 0 else 0
         spt_gap = (spt_result.total_energy - best_energy) / best_energy if best_energy > 0 else 0
+        if args.include_random and not np.isnan(random_energy) and best_energy > 0:
+            random_gap = (random_energy - best_energy) / best_energy
         
         row = {
             "instance_idx": i,
@@ -262,11 +284,13 @@ def main():
             "sgbs_energy": sgbs_result.total_energy,
             "eas_energy": eas_result.best_energy,
             "spt_energy": spt_result.total_energy,
+            "random_energy": random_energy if args.include_random else float("nan"),
             "best_energy": best_energy,
             "greedy_gap": greedy_gap,
             "sgbs_gap": sgbs_gap,
             "eas_gap": eas_gap,
             "spt_gap": spt_gap,
+            "random_gap": random_gap if args.include_random else float("nan"),
             "eas_improvement": (eas_result.greedy_energy - eas_result.best_energy) / eas_result.greedy_energy if eas_result.greedy_energy > 0 else 0,
             "eas_iterations": eas_result.iterations,
             "eas_time_s": eas_time,
@@ -278,10 +302,14 @@ def main():
         print(f"  SGBS:   {sgbs_result.total_energy:.2f} (gap: {sgbs_gap*100:.2f}%)")
         print(f"  EAS:    {eas_result.best_energy:.2f} (gap: {eas_gap*100:.2f}%, iter: {eas_result.iterations}, time: {eas_time:.1f}s)")
         print(f"  SPT:    {spt_result.total_energy:.2f} (gap: {spt_gap*100:.2f}%)")
+        if args.include_random:
+            print(f"  Random: {random_energy:.2f} (gap: {random_gap*100:.2f}%)")
     
     total_time = time.time() - total_start
     
-    # Summary statistics
+    # Summary statistics - compute mean of random gap if included
+    random_gaps = [r['random_gap'] for r in results if 'random_gap' in r and not np.isnan(r['random_gap'])]
+    
     summary = {
         "config": {
             "checkpoint": str(args.checkpoint),
@@ -297,6 +325,7 @@ def main():
             "mean_sgbs_gap": _mean([r["sgbs_gap"] for r in results]),
             "mean_eas_gap": _mean([r["eas_gap"] for r in results]),
             "mean_spt_gap": _mean([r["spt_gap"] for r in results]),
+            "mean_random_gap": _mean(random_gaps) if random_gaps else float("nan"),
             "mean_eas_improvement": _mean([r["eas_improvement"] for r in results]),
             "mean_eas_iterations": _mean([r["eas_iterations"] for r in results]),
             "mean_eas_time_s": _mean([r["eas_time_s"] for r in results]),
@@ -324,6 +353,8 @@ def main():
     print(f"  Mean SGBS Gap:   {summary['results']['mean_sgbs_gap']*100:.2f}%")
     print(f"  Mean EAS Gap:    {summary['results']['mean_eas_gap']*100:.2f}%")
     print(f"  Mean SPT Gap:    {summary['results']['mean_spt_gap']*100:.2f}%")
+    if args.include_random and random_gaps:
+        print(f"  Mean Random Gap: {summary['results']['mean_random_gap']*100:.2f}%")
     print(f"  Mean EAS Improvement: {summary['results']['mean_eas_improvement']*100:.2f}%")
     print(f"  Total Time: {total_time:.1f}s")
     print(f"\nResults saved to: {csv_path}")

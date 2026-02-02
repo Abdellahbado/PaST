@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import math
 import os
 import pickle
@@ -59,6 +60,27 @@ import numpy as np
 
 from PaST.solvers.bnb_solver_custom import Instance, BranchAndBoundSolver
 from PaST.bb_branching_features import WindowFeatureCache, extract_row_features
+
+
+def _open_csv_text(path: Path, mode: str):
+    """Open CSV text stream.
+
+    Supports transparent gzip when path ends with .gz.
+    Use newline="" for csv module correctness.
+    """
+    if "b" in mode:
+        raise ValueError("_open_csv_text expects text mode like 'r'/'w'")
+    if path.suffix.lower() == ".gz":
+        return gzip.open(path, mode + "t", newline="")
+    return path.open(mode, newline="")
+
+
+def _parse_data_paths(data_arg: str) -> List[Path]:
+    """Parse --data which can be a single path or comma-separated paths."""
+    parts = [p.strip() for p in (data_arg or "").split(",") if p.strip()]
+    if not parts:
+        raise ValueError("--data is empty")
+    return [Path(p) for p in parts]
 
 
 def _try_import_torch_dp():
@@ -484,7 +506,7 @@ def write_csv(path: Path, rows: List[Dict[str, float]]) -> None:
         raise ValueError("No rows to write")
     # Stable column order
     fieldnames = sorted(rows[0].keys())
-    with path.open("w", newline="") as f:
+    with _open_csv_text(path, "w") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in rows:
@@ -492,7 +514,7 @@ def write_csv(path: Path, rows: List[Dict[str, float]]) -> None:
 
 
 def read_csv(path: Path) -> List[Dict[str, float]]:
-    with path.open("r", newline="") as f:
+    with _open_csv_text(path, "r") as f:
         r = csv.DictReader(f)
         return [{k: float(v) for k, v in row.items()} for row in r]
 
@@ -503,7 +525,7 @@ def write_csv_stream(path: Path, row_iter: Iterable[Dict[str, float]]) -> int:
     n = 0
     writer = None
     fieldnames: List[str] = []
-    with path.open("w", newline="") as f:
+    with _open_csv_text(path, "w") as f:
         for row in row_iter:
             if writer is None:
                 fieldnames = sorted(row.keys())
@@ -771,6 +793,7 @@ def cmd_generate(args) -> None:
 
     dp_backend = (args.dp_backend or "numpy").strip().lower()
     dp_device = (args.dp_device or "auto").strip().lower()
+    max_rows = int(getattr(args, "max_rows", 0) or 0)
 
     def _rows_iter() -> Iterable[Dict[str, float]]:
         n_rows = 0
@@ -778,6 +801,8 @@ def cmd_generate(args) -> None:
         for instance_id in range(int(args.num_instances)):
             if (instance_id % num_shards) != shard_id:
                 continue
+            if max_rows > 0 and n_rows >= max_rows:
+                break
             inst_seed = rng.randint(0, 2**31 - 1)
             inst_rng = random.Random(inst_seed)
             instance = generate_instance(
@@ -802,6 +827,10 @@ def cmd_generate(args) -> None:
             for r in rows:
                 yield r
                 n_rows += 1
+                if max_rows > 0 and n_rows >= max_rows:
+                    break
+            if max_rows > 0 and n_rows >= max_rows:
+                break
 
             n_instances_done += 1
             if args.log_every > 0 and n_instances_done % int(args.log_every) == 0:
@@ -816,10 +845,12 @@ def cmd_generate(args) -> None:
 
 
 def cmd_train(args) -> None:
-    data_path = Path(args.data)
     model_out = Path(args.model_out)
 
-    rows = read_csv(data_path)
+    data_paths = _parse_data_paths(args.data)
+    rows: List[Dict[str, float]] = []
+    for p in data_paths:
+        rows.extend(read_csv(p))
     if not rows:
         raise ValueError("Empty dataset")
 
@@ -882,9 +913,12 @@ def cmd_train(args) -> None:
 
 
 def cmd_train_lgbm(args) -> None:
-    data_path = Path(args.data)
     model_out = Path(args.model_out)
-    rows = read_csv(data_path)
+
+    data_paths = _parse_data_paths(args.data)
+    rows: List[Dict[str, float]] = []
+    for p in data_paths:
+        rows.extend(read_csv(p))
     if not rows:
         raise ValueError("Empty dataset")
 
@@ -948,9 +982,12 @@ def cmd_train_lgbm(args) -> None:
 
 
 def cmd_train_xgb(args) -> None:
-    data_path = Path(args.data)
     model_out = Path(args.model_out)
-    rows = read_csv(data_path)
+
+    data_paths = _parse_data_paths(args.data)
+    rows: List[Dict[str, float]] = []
+    for p in data_paths:
+        rows.extend(read_csv(p))
     if not rows:
         raise ValueError("Empty dataset")
 
@@ -1012,8 +1049,10 @@ def cmd_train_xgb(args) -> None:
 
 
 def cmd_eval(args) -> None:
-    data_path = Path(args.data)
-    rows = read_csv(data_path)
+    data_paths = _parse_data_paths(args.data)
+    rows: List[Dict[str, float]] = []
+    for p in data_paths:
+        rows.extend(read_csv(p))
 
     train_rows, test_rows = _split_rows_by_instance(
         rows, test_frac=float(args.test_frac), seed=int(args.seed)
@@ -1082,6 +1121,12 @@ def build_argparser() -> argparse.ArgumentParser:
     g.add_argument("--near_tie_epsilon", type=float, default=1e-6)
     g.add_argument("--seed", type=int, default=0)
     g.add_argument("--log_every", type=int, default=50)
+    g.add_argument(
+        "--max_rows",
+        type=int,
+        default=0,
+        help="Optional safety cap: stop after writing this many rows (0 = no cap).",
+    )
     g.add_argument(
         "--dp_backend",
         type=str,

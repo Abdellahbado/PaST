@@ -293,10 +293,11 @@ def _solve_bnb_one(
     energy_costs: np.ndarray,
     time_limit: float,
     bnb_path: Optional[str],
-) -> Tuple[List[int], float, Dict[str, int]]:
+) -> Tuple[List[int], float, float, Dict[str, int]]:
     """Solve a single BnB instance.
 
     Runs in a worker process when parallelism is enabled.
+    Returns: (sequence, cost, solve_time_seconds, stats)
     """
     InstanceCls = None
     SolverCls = None
@@ -331,13 +332,18 @@ def _solve_bnb_one(
         energy_costs=np.asarray(energy_costs, dtype=np.int64),
     )
     solver = SolverCls(inst, time_limit=float(time_limit))
+    
+    # Measure actual solve time inside the worker
+    t0 = time.perf_counter()
     seq, cost = solver.solve()
+    solve_time = time.perf_counter() - t0
+    
     stats = {
         "nodes_explored": int(getattr(solver, "nodes_explored", -1)),
         "binpack_attempts": int(getattr(solver, "binpack_attempts", -1)),
         "pruned_by_binpack": int(getattr(solver, "pruned_by_binpack", -1)),
     }
-    return [int(x) for x in seq], float(cost), stats
+    return [int(x) for x in seq], float(cost), float(solve_time), stats
 
 
 def _slice_single_instance_np(batch: Dict[str, Any], index: int) -> Dict[str, Any]:
@@ -599,7 +605,7 @@ def main() -> None:
         bnb_workers = int(args.bnb_workers)
         if bnb_workers > 1:
             ctx = mp.get_context("spawn")
-            t0 = time.perf_counter()
+            t0_wall = time.perf_counter()
             with ProcessPoolExecutor(
                 max_workers=bnb_workers, mp_context=ctx
             ) as executor:
@@ -618,16 +624,12 @@ def main() -> None:
                     for (n_jobs, p, T, energy_costs) in bnb_inputs
                 ]
                 for fut in futures:
-                    seq, cost, stats = fut.result()
-                    bnb_results.append((seq, float(cost), 0.0, stats))
-            t_b_total = time.perf_counter() - t0
-            total_bnb_time += float(t_b_total)
-            bnb_time_per_inst = float(t_b_total) / max(1, len(episodes))
-            # Fill in per-instance times (average) for CSV consistency.
-            bnb_results = [
-                (seq, cost, float(bnb_time_per_inst), stats)
-                for (seq, cost, _t, stats) in bnb_results
-            ]
+                    seq, cost, solve_time, stats = fut.result()
+                    bnb_results.append((seq, float(cost), float(solve_time), stats))
+            wall_time = time.perf_counter() - t0_wall
+            # Sum of actual solve times (CPU time across workers)
+            total_bnb_time += sum(r[2] for r in bnb_results)
+            # Note: bnb_results already has per-instance solve times from workers
         else:
             # Sequential path with per-instance timing and richer stats.
             for n_jobs, p, T, energy_costs in bnb_inputs:
@@ -702,12 +704,21 @@ def main() -> None:
 
             # Progress print.
             if (idx + 1) % 5 == 0:
-                print(
-                    f"  {idx+1}/{len(episodes)} | "
-                    f"q={q_energy:.3f} (~{q_time_per_inst:.2f}s/inst) | "
-                    f"bnb={bnb_energy:.3f} ({t_b:.2f}s) | "
-                    f"gap={(100.0*gap):.2f}%"
-                )
+                if args.include_random_q and random_q_results is not None:
+                    print(
+                        f"  {idx+1}/{len(episodes)} | "
+                        f"q={q_energy:.3f} (~{q_time_per_inst:.2f}s/inst) | "
+                        f"random_q={random_q_energy:.3f} | "
+                        f"bnb={bnb_energy:.3f} ({t_b:.2f}s) | "
+                        f"gap={(100.0*gap):.2f}% | random_gap={(100.0*gap_random):.2f}%"
+                    )
+                else:
+                    print(
+                        f"  {idx+1}/{len(episodes)} | "
+                        f"q={q_energy:.3f} (~{q_time_per_inst:.2f}s/inst) | "
+                        f"bnb={bnb_energy:.3f} ({t_b:.2f}s) | "
+                        f"gap={(100.0*gap):.2f}%"
+                    )
 
     # Summary
     gaps = np.array([r["gap_rel_q_minus_opt"] for r in rows], dtype=np.float64)
@@ -801,12 +812,16 @@ def main() -> None:
 
     print(f"\nSaved CSV: {out_csv}")
     print(f"Saved JSON: {out_json}")
-    print(
+    
+    summary_msg = (
         "Summary: "
         f"avg_q_time={summary['timing']['avg_qseq_sgbs_time_s']:.3f}s | "
         f"avg_bnb_time={summary['timing']['avg_bnb_time_s']:.3f}s | "
         f"median_gap={100.0*summary['quality']['median_gap_rel']:.2f}%"
     )
+    if args.include_random_q and 'quality_random_q' in summary:
+        summary_msg += f" | random_q_median_gap={100.0*summary['quality_random_q']['median_gap_rel']:.2f}%"
+    print(summary_msg)
 
 
 if __name__ == "__main__":
