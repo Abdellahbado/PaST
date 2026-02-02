@@ -33,10 +33,22 @@ class Instance:
 class BranchAndBoundSolver:
     """Branch-and-Bound solver for job scheduling with bin packing heuristic."""
 
-    def __init__(self, instance: Instance, time_limit: float = 300, verbose: bool = False):
+    def __init__(
+        self,
+        instance: Instance,
+        time_limit: float = 300,
+        verbose: bool = False,
+        branching_policy=None,
+    ):
         self.instance = instance
         self.time_limit = time_limit
         self.verbose = verbose
+        # Optional callback to choose branching order at a node.
+        # Signature:
+        #   branching_policy(partial_sequence: List[int], remaining_jobs: Set[int], solver: BranchAndBoundSolver) -> List[int] | List[int-duration]
+        # Return either a list of job IDs to branch on, or a list of processing times (durations).
+        # If it errors or returns invalid output, we fall back to default ordering.
+        self.branching_policy = branching_policy
 
         # Precompute prefix sums for O(1) interval cost
         self.prefix_costs = np.zeros(instance.T + 1)
@@ -86,15 +98,17 @@ class BranchAndBoundSolver:
         self._branch_and_bound_dfs([], set(range(self.instance.n_jobs)), start_time)
 
         if self.verbose:
-            print(f"Details: Nodes={self.nodes_explored}, BP_Pruned={self.pruned_by_binpack}")
-        
+            print(
+                f"Details: Nodes={self.nodes_explored}, BP_Pruned={self.pruned_by_binpack}"
+            )
+
         return self.best_sequence, self.best_cost
 
     def _evaluate_sequence(self, sequence: List[int]) -> float:
         """Evaluate exact cost of a fixed sequence using DP."""
         if not sequence:
             return 0.0
-        
+
         # We use a simplified single-sequence DP here or reuse _dp_evaluate_with_schedule
         # The internal _dp_evaluate_with_schedule is more general
         pts = self.instance.processing_times[sequence].tolist()
@@ -144,16 +158,42 @@ class BranchAndBoundSolver:
             pt = self.instance.processing_times[j]
             if pt not in unique_pts:
                 unique_pts[pt] = j
-        
-        # Heuristic ordering: try largest processing times first? Or just sorted.
-        # Standard implementation usually does lexical or based on heuristic.
-        # Let's stick to sorted unique processing times for deterministic behavior.
-        for pt in sorted(unique_pts.keys()):
-            job = unique_pts[pt]
+
+        branch_jobs = None
+        if self.branching_policy is not None:
+            try:
+                proposed = self.branching_policy(
+                    list(partial_sequence), set(remaining_jobs), self
+                )
+                if isinstance(proposed, (list, tuple)) and len(proposed) > 0:
+                    # If the policy returns durations, map them to representative jobs.
+                    if all(isinstance(x, (int, np.integer)) for x in proposed):
+                        # Heuristic: if any x is not a job id in remaining, treat as duration.
+                        if any(int(x) not in remaining_jobs for x in proposed):
+                            jobs = []
+                            for d in proposed:
+                                d = int(d)
+                                if d in unique_pts:
+                                    jobs.append(int(unique_pts[d]))
+                            branch_jobs = jobs if jobs else None
+                        else:
+                            # Looks like job ids
+                            jobs = [
+                                int(x) for x in proposed if int(x) in remaining_jobs
+                            ]
+                            branch_jobs = jobs if jobs else None
+            except Exception:
+                branch_jobs = None
+
+        # Default deterministic behavior: sorted unique processing times.
+        if not branch_jobs:
+            branch_jobs = [int(unique_pts[pt]) for pt in sorted(unique_pts.keys())]
+
+        for job in branch_jobs:
             self._branch_and_bound_dfs(
                 partial_sequence + [job], remaining_jobs - {job}, start_time
             )
-            
+
             # Alpha-beta style check
             if self.best_cost <= lb:
                 break
@@ -169,50 +209,55 @@ class BranchAndBoundSolver:
         total_rem = sum(rem_pts)
         if total_rem == 0:
             return self._evaluate_sequence(partial_sequence), None, []
-            
+
         gcd_val = np.gcd.reduce(rem_pts)
-        if gcd_val == 0: gcd_val = 1
-        
+        if gcd_val == 0:
+            gcd_val = 1
+
         n_relaxed = total_rem // gcd_val
-        
+
         # Fixed part
         relaxed_pts = []
         if partial_sequence:
             relaxed_pts = self.instance.processing_times[partial_sequence].tolist()
-        
+
         n_fixed = len(relaxed_pts)
         relaxed_pts.extend([gcd_val] * n_relaxed)
-        
+
         # Solve relaxed
         lb, schedule = self._dp_evaluate_with_schedule(relaxed_pts)
-        
+
         blocks = self._extract_blocks_from_schedule(
             schedule, relaxed_pts, n_fixed, gcd_val
         )
-        
+
         return lb, blocks, relaxed_pts
 
     def _extract_blocks_from_schedule(
-        self, schedule: List[int], processing_times: List[int], n_fixed: int, job_size: int
+        self,
+        schedule: List[int],
+        processing_times: List[int],
+        n_fixed: int,
+        job_size: int,
     ) -> List[int]:
         """Combine consecutive processing intervals of unfixed jobs into blocks."""
         if n_fixed >= len(schedule):
             return []
-        
+
         intervals = []
         for i in range(n_fixed, len(schedule)):
             s = schedule[i]
-            e = s + processing_times[i] # should be job_size
+            e = s + processing_times[i]  # should be job_size
             intervals.append((s, e))
-            
+
         if not intervals:
             return []
-            
+
         intervals.sort()
-        
+
         blocks = []
         curr_s, curr_e = intervals[0]
-        
+
         for s, e in intervals[1:]:
             if s <= curr_e:
                 curr_e = max(curr_e, e)
@@ -220,7 +265,7 @@ class BranchAndBoundSolver:
                 blocks.append(curr_e - curr_s)
                 curr_s, curr_e = s, e
         blocks.append(curr_e - curr_s)
-        
+
         return blocks
 
     def _try_bin_packing(
@@ -229,35 +274,37 @@ class BranchAndBoundSolver:
         """Fit remaining jobs into blocks using First Fit Decreasing."""
         if not blocks or not remaining_jobs:
             return None
-            
-        jobs = sorted(list(remaining_jobs), 
-                      key=lambda j: self.instance.processing_times[j], 
-                      reverse=True)
-                      
+
+        jobs = sorted(
+            list(remaining_jobs),
+            key=lambda j: self.instance.processing_times[j],
+            reverse=True,
+        )
+
         # Quick check
         if self.instance.processing_times[jobs[0]] > max(blocks):
             return None
-            
+
         bins = np.array(blocks, dtype=np.int32)
         bin_contents = [[] for _ in range(len(blocks))]
-        
+
         for j in jobs:
             pt = self.instance.processing_times[j]
-            
+
             # Vectorized first fit
-            fits = (bins >= pt)
+            fits = bins >= pt
             if not fits.any():
-                return None # Fail
-            
+                return None  # Fail
+
             idx = np.argmax(fits)
             bins[idx] -= pt
             bin_contents[idx].append(j)
-            
+
         # Success - flatten
         packed = []
         for content in bin_contents:
             packed.extend(content)
-            
+
         return packed
 
     def _dp_evaluate_with_schedule(
@@ -265,111 +312,112 @@ class BranchAndBoundSolver:
     ) -> Tuple[float, List[int]]:
         """
         DP evaluation returning (cost, schedule).
-        
+
         Tracks start time for each job to reconstruct schedule.
         """
         J = len(processing_times)
         if J == 0:
             return 0.0, []
-            
+
         T = self.instance.T
         PT = np.array(processing_times, dtype=np.int32)
-        
+
         ES = np.zeros(J, dtype=np.int32)
         LS = np.zeros(J, dtype=np.int32)
         for i in range(J):
             ES[i] = np.sum(PT[:i])
             LS[i] = T - np.sum(PT[i:])
-            
+
         # TEC[i, t] = cost of first i jobs with i-th job starting at t
         TEC = np.full((J + 1, T), np.inf)
         parent = np.full((J + 1, T), -1, dtype=np.int32)
-        
+
         # Base case
-        TEC[0, 0] = 0.0 # dummy job 0 ends at 0
-        
+        TEC[0, 0] = 0.0  # dummy job 0 ends at 0
+
         # DP
         for i in range(1, J + 1):
             job_idx = i - 1
             p = PT[job_idx]
-            
+
             # If first job
             if i == 1:
                 # valid starts are [ES, LS]
                 # Also must fit in T: s+p <= T -> s <= T-p
                 max_s = min(LS[job_idx], T - p)
                 starts = np.arange(ES[job_idx], max_s + 1)
-                
+
                 if len(starts) > 0:
                     costs = self.prefix_costs[starts + p] - self.prefix_costs[starts]
                     TEC[i, starts] = costs
-                    parent[i, starts] = 0 # came from dummy 0 at 0
+                    parent[i, starts] = 0  # came from dummy 0 at 0
                 continue
-            
+
             # General case
             prev_idx = job_idx - 1
             p_prev = PT[prev_idx]
-            
+
             # Compute prefix min of previous layer
             # We need min_{r <= s - p_prev} TEC[i-1, r]
-            # Let's be careful with indices. 
+            # Let's be careful with indices.
             # Previous job ends at `start_prev + p_prev`.
             # Current job starts at `s`.
             # Constraint: `start_prev + p_prev <= s`  => `start_prev <= s - p_prev`
-            
-            prev_layer_vals = TEC[i-1]
-            
+
+            prev_layer_vals = TEC[i - 1]
+
             # To optimize: accum_min[k] = min(TEC[i-1, :k+1])
             # Then best previous is accum_min[s - p_prev]
             # Handling infinity correctly
-            
+
             # Only consider valid range of previous
             # But the array is size T, so we can just accum min
-            
+
             accum_min = np.minimum.accumulate(prev_layer_vals)
             # We also need argmin for backtracking
             # NumPy doesn't have accumulate_argmin easily, but we can iterate
             # Since T is small (~500), iteration is fine or we custom build it
-            
+
             # Let's recreate the loop logic from provided code for safety
             # But vectorized where possible
-            
-            # The provided code used explicit loops for correctness. 
+
+            # The provided code used explicit loops for correctness.
             # I will trust the provided logic but wrap it slightly cleaner if possible.
             # Keeping the loop structure for safety as requested "full power".
-            
+
             p_min_val = np.inf
             p_min_arg = -1
-            
+
             # Precompute prefix min/argmin for relevant range
             # Range of prev starts: [ES_prev, LS_prev]
             # We can scan 0 to T for simplicity
-            
+
             global_prefix_min = np.full(T + 1, np.inf)
             global_prefix_argmin = np.full(T + 1, -1, dtype=np.int32)
-            
+
             curr = np.inf
             curr_arg = -1
             for t_prev in range(T):
-                 if prev_layer_vals[t_prev] < curr:
-                     curr = prev_layer_vals[t_prev]
-                     curr_arg = t_prev
-                 global_prefix_min[t_prev] = curr
-                 global_prefix_argmin[t_prev] = curr_arg
-                 
+                if prev_layer_vals[t_prev] < curr:
+                    curr = prev_layer_vals[t_prev]
+                    curr_arg = t_prev
+                global_prefix_min[t_prev] = curr
+                global_prefix_argmin[t_prev] = curr_arg
+
             # Compute current layer
             # Current starts s in [ES, LS]
             max_s = min(LS[job_idx], T - p)
             if max_s < ES[job_idx]:
                 continue
-                
+
             for s in range(ES[job_idx], max_s + 1):
                 # Valid previous must end by s
                 # start_prev <= s - p_prev
                 limit = s - p_prev
-                if limit < 0: continue
-                limit = min(limit, T-1) # bounded by T
-                
+                if limit < 0:
+                    continue
+                limit = min(limit, T - 1)  # bounded by T
+
                 best_prev_cost = global_prefix_min[limit]
                 if best_prev_cost < np.inf:
                     cost_here = self.prefix_costs[s + p] - self.prefix_costs[s]
@@ -378,14 +426,14 @@ class BranchAndBoundSolver:
 
         # Backtrack
         if np.isinf(np.min(TEC[J])):
-             return float("inf"), []
-             
+            return float("inf"), []
+
         best_end_cost = np.min(TEC[J])
         curr_t = np.argmin(TEC[J])
-        
+
         schedule = [0] * J
         for i in range(J, 0, -1):
-            schedule[i-1] = curr_t
+            schedule[i - 1] = curr_t
             curr_t = parent[i, curr_t]
-            
+
         return best_end_cost, schedule

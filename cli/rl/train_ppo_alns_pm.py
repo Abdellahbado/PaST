@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import inspect
 import math
 import os
 import random
@@ -19,6 +20,27 @@ import torch.nn as nn
 
 from PaST.solvers.alns_parallel import ALNSConfig
 from PaST.alns_rl.pm_alns_env import PMALNSEnv
+
+
+def _filter_env_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter env kwargs for backward compatibility.
+
+    Some deployments may have an older `PMALNSEnv.__init__` signature (e.g., no
+    `state_variant`). We introspect the constructor and only pass supported
+    parameters.
+    """
+
+    try:
+        sig = inspect.signature(PMALNSEnv.__init__)
+        params = sig.parameters
+        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return kwargs
+        allowed = set(params.keys())
+        allowed.discard("self")
+        return {k: v for k, v in kwargs.items() if k in allowed}
+    except Exception:
+        # If introspection fails for any reason, fall back to original kwargs.
+        return kwargs
 
 
 @dataclass
@@ -130,6 +152,37 @@ def _normalize_obs_np(obs: np.ndarray) -> np.ndarray:
     return np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
+def _normalize_obs_np_energy_aware(obs: np.ndarray) -> np.ndarray:
+    """Normalization for `state_variant=energy_aware`.
+
+    The energy-aware state appends many additional features (instance statistics,
+    TOU/cost summaries, correlations). Their raw scales can be large and can
+    dominate the MLP input if left unscaled.
+
+    This function preserves the original base normalization on the first 10 dims,
+    and applies a robust squashing transform to the remaining dims.
+    """
+
+    x = np.asarray(obs, dtype=np.float32)
+    y = _normalize_obs_np(x)
+    if y.shape[-1] <= 10:
+        return y
+
+    z = y[..., 10:]
+    # Robust squashing: near-linear around 0, saturates for very large values.
+    # This avoids outlier magnitudes swamping the policy/value networks.
+    z = np.tanh(z / 10.0)
+    y[..., 10:] = z
+    return np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+
+def _normalize_obs_by_variant(obs: np.ndarray, state_variant: str) -> np.ndarray:
+    v = str(state_variant).strip().lower()
+    if v == "energy_aware":
+        return _normalize_obs_np_energy_aware(obs)
+    return _normalize_obs_np(obs)
+
+
 def _torch_sanitize(x: torch.Tensor) -> torch.Tensor:
     """Replace non-finite values with 0.0 (works across torch versions)."""
 
@@ -137,6 +190,15 @@ def _torch_sanitize(x: torch.Tensor) -> torch.Tensor:
         return torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     finite = torch.isfinite(x)
     return torch.where(finite, x, torch.zeros_like(x))
+
+
+# Factorized action layout (see PMALNSEnv):
+#   A1: destroy+intensity
+#   A2: repair operator
+#   A3: acceptance criterion (0=SA, 1=greedy)
+#   A4: termination decision
+_ACCEPT_HEAD_IDX = 2
+_ACCEPT_GREEDY = 1
 
 
 def _rollout_worker(
@@ -168,6 +230,7 @@ def _rollout_worker(
     terminal_best_coef: float,
     terminal_time_coef: float,
     no_obs_norm: bool,
+    force_greedy_accept: bool,
     alns_cfg_dict: Dict[str, Any],
 ) -> Dict[str, np.ndarray]:
     # Limit BLAS threads inside each worker to avoid oversubscription.
@@ -193,34 +256,36 @@ def _rollout_worker(
         inst_id = int(start_instance_id) + int(worker_id) * int(envs_per_worker) + i
         # Deterministic multi-scale assignment so each update has a stable mix.
         scale_i = scales[int(inst_id) % int(len(scales))]
-        envs.append(
-            PMALNSEnv(
-                scale=str(scale_i),
-                seed=int(base_seed) + 17 * int(worker_id) + i,
-                instance_id=int(inst_id),
-                slack_ratio=float(slack_ratio),
-                alns_cfg=alns_cfg,
-                action_set=str(action_set),
-                state_variant=str(state_variant),
-                reward_scale=float(reward_scale),
-                reward_power=float(reward_power),
-                best_improve_bonus=float(best_improve_bonus),
-                reward_best_coef=float(reward_best_coef),
-                reward_accept_coef=float(reward_accept_coef),
-                sa_worse_accept_penalty_coef=float(sa_worse_accept_penalty_coef),
-                sa_worse_accept_penalty_power=float(sa_worse_accept_penalty_power),
-                reject_penalty=float(reject_penalty),
-                reject_worse_penalty_coef=float(reject_worse_penalty_coef),
-                reject_worse_penalty_power=float(reject_worse_penalty_power),
-                min_stop_iters=int(min_stop_iters),
-                terminal_best_coef=float(terminal_best_coef),
-                terminal_time_coef=float(terminal_time_coef),
-            )
-        )
+        env_kwargs = {
+            "scale": str(scale_i),
+            "seed": int(base_seed) + 17 * int(worker_id) + i,
+            "instance_id": int(inst_id),
+            "slack_ratio": float(slack_ratio),
+            "alns_cfg": alns_cfg,
+            "action_set": str(action_set),
+            "state_variant": str(state_variant),
+            "reward_scale": float(reward_scale),
+            "reward_power": float(reward_power),
+            "best_improve_bonus": float(best_improve_bonus),
+            "reward_best_coef": float(reward_best_coef),
+            "reward_accept_coef": float(reward_accept_coef),
+            "sa_worse_accept_penalty_coef": float(sa_worse_accept_penalty_coef),
+            "sa_worse_accept_penalty_power": float(sa_worse_accept_penalty_power),
+            "reject_penalty": float(reject_penalty),
+            "reject_worse_penalty_coef": float(reject_worse_penalty_coef),
+            "reject_worse_penalty_power": float(reject_worse_penalty_power),
+            "min_stop_iters": int(min_stop_iters),
+            "terminal_best_coef": float(terminal_best_coef),
+            "terminal_time_coef": float(terminal_time_coef),
+        }
+        envs.append(PMALNSEnv(**_filter_env_kwargs(env_kwargs)))
 
     obs = np.stack([e.reset() for e in envs], axis=0).astype(np.float32)  # [B,F]
     if bool(no_obs_norm) is False:
-        obs = _normalize_obs_np(obs)
+        if str(state_variant).strip().lower() == "energy_aware":
+            obs = _normalize_obs_np_energy_aware(obs)
+        else:
+            obs = _normalize_obs_np(obs)
     init_summaries = [e.get_state_summary() for e in envs]
 
     T = int(rollout_len)
@@ -250,9 +315,17 @@ def _rollout_worker(
             logits_list, values = net(obs_t)
             acts: List[torch.Tensor] = []
             logps: List[torch.Tensor] = []
-            for lg in logits_list:
+            for hi, lg in enumerate(logits_list):
                 dist = torch.distributions.Categorical(logits=lg, validate_args=False)
-                a = dist.sample()
+                if bool(force_greedy_accept) and int(hi) == int(_ACCEPT_HEAD_IDX):
+                    a = torch.full(
+                        (lg.shape[0],),
+                        int(_ACCEPT_GREEDY),
+                        dtype=torch.long,
+                        device=lg.device,
+                    )
+                else:
+                    a = dist.sample()
                 acts.append(a)
                 logps.append(dist.log_prob(a))
             actions = torch.stack(acts, dim=-1)
@@ -290,7 +363,7 @@ def _rollout_worker(
             next_obs.append(o2)
         obs = np.stack(next_obs, axis=0).astype(np.float32)
         if bool(no_obs_norm) is False:
-            obs = _normalize_obs_np(obs)
+            obs = _normalize_obs_by_variant(obs, state_variant)
 
         # Joint-action histogram for collapse diagnostics.
         joint_idx = _flatten_factor_action(act_buf[t].reshape(B, H), act_dims)
@@ -437,6 +510,7 @@ def _eval_policy_vs_random(
     terminal_best_coef: float,
     terminal_time_coef: float,
     no_obs_norm: bool,
+    force_greedy_accept: bool,
     eval_seed: int,
     eval_num_envs: int,
     eval_rollout_len: int,
@@ -468,61 +542,37 @@ def _eval_policy_vs_random(
         inst_id = int(eval_instance_offset) + i
         scale_i = scales[int(inst_id) % int(len(scales))]
         seed_i = int(eval_seed) + 1009 * i
-        envs_pol.append(
-            PMALNSEnv(
-                scale=str(scale_i),
-                seed=int(seed_i),
-                instance_id=int(inst_id),
-                slack_ratio=float(slack_ratio),
-                alns_cfg=alns_cfg,
-                action_set=str(action_set),
-                state_variant=str(state_variant),
-                reward_scale=float(reward_scale),
-                reward_power=float(reward_power),
-                best_improve_bonus=float(best_improve_bonus),
-                reward_best_coef=float(reward_best_coef),
-                reward_accept_coef=float(reward_accept_coef),
-                sa_worse_accept_penalty_coef=float(sa_worse_accept_penalty_coef),
-                sa_worse_accept_penalty_power=float(sa_worse_accept_penalty_power),
-                reject_penalty=float(reject_penalty),
-                reject_worse_penalty_coef=float(reject_worse_penalty_coef),
-                reject_worse_penalty_power=float(reject_worse_penalty_power),
-                min_stop_iters=int(min_stop_iters),
-                terminal_best_coef=float(terminal_best_coef),
-                terminal_time_coef=float(terminal_time_coef),
-            )
-        )
-        envs_rnd.append(
-            PMALNSEnv(
-                scale=str(scale_i),
-                seed=int(seed_i),
-                instance_id=int(inst_id),
-                slack_ratio=float(slack_ratio),
-                alns_cfg=alns_cfg,
-                action_set=str(action_set),
-                state_variant=str(state_variant),
-                reward_scale=float(reward_scale),
-                reward_power=float(reward_power),
-                best_improve_bonus=float(best_improve_bonus),
-                reward_best_coef=float(reward_best_coef),
-                reward_accept_coef=float(reward_accept_coef),
-                sa_worse_accept_penalty_coef=float(sa_worse_accept_penalty_coef),
-                sa_worse_accept_penalty_power=float(sa_worse_accept_penalty_power),
-                reject_penalty=float(reject_penalty),
-                reject_worse_penalty_coef=float(reject_worse_penalty_coef),
-                reject_worse_penalty_power=float(reject_worse_penalty_power),
-                min_stop_iters=int(min_stop_iters),
-                terminal_best_coef=float(terminal_best_coef),
-                terminal_time_coef=float(terminal_time_coef),
-            )
-        )
+        env_kwargs = {
+            "scale": str(scale_i),
+            "seed": int(seed_i),
+            "instance_id": int(inst_id),
+            "slack_ratio": float(slack_ratio),
+            "alns_cfg": alns_cfg,
+            "action_set": str(action_set),
+            "state_variant": str(state_variant),
+            "reward_scale": float(reward_scale),
+            "reward_power": float(reward_power),
+            "best_improve_bonus": float(best_improve_bonus),
+            "reward_best_coef": float(reward_best_coef),
+            "reward_accept_coef": float(reward_accept_coef),
+            "sa_worse_accept_penalty_coef": float(sa_worse_accept_penalty_coef),
+            "sa_worse_accept_penalty_power": float(sa_worse_accept_penalty_power),
+            "reject_penalty": float(reject_penalty),
+            "reject_worse_penalty_coef": float(reject_worse_penalty_coef),
+            "reject_worse_penalty_power": float(reject_worse_penalty_power),
+            "min_stop_iters": int(min_stop_iters),
+            "terminal_best_coef": float(terminal_best_coef),
+            "terminal_time_coef": float(terminal_time_coef),
+        }
+        envs_pol.append(PMALNSEnv(**_filter_env_kwargs(env_kwargs)))
+        envs_rnd.append(PMALNSEnv(**_filter_env_kwargs(env_kwargs)))
 
     obs_pol = np.stack([e.reset() for e in envs_pol], axis=0).astype(np.float32)
     obs_rnd = np.stack([e.reset() for e in envs_rnd], axis=0).astype(np.float32)
     # Eval uses the same feature preprocessing as rollouts.
     if bool(no_obs_norm) is False:
-        obs_pol = _normalize_obs_np(obs_pol)
-        obs_rnd = _normalize_obs_np(obs_rnd)
+        obs_pol = _normalize_obs_by_variant(obs_pol, state_variant)
+        obs_rnd = _normalize_obs_by_variant(obs_rnd, state_variant)
 
     init_pol = [e.get_state_summary() for e in envs_pol]
     init_rnd = [e.get_state_summary() for e in envs_rnd]
@@ -570,6 +620,9 @@ def _eval_policy_vs_random(
             else:
                 act_pol = np.zeros((n, H), dtype=np.int64)
 
+            if bool(force_greedy_accept) and int(H) > int(_ACCEPT_HEAD_IDX):
+                act_pol[:, int(_ACCEPT_HEAD_IDX)] = int(_ACCEPT_GREEDY)
+
             # Random actions (independent uniform over each factor => uniform over joint).
             act_rnd = np.stack(
                 [
@@ -578,6 +631,9 @@ def _eval_policy_vs_random(
                 ],
                 axis=-1,
             )
+
+            if bool(force_greedy_accept) and int(H) > int(_ACCEPT_HEAD_IDX):
+                act_rnd[:, int(_ACCEPT_HEAD_IDX)] = int(_ACCEPT_GREEDY)
 
             # Joint action histograms (only count actions for envs that are alive this step).
             if bool(alive_pol_step.any()):
@@ -624,9 +680,9 @@ def _eval_policy_vs_random(
 
             if bool(no_obs_norm) is False:
                 if bool(alive_pol.any()):
-                    obs_pol = _normalize_obs_np(obs_pol)
+                    obs_pol = _normalize_obs_by_variant(obs_pol, state_variant)
                 if bool(alive_rnd.any()):
-                    obs_rnd = _normalize_obs_np(obs_rnd)
+                    obs_rnd = _normalize_obs_by_variant(obs_rnd, state_variant)
 
             if (not bool(alive_pol.any())) and (not bool(alive_rnd.any())):
                 break
@@ -671,6 +727,7 @@ def _eval_policy_vs_random(
     pol_p10, pol_p50, pol_p90 = _safe_quantiles(end_best_pol, [0.1, 0.5, 0.9])
     rnd_p10, rnd_p50, rnd_p90 = _safe_quantiles(end_best_rnd, [0.1, 0.5, 0.9])
     gap_p10, gap_p50, gap_p90 = _safe_quantiles(gap, [0.1, 0.5, 0.9])
+    gap_p50_from_medians = float(rnd_p50) - float(pol_p50)
 
     imp_pol_p50 = _safe_quantiles(improve_pol, [0.5])[0]
     imp_rnd_p50 = _safe_quantiles(improve_rnd, [0.5])[0]
@@ -696,6 +753,9 @@ def _eval_policy_vs_random(
         "eval_gap_random_minus_policy_p10": float(gap_p10),
         "eval_gap_random_minus_policy_p50": float(gap_p50),
         "eval_gap_random_minus_policy_p90": float(gap_p90),
+        # Note: this differs from eval_gap_*_p50 because that p50 is the median of
+        # per-instance gaps, not the difference of medians.
+        "eval_gap_random_minus_policy_p50_from_medians": float(gap_p50_from_medians),
         "eval_vs_random_win_rate": float(win_rate),
         "eval_vs_random_tie_rate": float(tie_rate),
         "eval_vs_random_loss_rate": float(loss_rate),
@@ -798,6 +858,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="",
         help="Optional JSONL metrics output path (defaults to <out_dir>/<run_name>_metrics.jsonl).",
+    )
+
+    p.add_argument(
+        "--force_greedy_accept",
+        action="store_true",
+        help=(
+            "Disable simulated annealing completely by forcing the acceptance action (A3) to greedy=1 "
+            "for both rollouts and eval. Keeps action space shape unchanged but never selects SA."
+        ),
     )
 
     p.add_argument("--max_iters", type=int, default=200)
@@ -1067,6 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
             "eval_policy_best_energy_p50",
             "eval_policy_best_energy_mean",
             "eval_gap_random_minus_policy_p50",
+            "eval_gap_random_minus_policy_p50_from_medians",
             "eval_gap_random_minus_policy_mean",
         ),
         help=(
@@ -1203,15 +1273,16 @@ def main() -> None:
         workers = int(args.workers)
 
     # obs_dim / action dimensions are determined by the env.
-    tmp_env = PMALNSEnv(
-        scale=str(scales_list[0]),
-        seed=int(args.seed),
-        instance_id=0,
-        slack_ratio=float(args.slack_ratio),
-        alns_cfg=ALNSConfig(max_iters=1, no_improve_limit=1),
-        action_set=str(action_set),
-        state_variant=str(state_variant),
-    )
+    tmp_env_kwargs = {
+        "scale": str(scales_list[0]),
+        "seed": int(args.seed),
+        "instance_id": 0,
+        "slack_ratio": float(args.slack_ratio),
+        "alns_cfg": ALNSConfig(max_iters=1, no_improve_limit=1),
+        "action_set": str(action_set),
+        "state_variant": str(state_variant),
+    }
+    tmp_env = PMALNSEnv(**_filter_env_kwargs(tmp_env_kwargs))
     obs_dim = int(tmp_env.obs_dim)
     act_dims = list(getattr(tmp_env, "action_dims", [int(tmp_env.action_dim)]))
     act_dim_total = int(np.prod(np.asarray(act_dims, dtype=np.int64)))
@@ -1516,6 +1587,9 @@ def main() -> None:
                             getattr(args, "terminal_time_coef", 0.0)
                         ),
                         no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
+                        force_greedy_accept=bool(
+                            getattr(args, "force_greedy_accept", False)
+                        ),
                         alns_cfg_dict=alns_cfg_dict,
                     )
                 )
@@ -1796,6 +1870,9 @@ def main() -> None:
                             getattr(args, "terminal_time_coef", 0.0)
                         ),
                         no_obs_norm=bool(getattr(args, "no_obs_norm", False)),
+                        force_greedy_accept=bool(
+                            getattr(args, "force_greedy_accept", False)
+                        ),
                         eval_seed=int(args.eval_seed),
                         eval_num_envs=int(args.eval_num_envs),
                         eval_rollout_len=int(args.eval_rollout_len),
@@ -1824,6 +1901,7 @@ def main() -> None:
                         f"policy_p50={eval_metrics.get('eval_policy_best_energy_p50'):.1f} "
                         f"random_p50={eval_metrics.get('eval_random_best_energy_p50'):.1f} "
                         f"gap_p50(random-policy)={eval_metrics.get('eval_gap_random_minus_policy_p50'):.2f} "
+                        f"gap_p50_from_medians={eval_metrics.get('eval_gap_random_minus_policy_p50_from_medians'):.2f} "
                         f"win_rate={eval_metrics.get('eval_vs_random_win_rate'):.3f} "
                         f"health_pass={int(bool(eval_metrics.get('eval_health_pass', False)))} "
                         f"secs={eval_metrics.get('eval_seconds'):.1f}",
