@@ -776,6 +776,87 @@ def evaluate_hit_regret(
     }
 
 
+def evaluate_model_vs_oracle_lb(
+    rows: List[Dict[str, float]],
+    feature_cols: List[str],
+    *,
+    model: object,
+) -> Dict[str, float]:
+    """Evaluate a model against the per-query oracle (best lb_child).
+
+    This reports how close the model's chosen candidate is to the minimum
+    lb_child among candidates in the same query (i.e., the best possible child
+    lower bound at that node).
+    """
+    by_q: Dict[int, List[Dict[str, float]]] = {}
+    for r in rows:
+        by_q.setdefault(int(r["query_id"]), []).append(r)
+
+    regrets: List[float] = []
+    rel_regrets: List[float] = []
+    hit1 = 0
+    n_q = 0
+
+    for _qid, items in by_q.items():
+        if len(items) < 2:
+            continue
+        n_q += 1
+
+        items_sorted = sorted(items, key=lambda x: x["lb_child"])
+        best = items_sorted[0]
+        best_lb = float(best["lb_child"])
+
+        X_items = np.stack(
+            [np.array([it[c] for c in feature_cols], dtype=np.float64) for it in items],
+            axis=0,
+        )
+
+        mtype = getattr(model, "get", lambda _k, _d=None: None)(
+            "model_type", "pairwise_logistic"
+        )
+        if mtype == "pairwise_logistic":
+            scores = _score_from_pairwise_lr(
+                lr=model["lr"],
+                scaler=model["scaler"],
+                X_items=X_items,
+            )
+            pred = items[int(np.argmax(scores))]
+        elif mtype in {"lgbm_ranker", "xgb_ranker"}:
+            scores = model["model"].predict(X_items)
+            scores = np.nan_to_num(scores, nan=-np.inf, posinf=np.inf, neginf=-np.inf)
+            pred = items[int(np.argmax(scores))]
+        else:
+            # Unknown model wrapper: fall back to oracle-equivalent behaviour.
+            pred = best
+
+        pred_lb = float(pred["lb_child"])
+        gap = float(pred_lb - best_lb)
+        regrets.append(gap)
+        rel_regrets.append(float(gap / max(1e-9, abs(best_lb))))
+        hit1 += 1 if pred is best else 0
+
+    if n_q == 0:
+        return {"n_queries": 0.0}
+
+    r = np.array(regrets, dtype=np.float64)
+    rr = np.array(rel_regrets, dtype=np.float64)
+
+    def q(x: np.ndarray, p: float) -> float:
+        return float(np.quantile(x, p))
+
+    return {
+        "n_queries": float(n_q),
+        "hit1": float(hit1 / n_q),
+        "avg_regret": float(r.mean()),
+        "regret_p50": q(r, 0.50),
+        "regret_p90": q(r, 0.90),
+        "regret_p99": q(r, 0.99),
+        "avg_rel_regret": float(rr.mean()),
+        "rel_regret_p90": q(rr, 0.90),
+        "rel_regret_p99": q(rr, 0.99),
+    }
+
+
 # ----------------------------
 # CLI
 # ----------------------------
@@ -1113,6 +1194,31 @@ def cmd_eval(args) -> None:
     _print_split("test", test_rows if test_rows else rows)
 
 
+def cmd_eval_oracle(args) -> None:
+    data_paths = _parse_data_paths(args.data)
+    rows: List[Dict[str, float]] = []
+    for p in data_paths:
+        rows.extend(read_csv(p))
+    if not rows:
+        raise ValueError("Empty dataset")
+
+    if not args.model:
+        raise ValueError("--model is required for eval_oracle")
+
+    train_rows, test_rows = _split_rows_by_instance(
+        rows, test_frac=float(args.test_frac), seed=int(args.seed)
+    )
+
+    with Path(args.model).open("rb") as f:
+        payload = pickle.load(f)
+    model = payload["model"]
+    feature_cols = payload["feature_cols"]
+
+    rr = test_rows if test_rows else rows
+    m = evaluate_model_vs_oracle_lb(rr, feature_cols, model=model)
+    print("[eval_oracle:test] model_vs_oracle_lb:", m)
+
+
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -1212,6 +1318,15 @@ def build_argparser() -> argparse.ArgumentParser:
     e.add_argument("--test_frac", type=float, default=0.2)
     e.add_argument("--seed", type=int, default=0)
 
+    eo = sub.add_parser(
+        "eval_oracle",
+        help="Evaluate model vs oracle child-lower-bound only (no baselines)",
+    )
+    eo.add_argument("--data", required=True)
+    eo.add_argument("--model", required=True)
+    eo.add_argument("--test_frac", type=float, default=0.2)
+    eo.add_argument("--seed", type=int, default=0)
+
     return p
 
 
@@ -1231,6 +1346,9 @@ def main() -> None:
         return
     if args.cmd == "eval":
         cmd_eval(args)
+        return
+    if args.cmd == "eval_oracle":
+        cmd_eval_oracle(args)
         return
     raise SystemExit(2)
 
