@@ -61,6 +61,10 @@ class BranchAndBoundSolver:
         self.pruned_by_binpack = 0
         self.binpack_attempts = 0
 
+        # Runtime metadata for evaluation.
+        self.timed_out: bool = False
+        self.solve_time_sec: float = 0.0
+
     def _lpt_heuristic(self) -> List[int]:
         """Longest Processing Time first heuristic."""
         jobs = list(range(self.instance.n_jobs))
@@ -97,6 +101,8 @@ class BranchAndBoundSolver:
         # Run DFS
         self._branch_and_bound_dfs([], set(range(self.instance.n_jobs)), start_time)
 
+        self.solve_time_sec = float(time.time() - start_time)
+
         if self.verbose:
             print(
                 f"Details: Nodes={self.nodes_explored}, BP_Pruned={self.pruned_by_binpack}"
@@ -119,6 +125,7 @@ class BranchAndBoundSolver:
         self, partial_sequence: List[int], remaining_jobs: set, start_time: float
     ):
         if time.time() - start_time > self.time_limit:
+            self.timed_out = True
             return
 
         self.nodes_explored += 1
