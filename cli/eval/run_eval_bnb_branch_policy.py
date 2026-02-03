@@ -29,6 +29,7 @@ import csv
 import pickle
 import random
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -179,10 +180,106 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     p.add_argument("--time_limit_s", type=float, default=2.0)
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Parallel workers over instances (uses multiprocessing).",
+    )
+    p.add_argument(
+        "--compute_root_lb",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="If enabled, compute and log the root lower bound per instance (extra DP work).",
+    )
     p.add_argument("--out_csv", type=str, default="")
     p.add_argument("--log_every", type=int, default=10)
 
     return p
+
+
+def _solve_one_instance(
+    *,
+    instance_id: int,
+    inst_seed: int,
+    policy_specs: List[Tuple[str, Optional[Callable]]],
+    n_jobs: int,
+    T: int,
+    duration_vocab: Sequence[int],
+    price_kind: str,
+    duration_mixture: str,
+    time_limit_s: float,
+    compute_root_lb: bool,
+) -> List[Dict[str, Any]]:
+    inst_rng = random.Random(int(inst_seed))
+    inst: Instance = generate_instance(
+        n_jobs=int(n_jobs),
+        T=int(T),
+        duration_vocab=list(duration_vocab),
+        rng=inst_rng,
+        price_kind=str(price_kind),
+        duration_mixture=str(duration_mixture),
+    )
+
+    root_lb = float("nan")
+    if bool(compute_root_lb):
+        lb_solver = BranchAndBoundSolver(
+            inst,
+            time_limit=float(time_limit_s),
+            verbose=False,
+            branching_policy=None,
+        )
+        try:
+            root_lb_val, _blocks, _relaxed = lb_solver._compute_lower_bound_with_blocks(
+                [], set(range(int(inst.n_jobs)))
+            )
+            root_lb = float(root_lb_val)
+        except Exception:
+            root_lb = float("nan")
+
+    out_rows: List[Dict[str, Any]] = []
+    for policy_name, policy_fn in policy_specs:
+        solver = BranchAndBoundSolver(
+            inst,
+            time_limit=float(time_limit_s),
+            verbose=False,
+            branching_policy=policy_fn,
+        )
+        t0 = time.perf_counter()
+        _seq, best_cost = solver.solve()
+        wall = time.perf_counter() - t0
+
+        out_rows.append(
+            {
+                "instance_id": int(instance_id),
+                "inst_seed": int(inst_seed),
+                "policy": str(policy_name),
+                "n_jobs": int(inst.n_jobs),
+                "T": int(inst.T),
+                "time_limit_s": float(time_limit_s),
+                "solve_time_sec": float(getattr(solver, "solve_time_sec", wall)),
+                "wall_time_sec": float(wall),
+                "timed_out": bool(getattr(solver, "timed_out", False))
+                or (wall >= float(time_limit_s) * 0.999),
+                "best_cost": float(best_cost),
+                "root_lb": float(root_lb),
+                "gap_to_lb": (
+                    float(best_cost - root_lb)
+                    if (root_lb == root_lb and best_cost == best_cost)
+                    else float("nan")
+                ),
+                "gap_to_lb_rel": (
+                    float((best_cost - root_lb) / max(1e-9, abs(root_lb)))
+                    if (root_lb == root_lb and best_cost == best_cost)
+                    else float("nan")
+                ),
+                "nodes_explored": int(getattr(solver, "nodes_explored", -1)),
+                "binpack_attempts": int(getattr(solver, "binpack_attempts", -1)),
+                "pruned_by_binpack": int(getattr(solver, "pruned_by_binpack", -1)),
+            }
+        )
+
+    return out_rows
 
 
 def main() -> None:
@@ -205,64 +302,79 @@ def main() -> None:
         )
         policy_specs.append((name, fn))
 
-    rng = random.Random(int(args.seed))
-
     out_rows: List[Dict[str, Any]] = []
 
-    for instance_id in range(int(args.num_instances)):
-        inst_seed = rng.randint(0, 2**31 - 1)
-        inst_rng = random.Random(int(inst_seed))
+    # Pre-sample instance seeds so parallelism doesn't change which instances are evaluated.
+    rng = random.Random(int(args.seed))
+    inst_seeds = [rng.randint(0, 2**31 - 1) for _ in range(int(args.num_instances))]
 
-        inst: Instance = generate_instance(
-            n_jobs=int(args.n_jobs),
-            T=int(args.T),
-            duration_vocab=duration_vocab,
-            rng=inst_rng,
-            price_kind=str(args.price_kind),
-            duration_mixture=str(args.duration_mixture),
-        )
-
-        for policy_name, policy_fn in policy_specs:
-            solver = BranchAndBoundSolver(
-                inst,
-                time_limit=float(args.time_limit_s),
-                verbose=False,
-                branching_policy=policy_fn,
-            )
-            t0 = time.perf_counter()
-            _seq, best_cost = solver.solve()
-            wall = time.perf_counter() - t0
-
-            out_rows.append(
-                {
-                    "instance_id": int(instance_id),
-                    "inst_seed": int(inst_seed),
-                    "policy": str(policy_name),
-                    "n_jobs": int(inst.n_jobs),
-                    "T": int(inst.T),
-                    "time_limit_s": float(args.time_limit_s),
-                    "solve_time_sec": float(getattr(solver, "solve_time_sec", wall)),
-                    "wall_time_sec": float(wall),
-                    "timed_out": bool(getattr(solver, "timed_out", False))
-                    or (wall >= float(args.time_limit_s) * 0.999),
-                    "best_cost": float(best_cost),
-                    "nodes_explored": int(getattr(solver, "nodes_explored", -1)),
-                    "binpack_attempts": int(getattr(solver, "binpack_attempts", -1)),
-                    "pruned_by_binpack": int(getattr(solver, "pruned_by_binpack", -1)),
-                }
-            )
-
-        if int(args.log_every) > 0 and (instance_id + 1) % int(args.log_every) == 0:
-            # Print lightweight running summaries.
-            keys = [k for k, _ in policy_specs]
-            parts = []
-            for k in keys:
-                s = _summarize(out_rows, k)
-                parts.append(
-                    f"{k}: n={int(s.get('n',0))} t_p50={s.get('time_p50',float('nan')):.3f}s "
-                    f"nodes_p50={s.get('nodes_p50',float('nan')):.0f} to={int(s.get('timeouts',0))}"
+    workers = int(getattr(args, "workers", 1) or 1)
+    if workers <= 1:
+        for instance_id, inst_seed in enumerate(inst_seeds):
+            out_rows.extend(
+                _solve_one_instance(
+                    instance_id=int(instance_id),
+                    inst_seed=int(inst_seed),
+                    policy_specs=policy_specs,
+                    n_jobs=int(args.n_jobs),
+                    T=int(args.T),
+                    duration_vocab=duration_vocab,
+                    price_kind=str(args.price_kind),
+                    duration_mixture=str(args.duration_mixture),
+                    time_limit_s=float(args.time_limit_s),
+                    compute_root_lb=bool(args.compute_root_lb),
                 )
-            print(f"[{instance_id+1}/{int(args.num_instances)}] " + " | ".join(parts))
+            )
+            if int(args.log_every) > 0 and (instance_id + 1) % int(args.log_every) == 0:
+                keys = [k for k, _ in policy_specs]
+                parts = []
+                for k in keys:
+                    s = _summarize(out_rows, k)
+                    parts.append(
+                        f"{k}: n={int(s.get('n',0))} t_p50={s.get('time_p50',float('nan')):.3f}s "
+                        f"nodes_p50={s.get('nodes_p50',float('nan')):.0f} to={int(s.get('timeouts',0))}"
+                    )
+                print(
+                    f"[{instance_id+1}/{int(args.num_instances)}] " + " | ".join(parts)
+                )
+    else:
+        # Parallel over instances.
+        submitted = 0
+        completed = 0
+        with ProcessPoolExecutor(max_workers=int(workers)) as ex:
+            futs = []
+            for instance_id, inst_seed in enumerate(inst_seeds):
+                futs.append(
+                    ex.submit(
+                        _solve_one_instance,
+                        instance_id=int(instance_id),
+                        inst_seed=int(inst_seed),
+                        policy_specs=policy_specs,
+                        n_jobs=int(args.n_jobs),
+                        T=int(args.T),
+                        duration_vocab=list(duration_vocab),
+                        price_kind=str(args.price_kind),
+                        duration_mixture=str(args.duration_mixture),
+                        time_limit_s=float(args.time_limit_s),
+                        compute_root_lb=bool(args.compute_root_lb),
+                    )
+                )
+                submitted += 1
+
+            for fut in as_completed(futs):
+                rows_i = fut.result()
+                out_rows.extend(rows_i)
+                completed += 1
+                if int(args.log_every) > 0 and completed % int(args.log_every) == 0:
+                    keys = [k for k, _ in policy_specs]
+                    parts = []
+                    for k in keys:
+                        s = _summarize(out_rows, k)
+                        parts.append(
+                            f"{k}: n={int(s.get('n',0))} t_p50={s.get('time_p50',float('nan')):.3f}s "
+                            f"nodes_p50={s.get('nodes_p50',float('nan')):.0f} to={int(s.get('timeouts',0))}"
+                        )
+                    print(f"[{completed}/{submitted}] " + " | ".join(parts))
 
     # Final report
     print("\n[final]")
