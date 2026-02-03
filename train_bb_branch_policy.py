@@ -949,8 +949,27 @@ def cmd_train_lgbm(args) -> None:
     X_train, y_train, group_train = _build_query_grouped_arrays(
         train_rows, feature_cols
     )
+
+    # LightGBM ranking expects integer relevance labels (non-negative).
+    # Our natural supervision is a *float* lower-bound (lb_child). We convert it
+    # into an ordinal relevance per query: smallest lb_child -> highest relevance.
+    y_train_int = np.empty_like(y_train, dtype=np.int32)
+    offset = 0
+    for g in group_train.tolist():
+        sl = slice(offset, offset + int(g))
+        lbs = (-y_train[sl]).astype(np.float64)
+        uniq = np.unique(lbs)
+        uniq.sort()  # ascending lb
+        pos = np.searchsorted(uniq, lbs)
+        # best (smallest lb) gets the highest relevance
+        y_train_int[sl] = (len(uniq) - 1 - pos).astype(np.int32)
+        offset += int(g)
+
+    max_rel = int(y_train_int.max()) if y_train_int.size else 0
+    label_gain = list(range(max_rel + 1))
     model = lgb.LGBMRanker(
         objective="lambdarank",
+        label_gain=label_gain,
         n_estimators=int(args.n_estimators),
         learning_rate=float(args.learning_rate),
         num_leaves=int(args.num_leaves),
@@ -962,7 +981,7 @@ def cmd_train_lgbm(args) -> None:
         verbose=-1,
     )
 
-    model.fit(X_train, y_train, group=group_train)
+    model.fit(X_train, y_train_int, group=group_train)
 
     payload = {
         "model_type": "lgbm_ranker",
