@@ -83,6 +83,184 @@ def _downsample_ct(ct: np.ndarray, T: int, bins: int) -> np.ndarray:
     return x.astype(np.float32)
 
 
+def _compute_window_cost_features(
+    ct: np.ndarray, T: int, p_subset: np.ndarray, n_jobs: int, max_window_sizes: int = 5
+) -> np.ndarray:
+    """Compute per-job-duration window-cost statistics (DP-aligned features).
+
+    For each job duration p found in p_subset, compute:
+    - min_window_sum[p]: min sum of ct over all windows of size p
+    - p10_window_sum[p]: 10th percentile window sum
+    - gap[p] = p10 - min (how much variance in window costs)
+
+    Then aggregate per sequence:
+    - sum of min_window_sums for jobs in sequence
+    - max of min_window_sums
+    - sum of gaps
+    - fraction of jobs with large gaps
+
+    Returns feature vector of shape (n_agg_features,).
+    """
+    if T <= 0 or n_jobs <= 0:
+        return np.zeros((4,), dtype=np.float32)  # Fallback for 4 aggregates
+
+    ct_f = ct[:T].astype(np.float64)
+
+    # Compute prefix sums for fast window queries.
+    prefix = np.concatenate(([0.0], np.cumsum(ct_f)))  # length T+1
+
+    # Collect distinct non-zero job durations.
+    p_vals = p_subset[:n_jobs].astype(np.int64)
+    p_vals = p_vals[p_vals > 0]
+    if len(p_vals) == 0:
+        return np.zeros((4,), dtype=np.float32)
+
+    p_uniq = np.unique(p_vals)
+    p_uniq = p_uniq[p_uniq <= T]  # Only feasible windows
+
+    if len(p_uniq) == 0:
+        return np.zeros((4,), dtype=np.float32)
+
+    min_sums = {}
+    p10_sums = {}
+    gaps = {}
+
+    for p in p_uniq:
+        p_int = int(p)
+        if p_int >= len(prefix):
+            continue
+
+        # All windows of size p_int.
+        windows = []
+        for s in range(max(0, len(prefix) - p_int)):
+            windows.append(prefix[s + p_int] - prefix[s])
+
+        if windows:
+            windows = np.array(windows, dtype=np.float64)
+            min_sums[p_int] = float(np.min(windows))
+            p10_sums[p_int] = float(np.percentile(windows, 10))
+            gaps[p_int] = float(p10_sums[p_int] - min_sums[p_int])
+
+    if not min_sums:
+        return np.zeros((4,), dtype=np.float32)
+
+    # Aggregate per sequence: sum over jobs' durations.
+    sum_min = 0.0
+    max_min = 0.0
+    sum_gap = 0.0
+    n_large_gap = 0
+    gap_threshold = np.median(list(gaps.values())) if gaps else 1.0
+
+    for p in p_vals:
+        p_int = int(p)
+        if p_int in min_sums:
+            sum_min += min_sums[p_int]
+            max_min = max(max_min, min_sums[p_int])
+            gap_val = gaps[p_int]
+            sum_gap += gap_val
+            if gap_val > gap_threshold:
+                n_large_gap += 1
+
+    frac_large_gap = float(n_large_gap) / max(1, len(p_vals))
+
+    return np.array([sum_min, max_min, sum_gap, frac_large_gap], dtype=np.float32)
+
+
+def _compute_price_quantile_features(ct: np.ndarray, T: int) -> np.ndarray:
+    """Compute price quantiles and cheap-run features.
+
+    Returns: [q25, q50, q75, longest_cheap_run, mass_below_q25] as float32 array.
+    """
+    if T <= 0:
+        return np.zeros((5,), dtype=np.float32)
+
+    ct_f = ct[:T].astype(np.float64)
+    q25 = float(np.percentile(ct_f, 25))
+    q50 = float(np.percentile(ct_f, 50))
+    q75 = float(np.percentile(ct_f, 75))
+
+    # Longest run of prices <= q25 (cheap).
+    is_cheap = ct_f <= q25
+    runs = np.where(np.diff(np.concatenate(([0], is_cheap.astype(np.int32), [0]))))[0]
+    longest_cheap = 0
+    if len(runs) >= 2:
+        for i in range(0, len(runs), 2):
+            longest_cheap = max(longest_cheap, runs[i + 1] - runs[i])
+
+    # Mass (count) below q25.
+    mass_below_q25 = float(np.sum(is_cheap)) / max(1, T)
+
+    return np.array(
+        [q25, q50, q75, float(longest_cheap), mass_below_q25], dtype=np.float32
+    )
+
+
+def _compute_proxy_cost_features(
+    p_seq: np.ndarray, ct: np.ndarray, T_limit: int, e_single: int, n_jobs: int
+) -> float:
+    """Compute accurate sequential cost (no binning) as a single proxy feature.
+
+    Schedule jobs sequentially with exact ct (not downsampled), allowing small
+    lookahead to find low-cost placements.
+
+    Returns a single float representing the predicted cost (useful as a ranker feature).
+    """
+    try:
+        if n_jobs <= 0 or T_limit <= 0:
+            return 0.0
+
+        n_jobs = min(int(n_jobs), len(p_seq))
+        T_limit = max(1, int(T_limit))
+        T_actual = min(int(T_limit), len(ct))
+
+        if T_actual <= 0 or n_jobs <= 0:
+            return 0.0
+
+        ct_f = ct[:T_actual].astype(np.float64)
+        e_single_f = float(max(1, int(e_single)))
+
+        # Prefix sums for fast window query.
+        prefix = np.concatenate(([0.0], np.cumsum(ct_f)))
+
+        t = 0
+        cost = 0.0
+        lookahead = min(16, T_actual)  # Small lookahead for placement.
+
+        for j in range(n_jobs):
+            p_j = int(p_seq[j])
+            if p_j <= 0:
+                continue
+
+            if t >= T_actual:
+                # Past horizon; just use last price.
+                cost += float(p_j * ct_f[-1])
+                continue
+
+            # Find best start within lookahead.
+            best_cost = float("inf")
+            best_start = t
+
+            for start_offset in range(min(lookahead, T_actual - t)):
+                start = t + start_offset
+                if start + p_j > T_actual:
+                    break
+                window_end = min(start + p_j, T_actual)
+                window_cost = float(prefix[window_end] - prefix[start])
+                if window_cost < best_cost:
+                    best_cost = window_cost
+                    best_start = window_end
+
+            if best_cost < float("inf"):
+                cost += float(best_cost)
+                t = best_start
+
+        result = float(cost * e_single_f)
+        # Clamp to reasonable range to avoid overflow.
+        return min(float(1e10), max(0.0, result))
+    except Exception:
+        return 0.0
+
+
 def _seq_from_perm(perm: Sequence[int], n_jobs_pad: int) -> np.ndarray:
     out = np.zeros((n_jobs_pad,), dtype=np.int64)
     k = min(len(perm), n_jobs_pad)
@@ -359,13 +537,18 @@ def generate_dataset_shard(
                 perturbations_per_base=int(perturbations_per_base),
             )
 
-            # Instance-level (shared) features: downsampled prices + scalars.
+            # Instance-level (shared) features: downsampled prices + quantiles + window stats + scalars.
             # DP uses T_limit, so prefer deadline-relevant horizon for features.
             T_feat = int(min(T_limit_i, T_max_i))
             ct_ds = _downsample_ct(ct_i, T_feat, int(ct_bins))
+
+            # NEW: Add price quantile features.
+            price_quant_feats = _compute_price_quantile_features(ct_i, T_feat)
+
             inst_feats = np.concatenate(
                 [
                     ct_ds,
+                    price_quant_feats,
                     np.array(
                         [
                             float(e_i),
@@ -387,13 +570,32 @@ def generate_dataset_shard(
                 T_rows.append(T_limit_i)
                 L_rows.append(n)
 
-                # Sequence-level features: processing times in sequence order.
+                # Sequence-level features: processing times in sequence order + new rich features.
                 p_seq = p_i[np.asarray(s, dtype=np.int64)].astype(np.float32)
                 if len(p_seq) < n_jobs_pad:
                     p_seq = np.pad(p_seq, (0, n_jobs_pad - len(p_seq)), mode="constant")
                 else:
                     p_seq = p_seq[:n_jobs_pad]
-                feat = np.concatenate([p_seq.astype(np.float32), inst_feats], axis=0)
+
+                # NEW: Window-cost features (DP-aligned).
+                window_feats = _compute_window_cost_features(
+                    ct_i, T_feat, p_i, n, max_window_sizes=5
+                )
+
+                # NEW: Stronger proxy cost for this sequence.
+                proxy_cost = _compute_proxy_cost_features(
+                    p_seq, ct_i, T_limit_i, e_i, n
+                )
+
+                feat = np.concatenate(
+                    [
+                        p_seq.astype(np.float32),
+                        window_feats,
+                        np.array([proxy_cost], dtype=np.float32),
+                        inst_feats,
+                    ],
+                    axis=0,
+                )
                 feat_rows.append(feat)
                 inst_ids.append(inst_id)
 
@@ -450,11 +652,13 @@ def generate_dataset_shard(
                 f"shard_id={shard_id}",
                 f"num_shards={num_shards}",
                 f"dp_batch_max={int(dp_batch_max or 0)}",
+                f"feature_layout=seq_block({n_jobs_pad})+window_feats(4)+proxy_cost(1)+price_quant(5)+ct_bins({int(ct_bins)})+scalars(4)",
+                f"total_features={X_all.shape[1] if len(X_list) > 0 else 'unknown'}",
             ],
             dtype=object,
         ),
     )
-    print(f"[generate] wrote {len(y_all)} samples to {out}")
+    print(f"[generate] wrote {len(y_all)} samples to {out} (d={X_all.shape[1]})")
 
 
 def _split_by_inst(
@@ -498,6 +702,76 @@ def _eval_metrics(
         "n_instances": float(n_inst),
         "avg_regret_pick": float(regret_sum / max(1, n_inst)),
     }
+
+
+def _eval_metrics_by_score(
+    *,
+    y_true: np.ndarray,
+    inst_id: np.ndarray,
+    scores: np.ndarray,
+) -> Dict[str, float]:
+    """Evaluate selection quality when the model outputs scores (higher=better).
+
+    We report the same key metric as regression: avg_regret_pick in true cost
+    units, where "pick" is argmax(score) within each instance.
+    """
+    regret_sum = 0.0
+    hit1 = 0
+    n_inst = 0
+    for inst in np.unique(inst_id):
+        m = inst_id == inst
+        if not np.any(m):
+            continue
+        yy = y_true[m]
+        ss = scores[m]
+        best_true = float(np.min(yy))
+        best_idx = int(np.argmin(yy))
+        pick = int(np.argmax(ss))
+        regret_sum += float(yy[pick] - best_true)
+        hit1 += 1 if pick == best_idx else 0
+        n_inst += 1
+
+    return {
+        "n_samples": float(len(y_true)),
+        "n_instances": float(n_inst),
+        "hit1_pick": float(hit1 / max(1, n_inst)),
+        "avg_regret_pick": float(regret_sum / max(1, n_inst)),
+    }
+
+
+def _build_grouped_rank_data(
+    X: np.ndarray, y: np.ndarray, inst_id: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Prepare arrays for learning-to-rank.
+
+    Returns (X2, rel_int, group, y2) where:
+    - X2 is sorted/grouped by inst_id
+    - rel_int is integer relevance (higher = better) within each inst_id
+    - group gives group sizes per instance in X2 order
+    - y2 is the true cost aligned to X2 (useful for evaluation)
+    """
+    order = np.argsort(inst_id, kind="mergesort")
+    X2 = X[order]
+    y2 = y[order]
+    inst2 = inst_id[order]
+
+    # Group boundaries.
+    if len(inst2) == 0:
+        raise ValueError("Empty arrays")
+    change = np.nonzero(inst2[1:] != inst2[:-1])[0] + 1
+    bounds = np.concatenate(([0], change, [len(inst2)]))
+    group_sizes = np.diff(bounds).astype(np.int32)
+
+    rel = np.empty((len(y2),), dtype=np.int32)
+    for a, b in zip(bounds[:-1], bounds[1:]):
+        yy = y2[a:b].astype(np.float64)
+        # Lowest true cost should be highest relevance.
+        uniq = np.unique(yy)
+        uniq.sort()  # ascending cost
+        pos = np.searchsorted(uniq, yy)
+        rel[a:b] = (len(uniq) - 1 - pos).astype(np.int32)
+
+    return X2, rel, group_sizes, y2
 
 
 def _try_import_sklearn_linear():
@@ -664,6 +938,73 @@ def cmd_train_lgbm(args) -> None:
     print("[train_lgbm] test:", m_test)
 
 
+def cmd_train_lgbm_ranker(args) -> None:
+    paths = _parse_paths(args.data)
+    X, y, inst_id = _load_npz(paths)
+
+    train_idx, test_idx = _split_by_inst(inst_id, float(args.test_frac), int(args.seed))
+
+    lgb = _try_import_lightgbm()
+    if lgb is None:
+        raise RuntimeError("lightgbm required: pip install lightgbm")
+
+    X_tr, rel_tr, group_tr, y_tr = _build_grouped_rank_data(
+        X[train_idx], y[train_idx], inst_id[train_idx]
+    )
+    X_te, rel_te, group_te, y_te = _build_grouped_rank_data(
+        X[test_idx], y[test_idx], inst_id[test_idx]
+    )
+
+    max_rel = int(rel_tr.max()) if rel_tr.size else 0
+    label_gain = list(range(max_rel + 1))
+
+    model = lgb.LGBMRanker(
+        objective="lambdarank",
+        label_gain=label_gain,
+        n_estimators=int(args.n_estimators),
+        learning_rate=float(args.learning_rate),
+        num_leaves=int(args.num_leaves),
+        min_data_in_leaf=int(args.min_data_in_leaf),
+        max_depth=int(args.max_depth),
+        subsample=float(args.subsample),
+        colsample_bytree=float(args.colsample_bytree),
+        reg_lambda=float(args.reg_lambda),
+        random_state=int(args.seed),
+        # Speeds up training on wide dense data.
+        force_row_wise=True,
+        verbose=-1,
+    )
+
+    model.fit(
+        X_tr,
+        rel_tr,
+        group=group_tr,
+        eval_set=[(X_te, rel_te)],
+        eval_group=[group_te],
+        eval_at=[1, 3, 5],
+        callbacks=[lgb.early_stopping(int(args.early_stopping_rounds), verbose=False)],
+    )
+
+    out = Path(args.model_out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("wb") as f:
+        pickle.dump({"model_type": "lgbm_ranker", "model": model}, f)
+
+    # Report pick-quality directly in true cost units.
+    s_tr = model.predict(X_tr).astype(np.float32)
+    s_te = model.predict(X_te).astype(np.float32)
+    m_train = _eval_metrics_by_score(
+        y_true=y_tr, inst_id=np.repeat(np.arange(len(group_tr)), group_tr), scores=s_tr
+    )
+    m_test = _eval_metrics_by_score(
+        y_true=y_te, inst_id=np.repeat(np.arange(len(group_te)), group_te), scores=s_te
+    )
+
+    print(f"[train_lgbm_ranker] saved {out}")
+    print("[train_lgbm_ranker] train:", m_train)
+    print("[train_lgbm_ranker] test:", m_test)
+
+
 def cmd_train_xgb(args) -> None:
     paths = _parse_paths(args.data)
     X, y, inst_id = _load_npz(paths)
@@ -733,6 +1074,10 @@ def cmd_eval(args) -> None:
         X2 = scaler.transform(X)
         yhat = model.predict(X2).astype(np.float32)
         m = _eval_metrics(X2, y, inst_id, yhat)
+    elif model_type == "lgbm_ranker":
+        model = payload["model"]
+        scores = model.predict(X).astype(np.float32)
+        m = _eval_metrics_by_score(y_true=y, inst_id=inst_id, scores=scores)
     else:
         model = payload["model"]
         yhat = model.predict(X).astype(np.float32)
@@ -799,6 +1144,21 @@ def build_argparser() -> argparse.ArgumentParser:
     tl.add_argument("--colsample_bytree", type=float, default=0.9)
     tl.add_argument("--early_stopping_rounds", type=int, default=100)
 
+    tlr = sub.add_parser("train_lgbm_ranker")
+    tlr.add_argument("--data", required=True)
+    tlr.add_argument("--model_out", required=True)
+    tlr.add_argument("--test_frac", type=float, default=0.2)
+    tlr.add_argument("--seed", type=int, default=0)
+    tlr.add_argument("--n_estimators", type=int, default=4000)
+    tlr.add_argument("--learning_rate", type=float, default=0.05)
+    tlr.add_argument("--num_leaves", type=int, default=127)
+    tlr.add_argument("--min_data_in_leaf", type=int, default=100)
+    tlr.add_argument("--max_depth", type=int, default=-1)
+    tlr.add_argument("--subsample", type=float, default=0.9)
+    tlr.add_argument("--colsample_bytree", type=float, default=0.9)
+    tlr.add_argument("--reg_lambda", type=float, default=1.0)
+    tlr.add_argument("--early_stopping_rounds", type=int, default=100)
+
     tx = sub.add_parser("train_xgb")
     tx.add_argument("--data", required=True)
     tx.add_argument("--model_out", required=True)
@@ -848,6 +1208,9 @@ def main() -> None:
         return
     if args.cmd == "train_lgbm":
         cmd_train_lgbm(args)
+        return
+    if args.cmd == "train_lgbm_ranker":
+        cmd_train_lgbm_ranker(args)
         return
     if args.cmd == "train_xgb":
         cmd_train_xgb(args)
