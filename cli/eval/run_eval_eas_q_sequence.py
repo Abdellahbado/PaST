@@ -50,6 +50,7 @@ from PaST.artifacts.algorithms.eas_q_sequence import (
     sgbs_q_sequence_with_eas,
     EASQModelWrapper,
 )
+from PaST.cli.eval.debiased_inference import multi_restart_decode
 
 
 # =============================================================================
@@ -141,6 +142,12 @@ def parse_args():
                    help="Early stopping patience")
     p.add_argument("--max_time_per_instance", type=float, default=None,
                    help="Max seconds per instance")
+    
+    # Debiasing parameters (for biased models)
+    p.add_argument("--multi_restart", type=int, default=0,
+                   help="Number of multi-restart samples (0=disabled). Use 16-32 if model < random.")
+    p.add_argument("--restart_temperature", type=float, default=1.5,
+                   help="Temperature for multi-restart sampling")
     
     # Output
     p.add_argument("--out_dir", type=str, default="eas_q_results")
@@ -263,16 +270,36 @@ def main():
         spt_results = spt_lpt_with_dp(q_cfg.env, device, single_data, "spt")
         spt_result = spt_results[0]
         
-        # Compute gaps - include random in best if available
+        # Multi-restart debiased decoding (if enabled)
+        multi_restart_energy = float("nan")
+        multi_restart_time = 0.0
+        if args.multi_restart > 0:
+            t0 = time.time()
+            mr_result = multi_restart_decode(
+                model=q_model,
+                variant_config=q_cfg,
+                single_data=single_data,
+                device=device,
+                n_restarts=args.multi_restart,
+                temperature=args.restart_temperature,
+                seed=args.random_seed + i,
+            )
+            multi_restart_time = time.time() - t0
+            multi_restart_energy = float(mr_result.total_energy)
+        
+        # Compute gaps - include random and multi-restart in best if available
         candidates = [eas_result.best_energy, sgbs_result.total_energy, spt_result.total_energy]
         if args.include_random and not np.isnan(random_energy):
             candidates.append(random_energy)
+        if args.multi_restart > 0 and not np.isnan(multi_restart_energy):
+            candidates.append(multi_restart_energy)
         best_energy = min(candidates)
         
         greedy_gap = (eas_result.greedy_energy - best_energy) / best_energy if best_energy > 0 else 0
         sgbs_gap = (sgbs_result.total_energy - best_energy) / best_energy if best_energy > 0 else 0
         eas_gap = (eas_result.best_energy - best_energy) / best_energy if best_energy > 0 else 0
         spt_gap = (spt_result.total_energy - best_energy) / best_energy if best_energy > 0 else 0
+        multi_restart_gap = (multi_restart_energy - best_energy) / best_energy if (args.multi_restart > 0 and best_energy > 0 and not np.isnan(multi_restart_energy)) else float("nan")
         if args.include_random and not np.isnan(random_energy) and best_energy > 0:
             random_gap = (random_energy - best_energy) / best_energy
         
@@ -285,16 +312,19 @@ def main():
             "eas_energy": eas_result.best_energy,
             "spt_energy": spt_result.total_energy,
             "random_energy": random_energy if args.include_random else float("nan"),
+            "multi_restart_energy": multi_restart_energy if args.multi_restart > 0 else float("nan"),
             "best_energy": best_energy,
             "greedy_gap": greedy_gap,
             "sgbs_gap": sgbs_gap,
             "eas_gap": eas_gap,
             "spt_gap": spt_gap,
             "random_gap": random_gap if args.include_random else float("nan"),
+            "multi_restart_gap": multi_restart_gap if args.multi_restart > 0 else float("nan"),
             "eas_improvement": (eas_result.greedy_energy - eas_result.best_energy) / eas_result.greedy_energy if eas_result.greedy_energy > 0 else 0,
             "eas_iterations": eas_result.iterations,
             "eas_time_s": eas_time,
             "sgbs_time_s": sgbs_time,
+            "multi_restart_time_s": multi_restart_time if args.multi_restart > 0 else 0.0,
         }
         results.append(row)
         
@@ -302,6 +332,8 @@ def main():
         print(f"  SGBS:   {sgbs_result.total_energy:.2f} (gap: {sgbs_gap*100:.2f}%)")
         print(f"  EAS:    {eas_result.best_energy:.2f} (gap: {eas_gap*100:.2f}%, iter: {eas_result.iterations}, time: {eas_time:.1f}s)")
         print(f"  SPT:    {spt_result.total_energy:.2f} (gap: {spt_gap*100:.2f}%)")
+        if args.multi_restart > 0:
+            print(f"  Multi-R:{multi_restart_energy:.2f} (gap: {multi_restart_gap*100:.2f}%, n={args.multi_restart}, time: {multi_restart_time:.1f}s)")
         if args.include_random:
             print(f"  Random: {random_energy:.2f} (gap: {random_gap*100:.2f}%)")
     
