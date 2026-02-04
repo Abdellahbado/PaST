@@ -8,6 +8,8 @@ Methods:
 - SGBS(β, γ): Simulation-guided beam search with DP scheduling
 - SPT+DP: Shortest Processing Time order + optimal DP scheduling
 - LPT+DP: Longest Processing Time order + optimal DP scheduling
+ - Random-Q: same decoders but with random Q-values (sanity baseline)
+ - Branch-model (constructive): uses saved duration ranker to construct a job order
 
 Example:
     python -m PaST.cli.eval.run_eval_q_sequence \\
@@ -55,6 +57,13 @@ from PaST.q_sequence_model import build_q_model, QSequenceNet, QModelWrapper
 from PaST.sm_benchmark_data import generate_episode_batch
 from PaST.sequence_env import GPUBatchSequenceEnv
 from PaST.batch_dp_solver import BatchSequenceDPSolver
+
+from PaST.cli.eval.random_q_baseline import RandomQModel
+from PaST.cli.eval.constructive_duration_ranker import (
+    DurationRanker,
+    greedy_decode_duration_ranker,
+    sgbs_decode_duration_ranker,
+)
 
 
 # =============================================================================
@@ -856,8 +865,10 @@ def parse_args() -> argparse.Namespace:
         "--which",
         type=str,
         default="best",
-        choices=["best", "latest"],
-        help="Checkpoint name under <run_dir>/checkpoints (only used with --run_dir).",
+        help=(
+            "Checkpoint name under <run_dir>/checkpoints (only used with --run_dir). "
+            "Examples: best, latest, checkpoint_85"
+        ),
     )
     p.add_argument(
         "--eval_seed", type=int, required=True, help="Seed for instance generation."
@@ -889,6 +900,52 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Temperature for Q->logits conversion.",
+    )
+
+    # Optional: Random-Q baseline
+    p.add_argument(
+        "--include_random_q",
+        action="store_true",
+        help="Also evaluate Random-Q greedy and SGBS baselines.",
+    )
+    p.add_argument(
+        "--random_q_seed",
+        type=int,
+        default=42,
+        help="Seed for Random-Q baseline (reproducibility depends on call order).",
+    )
+    p.add_argument(
+        "--random_q_scale",
+        type=float,
+        default=1.0,
+        help="Stddev for Random-Q values.",
+    )
+
+    # Optional: Constructive decoding with a saved duration-ranker
+    p.add_argument(
+        "--branch_model",
+        type=str,
+        default=None,
+        help="Path to saved bb-branch duration ranker (.pkl) to use as a constructive decoder (no B&B).",
+    )
+    p.add_argument(
+        "--branch_tie_eps",
+        type=float,
+        default=1e-6,
+        help="Tie threshold for duration ranker; may fall back to min-window ordering.",
+    )
+    p.add_argument(
+        "--branch_rollout_policy",
+        type=str,
+        default="model",
+        choices=["model", "random", "spt", "lpt"],
+        help="Rollout policy used to complete candidate prefixes in constructive SGBS.",
+    )
+    p.add_argument(
+        "--branch_rollout_seed",
+        type=int,
+        default=None,
+        help="Seed for constructive rollout (default: eval_seed).",
     )
 
     # Output
@@ -993,6 +1050,96 @@ def main() -> None:
     greedy_time = time.perf_counter() - t0
     print(f"done ({greedy_time:.2f}s)")
 
+    # === Random-Q (optional) ===
+    random_greedy_res: Optional[List[DPResult]] = None
+    random_sgbs_res_map: Dict[str, List[DPResult]] = {}
+    random_greedy_time = 0.0
+    random_sgbs_time_map: Dict[str, float] = {}
+    if bool(args.include_random_q):
+        print(
+            f"Running Random-Q baselines (seed={args.random_q_seed}, scale={args.random_q_scale})..."
+        )
+        random_model = (
+            RandomQModel(seed=int(args.random_q_seed), scale=float(args.random_q_scale))
+            .to(device)
+            .eval()
+        )
+
+        print("  Random-Q Greedy...", end=" ", flush=True)
+        t0 = time.perf_counter()
+        random_greedy_res = greedy_decode_q_sequence(
+            random_model, variant_config, batch, device
+        )
+        random_greedy_time = time.perf_counter() - t0
+        print(f"done ({random_greedy_time:.2f}s)")
+
+        for b_val, g_val in bg_pairs:
+            label = f"{b_val}-{g_val}"
+            print(f"  Random-Q SGBS(β={b_val}, γ={g_val})...", end=" ", flush=True)
+            t0 = time.perf_counter()
+            res = sgbs_q_sequence(
+                random_model,
+                variant_config,
+                batch,
+                device,
+                beta=b_val,
+                gamma=g_val,
+                temperature=args.temperature,
+            )
+            dt = time.perf_counter() - t0
+            print(f"done ({dt:.2f}s)")
+            random_sgbs_res_map[label] = res
+            random_sgbs_time_map[label] = float(dt)
+
+    # === Constructive duration-ranker (optional) ===
+    branch_greedy_res: Optional[List[DPResult]] = None
+    branch_sgbs_res_map: Dict[str, List[DPResult]] = {}
+    branch_greedy_time = 0.0
+    branch_sgbs_time_map: Dict[str, float] = {}
+    if args.branch_model is not None:
+        branch_rollout_seed = (
+            int(args.branch_rollout_seed)
+            if args.branch_rollout_seed is not None
+            else int(args.eval_seed)
+        )
+        print(
+            f"Running constructive branch-model decoders: {args.branch_model} (rollout={args.branch_rollout_policy}, seed={branch_rollout_seed})..."
+        )
+        ranker = DurationRanker(
+            model_path=str(args.branch_model), tie_eps=float(args.branch_tie_eps)
+        )
+
+        print("  Branch-model Greedy...", end=" ", flush=True)
+        t0 = time.perf_counter()
+        branch_greedy_res = []
+        for i in range(int(args.num_instances)):
+            single = _slice_single_instance(batch, i)
+            branch_greedy_res.append(greedy_decode_duration_ranker(ranker, single))
+        branch_greedy_time = time.perf_counter() - t0
+        print(f"done ({branch_greedy_time:.2f}s)")
+
+        for b_val, g_val in bg_pairs:
+            label = f"{b_val}-{g_val}"
+            print(f"  Branch-model SGBS(β={b_val}, γ={g_val})...", end=" ", flush=True)
+            t0 = time.perf_counter()
+            res_list: List[DPResult] = []
+            for i in range(int(args.num_instances)):
+                single = _slice_single_instance(batch, i)
+                res_list.append(
+                    sgbs_decode_duration_ranker(
+                        ranker,
+                        single,
+                        beta=int(b_val),
+                        gamma=int(g_val),
+                        rollout_policy=str(args.branch_rollout_policy),
+                        rollout_seed=int(branch_rollout_seed),
+                    )
+                )
+            dt = time.perf_counter() - t0
+            print(f"done ({dt:.2f}s)")
+            branch_sgbs_res_map[label] = res_list
+            branch_sgbs_time_map[label] = float(dt)
+
     # === SGBS ===
     sgbs_res_map: Dict[str, List[DPResult]] = {}
     for b_val, g_val in bg_pairs:
@@ -1036,6 +1183,16 @@ def main() -> None:
         }
         for label, res_list in sgbs_res_map.items():
             row[f"sgbs_{label}_energy"] = res_list[i].total_energy
+
+        if random_greedy_res is not None:
+            row["randomq_greedy_energy"] = random_greedy_res[i].total_energy
+            for label, res_list in random_sgbs_res_map.items():
+                row[f"randomq_sgbs_{label}_energy"] = res_list[i].total_energy
+
+        if branch_greedy_res is not None:
+            row["branch_greedy_energy"] = branch_greedy_res[i].total_energy
+            for label, res_list in branch_sgbs_res_map.items():
+                row[f"branch_sgbs_{label}_energy"] = res_list[i].total_energy
         rows.append(row)
 
     # Compute means
@@ -1046,6 +1203,24 @@ def main() -> None:
         label: _mean([r.total_energy for r in res])
         for label, res in sgbs_res_map.items()
     }
+
+    random_greedy_mean: Optional[float] = None
+    random_sgbs_means: Dict[str, float] = {}
+    if random_greedy_res is not None:
+        random_greedy_mean = _mean([r.total_energy for r in random_greedy_res])
+        random_sgbs_means = {
+            label: _mean([r.total_energy for r in res])
+            for label, res in random_sgbs_res_map.items()
+        }
+
+    branch_greedy_mean: Optional[float] = None
+    branch_sgbs_means: Dict[str, float] = {}
+    if branch_greedy_res is not None:
+        branch_greedy_mean = _mean([r.total_energy for r in branch_greedy_res])
+        branch_sgbs_means = {
+            label: _mean([r.total_energy for r in res])
+            for label, res in branch_sgbs_res_map.items()
+        }
 
     # Print summary
     print("\n" + "=" * 70)
@@ -1064,6 +1239,36 @@ def main() -> None:
     imp_lpt = ((greedy_mean - lpt_mean) / greedy_mean * 100) if greedy_mean > 0 else 0
     print(f"{'SPT+DP':<25} | {spt_mean:<12.2f} | {f'{imp_spt:+.2f}%':<15}")
     print(f"{'LPT+DP':<25} | {lpt_mean:<12.2f} | {f'{imp_lpt:+.2f}%':<15}")
+
+    if random_greedy_mean is not None:
+        imp_r = (
+            ((greedy_mean - random_greedy_mean) / greedy_mean * 100)
+            if greedy_mean > 0
+            else 0
+        )
+        print(
+            f"{'RandomQ Greedy':<25} | {random_greedy_mean:<12.2f} | {f'{imp_r:+.2f}%':<15}"
+        )
+        for label, mean_e in random_sgbs_means.items():
+            imp = ((greedy_mean - mean_e) / greedy_mean * 100) if greedy_mean > 0 else 0
+            print(
+                f"{f'RandomQ SGBS({label})':<25} | {mean_e:<12.2f} | {f'{imp:+.2f}%':<15}"
+            )
+
+    if branch_greedy_mean is not None:
+        imp_b = (
+            ((greedy_mean - branch_greedy_mean) / greedy_mean * 100)
+            if greedy_mean > 0
+            else 0
+        )
+        print(
+            f"{'Branch Greedy':<25} | {branch_greedy_mean:<12.2f} | {f'{imp_b:+.2f}%':<15}"
+        )
+        for label, mean_e in branch_sgbs_means.items():
+            imp = ((greedy_mean - mean_e) / greedy_mean * 100) if greedy_mean > 0 else 0
+            print(
+                f"{f'Branch SGBS({label})':<25} | {mean_e:<12.2f} | {f'{imp:+.2f}%':<15}"
+            )
     print("=" * 70)
 
     # === Output ===
@@ -1083,6 +1288,14 @@ def main() -> None:
     fieldnames = ["instance", "greedy_energy", "spt_dp_energy", "lpt_dp_energy"]
     for label in sgbs_res_map.keys():
         fieldnames.append(f"sgbs_{label}_energy")
+    if random_greedy_res is not None:
+        fieldnames.append("randomq_greedy_energy")
+        for label in random_sgbs_res_map.keys():
+            fieldnames.append(f"randomq_sgbs_{label}_energy")
+    if branch_greedy_res is not None:
+        fieldnames.append("branch_greedy_energy")
+        for label in branch_sgbs_res_map.keys():
+            fieldnames.append(f"branch_sgbs_{label}_energy")
 
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -1099,11 +1312,56 @@ def main() -> None:
         "num_instances": int(args.num_instances),
         "sgbs_configs": [{"beta": b, "gamma": g} for b, g in bg_pairs],
         "temperature": float(args.temperature),
+        "random_q": {
+            "enabled": bool(args.include_random_q),
+            "seed": int(args.random_q_seed),
+            "scale": float(args.random_q_scale),
+        },
+        "branch_model": {
+            "path": str(args.branch_model) if args.branch_model is not None else None,
+            "tie_eps": float(args.branch_tie_eps),
+            "rollout_policy": str(args.branch_rollout_policy),
+            "rollout_seed": (
+                int(args.branch_rollout_seed)
+                if args.branch_rollout_seed is not None
+                else int(args.eval_seed)
+            ),
+        },
         "means": {
             "greedy_energy": greedy_mean,
             "spt_dp_energy": spt_mean,
             "lpt_dp_energy": lpt_mean,
             **{f"sgbs_{label}_energy": mean_e for label, mean_e in sgbs_means.items()},
+            **(
+                {"randomq_greedy_energy": random_greedy_mean}
+                if random_greedy_mean is not None
+                else {}
+            ),
+            **(
+                {
+                    **{
+                        f"randomq_sgbs_{label}_energy": mean_e
+                        for label, mean_e in random_sgbs_means.items()
+                    }
+                }
+                if random_greedy_mean is not None
+                else {}
+            ),
+            **(
+                {"branch_greedy_energy": branch_greedy_mean}
+                if branch_greedy_mean is not None
+                else {}
+            ),
+            **(
+                {
+                    **{
+                        f"branch_sgbs_{label}_energy": mean_e
+                        for label, mean_e in branch_sgbs_means.items()
+                    }
+                }
+                if branch_greedy_mean is not None
+                else {}
+            ),
         },
         "outputs": {
             "csv": str(out_csv),
@@ -1148,6 +1406,46 @@ def main() -> None:
                         p_subset,
                     ),
                 }
+
+            # Random-Q (optional)
+            if random_greedy_res is not None:
+                schedules["RandomQ Greedy"] = {
+                    "energy": random_greedy_res[viz_idx].total_energy,
+                    "bars": _sequence_schedule_to_bars(
+                        random_greedy_res[viz_idx].job_sequence,
+                        random_greedy_res[viz_idx].start_times,
+                        p_subset,
+                    ),
+                }
+                for label, res_list in random_sgbs_res_map.items():
+                    schedules[f"RandomQ SGBS({label})"] = {
+                        "energy": res_list[viz_idx].total_energy,
+                        "bars": _sequence_schedule_to_bars(
+                            res_list[viz_idx].job_sequence,
+                            res_list[viz_idx].start_times,
+                            p_subset,
+                        ),
+                    }
+
+            # Branch-model constructive (optional)
+            if branch_greedy_res is not None:
+                schedules["Branch Greedy"] = {
+                    "energy": branch_greedy_res[viz_idx].total_energy,
+                    "bars": _sequence_schedule_to_bars(
+                        branch_greedy_res[viz_idx].job_sequence,
+                        branch_greedy_res[viz_idx].start_times,
+                        p_subset,
+                    ),
+                }
+                for label, res_list in branch_sgbs_res_map.items():
+                    schedules[f"Branch SGBS({label})"] = {
+                        "energy": res_list[viz_idx].total_energy,
+                        "bars": _sequence_schedule_to_bars(
+                            res_list[viz_idx].job_sequence,
+                            res_list[viz_idx].start_times,
+                            p_subset,
+                        ),
+                    }
 
             # SPT+DP
             schedules["SPT+DP"] = {

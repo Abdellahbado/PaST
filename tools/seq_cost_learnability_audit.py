@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -59,22 +60,38 @@ def _try_import_lightgbm():
 
 def _infer_feature_layout(
     d: int, meta: Optional[np.ndarray]
-) -> Tuple[int, int, int, int]:
-    """Return (n_jobs_pad, window_feats_dim, proxy_cost_dim, ct_bins) inferred from meta or from d.
+) -> Tuple[int, int, int, int, int, bool]:
+    """Infer feature layout.
 
-    New layout: seq_block(n_jobs_pad) + window_feats(4) + proxy_cost(1) + price_quant(5) + ct_bins + scalars(4)
+    Returns (n_jobs_pad, window_feats_dim, proxy_cost_dim, ct_bins, price_quant_dim, enhanced).
+
+    Supported layouts:
+    - legacy:   seq_block(n_jobs_pad) + ct_bins + scalars(4)
+    - enhanced: seq_block(n_jobs_pad) + window_feats(W) + proxy_cost(P) + ct_bins + price_quant(Q) + scalars(4)
     """
     n_jobs_pad = None
     ct_bins = None
-    window_dim = 4  # Fixed: min, max, sum_gap, frac_large_gap
-    proxy_dim = 1  # Fixed: single proxy cost feature
-    price_quant_dim = 5  # Fixed: q25, q50, q75, longest_cheap, mass_below_q25
+    window_dim = 4  # Enhanced default
+    proxy_dim = 1  # Enhanced default
+    price_quant_dim = 5  # Enhanced default
+    enhanced = False
 
     if meta is not None:
         try:
             # meta is object array of strings like "ct_bins=64"
             meta_s = [str(x) for x in meta.tolist()]
             for s in meta_s:
+                if s.startswith("feature_layout=") and "window_feats" in s:
+                    enhanced = True
+                    m = re.search(r"window_feats\((\d+)\)", s)
+                    if m:
+                        window_dim = int(m.group(1))
+                    m = re.search(r"proxy_cost\((\d+)\)", s)
+                    if m:
+                        proxy_dim = int(m.group(1))
+                    m = re.search(r"price_quant\((\d+)\)", s)
+                    if m:
+                        price_quant_dim = int(m.group(1))
                 if s.startswith("n_jobs_pad="):
                     n_jobs_pad = int(s.split("=", 1)[1])
                 elif s.startswith("ct_bins="):
@@ -83,20 +100,63 @@ def _infer_feature_layout(
             pass
 
     if n_jobs_pad is not None and ct_bins is not None:
-        return int(n_jobs_pad), window_dim, proxy_dim, int(ct_bins)
+        n_jobs_pad_i = int(n_jobs_pad)
+        ct_bins_i = int(ct_bins)
+        d_legacy = n_jobs_pad_i + ct_bins_i + 4
+        d_enh = (
+            n_jobs_pad_i
+            + int(window_dim)
+            + int(proxy_dim)
+            + ct_bins_i
+            + int(price_quant_dim)
+            + 4
+        )
+        if int(d) == int(d_enh):
+            return (
+                n_jobs_pad_i,
+                int(window_dim),
+                int(proxy_dim),
+                ct_bins_i,
+                int(price_quant_dim),
+                True,
+            )
+        if int(d) == int(d_legacy):
+            return n_jobs_pad_i, 0, 0, ct_bins_i, 0, False
 
-    # Fallback: d = n_jobs_pad + 4 (window) + 1 (proxy) + 5 (price_quant) + ct_bins + 4 (scalars)
-    # d = n_jobs_pad + ct_bins + 14
+        # If meta suggests enhanced but dimension doesn't match, still return dims but mark enhanced.
+        if enhanced:
+            return (
+                n_jobs_pad_i,
+                int(window_dim),
+                int(proxy_dim),
+                ct_bins_i,
+                int(price_quant_dim),
+                True,
+            )
+        return n_jobs_pad_i, 0, 0, ct_bins_i, 0, False
+
+    # Fallback inference: try enhanced, then legacy.
     common_bins = [32, 48, 64, 96, 128]
     for b in common_bins:
-        n = d - b - 14  # 14 = 4 window + 1 proxy + 5 price_quant + 4 scalars
-        if 8 <= n <= 512:
-            return int(n), window_dim, proxy_dim, int(b)
+        # Assume enhanced defaults when metadata is missing.
+        n_enh = d - b - (int(window_dim) + int(proxy_dim) + int(price_quant_dim) + 4)
+        if 8 <= n_enh <= 512:
+            return (
+                int(n_enh),
+                int(window_dim),
+                int(proxy_dim),
+                int(b),
+                int(price_quant_dim),
+                True,
+            )
+        n_leg = d - b - 4
+        if 8 <= n_leg <= 512:
+            return int(n_leg), 0, 0, int(b), 0, False
 
-    # Last resort: assume ct_bins=64.
+    # Last resort: assume ct_bins=64 and enhanced.
     b = 64
-    n = max(1, d - b - 14)
-    return int(n), window_dim, proxy_dim, int(b)
+    n = max(1, d - b - (int(window_dim) + int(proxy_dim) + int(price_quant_dim) + 4))
+    return int(n), int(window_dim), int(proxy_dim), int(b), int(price_quant_dim), True
 
 
 def _split_by_inst(
@@ -153,7 +213,7 @@ def _within_instance_spread(y: np.ndarray, inst_id: np.ndarray) -> Dict[str, flo
 
 
 def _avg_regret_pick_from_scores(
-    y: np.ndarray, inst_id: np.ndarray, scores: np.ndarray
+    y: np.ndarray, inst_id: np.ndarray, scores: np.ndarray, *, seed: int = 0
 ) -> Dict[str, float]:
     regret_sum = 0.0
     hit1 = 0
@@ -166,7 +226,18 @@ def _avg_regret_pick_from_scores(
         ss = scores[m]
         best_true = float(np.min(yy))
         best_idx = int(np.argmin(yy))
-        pick = int(np.argmax(ss))
+
+        # Remove candidate-order artifact: if scores tie (e.g., constant within-instance
+        # features), choose uniformly among argmax ties using a deterministic per-instance RNG.
+        mx = float(np.max(ss))
+        ties = np.flatnonzero(ss == mx)
+        if ties.size <= 1:
+            pick = int(np.argmax(ss))
+        else:
+            mix = int(seed) ^ (int(inst) * 2654435761)
+            rng = np.random.default_rng(mix & 0xFFFFFFFF)
+            pick = int(rng.choice(ties))
+
         regret_sum += float(yy[pick] - best_true)
         hit1 += 1 if pick == best_idx else 0
         n_inst += 1
@@ -205,7 +276,13 @@ def _avg_regret_pick_random(
 
 
 def _proxy_sequential_cost_scores(
-    X: np.ndarray, *, n_jobs_pad: int, ct_bins: int
+    X: np.ndarray,
+    *,
+    n_jobs_pad: int,
+    window_dim: int,
+    proxy_dim: int,
+    ct_bins: int,
+    price_quant_dim: int,
 ) -> np.ndarray:
     """Cheap heuristic score from features only.
 
@@ -218,12 +295,44 @@ def _proxy_sequential_cost_scores(
 
     This is *not* DP; it's just a diagnostic baseline.
     """
-    p_seq = X[:, :n_jobs_pad].astype(np.float64)
-    inst_feats = X[:, n_jobs_pad:]
-    ct_ds = inst_feats[:, :ct_bins].astype(np.float64)
-    e_single = inst_feats[:, ct_bins + 0].astype(np.float64)
-    T_limit = inst_feats[:, ct_bins + 1].astype(np.float64)
-    n_jobs = inst_feats[:, ct_bins + 3].astype(np.float64)
+    p_seq = X[:, : int(n_jobs_pad)].astype(np.float64)
+
+    # Layout offsets:
+    # legacy:   [p_seq(n_jobs_pad)] [ct_bins] [scalars(4)]
+    # enhanced: [p_seq] [window(window_dim)] [proxy(proxy_dim)] [ct_bins] [price_quant(price_quant_dim)] [scalars(4)]
+    d = int(X.shape[1])
+    d_enh = (
+        int(n_jobs_pad)
+        + int(window_dim)
+        + int(proxy_dim)
+        + int(ct_bins)
+        + int(price_quant_dim)
+        + 4
+    )
+    d_leg = int(n_jobs_pad) + int(ct_bins) + 4
+
+    is_enh = (
+        d >= d_enh
+        and int(window_dim) > 0
+        and int(proxy_dim) > 0
+        and int(price_quant_dim) > 0
+    )
+
+    if is_enh:
+        ct_start = int(n_jobs_pad) + int(window_dim) + int(proxy_dim)
+        ct_end = ct_start + int(ct_bins)
+        scalars_start = ct_end + int(price_quant_dim)
+    elif d >= d_leg:
+        ct_start = int(n_jobs_pad)
+        ct_end = ct_start + int(ct_bins)
+        scalars_start = ct_end
+    else:
+        return np.zeros((X.shape[0],), dtype=np.float32)
+
+    ct_ds = X[:, ct_start:ct_end].astype(np.float64)
+    e_single = X[:, scalars_start + 0].astype(np.float64)
+    T_limit = X[:, scalars_start + 1].astype(np.float64)
+    n_jobs = X[:, scalars_start + 3].astype(np.float64)
 
     B = X.shape[0]
     out_cost = np.zeros((B,), dtype=np.float64)
@@ -285,7 +394,10 @@ def _train_eval_ridge(
     rmse = float(np.sqrt(np.mean(err * err)))
     # pick best predicted within instance: lower predicted cost is better
     scores = (-yhat_te).astype(np.float32)
-    m_pick = _avg_regret_pick_from_scores(y[test_idx], inst_id[test_idx], scores)
+    scores = (-yhat_te).astype(np.float32)
+    m_pick = _avg_regret_pick_from_scores(
+        y[test_idx], inst_id[test_idx], scores, seed=int(seed)
+    )
 
     out = {"test": {"rmse": rmse, **m_pick}}
     return out
@@ -328,7 +440,9 @@ def _train_eval_lgbm_regressor(
     err = yhat - y_te
     rmse = float(np.sqrt(np.mean(err * err)))
     scores = (-yhat).astype(np.float32)
-    m_pick = _avg_regret_pick_from_scores(y_te, inst_id[test_idx], scores)
+    m_pick = _avg_regret_pick_from_scores(
+        y_te, inst_id[test_idx], scores, seed=int(seed)
+    )
 
     return {"test": {"rmse": rmse, **m_pick}}
 
@@ -404,7 +518,7 @@ def _train_eval_lgbm_ranker(
     )
 
     scores = model.predict(X_te).astype(np.float32)
-    m_pick = _avg_regret_pick_from_scores(y_te, inst_te, scores)
+    m_pick = _avg_regret_pick_from_scores(y_te, inst_te, scores, seed=int(seed))
     return {"test": m_pick}
 
 
@@ -477,18 +591,30 @@ def main() -> None:
         paths, max_instances=int(args.max_instances), seed=int(args.seed)
     )
 
-    n_jobs_pad, window_dim, proxy_dim, ct_bins = _infer_feature_layout(
-        int(X.shape[1]), meta
+    n_jobs_pad, window_dim, proxy_dim, ct_bins, price_quant_dim, enhanced = (
+        _infer_feature_layout(int(X.shape[1]), meta)
     )
 
-    # New feature layout: seq_block + window + proxy + price_quant + ct_bins + scalars
-    # seq_block (n_jobs_pad) | window_feats (4) | proxy_cost (1) | price_quant (5) | ct_bins + scalars (ct_bins + 4)
-    seq_end = n_jobs_pad
-    window_end = seq_end + window_dim
-    proxy_end = window_end + proxy_dim
-    price_quant_end = (
-        proxy_end + 5
-    )  # Fixed: q25, q50, q75, longest_cheap, mass_below_q25
+    # Compute slice boundaries.
+    seq_end = int(n_jobs_pad)
+    if enhanced:
+        window_end = seq_end + int(window_dim)
+        proxy_end = window_end + int(proxy_dim)
+        ct_end = proxy_end + int(ct_bins)
+        price_quant_end = ct_end + int(price_quant_dim)
+        scalars_end = price_quant_end + 4
+    else:
+        window_end = seq_end
+        proxy_end = seq_end
+        ct_end = seq_end + int(ct_bins)
+        price_quant_end = ct_end
+        scalars_end = ct_end + 4
+
+    if int(X.shape[1]) < scalars_end:
+        raise ValueError(
+            f"Feature layout mismatch: d={int(X.shape[1])} < expected_min_d={scalars_end}. "
+            "Regenerate shards or update audit layout inference."
+        )
 
     print(
         "[data] n_samples=",
@@ -505,7 +631,11 @@ def main() -> None:
         window_dim,
         " proxy_dim=",
         proxy_dim,
-        " price_quant_dim=5 ct_bins=",
+        " enhanced=",
+        int(bool(enhanced)),
+        " price_quant_dim=",
+        (int(price_quant_dim) if enhanced else 0),
+        " ct_bins=",
         ct_bins,
     )
 
@@ -514,25 +644,29 @@ def main() -> None:
     print("[baseline:random]", _avg_regret_pick_random(y, inst_id, seed=int(args.seed)))
 
     proxy_scores = _proxy_sequential_cost_scores(
-        X, n_jobs_pad=n_jobs_pad, ct_bins=ct_bins
+        X,
+        n_jobs_pad=n_jobs_pad,
+        window_dim=window_dim,
+        proxy_dim=proxy_dim,
+        ct_bins=ct_bins,
+        price_quant_dim=price_quant_dim,
     )
     print(
         "[baseline:proxy_seq_cost]",
-        _avg_regret_pick_from_scores(y, inst_id, proxy_scores),
+        _avg_regret_pick_from_scores(y, inst_id, proxy_scores, seed=int(args.seed)),
     )
 
     # Feature ablations:
     # - p_only: sequence features (processing times in order)
-    # - window_proxy_only: window + proxy features (new, DP-aligned)
-    # - inst_only: instance features (prices + scalars)
+    # - seq+window+proxy: sequence + DP-aligned extras (only if enhanced)
+    # - inst_only: instance features (ct_bins + [price_quant] + scalars)
     # - all: everything
     p_only = X[:, :seq_end]
-    window_proxy = X[:, seq_end:proxy_end]  # window_feats + proxy_cost
-    inst_only = X[:, price_quant_end:]  # price_quant + ct_bins + scalars
-    all_feats = X
+    inst_only = X[:, proxy_end:scalars_end]
+    all_feats = X[:, :scalars_end]
 
     # Combine sequence with new features.
-    seq_with_window_proxy = X[:, :proxy_end]  # p_seq + window + proxy
+    seq_with_window_proxy = X[:, :proxy_end] if enhanced else p_only
 
     print(
         "\n[regression:ridgetest:all]",

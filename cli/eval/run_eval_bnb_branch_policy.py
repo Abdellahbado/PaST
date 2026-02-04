@@ -31,6 +31,7 @@ import random
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from multiprocessing import get_context
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -44,6 +45,40 @@ from PaST.solvers.branching_policies import (
     XGBoostBranchingPolicy,
 )
 from PaST.train_bb_branch_policy import generate_instance
+
+
+# NOTE: In multiprocessing mode, passing instantiated policy objects (especially
+# model-based ones) to ProcessPool tasks can be extremely slow or hang because
+# those objects may be large and expensive to pickle/ship to workers.
+#
+# Instead, each worker process lazily loads the policy objects the first time it
+# needs them, and caches them for subsequent tasks.
+_WORKER_POLICY_CACHE: Dict[
+    Tuple[str, str, Tuple[int, ...]], Tuple[str, Optional[Callable]]
+] = {}
+
+
+def _load_policy_cached(
+    *,
+    policy_name: str,
+    model_path: Optional[str],
+    duration_vocab: Sequence[int],
+) -> Tuple[str, Optional[Callable]]:
+    key = (
+        str(policy_name or ""),
+        str(model_path or ""),
+        tuple(int(x) for x in duration_vocab),
+    )
+    hit = _WORKER_POLICY_CACHE.get(key)
+    if hit is not None:
+        return hit
+    loaded = _load_policy(
+        policy_name=str(policy_name),
+        model_path=str(model_path) if model_path else None,
+        duration_vocab=duration_vocab,
+    )
+    _WORKER_POLICY_CACHE[key] = loaded
+    return loaded
 
 
 def _parse_duration_vocab(spec: str) -> List[int]:
@@ -123,7 +158,13 @@ def _load_policy(
 
 
 def _summarize(rows: List[Dict[str, Any]], policy_key: str) -> Dict[str, float]:
-    sub = [r for r in rows if r["policy"] == policy_key]
+    # In parallel mode we may not know the exact model policy name upfront
+    # (e.g. 'model(xgb_ranker)'). Allow prefix matches for convenience.
+    if policy_key.endswith("*"):
+        prefix = policy_key[:-1]
+        sub = [r for r in rows if str(r.get("policy", "")).startswith(prefix)]
+    else:
+        sub = [r for r in rows if r["policy"] == policy_key]
     if not sub:
         return {"n": 0.0}
 
@@ -202,7 +243,8 @@ def _solve_one_instance(
     *,
     instance_id: int,
     inst_seed: int,
-    policy_specs: List[Tuple[str, Optional[Callable]]],
+    policies_to_run: List[str],
+    model_path: Optional[str],
     n_jobs: int,
     T: int,
     duration_vocab: Sequence[int],
@@ -211,6 +253,15 @@ def _solve_one_instance(
     time_limit_s: float,
     compute_root_lb: bool,
 ) -> List[Dict[str, Any]]:
+    policy_specs: List[Tuple[str, Optional[Callable]]] = []
+    for pol in policies_to_run:
+        name, fn = _load_policy_cached(
+            policy_name=str(pol),
+            model_path=str(model_path) if model_path else None,
+            duration_vocab=duration_vocab,
+        )
+        policy_specs.append((name, fn))
+
     inst_rng = random.Random(int(inst_seed))
     inst: Instance = generate_instance(
         n_jobs=int(n_jobs),
@@ -293,14 +344,29 @@ def main() -> None:
     else:
         policies_to_run = [str(args.policy)]
 
-    policy_specs: List[Tuple[str, Optional[Callable]]] = []
-    for pol in policies_to_run:
-        name, fn = _load_policy(
-            policy_name=pol,
-            model_path=str(args.model) if args.model else None,
-            duration_vocab=duration_vocab,
-        )
-        policy_specs.append((name, fn))
+    workers = int(getattr(args, "workers", 1) or 1)
+    if workers <= 1:
+        # Safe to resolve exact display names (no multiprocessing fork/spawn).
+        policy_keys: List[str] = []
+        for pol in policies_to_run:
+            name, _fn = _load_policy_cached(
+                policy_name=str(pol),
+                model_path=str(args.model) if args.model else None,
+                duration_vocab=duration_vocab,
+            )
+            policy_keys.append(str(name))
+    else:
+        # IMPORTANT: do not unpickle the model in the parent before creating the
+        # process pool. On Linux, ProcessPoolExecutor defaults to fork, and
+        # unpickling/importing XGBoost/LightGBM/OpenMP in the parent can lead to
+        # workers hanging indefinitely.
+        #
+        # We'll summarize model results via prefix match 'model*'.
+        policy_keys = [
+            "random",
+            "min_w",
+            "model*",
+        ]
 
     out_rows: List[Dict[str, Any]] = []
 
@@ -308,14 +374,14 @@ def main() -> None:
     rng = random.Random(int(args.seed))
     inst_seeds = [rng.randint(0, 2**31 - 1) for _ in range(int(args.num_instances))]
 
-    workers = int(getattr(args, "workers", 1) or 1)
     if workers <= 1:
         for instance_id, inst_seed in enumerate(inst_seeds):
             out_rows.extend(
                 _solve_one_instance(
                     instance_id=int(instance_id),
                     inst_seed=int(inst_seed),
-                    policy_specs=policy_specs,
+                    policies_to_run=policies_to_run,
+                    model_path=str(args.model) if args.model else None,
                     n_jobs=int(args.n_jobs),
                     T=int(args.T),
                     duration_vocab=duration_vocab,
@@ -326,9 +392,8 @@ def main() -> None:
                 )
             )
             if int(args.log_every) > 0 and (instance_id + 1) % int(args.log_every) == 0:
-                keys = [k for k, _ in policy_specs]
                 parts = []
-                for k in keys:
+                for k in policy_keys:
                     s = _summarize(out_rows, k)
                     parts.append(
                         f"{k}: n={int(s.get('n',0))} t_p50={s.get('time_p50',float('nan')):.3f}s "
@@ -341,7 +406,10 @@ def main() -> None:
         # Parallel over instances.
         submitted = 0
         completed = 0
-        with ProcessPoolExecutor(max_workers=int(workers)) as ex:
+        # Use spawn context for robustness with OpenMP-backed libraries.
+        with ProcessPoolExecutor(
+            max_workers=int(workers), mp_context=get_context("spawn")
+        ) as ex:
             futs = []
             for instance_id, inst_seed in enumerate(inst_seeds):
                 futs.append(
@@ -349,7 +417,8 @@ def main() -> None:
                         _solve_one_instance,
                         instance_id=int(instance_id),
                         inst_seed=int(inst_seed),
-                        policy_specs=policy_specs,
+                        policies_to_run=policies_to_run,
+                        model_path=str(args.model) if args.model else None,
                         n_jobs=int(args.n_jobs),
                         T=int(args.T),
                         duration_vocab=list(duration_vocab),
@@ -362,13 +431,17 @@ def main() -> None:
                 submitted += 1
 
             for fut in as_completed(futs):
-                rows_i = fut.result()
+                try:
+                    rows_i = fut.result()
+                except Exception as e:
+                    completed += 1
+                    print(f"[{completed}/{submitted}] worker error: {e!r}")
+                    continue
                 out_rows.extend(rows_i)
                 completed += 1
                 if int(args.log_every) > 0 and completed % int(args.log_every) == 0:
-                    keys = [k for k, _ in policy_specs]
                     parts = []
-                    for k in keys:
+                    for k in policy_keys:
                         s = _summarize(out_rows, k)
                         parts.append(
                             f"{k}: n={int(s.get('n',0))} t_p50={s.get('time_p50',float('nan')):.3f}s "
@@ -378,9 +451,21 @@ def main() -> None:
 
     # Final report
     print("\n[final]")
-    for policy_name, _ in policy_specs:
-        s = _summarize(out_rows, policy_name)
+    # In parallel mode, 'model*' is a prefix summary; also print exact model
+    # policy names observed (e.g. model(xgb_ranker)).
+    for policy_name in policy_keys:
+        s = _summarize(out_rows, str(policy_name))
         print(f"  {policy_name}: {s}")
+    model_names = sorted(
+        {
+            str(r.get("policy"))
+            for r in out_rows
+            if str(r.get("policy", "")).startswith("model(")
+        }
+    )
+    for mn in model_names:
+        s = _summarize(out_rows, mn)
+        print(f"  {mn}: {s}")
 
     if args.out_csv:
         out_path = Path(args.out_csv)

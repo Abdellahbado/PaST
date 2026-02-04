@@ -65,6 +65,12 @@ class BranchAndBoundSolver:
         self.timed_out: bool = False
         self.solve_time_sec: float = 0.0
 
+    def _check_timeout(self, start_time: float) -> bool:
+        if time.time() - start_time > self.time_limit:
+            self.timed_out = True
+            return True
+        return False
+
     def _lpt_heuristic(self) -> List[int]:
         """Longest Processing Time first heuristic."""
         jobs = list(range(self.instance.n_jobs))
@@ -124,8 +130,7 @@ class BranchAndBoundSolver:
     def _branch_and_bound_dfs(
         self, partial_sequence: List[int], remaining_jobs: set, start_time: float
     ):
-        if time.time() - start_time > self.time_limit:
-            self.timed_out = True
+        if self._check_timeout(start_time):
             return
 
         self.nodes_explored += 1
@@ -137,18 +142,31 @@ class BranchAndBoundSolver:
                 self.best_sequence = list(partial_sequence)
             return
 
+        # Timeout check before doing heavier work.
+        if self._check_timeout(start_time):
+            return
+
         # Lower Bound + Blocks
         lb, blocks, _ = self._compute_lower_bound_with_blocks(
             partial_sequence, remaining_jobs
         )
+
+        # Computing the bound can be expensive; re-check timeout.
+        if self._check_timeout(start_time):
+            return
 
         if lb >= self.best_cost:
             return  # Prune by bound
 
         # Bin Packing Heuristic
         if blocks and len(blocks) > 0:
+            if self._check_timeout(start_time):
+                return
             self.binpack_attempts += 1
             packed_jobs = self._try_bin_packing(remaining_jobs, blocks)
+
+            if self._check_timeout(start_time):
+                return
 
             if packed_jobs is not None:
                 # Found valid packing that matches LB exactly
@@ -197,6 +215,8 @@ class BranchAndBoundSolver:
             branch_jobs = [int(unique_pts[pt]) for pt in sorted(unique_pts.keys())]
 
         for job in branch_jobs:
+            if self._check_timeout(start_time):
+                return
             self._branch_and_bound_dfs(
                 partial_sequence + [job], remaining_jobs - {job}, start_time
             )

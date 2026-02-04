@@ -83,87 +83,111 @@ def _downsample_ct(ct: np.ndarray, T: int, bins: int) -> np.ndarray:
     return x.astype(np.float32)
 
 
-def _compute_window_cost_features(
-    ct: np.ndarray, T: int, p_subset: np.ndarray, n_jobs: int, max_window_sizes: int = 5
-) -> np.ndarray:
-    """Compute per-job-duration window-cost statistics (DP-aligned features).
+def _precompute_window_min_per_unit(
+    ct: np.ndarray, T: int, p_subset: np.ndarray, n_jobs: int
+) -> Dict[int, float]:
+    """Precompute min-window-sum per unit time for each duration in the instance.
 
-    For each job duration p found in p_subset, compute:
-    - min_window_sum[p]: min sum of ct over all windows of size p
-    - p10_window_sum[p]: 10th percentile window sum
-    - gap[p] = p10 - min (how much variance in window costs)
-
-    Then aggregate per sequence:
-    - sum of min_window_sums for jobs in sequence
-    - max of min_window_sums
-    - sum of gaps
-    - fraction of jobs with large gaps
-
-    Returns feature vector of shape (n_agg_features,).
+    Returns a dict duration->min_window_sum(duration)/duration.
     """
     if T <= 0 or n_jobs <= 0:
-        return np.zeros((4,), dtype=np.float32)  # Fallback for 4 aggregates
+        return {}
 
     ct_f = ct[:T].astype(np.float64)
-
-    # Compute prefix sums for fast window queries.
     prefix = np.concatenate(([0.0], np.cumsum(ct_f)))  # length T+1
 
-    # Collect distinct non-zero job durations.
     p_vals = p_subset[:n_jobs].astype(np.int64)
     p_vals = p_vals[p_vals > 0]
-    if len(p_vals) == 0:
-        return np.zeros((4,), dtype=np.float32)
+    if p_vals.size == 0:
+        return {}
 
     p_uniq = np.unique(p_vals)
-    p_uniq = p_uniq[p_uniq <= T]  # Only feasible windows
+    p_uniq = p_uniq[p_uniq <= T]
+    if p_uniq.size == 0:
+        return {}
 
-    if len(p_uniq) == 0:
-        return np.zeros((4,), dtype=np.float32)
-
-    min_sums = {}
-    p10_sums = {}
-    gaps = {}
-
-    for p in p_uniq:
-        p_int = int(p)
-        if p_int >= len(prefix):
+    out: Dict[int, float] = {}
+    for p in p_uniq.tolist():
+        d = int(p)
+        if d <= 0 or d >= len(prefix):
             continue
+        w = prefix[d:] - prefix[:-d]
+        if w.size == 0:
+            continue
+        w_min = float(np.min(w))
+        out[d] = float(w_min / float(max(1, d)))
+    return out
 
-        # All windows of size p_int.
-        windows = []
-        for s in range(max(0, len(prefix) - p_int)):
-            windows.append(prefix[s + p_int] - prefix[s])
 
-        if windows:
-            windows = np.array(windows, dtype=np.float64)
-            min_sums[p_int] = float(np.min(windows))
-            p10_sums[p_int] = float(np.percentile(windows, 10))
-            gaps[p_int] = float(p10_sums[p_int] - min_sums[p_int])
+def _compute_window_cost_features_seqaware(
+    *,
+    p_seq: np.ndarray,
+    n_jobs: int,
+    n_jobs_pad: int,
+    min_per_unit: Dict[int, float],
+    n_buckets: int = 10,
+) -> np.ndarray:
+    """Sequence-position-aware window features.
 
-    if not min_sums:
-        return np.zeros((4,), dtype=np.float32)
+    We align a per-duration precomputed table to the *sequence positions*:
+      m_seq[k] = min_window_sum(p_seq[k]) / p_seq[k]
 
-    # Aggregate per sequence: sum over jobs' durations.
-    sum_min = 0.0
-    max_min = 0.0
-    sum_gap = 0.0
-    n_large_gap = 0
-    gap_threshold = np.median(list(gaps.values())) if gaps else 1.0
+    Then we summarize early/late structure using fixed position buckets and
+    prefix/suffix sums.
 
-    for p in p_vals:
-        p_int = int(p)
-        if p_int in min_sums:
-            sum_min += min_sums[p_int]
-            max_min = max(max_min, min_sums[p_int])
-            gap_val = gaps[p_int]
-            sum_gap += gap_val
-            if gap_val > gap_threshold:
-                n_large_gap += 1
+    Output dims:
+      - bucket means: n_buckets
+      - prefix sums: 3 (first 5/10/20)
+      - suffix sums: 3 (last 5/10/20)
+      - global stats: 3 (mean/max/std)
+    => total = n_buckets + 9
+    """
+    n_jobs_i = int(max(0, min(int(n_jobs), int(n_jobs_pad))))
+    if n_jobs_i <= 0:
+        return np.zeros((int(n_buckets) + 9,), dtype=np.float32)
 
-    frac_large_gap = float(n_large_gap) / max(1, len(p_vals))
+    p_seq = np.asarray(p_seq, dtype=np.int32)
+    m = np.zeros((int(n_jobs_pad),), dtype=np.float64)
+    for k in range(n_jobs_i):
+        d = int(p_seq[k])
+        if d > 0:
+            m[k] = float(min_per_unit.get(d, 0.0))
 
-    return np.array([sum_min, max_min, sum_gap, frac_large_gap], dtype=np.float32)
+    # Bucket means over fixed position ranges.
+    n_b = int(max(1, n_buckets))
+    bucket_size = int(math.ceil(float(n_jobs_pad) / float(n_b)))
+    bucket_means: List[float] = []
+    for b in range(n_b):
+        a = b * bucket_size
+        c = min(int(n_jobs_pad), (b + 1) * bucket_size)
+        if a >= c:
+            bucket_means.append(0.0)
+            continue
+        # Only count real jobs.
+        aa = min(a, n_jobs_i)
+        cc = min(c, n_jobs_i)
+        if aa >= cc:
+            bucket_means.append(0.0)
+            continue
+        bucket_means.append(float(np.mean(m[aa:cc])))
+
+    # Prefix/suffix sums on real positions.
+    def _sum_first(k: int) -> float:
+        kk = min(n_jobs_i, int(k))
+        return float(np.sum(m[:kk]))
+
+    def _sum_last(k: int) -> float:
+        kk = min(n_jobs_i, int(k))
+        return float(np.sum(m[n_jobs_i - kk : n_jobs_i]))
+
+    prefix_sums = [_sum_first(5), _sum_first(10), _sum_first(20)]
+    suffix_sums = [_sum_last(5), _sum_last(10), _sum_last(20)]
+
+    core = m[:n_jobs_i]
+    stats = [float(np.mean(core)), float(np.max(core)), float(np.std(core))]
+
+    out = np.array(bucket_means + prefix_sums + suffix_sums + stats, dtype=np.float32)
+    return out
 
 
 def _compute_price_quantile_features(ct: np.ndarray, T: int) -> np.ndarray:
@@ -195,70 +219,106 @@ def _compute_price_quantile_features(ct: np.ndarray, T: int) -> np.ndarray:
     )
 
 
+def _proxy_cost_with_lookahead(
+    *,
+    p_seq: np.ndarray,
+    ct: np.ndarray,
+    T_limit: int,
+    e_single: int,
+    n_jobs: int,
+    lookahead: int,
+) -> float:
+    if n_jobs <= 0 or T_limit <= 0:
+        return 0.0
+
+    n_jobs_i = min(int(n_jobs), len(p_seq))
+    T_limit_i = max(1, int(T_limit))
+    T_actual = min(int(T_limit_i), len(ct))
+    if T_actual <= 0 or n_jobs_i <= 0:
+        return 0.0
+
+    ct_f = ct[:T_actual].astype(np.float64)
+    e_single_f = float(max(1, int(e_single)))
+    prefix = np.concatenate(([0.0], np.cumsum(ct_f)))
+
+    t = 0
+    cost = 0.0
+    la = int(max(0, min(int(lookahead), T_actual)))
+
+    for j in range(n_jobs_i):
+        p_j = int(p_seq[j])
+        if p_j <= 0:
+            continue
+
+        if t >= T_actual:
+            cost += float(p_j * ct_f[-1])
+            continue
+
+        if la <= 0:
+            # No-lookahead sequential placement.
+            end = min(t + p_j, T_actual)
+            cost += float(prefix[end] - prefix[t])
+            t = end
+            continue
+
+        best_cost = float("inf")
+        best_end = min(t + p_j, T_actual)
+
+        max_off = min(la, max(0, T_actual - t))
+        for off in range(max_off + 1):
+            start = t + off
+            if start + p_j > T_actual:
+                break
+            end = start + p_j
+            w = float(prefix[end] - prefix[start])
+            if w < best_cost:
+                best_cost = w
+                best_end = end
+
+        if best_cost < float("inf"):
+            cost += float(best_cost)
+            t = int(best_end)
+
+    result = float(cost * e_single_f)
+    return min(float(1e10), max(0.0, result))
+
+
 def _compute_proxy_cost_features(
     p_seq: np.ndarray, ct: np.ndarray, T_limit: int, e_single: int, n_jobs: int
-) -> float:
-    """Compute accurate sequential cost (no binning) as a single proxy feature.
+) -> np.ndarray:
+    """Multiple proxy variants so the model can learn when waiting helps.
 
-    Schedule jobs sequentially with exact ct (not downsampled), allowing small
-    lookahead to find low-cost placements.
-
-    Returns a single float representing the predicted cost (useful as a ranker feature).
+    Returns float32 vector:
+      [cost_la0, cost_la8, cost_la16, delta16_vs_0]
     """
     try:
-        if n_jobs <= 0 or T_limit <= 0:
-            return 0.0
-
-        n_jobs = min(int(n_jobs), len(p_seq))
-        T_limit = max(1, int(T_limit))
-        T_actual = min(int(T_limit), len(ct))
-
-        if T_actual <= 0 or n_jobs <= 0:
-            return 0.0
-
-        ct_f = ct[:T_actual].astype(np.float64)
-        e_single_f = float(max(1, int(e_single)))
-
-        # Prefix sums for fast window query.
-        prefix = np.concatenate(([0.0], np.cumsum(ct_f)))
-
-        t = 0
-        cost = 0.0
-        lookahead = min(16, T_actual)  # Small lookahead for placement.
-
-        for j in range(n_jobs):
-            p_j = int(p_seq[j])
-            if p_j <= 0:
-                continue
-
-            if t >= T_actual:
-                # Past horizon; just use last price.
-                cost += float(p_j * ct_f[-1])
-                continue
-
-            # Find best start within lookahead.
-            best_cost = float("inf")
-            best_start = t
-
-            for start_offset in range(min(lookahead, T_actual - t)):
-                start = t + start_offset
-                if start + p_j > T_actual:
-                    break
-                window_end = min(start + p_j, T_actual)
-                window_cost = float(prefix[window_end] - prefix[start])
-                if window_cost < best_cost:
-                    best_cost = window_cost
-                    best_start = window_end
-
-            if best_cost < float("inf"):
-                cost += float(best_cost)
-                t = best_start
-
-        result = float(cost * e_single_f)
-        # Clamp to reasonable range to avoid overflow.
-        return min(float(1e10), max(0.0, result))
+        c0 = _proxy_cost_with_lookahead(
+            p_seq=p_seq,
+            ct=ct,
+            T_limit=T_limit,
+            e_single=e_single,
+            n_jobs=n_jobs,
+            lookahead=0,
+        )
+        c8 = _proxy_cost_with_lookahead(
+            p_seq=p_seq,
+            ct=ct,
+            T_limit=T_limit,
+            e_single=e_single,
+            n_jobs=n_jobs,
+            lookahead=8,
+        )
+        c16 = _proxy_cost_with_lookahead(
+            p_seq=p_seq,
+            ct=ct,
+            T_limit=T_limit,
+            e_single=e_single,
+            n_jobs=n_jobs,
+            lookahead=16,
+        )
+        return np.array([c0, c8, c16, float(c16 - c0)], dtype=np.float32)
     except Exception:
-        return 0.0
+        return np.zeros((4,), dtype=np.float32)
 
 
 def _seq_from_perm(perm: Sequence[int], n_jobs_pad: int) -> np.ndarray:
@@ -562,6 +622,9 @@ def generate_dataset_shard(
                 axis=0,
             ).astype(np.float32)
 
+            # Precompute duration->min_window_sum_per_unit once per instance.
+            win_min_per_unit = _precompute_window_min_per_unit(ct_i, T_feat, p_i, n)
+
             for s in seqs:
                 seq_rows.append(_seq_from_perm(s, n_jobs_pad))
                 p_rows.append(p_i.astype(np.int32, copy=False))
@@ -578,8 +641,12 @@ def generate_dataset_shard(
                     p_seq = p_seq[:n_jobs_pad]
 
                 # NEW: Window-cost features (DP-aligned).
-                window_feats = _compute_window_cost_features(
-                    ct_i, T_feat, p_i, n, max_window_sizes=5
+                window_feats = _compute_window_cost_features_seqaware(
+                    p_seq=p_seq,
+                    n_jobs=n,
+                    n_jobs_pad=n_jobs_pad,
+                    min_per_unit=win_min_per_unit,
+                    n_buckets=10,
                 )
 
                 # NEW: Stronger proxy cost for this sequence.
@@ -591,7 +658,7 @@ def generate_dataset_shard(
                     [
                         p_seq.astype(np.float32),
                         window_feats,
-                        np.array([proxy_cost], dtype=np.float32),
+                        proxy_cost.astype(np.float32),
                         inst_feats,
                     ],
                     axis=0,
@@ -652,7 +719,7 @@ def generate_dataset_shard(
                 f"shard_id={shard_id}",
                 f"num_shards={num_shards}",
                 f"dp_batch_max={int(dp_batch_max or 0)}",
-                f"feature_layout=seq_block({n_jobs_pad})+window_feats(4)+proxy_cost(1)+price_quant(5)+ct_bins({int(ct_bins)})+scalars(4)",
+                f"feature_layout=seq_block({n_jobs_pad})+window_feats({int(window_feats.shape[0])})+proxy_cost({int(proxy_cost.shape[0])})+ct_bins({int(ct_bins)})+price_quant(5)+scalars(4)",
                 f"total_features={X_all.shape[1] if len(X_list) > 0 else 'unknown'}",
             ],
             dtype=object,
@@ -676,13 +743,20 @@ def _split_by_inst(
 
 
 def _eval_metrics(
-    X: np.ndarray, y: np.ndarray, inst_id: np.ndarray, yhat: np.ndarray
+    X: np.ndarray,
+    y: np.ndarray,
+    inst_id: np.ndarray,
+    yhat: np.ndarray,
+    *,
+    seed: int = 0,
 ) -> Dict[str, float]:
     # RMSE overall
     err = yhat - y
     rmse = float(np.sqrt(np.mean(err * err)))
 
     # Within-instance: pick best predicted sequence among samples of same instance.
+    # Use deterministic random tie-breaking so constant-score models don't
+    # accidentally get credit for candidate ordering.
     regret_sum = 0.0
     n_inst = 0
     for inst in np.unique(inst_id):
@@ -692,7 +766,13 @@ def _eval_metrics(
         yy = y[m]
         yh = yhat[m]
         best_true = float(np.min(yy))
-        pick = int(np.argmin(yh))
+        min_pred = float(np.min(yh))
+        tied = np.flatnonzero(yh == min_pred)
+        if tied.size == 1:
+            pick = int(tied[0])
+        else:
+            rng = np.random.default_rng((int(seed) * 1000003 + int(inst)) & 0xFFFFFFFF)
+            pick = int(rng.choice(tied))
         regret_sum += float(yy[pick] - best_true)
         n_inst += 1
 
@@ -709,6 +789,7 @@ def _eval_metrics_by_score(
     y_true: np.ndarray,
     inst_id: np.ndarray,
     scores: np.ndarray,
+    seed: int = 0,
 ) -> Dict[str, float]:
     """Evaluate selection quality when the model outputs scores (higher=better).
 
@@ -725,10 +806,18 @@ def _eval_metrics_by_score(
         yy = y_true[m]
         ss = scores[m]
         best_true = float(np.min(yy))
-        best_idx = int(np.argmin(yy))
-        pick = int(np.argmax(ss))
+        min_true = float(np.min(yy))
+        best_idxs = set(np.flatnonzero(yy == min_true).tolist())
+
+        max_score = float(np.max(ss))
+        tied = np.flatnonzero(ss == max_score)
+        if tied.size == 1:
+            pick = int(tied[0])
+        else:
+            rng = np.random.default_rng((int(seed) * 1000003 + int(inst)) & 0xFFFFFFFF)
+            pick = int(rng.choice(tied))
         regret_sum += float(yy[pick] - best_true)
-        hit1 += 1 if pick == best_idx else 0
+        hit1 += 1 if pick in best_idxs else 0
         n_inst += 1
 
     return {
@@ -838,8 +927,12 @@ def cmd_train_ridge(args) -> None:
     yhat_train = model.predict(X_train).astype(np.float32)
     yhat_test = model.predict(X_test).astype(np.float32)
 
-    m_train = _eval_metrics(X_train, y[train_idx], inst_id[train_idx], yhat_train)
-    m_test = _eval_metrics(X_test, y[test_idx], inst_id[test_idx], yhat_test)
+    m_train = _eval_metrics(
+        X_train, y[train_idx], inst_id[train_idx], yhat_train, seed=int(args.seed)
+    )
+    m_test = _eval_metrics(
+        X_test, y[test_idx], inst_id[test_idx], yhat_test, seed=int(args.seed)
+    )
 
     out = Path(args.model_out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -877,8 +970,12 @@ def cmd_train_elasticnet(args) -> None:
     yhat_train = model.predict(X_train).astype(np.float32)
     yhat_test = model.predict(X_test).astype(np.float32)
 
-    m_train = _eval_metrics(X_train, y[train_idx], inst_id[train_idx], yhat_train)
-    m_test = _eval_metrics(X_test, y[test_idx], inst_id[test_idx], yhat_test)
+    m_train = _eval_metrics(
+        X_train, y[train_idx], inst_id[train_idx], yhat_train, seed=int(args.seed)
+    )
+    m_test = _eval_metrics(
+        X_test, y[test_idx], inst_id[test_idx], yhat_test, seed=int(args.seed)
+    )
 
     out = Path(args.model_out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -925,8 +1022,12 @@ def cmd_train_lgbm(args) -> None:
     yhat_train = model.predict(X_train).astype(np.float32)
     yhat_test = model.predict(X_test).astype(np.float32)
 
-    m_train = _eval_metrics(X_train, y_train, inst_id[train_idx], yhat_train)
-    m_test = _eval_metrics(X_test, y_test, inst_id[test_idx], yhat_test)
+    m_train = _eval_metrics(
+        X_train, y_train, inst_id[train_idx], yhat_train, seed=int(args.seed)
+    )
+    m_test = _eval_metrics(
+        X_test, y_test, inst_id[test_idx], yhat_test, seed=int(args.seed)
+    )
 
     out = Path(args.model_out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -994,10 +1095,16 @@ def cmd_train_lgbm_ranker(args) -> None:
     s_tr = model.predict(X_tr).astype(np.float32)
     s_te = model.predict(X_te).astype(np.float32)
     m_train = _eval_metrics_by_score(
-        y_true=y_tr, inst_id=np.repeat(np.arange(len(group_tr)), group_tr), scores=s_tr
+        y_true=y_tr,
+        inst_id=np.repeat(np.arange(len(group_tr)), group_tr),
+        scores=s_tr,
+        seed=int(args.seed),
     )
     m_test = _eval_metrics_by_score(
-        y_true=y_te, inst_id=np.repeat(np.arange(len(group_te)), group_te), scores=s_te
+        y_true=y_te,
+        inst_id=np.repeat(np.arange(len(group_te)), group_te),
+        scores=s_te,
+        seed=int(args.seed),
     )
 
     print(f"[train_lgbm_ranker] saved {out}")
@@ -1042,8 +1149,12 @@ def cmd_train_xgb(args) -> None:
     yhat_train = model.predict(X_train).astype(np.float32)
     yhat_test = model.predict(X_test).astype(np.float32)
 
-    m_train = _eval_metrics(X_train, y_train, inst_id[train_idx], yhat_train)
-    m_test = _eval_metrics(X_test, y_test, inst_id[test_idx], yhat_test)
+    m_train = _eval_metrics(
+        X_train, y_train, inst_id[train_idx], yhat_train, seed=int(args.seed)
+    )
+    m_test = _eval_metrics(
+        X_test, y_test, inst_id[test_idx], yhat_test, seed=int(args.seed)
+    )
 
     out = Path(args.model_out)
     out.parent.mkdir(parents=True, exist_ok=True)
