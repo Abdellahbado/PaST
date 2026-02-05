@@ -89,6 +89,12 @@ def main() -> None:
         default=1.0,
         help="Dirichlet concentration for the simulated split (lower = more unbalanced)",
     )
+    ap.add_argument(
+        "--tie-break",
+        choices=["cost", "early"],
+        default="early",
+        help="Tie-break among equal-cost optima (early = prefer earlier schedule)",
+    )
 
     args = ap.parse_args()
 
@@ -127,7 +133,9 @@ def main() -> None:
 
     prices = np.array(raw.ct, dtype=np.float64)
 
-    res = solve_optimal_benchmark_dp(p_subset.tolist(), prices)
+    res = solve_optimal_benchmark_dp(
+        p_subset.tolist(), prices, tie_break=str(args.tie_break)
+    )
 
     sum_p = int(np.sum(p_subset)) if len(p_subset) else 0
 

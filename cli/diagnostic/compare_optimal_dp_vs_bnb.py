@@ -33,9 +33,8 @@ import argparse
 import json
 import os
 import time
-from dataclasses import asdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
@@ -66,6 +65,7 @@ def _parse_seeds(spec: str) -> List[int]:
     - "0:9:2" meaning 0..9 step 2
     - "1,2,5,9"
     """
+
     spec = spec.strip()
     if "," in spec:
         return [int(x.strip()) for x in spec.split(",") if x.strip()]
@@ -111,7 +111,6 @@ def _pick_machine(
 def _bnb_sequence_to_schedule(
     sequence: List[int], processing_times: np.ndarray, starts: List[int]
 ) -> Tuple[Tuple[int, int, int], ...]:
-    # starts list is aligned with the evaluation order (sequence order)
     out: List[Tuple[int, int, int]] = []
     for job_id, s in zip(sequence, starts):
         p = int(processing_times[int(job_id)])
@@ -141,8 +140,7 @@ def _plot_price_and_schedules(
     ax.set_ylabel("price")
     ax.set_title(title)
 
-    # Draw schedules as translucent bars below the curve.
-    # Two rows: DP at y=-0.15, BnB at y=-0.30 (relative offsets).
+    # Draw schedules as bars below the curve.
     y0 = float(np.min(prices))
     y_span = float(np.max(prices) - np.min(prices) + 1e-9)
 
@@ -174,6 +172,7 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
     machine_policy = str(args_dict["machine_policy"])
     machine_index = int(args_dict["machine_index"])
     bnb_time_limit = float(args_dict["bnb_time_limit"])
+    dp_tie_break = str(args_dict.get("dp_tie_break", "early"))
     out_dir = str(args_dict["out_dir"])
 
     # Reproducible RNGs
@@ -210,7 +209,10 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
     # --- DP ---
     t0 = time.perf_counter()
     dp_res = solve_optimal_benchmark_dp(
-        p_subset.tolist(), prices, job_ids=range(len(p_subset))
+        p_subset.tolist(),
+        prices,
+        job_ids=range(len(p_subset)),
+        tie_break=dp_tie_break,
     )
     dp_time = float(time.perf_counter() - t0)
 
@@ -238,7 +240,6 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
     else:
         bnb_sched = ()
 
-    # DP schedule already produced
     dp_sched = dp_res.schedule
 
     # Save artifacts
@@ -257,9 +258,11 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
         "sum_p_sm": int(np.sum(p_subset)) if len(p_subset) else 0,
         "unique_p_sm": int(len(set(map(int, p_subset.tolist())))),
         "dp": {
+            "tie_break": dp_tie_break,
             "feasible": bool(dp_res.feasible),
             "cost": float(dp_res.cost),
             "time_sec": float(dp_time),
+            "finish_time": int(dp_res.finish_time),
             "schedule": [list(x) for x in dp_sched],
         },
         "bnb": {
@@ -282,7 +285,10 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
     with open(out_json, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, sort_keys=True)
 
-    title = f"{seed_tag} | DP {dp_res.cost:.3f} ({dp_time:.2f}s) vs BnB {float(bnb_cost):.3f} ({bnb_time:.2f}s)"
+    title = (
+        f"{seed_tag} | DP {dp_res.cost:.3f} ({dp_time:.2f}s) "
+        f"vs BnB {float(bnb_cost):.3f} ({bnb_time:.2f}s)"
+    )
     _plot_price_and_schedules(out_png, prices, dp_sched, bnb_sched, title)
 
     return payload
@@ -311,6 +317,12 @@ def main() -> None:
         type=float,
         default=0.0,
         help="Seconds. 0 means no limit (very large).",
+    )
+    ap.add_argument(
+        "--dp-tie-break",
+        choices=["cost", "early"],
+        default="early",
+        help="Tie-break among equal-cost DP optima (early = prefer earlier schedule)",
     )
 
     args = ap.parse_args()
@@ -341,10 +353,10 @@ def main() -> None:
         "machine_policy": str(args.machine_policy),
         "machine_index": int(args.machine_index),
         "bnb_time_limit": float(args.bnb_time_limit),
+        "dp_tie_break": str(args.dp_tie_break),
         "out_dir": str(out_dir),
     }
 
-    # Run
     from multiprocessing import get_context
 
     ctx = get_context("spawn")
@@ -358,7 +370,6 @@ def main() -> None:
             for payload in pool.starmap(_run_one, [(int(s), args_dict) for s in seeds]):
                 results.append(payload)
 
-    # Write a small CSV summary for convenience
     summary_csv = os.path.join(out_dir, "summary.csv")
     lines = [
         "seed,scale,T,m,n,machine,n_jobs_sm,sum_p_sm,unique_p_sm,dp_cost,dp_time_sec,bnb_cost,bnb_time_sec,bnb_nodes,cost_match,bnb_timed_out"

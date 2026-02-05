@@ -61,6 +61,9 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 
+_EPS = 1e-12
+
+
 @dataclass(frozen=True)
 class BenchmarkJob:
     id: int
@@ -93,6 +96,7 @@ def solve_optimal_benchmark_dp(
     prices: np.ndarray,
     *,
     job_ids: Optional[Iterable[int]] = None,
+    tie_break: str = "cost",
 ) -> DPResult:
     """Solve the simplified benchmark exactly.
 
@@ -101,6 +105,10 @@ def solve_optimal_benchmark_dp(
         prices: per-slot TOU prices, length T.
         job_ids: optional job IDs to attach to returned schedule. If omitted,
                  IDs are assigned 0..N-1.
+        tie_break: tie-breaking rule among equal-cost optima.
+            - "cost": cost only (any optimal schedule)
+            - "early": among equal-cost schedules, minimize sum of job start times;
+              then minimize finish time.
 
     Returns:
         DPResult with feasibility, optimal cost, schedule, and finish_time.
@@ -119,6 +127,10 @@ def solve_optimal_benchmark_dp(
 
     if n_jobs == 0:
         return DPResult(True, 0.0, (), 0)
+
+    tie_break = str(tie_break).strip().lower()
+    if tie_break not in {"cost", "early"}:
+        raise ValueError("tie_break must be 'cost' or 'early'")
 
     total_p = int(sum(p_list))
     if total_p > T:
@@ -183,12 +195,15 @@ def solve_optimal_benchmark_dp(
             used_cache[state] = tup
             return tup
 
-        dp_layers: List[Dict[int, float]] = [dict() for _ in range(T + 1)]
-        dp_layers[0][0] = 0.0
+        # dp_layers[t][state] = (cost, penalty)
+        # penalty is used only when tie_break == "early".
+        dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
+        dp_layers[0][0] = (0.0, 0)
         parent: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
         # parent[(t2, s2)] = (t1, s1, L) with L=0 for idle, else job length.
 
         best_final_cost = float("inf")
+        best_final_pen = 2**63 - 1
         best_final_time = -1
 
         for t in range(T + 1):
@@ -197,24 +212,48 @@ def solve_optimal_benchmark_dp(
                 continue
 
             # If final state reached at time t, track best.
-            c_final = layer.get(final_state)
-            if c_final is not None and c_final < best_final_cost:
-                best_final_cost = float(c_final)
-                best_final_time = int(t)
+            v_final = layer.get(final_state)
+            if v_final is not None:
+                c_final, p_final = float(v_final[0]), int(v_final[1])
+                better = c_final < best_final_cost
+                if (
+                    tie_break == "early"
+                    and not better
+                    and abs(c_final - best_final_cost) <= _EPS
+                ):
+                    better = p_final < best_final_pen or (
+                        p_final == best_final_pen and int(t) < best_final_time
+                    )
+                if better:
+                    best_final_cost = c_final
+                    best_final_pen = p_final
+                    best_final_time = int(t)
 
             if t == T:
                 continue
 
             # Idle transition: (t,state)->(t+1,state)
             next_layer = dp_layers[t + 1]
-            for state, c0 in layer.items():
+            for state, (c0, p0) in layer.items():
                 prev = next_layer.get(state)
-                if prev is None or c0 < prev:
-                    next_layer[state] = float(c0)
+                if prev is None:
+                    next_layer[state] = (float(c0), int(p0))
                     parent[(t + 1, state)] = (t, state, 0)
+                else:
+                    c_prev, p_prev = float(prev[0]), int(prev[1])
+                    better = c0 < c_prev
+                    if (
+                        tie_break == "early"
+                        and not better
+                        and abs(float(c0) - c_prev) <= _EPS
+                    ):
+                        better = p0 < p_prev
+                    if better:
+                        next_layer[state] = (float(c0), int(p0))
+                        parent[(t + 1, state)] = (t, state, 0)
 
             # Job transitions
-            for state, c0 in layer.items():
+            for state, (c0, p0) in layer.items():
                 used = decode_used(state)
                 for i, L in enumerate(lengths_list):
                     if used[i] >= int(totals[i]):
@@ -224,12 +263,27 @@ def solve_optimal_benchmark_dp(
                         continue
 
                     new_state = state + int(inc[i])
-                    cand = float(c0 + (prefix[end] - prefix[t]))
+                    cand_cost = float(c0 + (prefix[end] - prefix[t]))
+                    cand_pen = int(p0)
+                    if tie_break == "early":
+                        cand_pen += int(t)
                     target_layer = dp_layers[end]
                     prev = target_layer.get(new_state)
-                    if prev is None or cand < prev:
-                        target_layer[new_state] = cand
+                    if prev is None:
+                        target_layer[new_state] = (cand_cost, cand_pen)
                         parent[(end, new_state)] = (t, state, int(L))
+                    else:
+                        prev_cost, prev_pen = float(prev[0]), int(prev[1])
+                        better = cand_cost < prev_cost
+                        if (
+                            tie_break == "early"
+                            and not better
+                            and abs(cand_cost - prev_cost) <= _EPS
+                        ):
+                            better = cand_pen < prev_pen
+                        if better:
+                            target_layer[new_state] = (cand_cost, cand_pen)
+                            parent[(end, new_state)] = (t, state, int(L))
 
         if not np.isfinite(best_final_cost) or best_final_time < 0:
             return DPResult(False, float("inf"), (), 0)
@@ -269,10 +323,12 @@ def solve_optimal_benchmark_dp(
             x //= int(radices[i])
 
     dp = np.full((T + 1, n_states), np.inf, dtype=np.float64)
+    dp_pen = np.full((T + 1, n_states), np.iinfo(np.int32).max, dtype=np.int32)
     parent_prev_state = np.full((T + 1, n_states), -1, dtype=np.int32)
     parent_len = np.full((T + 1, n_states), -1, dtype=np.int16)  # 0 idle, >0 job
 
     dp[0, 0] = 0.0
+    dp_pen[0, 0] = 0
 
     # Precompute feasible states for each length index once (independent of time).
     feasible_by_i: List[np.ndarray] = []
@@ -281,17 +337,26 @@ def solve_optimal_benchmark_dp(
 
     for t in range(T + 1):
         row = dp[t]
+        row_pen = dp_pen[t]
         if not np.isfinite(row).any():
             continue
 
         # Idle transition (waiting is free)
         if t < T:
             nxt = dp[t + 1]
+            nxt_pen = dp_pen[t + 1]
+
             improved = row < nxt
+            if tie_break == "early":
+                eq = np.isclose(row, nxt, rtol=0.0, atol=_EPS)
+                improved = improved | (eq & (row_pen < nxt_pen))
+
             if improved.any():
-                nxt[improved] = row[improved]
-                parent_prev_state[t + 1, improved] = np.nonzero(improved)[0]
-                parent_len[t + 1, improved] = 0
+                idxs = np.nonzero(improved)[0]
+                nxt[idxs] = row[idxs]
+                nxt_pen[idxs] = row_pen[idxs]
+                parent_prev_state[t + 1, idxs] = idxs
+                parent_len[t + 1, idxs] = 0
 
         # Job transitions
         for i, L in enumerate(lengths_list):
@@ -306,28 +371,47 @@ def solve_optimal_benchmark_dp(
 
             s2 = feasible_states + int(inc[i])
             cand = row[feasible_states] + float(prefix[end] - prefix[t])
+            cand_pen = row_pen[feasible_states]
+            if tie_break == "early":
+                cand_pen = cand_pen + int(t)
+
             tgt = dp[end, s2]
+            tgt_pen = dp_pen[end, s2]
             better = cand < tgt
+            if tie_break == "early":
+                eq = np.isclose(cand, tgt, rtol=0.0, atol=_EPS)
+                better = better | (eq & (cand_pen < tgt_pen))
+
             if better.any():
                 idxs = np.nonzero(better)[0]
                 tgt[idxs] = cand[idxs]
                 dp[end, s2] = tgt
+                dp_pen[end, s2[idxs]] = cand_pen[idxs]
                 parent_prev_state[end, s2[idxs]] = feasible_states[idxs]
                 parent_len[end, s2[idxs]] = L
 
-    opt_cost = float(dp[T, final_state])
-    if not np.isfinite(opt_cost):
+    # Choose best finishing time for the final state.
+    col = dp[:, final_state]
+    if not np.isfinite(col).any():
         return DPResult(False, float("inf"), (), 0)
+
+    opt_cost = float(np.min(col))
+    best_t_candidates = np.where(np.isclose(col, opt_cost, rtol=0.0, atol=_EPS))[0]
+    if tie_break == "early":
+        pens = dp_pen[best_t_candidates, final_state]
+        min_pen = int(np.min(pens))
+        best_t_candidates = best_t_candidates[pens == min_pen]
+    best_t = int(np.min(best_t_candidates))
 
     # Backtrack to recover segments (start, length). Ignore idle steps.
     segments: List[Tuple[int, int]] = []
-    t = T
+    t = best_t
     s = final_state
     while not (t == 0 and s == 0):
         L = int(parent_len[t, s])
         prev_s = int(parent_prev_state[t, s])
         if L < 0 or prev_s < 0:
-            return DPResult(True, opt_cost, (), T)
+            return DPResult(True, opt_cost, (), int(best_t))
         if L == 0:
             t -= 1
             s = prev_s
@@ -356,6 +440,8 @@ def solve_optimal_benchmark_dp(
 def solve_optimal_benchmark_dp_counts(
     counts_by_p: Dict[int, int],
     prices: np.ndarray,
+    *,
+    tie_break: str = "cost",
 ) -> DPResult:
     """Counts-based convenience wrapper.
 
@@ -372,7 +458,7 @@ def solve_optimal_benchmark_dp_counts(
             raise ValueError("counts must be non-negative")
         processing_times.extend([p] * c)
 
-    return solve_optimal_benchmark_dp(processing_times, prices)
+    return solve_optimal_benchmark_dp(processing_times, prices, tie_break=tie_break)
 
 
 def _demo() -> None:
