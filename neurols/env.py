@@ -32,7 +32,14 @@ from PaST.neurols.operators import OPERATORS, OPERATOR_BY_ID, OperatorID
 from PaST.neurols.perturbations import PERTURBATION_BY_ID, PerturbationID
 from PaST.neurols.action_space import ActionSpace, ActionType, AANP_SPACE, DecodedAction
 from PaST.neurols.candidate_generator import CandidateGenerator, CandidateConfig
-from PaST.neurols.move_evaluator import MoveEvaluator
+from PaST.neurols.move_evaluator import MoveEvaluator, FullEvaluation, MoveEvaluation
+from PaST.neurols.price_embedding import PriceFeatureExtractor
+
+
+def _per_machine_energy_and_makespan(full_eval: FullEvaluation):
+    per_machine_energy = [float(me.energy) for me in full_eval.per_machine]
+    per_machine_makespan = [int(me.makespan) for me in full_eval.per_machine]
+    return per_machine_energy, per_machine_makespan
 
 
 @dataclass
@@ -106,6 +113,7 @@ class NeuroLSEnv:
         self._processing_times: Optional[np.ndarray] = None
         self._ct: Optional[np.ndarray] = None
         self._machine_energy_rates: Optional[np.ndarray] = None
+        self._price_per_hour: Optional[np.ndarray] = None  # (hours_per_day, 5)
 
         # RNG for perturbations
         self._rng = np.random.default_rng()
@@ -142,10 +150,15 @@ class NeuroLSEnv:
         # Extract instance data as numpy arrays
         # RawInstance fields: .p (processing times), .ct (per-slot prices), .e (energy rates)
         self._processing_times = np.asarray(instance.p, dtype=np.int64)
-        self._ct = np.asarray(instance.ct, dtype=np.float64)
+        # Truncate to K so the price feature has consistent length K.
+        self._ct = np.asarray(instance.ct[:K], dtype=np.float64)
         self._machine_energy_rates = np.asarray(instance.e, dtype=np.float64)
         n = len(self._processing_times)
         m = instance.m
+
+        # Cache per-hour price features for the CNN encoder (constant per episode)
+        _price_extractor = PriceFeatureExtractor(self._ct, K)
+        self._price_per_hour = _price_extractor.get_per_hour_features()  # (20, 5)
 
         # Create evaluator
         self._evaluator = MoveEvaluator(
@@ -157,8 +170,9 @@ class NeuroLSEnv:
         )
 
         # Create candidate generator
+        # EnvConfig.top_k controls how many moves we evaluate in large neighborhoods.
         cand_config = CandidateConfig(
-            top_k=self.config.top_k,
+            max_moves_topk=self.config.top_k,
             use_proxy_ranking=self.config.use_proxy,
         )
         self._candidate_gen = CandidateGenerator(
@@ -188,7 +202,7 @@ class NeuroLSEnv:
 
         # Evaluate initial solution
         self._current_eval = self._evaluator.evaluate_solution(solution)
-        initial_cost = self._current_eval.total_cost
+        initial_cost = float(self._current_eval.total_energy)
 
         self._initial_cost = initial_cost
         self._best_cost_episode = initial_cost
@@ -206,13 +220,12 @@ class NeuroLSEnv:
         # Set costs from evaluation
         self.state.current_cost = initial_cost
         self.state.best_cost = initial_cost
-        self.state.per_machine_energy = getattr(
-            self._current_eval, "per_machine_energy", None
+        per_machine_energy, per_machine_makespan = _per_machine_energy_and_makespan(
+            self._current_eval
         )
-        self.state.per_machine_makespan = getattr(
-            self._current_eval, "per_machine_makespan", None
-        )
-        self.state.makespan = getattr(self._current_eval, "makespan", 0)
+        self.state.per_machine_energy = per_machine_energy
+        self.state.per_machine_makespan = per_machine_makespan
+        self.state.makespan = int(self._current_eval.makespan)
 
         # Reset episode tracking
         self._step_count = 0
@@ -289,21 +302,33 @@ class NeuroLSEnv:
                     new_solution = self.state.solution.clone()
                     OPERATOR_BY_ID[move.operator].apply_move(new_solution, move)
 
+                    # Update evaluator state (FullEvaluation) using incremental results
+                    if isinstance(new_eval, MoveEvaluation):
+                        updated_per_machine = list(self._current_eval.per_machine)
+                        for mi, machine_eval in new_eval.affected_machine_evals.items():
+                            updated_per_machine[int(mi)] = machine_eval
+                        self._current_eval = FullEvaluation(
+                            total_energy=float(new_cost),
+                            makespan=int(new_eval.new_makespan),
+                            feasible=bool(new_eval.feasible),
+                            per_machine=updated_per_machine,
+                            per_job_costs=None,
+                        )
+
+                    per_machine_energy, per_machine_makespan = (
+                        _per_machine_energy_and_makespan(self._current_eval)
+                    )
+
                     # Update state via update_from_move
                     self.state.update_from_move(
                         new_solution=new_solution,
                         new_cost=new_cost,
-                        new_per_machine_energy=getattr(
-                            new_eval, "per_machine_energy", None
-                        ),
-                        new_per_machine_makespan=getattr(
-                            new_eval, "per_machine_makespan", None
-                        ),
-                        new_makespan=getattr(new_eval, "makespan", 0),
+                        new_per_machine_energy=per_machine_energy,
+                        new_per_machine_makespan=per_machine_makespan,
+                        new_makespan=int(self._current_eval.makespan),
                         accepted=True,
                         operator=decoded.operator_id,
                     )
-                    self._current_eval = new_eval
                     info["accepted"] = True
 
                     # Check if improved best
@@ -349,17 +374,19 @@ class NeuroLSEnv:
 
             # Evaluate perturbed solution
             new_eval = self._evaluator.evaluate_solution(new_solution)
-            new_cost = new_eval.total_cost
+            new_cost = float(new_eval.total_energy)
+
+            per_machine_energy, per_machine_makespan = _per_machine_energy_and_makespan(
+                new_eval
+            )
 
             # Update state via update_from_perturbation
             self.state.update_from_perturbation(
                 new_solution=new_solution,
                 new_cost=new_cost,
-                new_per_machine_energy=getattr(new_eval, "per_machine_energy", None),
-                new_per_machine_makespan=getattr(
-                    new_eval, "per_machine_makespan", None
-                ),
-                new_makespan=getattr(new_eval, "makespan", 0),
+                new_per_machine_energy=per_machine_energy,
+                new_per_machine_makespan=per_machine_makespan,
+                new_makespan=int(new_eval.makespan),
             )
             self._current_eval = new_eval
 
@@ -509,6 +536,7 @@ class NeuroLSEnv:
             - job_features: (n_jobs, d_job)
             - machine_features: (m, d_machine)
             - state_features: (d_state,)
+            - job_to_machine: (n_jobs,) machine assignment per job
             - assignment_edges: (2, n_jobs) raw assignment (job_i -> machine_m)
             - static_edge_index: (2, E_static) full bipartite edges with node offsets
             - dynamic_edge_index: (2, E_dynamic) current assignment edges with node offsets
@@ -523,6 +551,7 @@ class NeuroLSEnv:
         # Use individual feature extraction methods from NeuroLSState
         src, dst = self.state.get_assignment_edges()
         assignment_edges = np.stack([src, dst], axis=0)  # (2, n_jobs)
+        job_to_machine = np.asarray(dst, dtype=np.int64)  # (n_jobs,)
 
         # Build static bipartite edges (all jobs can go to all machines)
         # Node indices: jobs [0..n-1], machines [n..n+m-1]
@@ -551,10 +580,12 @@ class NeuroLSEnv:
             "job_features": self.state.get_job_features(),
             "machine_features": self.state.get_machine_features(),
             "state_features": self.state.get_scalar_features(),
+            "job_to_machine": job_to_machine,
             "assignment_edges": assignment_edges,
             "static_edge_index": static_edge_index,
             "dynamic_edge_index": dynamic_edge_index,
             "prices": self._ct.astype(np.float32),
+            "price_per_hour": self._price_per_hour,  # (hours_per_day, 5)
         }
 
     def get_torch_features(self, device: str = "cpu"):
@@ -579,6 +610,9 @@ class NeuroLSEnv:
             "state_features": torch.tensor(
                 features["state_features"], dtype=torch.float32, device=device
             ),
+            "job_to_machine": torch.tensor(
+                features["job_to_machine"], dtype=torch.long, device=device
+            ),
             "assignment_edges": torch.tensor(
                 features["assignment_edges"], dtype=torch.long, device=device
             ),
@@ -590,6 +624,9 @@ class NeuroLSEnv:
             ),
             "prices": torch.tensor(
                 features["prices"], dtype=torch.float32, device=device
+            ),
+            "price_per_hour": torch.tensor(
+                features["price_per_hour"], dtype=torch.float32, device=device
             ),
         }
 
@@ -713,6 +750,7 @@ class VectorizedNeuroLSEnv:
                 [f["machine_features"] for f in all_features]
             ),
             "state_features": torch.stack([f["state_features"] for f in all_features]),
+            "job_to_machine": torch.stack([f["job_to_machine"] for f in all_features]),
             "assignment_edges": torch.stack(
                 [f["assignment_edges"] for f in all_features]
             ),
@@ -723,4 +761,5 @@ class VectorizedNeuroLSEnv:
                 [f["dynamic_edge_index"] for f in all_features]
             ),
             "prices": torch.stack([f["prices"] for f in all_features]),
+            "price_per_hour": torch.stack([f["price_per_hour"] for f in all_features]),
         }

@@ -290,14 +290,14 @@ class NeuroLSState:
 
         # Makespan features
         if self.per_machine_makespan is not None:
-            ms = self.per_machine_makespan.astype(np.float32)
+            ms = np.asarray(self.per_machine_makespan, dtype=np.float32)
             ms_norm = ms / float(self.K)
         else:
             ms_norm = loads_norm  # Proxy
 
         # Energy features
         if self.per_machine_energy is not None:
-            energy = self.per_machine_energy.astype(np.float32)
+            energy = np.asarray(self.per_machine_energy, dtype=np.float32)
             energy_norm = energy / float(np.sum(energy) + 1e-9)
         else:
             energy_norm = np.zeros(n_machines, dtype=np.float32)

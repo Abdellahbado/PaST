@@ -180,9 +180,10 @@ if _TORCH_AVAILABLE:
             super().__init__()
             self.n_actions = n_actions
 
-            # Quantile embedding
+            # Quantile embedding – must produce hidden_dim so Hadamard
+            # product with state_embed works.
             self.tau_embed = IQNEmbedding(
-                embedding_dim=state_dim,
+                embedding_dim=hidden_dim,
                 n_cosines=n_cosines,
             )
 
@@ -467,7 +468,15 @@ if _TORCH_AVAILABLE:
             """
             # Price embedding
             if self.price_embed is not None and price_features is not None:
-                price_emb = self.price_embed(price_features, machine_exposure)
+                pf = price_features
+                squeezed_price = False
+                if pf.dim() == 2:
+                    # Unbatched (H, 5) → (1, H, 5) for CNN
+                    pf = pf.unsqueeze(0)
+                    squeezed_price = True
+                price_emb = self.price_embed(pf, machine_exposure)
+                if squeezed_price:
+                    price_emb = price_emb.squeeze(0)  # back to (d_price,)
             else:
                 price_emb = None
 

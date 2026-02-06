@@ -37,6 +37,20 @@ export NUMEXPR_MAX_THREADS=4
 cd "${SLURM_SUBMIT_DIR:-$(dirname "$0")/..}"
 PROJECT_ROOT="$(pwd)"
 
+# Make module imports work whether PROJECT_ROOT is a repo root (contains PaST/)
+# or the PaST package directory itself (contains neurols/).
+if [[ -d "PaST" && -f "PaST/__init__.py" ]]; then
+    TRAIN_MODULE="PaST.neurols.train"
+elif [[ -f "__init__.py" && -d "neurols" ]]; then
+    export PYTHONPATH="${PROJECT_ROOT}/..:${PYTHONPATH:-}"
+    TRAIN_MODULE="PaST.neurols.train"
+elif [[ -d "neurols" ]]; then
+    TRAIN_MODULE="neurols.train"
+else
+    echo "Could not locate NeuroLS package layout from ${PROJECT_ROOT}" >&2
+    exit 1
+fi
+
 # ── Create log directory ──────────────────────────────────────────
 mkdir -p logs/slurm
 
@@ -66,7 +80,7 @@ echo "════════════════════════�
 python -c "import torch; print(f'PyTorch {torch.__version__}, CUDA: {torch.cuda.is_available()}, Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"CPU\"}')"
 
 # ── Run training ──────────────────────────────────────────────────
-python -m PaST.neurols.train \
+python -m "$TRAIN_MODULE" \
     --config "$CONFIG" \
     --device cuda \
     --seed 42

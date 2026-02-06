@@ -29,11 +29,37 @@ try:
     import torch
     import torch.nn as nn
     import torch.optim as optim
-    from torch.utils.tensorboard import SummaryWriter
 
     _TORCH_AVAILABLE = True
 except ImportError:
     _TORCH_AVAILABLE = False
+
+
+class _NoOpSummaryWriter:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def add_scalar(self, *args, **kwargs):
+        pass
+
+    def add_histogram(self, *args, **kwargs):
+        pass
+
+    def add_text(self, *args, **kwargs):
+        pass
+
+    def flush(self):
+        pass
+
+    def close(self):
+        pass
+
+
+if _TORCH_AVAILABLE:
+    try:
+        from torch.utils.tensorboard import SummaryWriter  # type: ignore
+    except Exception:
+        SummaryWriter = _NoOpSummaryWriter  # type: ignore
 
 
 @dataclass
@@ -51,6 +77,7 @@ class TrainConfig:
     n_jobs_train: List[int] = field(default_factory=lambda: [10, 15, 20])
     n_machines_train: List[int] = field(default_factory=lambda: [2, 3, 4])
     K_range: Tuple[int, int] = (40, 120)  # Range for horizon K
+    K_fixed: Optional[int] = 40  # Use a fixed K to keep tensor shapes consistent
     n_instances_per_reset: int = 100  # Train instances to cycle through
 
     # Environment
@@ -193,7 +220,12 @@ def collate_states(states: List[Dict], device: str) -> Dict[str, torch.Tensor]:
         batched[key] = torch.tensor(stacked, device=device)
 
         # Set appropriate dtype
-        if key in ["assignment_edges", "static_edge_index", "dynamic_edge_index"]:
+        if key in [
+            "job_to_machine",
+            "assignment_edges",
+            "static_edge_index",
+            "dynamic_edge_index",
+        ]:
             batched[key] = batched[key].long()
         else:
             batched[key] = batched[key].float()
@@ -324,27 +356,19 @@ class NeuroLSTrainer:
             return random.randrange(self.policy_net.n_actions)
 
         with torch.no_grad():
-            # Convert state to tensors
+            # Convert state to tensors – NO batch dim; GNN expects unbatched
             state_tensors = {
-                k: torch.tensor(v, device=self.device).unsqueeze(0)
-                for k, v in state.items()
+                k: torch.tensor(v, device=self.device) for k, v in state.items()
             }
 
-            # Forward pass
-            # Note: This is simplified - full version needs proper feature extraction
             q_values = self.policy_net(
                 job_features=state_tensors["job_features"].float(),
                 machine_features=state_tensors["machine_features"].float(),
                 state_features=state_tensors["state_features"].float(),
-                job_to_machine=state_tensors["assignment_edges"].long(),
-                static_edge_index=state_tensors.get(
-                    "static_edge_index",
-                    torch.zeros(2, 0, dtype=torch.long, device=self.device),
-                ),
-                dynamic_edge_index=state_tensors.get(
-                    "dynamic_edge_index", state_tensors["assignment_edges"].long()
-                ),
-                price_features=state_tensors.get("prices", None),
+                job_to_machine=state_tensors["job_to_machine"].long(),
+                static_edge_index=state_tensors["static_edge_index"].long(),
+                dynamic_edge_index=state_tensors["dynamic_edge_index"].long(),
+                price_features=state_tensors.get("price_per_hour", None),
             )
 
             return q_values.argmax().item()
@@ -483,23 +507,28 @@ class NeuroLSTrainer:
         net: nn.Module,
         states: Dict[str, torch.Tensor],
     ) -> torch.Tensor:
-        """Forward pass for batch of states."""
-        return net(
-            job_features=states["job_features"].float(),
-            machine_features=states["machine_features"].float(),
-            state_features=states["state_features"].float(),
-            job_to_machine=states["assignment_edges"].long(),
-            static_edge_index=states.get(
-                "static_edge_index",
-                torch.zeros(2, 0, dtype=torch.long, device=self.device)
-                .unsqueeze(0)
-                .expand(states["job_features"].size(0), -1, -1),
-            ),
-            dynamic_edge_index=states.get(
-                "dynamic_edge_index", states["assignment_edges"].long()
-            ),
-            price_features=states.get("prices", None),
-        )
+        """Forward pass for batch of states.
+
+        The GNN encoder operates on single graphs, so we loop over the
+        batch and stack the resulting Q-value vectors.
+        """
+        batch_size = states["job_features"].size(0)
+        q_list = []
+        has_price = "price_per_hour" in states
+        for i in range(batch_size):
+            q = net(
+                job_features=states["job_features"][i].float(),
+                machine_features=states["machine_features"][i].float(),
+                state_features=states["state_features"][i].float(),
+                job_to_machine=states["job_to_machine"][i].long(),
+                static_edge_index=states["static_edge_index"][i].long(),
+                dynamic_edge_index=states["dynamic_edge_index"][i].long(),
+                price_features=(
+                    states["price_per_hour"][i].float() if has_price else None
+                ),
+            )
+            q_list.append(q)  # (A,)
+        return torch.stack(q_list, dim=0)  # (B, A)
 
     def _forward_batch_iqn(
         self,
@@ -507,24 +536,25 @@ class NeuroLSTrainer:
         states: Dict[str, torch.Tensor],
         tau: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass with quantile samples."""
-        return net(
-            job_features=states["job_features"].float(),
-            machine_features=states["machine_features"].float(),
-            state_features=states["state_features"].float(),
-            job_to_machine=states["assignment_edges"].long(),
-            static_edge_index=states.get(
-                "static_edge_index",
-                torch.zeros(2, 0, dtype=torch.long, device=self.device)
-                .unsqueeze(0)
-                .expand(states["job_features"].size(0), -1, -1),
-            ),
-            dynamic_edge_index=states.get(
-                "dynamic_edge_index", states["assignment_edges"].long()
-            ),
-            price_features=states.get("prices", None),
-            tau=tau,
-        )
+        """Forward pass with quantile samples (loops over batch)."""
+        batch_size = states["job_features"].size(0)
+        q_list = []
+        has_price = "price_per_hour" in states
+        for i in range(batch_size):
+            q = net(
+                job_features=states["job_features"][i].float(),
+                machine_features=states["machine_features"][i].float(),
+                state_features=states["state_features"][i].float(),
+                job_to_machine=states["job_to_machine"][i].long(),
+                static_edge_index=states["static_edge_index"][i].long(),
+                dynamic_edge_index=states["dynamic_edge_index"][i].long(),
+                price_features=(
+                    states["price_per_hour"][i].float() if has_price else None
+                ),
+                tau=tau[i : i + 1],  # keep (1, N) shape
+            )
+            q_list.append(q)  # (N, A) after squeeze
+        return torch.stack(q_list, dim=0)  # (B, N, A)
 
     def train_step(self) -> float:
         """Perform one training step."""
@@ -626,23 +656,32 @@ class NeuroLSTrainer:
         env = NeuroLSEnv(env_config)
         env.seed(self.config.seed)
 
-        # Generate training instances
+        # Generate training instances.
+        # IMPORTANT: This trainer currently batches by `np.stack`, so tensor shapes
+        # must be constant within a run (n_jobs, n_machines, and K/price length).
         data_config = DataConfig(sampling_mode="new_benchmark_grid")
         data_rng = random.Random(self.config.seed)
+        hours_per_day = int(getattr(data_config, "hours_per_day", 20))
+
+        fixed_n = int(self.config.n_jobs_train[0])
+        fixed_m = int(self.config.n_machines_train[0])
+        fixed_K = int(self.config.K_fixed or self.config.K_range[0])
+        if fixed_K % hours_per_day != 0:
+            fixed_K = (fixed_K // hours_per_day) * hours_per_day
+            fixed_K = max(fixed_K, hours_per_day)
+        fixed_D_days = int(fixed_K // hours_per_day)
 
         train_instances = []
         for i in range(self.config.n_instances_per_reset):
-            n = random.choice(self.config.n_jobs_train)
-            m = random.choice(self.config.n_machines_train)
             instance = generate_raw_instance(
                 config=data_config,
                 rng=data_rng,
                 instance_id=i,
-                n=n,
-                m=m,
+                n=fixed_n,
+                m=fixed_m,
+                D_days=fixed_D_days,
             )
-            K = instance.T_max  # Use the instance's own horizon
-            train_instances.append((instance, K))
+            train_instances.append((instance, fixed_K))
 
         # Training loop
         for episode in range(self.config.n_episodes):
@@ -795,15 +834,20 @@ class NeuroLSTrainer:
 def main():
     parser = argparse.ArgumentParser(description="Train NeuroLS")
     parser.add_argument("--config", type=str, default=None, help="Config file path")
-    parser.add_argument("--exp-name", type=str, default="neurols_default")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cuda")
-    parser.add_argument("--n-episodes", type=int, default=10000)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--use-iqn", action="store_true", default=True)
+    parser.add_argument("--exp-name", type=str, default=None)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--device", type=str, default=None)
+    parser.add_argument("--n-episodes", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=None)
     parser.add_argument(
-        "--action-space", type=str, default="AANP", choices=["AA", "AAN", "AANP"]
+        "--use-iqn",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Enable/disable IQN (distributional RL)",
+    )
+    parser.add_argument(
+        "--action-space", type=str, default=None, choices=["AA", "AAN", "AANP"]
     )
 
     args = parser.parse_args()
@@ -816,16 +860,25 @@ def main():
             config_dict = yaml.safe_load(f)
         config = TrainConfig(**config_dict)
     else:
-        config = TrainConfig(
-            exp_name=args.exp_name,
-            seed=args.seed,
-            device=args.device,
-            n_episodes=args.n_episodes,
-            batch_size=args.batch_size,
-            learning_rate=args.lr,
-            use_iqn=args.use_iqn,
-            action_space=args.action_space,
-        )
+        config = TrainConfig()
+
+    # Allow CLI to override config file values
+    if args.exp_name is not None:
+        config.exp_name = args.exp_name
+    if args.device is not None:
+        config.device = args.device
+    if args.seed is not None:
+        config.seed = args.seed
+    if args.n_episodes is not None:
+        config.n_episodes = args.n_episodes
+    if args.batch_size is not None:
+        config.batch_size = args.batch_size
+    if args.lr is not None:
+        config.learning_rate = args.lr
+    if args.use_iqn is not None:
+        config.use_iqn = args.use_iqn
+    if args.action_space is not None:
+        config.action_space = args.action_space
 
     # Train
     trainer = NeuroLSTrainer(config)

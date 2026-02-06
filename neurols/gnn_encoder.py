@@ -321,16 +321,24 @@ if _TORCH_AVAILABLE:
             )
 
             # Group pooling by machine (equation 8)
-            # Pool jobs by their assigned machine
-            group_max = torch.zeros(n_machines, self.d_emb, device=h_jobs.device)
-            group_sum = torch.zeros(n_machines, self.d_emb, device=h_jobs.device)
-            group_count = torch.zeros(n_machines, 1, device=h_jobs.device)
+            # Use scatter-based ops to avoid in-place modifications that
+            # break autograd.
+            idx = job_to_machine.long()  # (n_jobs,)
+            idx_exp = idx.unsqueeze(-1).expand(-1, self.d_emb)  # (n_jobs, d_emb)
 
-            for j in range(n_jobs):
-                mi = job_to_machine[j].item()
-                group_max[mi] = torch.max(group_max[mi], h_jobs[j])
-                group_sum[mi] = group_sum[mi] + h_jobs[j]
-                group_count[mi] += 1
+            # Scatter-max for group_max
+            group_max = torch.zeros(n_machines, self.d_emb, device=h_jobs.device)
+            group_max.scatter_reduce_(
+                0, idx_exp, h_jobs, reduce="amax", include_self=True
+            )
+
+            # Scatter-add for group_sum and group_count
+            group_sum = torch.zeros(n_machines, self.d_emb, device=h_jobs.device)
+            group_sum.scatter_add_(0, idx_exp, h_jobs)
+
+            group_count = torch.zeros(n_machines, 1, device=h_jobs.device)
+            ones = torch.ones(n_jobs, 1, device=h_jobs.device)
+            group_count.scatter_add_(0, idx.unsqueeze(-1), ones)
 
             group_mean = group_sum / (group_count + 1e-9)
             group_combined = torch.cat([group_max, group_mean], dim=-1)  # (M, 2*d_emb)

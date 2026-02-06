@@ -10,10 +10,34 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Some setups mount the *package directory* at ~/PaST (i.e., this cwd contains
+# neurols/, config.py, etc.), while others use a repo root that contains PaST/.
+# Make imports work in both cases.
+if [[ -d "PaST" && -f "PaST/__init__.py" ]]; then
+    # Repo root layout: ./PaST is importable from cwd
+    TRAIN_MODULE="PaST.neurols.train"
+elif [[ -f "__init__.py" && -d "neurols" ]]; then
+    # Package-dir layout: need parent on PYTHONPATH to import PaST.*
+    export PYTHONPATH="$(pwd)/..:${PYTHONPATH:-}"
+    TRAIN_MODULE="PaST.neurols.train"
+elif [[ -d "neurols" ]]; then
+    # Fallback: treat cwd as a flat project containing neurols/
+    TRAIN_MODULE="neurols.train"
+else
+    echo "Could not locate NeuroLS package layout from $(pwd)" >&2
+    exit 1
+fi
+
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 DEVICE="${DEVICE:-cuda}"
 SEED="${SEED:-42}"
+
+# Optionally activate a conda environment: CONDA_ENV=new-ml-env bash scripts/...
+if [[ -n "${CONDA_ENV:-}" ]]; then
+    eval "$(conda shell.bash hook 2>/dev/null)" || true
+    conda activate "$CONDA_ENV" 2>/dev/null || true
+fi
 
 declare -A CONFIGS
 CONFIGS=(
@@ -37,7 +61,7 @@ if [[ $# -gt 0 ]]; then
         exit 1
     fi
     echo "Running variant: $KEY"
-    python -m PaST.neurols.train --config "${CONFIGS[$KEY]}" --device "$DEVICE" --seed "$SEED"
+    python -m "$TRAIN_MODULE" --config "${CONFIGS[$KEY]}" --device "$DEVICE" --seed "$SEED"
     exit 0
 fi
 
@@ -47,7 +71,7 @@ for KEY in AA_none AA_zprice AA_full AAN_none AAN_zprice AAN_full AANP_none AANP
     echo "════════════════════════════════════════════════════════════"
     echo " Starting: $KEY  ($(date))"
     echo "════════════════════════════════════════════════════════════"
-    python -m PaST.neurols.train --config "${CONFIGS[$KEY]}" --device "$DEVICE" --seed "$SEED"
+    python -m "$TRAIN_MODULE" --config "${CONFIGS[$KEY]}" --device "$DEVICE" --seed "$SEED"
     echo " Finished: $KEY  ($(date))"
 done
 
