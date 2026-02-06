@@ -345,7 +345,7 @@ class EnvConfig:
         48  # Local lookahead window (default 48, can be 150 for Large)
     )
     K_period_full_max: int = (
-        250  # Maximum periods in full horizon (T_max=500 / min_period=2)
+        300  # Maximum periods in full horizon (T_max=600 / min_period=2)
     )
 
     # Feature dimensions
@@ -465,7 +465,12 @@ class DataConfig:
     #   sample p/e/ck from fixed ranges.
     # - "paper_grid_90": match the 90-instance benchmark distribution used by
     #   New Benchmark/generate_data.py (Wang2018 small+mls, Anghinolfi2021 vls).
-    sampling_mode: str = "paper_grid_90"
+    # - "new_benchmark_grid": match New Benchmark/new_data.py grid sampling
+    #   over (N, M, D) with T_max = hours_per_day * D and a load cap.
+    sampling_mode: str = "new_benchmark_grid"
+
+    # New Benchmark time discretization
+    hours_per_day: int = 20
 
     # Horizon choices for training
     T_max_choices: List[int] = field(
@@ -483,6 +488,9 @@ class DataConfig:
     p_min: int = 1
     p_max: int = 4
 
+    # New Benchmark default (New Benchmark/new_data.py uses p in 1..12 by default)
+    p_max_benchmark: int = 12
+
     # Machine energy rate range
     e_min: int = 1
     e_max: int = 3
@@ -499,6 +507,31 @@ class DataConfig:
     # Epsilon-constraint deadline slack
     deadline_slack_ratio_min: float = 0.0
     deadline_slack_ratio_max: float = 0.5
+
+    # -----------------------------------------------------------------
+    # New Benchmark grid config (DEFAULT_BENCHMARK from New Benchmark/new_data.py)
+    # -----------------------------------------------------------------
+
+    # Grid values (integers)
+    nb_small_Ns: Tuple[int, ...] = (20, 40, 60)
+    nb_small_Ms: Tuple[int, ...] = (3, 5, 7)
+    nb_small_Ds: Tuple[int, ...] = (2, 3, 4)
+    nb_medium_Ns: Tuple[int, ...] = (100, 150, 200)
+    nb_medium_Ms: Tuple[int, ...] = (8, 12, 16)
+    nb_medium_Ds: Tuple[int, ...] = (5, 10, 15)
+    nb_large_Ns: Tuple[int, ...] = (250, 300, 350, 400, 500)
+    nb_large_Ms: Tuple[int, ...] = (25, 30, 40)
+    nb_large_Ds: Tuple[int, ...] = (10, 20, 30)
+
+    # Machine energy rate ranges u_h (integers)
+    nb_small_u_range: Tuple[int, int] = (1, 3)
+    nb_medium_u_range: Tuple[int, int] = (1, 3)
+    nb_large_u_range: Tuple[int, int] = (1, 6)
+
+    # Load caps (floats, but N/M/D themselves remain integers)
+    nb_small_target_util: float = 0.80
+    nb_medium_target_util: float = 0.85
+    nb_large_target_util: float = 0.90
 
 
 # =============================================================================

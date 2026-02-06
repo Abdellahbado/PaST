@@ -1,0 +1,6804 @@
+Learning to Control Local Search for
+Combinatorial Optimization
+Jonas K. Falkner, Daniela Thyssens, Ahmad Bdeir, and Lars Schmidt-Thieme
+
+arXiv:2206.13181v2 [cs.LG] 13 Jul 2022
+
+Institute for Computer Science, University of Hildesheim, Hildesheim, Germany
+{falkner,thyssens,bdeir,schmidt-thieme}@ismll.uni-hildesheim.de
+
+Abstract. Combinatorial optimization problems are encountered in
+many practical contexts such as logistics and production, but exact
+solutions are particularly difficult to find and usually NP-hard for
+considerable problem sizes. To compute approximate solutions, a zoo of
+generic as well as problem-specific variants of local search is commonly
+used. However, which variant to apply to which particular problem is
+difficult to decide even for experts.
+In this paper we identify three independent algorithmic aspects of such
+local search algorithms and formalize their sequential selection over an
+optimization process as Markov Decision Process (MDP). We design a
+deep graph neural network as policy model for this MDP, yielding a
+learned controller for local search called NeuroLS. Ample experimental
+evidence shows that NeuroLS is able to outperform both, well-known
+general purpose local search controllers from Operations Research as
+well as latest machine learning-based approaches.
+Keywords: combinatorial optimization · local search · neural networks.
+
+1
+
+Introduction
+
+Combinatorial optimization problems (COPs) arise in many research areas and
+applications. They appear in many forms and variants like vehicle routing[40],
+scheduling[38] and constraint satisfaction[41] problems but share some general
+properties. One of these properties is that most COPs are proven to be NP-hard
+which makes their solution very complex and time consuming. Over the years
+many different solution approaches were proposed. Exact methods like branchand-bound [23] attempt to find the global optimum of a COP based on smart
+and efficient ways of searching the solution space. While they are often able to
+find the optimal solution to small scale COPs in reasonable time, they require a
+significant amount of time to tackle larger instances of sizes relevant for practical
+applications. For that reason, heuristic methods were proposed which usually
+cannot guarantee to find the global optimum but sometimes can define a lower
+bound on the performance, which can be achieved at a minimum, and have shown
+good empirical performance. One common and well-known heuristic method
+is local search (LS)[1]. The main concept of LS is to iteratively explore the
+search space of candidate solutions in the close neighborhood of the current
+
+2
+
+Falkner et al.
+
+solution by applying small (local) changes. The simplest local search procedure
+is employing a hill climbing routine which greedily applies local changes that
+improve the current solution. However, this approach can easily get stuck in bad
+local optima from which it cannot escape anymore. Therefore, LS is commonly
+used in combination with meta-heuristics which enable the procedure to escape
+from local optima and achieve better final performance. The meta-heuristics
+introduced in section 2.2 are well established in the optimization community and
+have demonstrated very good performance on a plenitude of different COPs.
+Since a few years however, there is an increasing interest in leveraging methods from the growing field of machine learning (ML) to solve COPs, as recent
+developments in neural network architectures, involving the Transformer[44] and
+Graph Neural Networks (GNNs)[48], have led to significant progress in this domain. Most work based on ML is concerned with auto-regressive approaches to
+construct feasible solutions[45,21,17,49], but there is also some work which focuses on iterative improvement[6,25,47] or exact solutions[10,30] for COPs. While
+the existing iterative improvement approaches share some similarities with metaheuristics and local search, the exact formulation of the methods is often problem
+specific and misses the generality of the LS framework as well as a clear definition of the intervention points which can be used to control the meta-heuristic
+procedure for LS.
+In this work we present a consistent formulation of learned meta-heuristics in
+local search procedures and show on two representative problems how it can be
+successfully applied. In our experiments we compare our method to well-known
+meta-heuristics commonly used with LS at the example of capacitated vehicle
+routing (CVRP) and job shop scheduling (JSSP). The results show that our
+GNN-based learned meta-heuristic consistently outperforms these methods in
+terms of speed and final performance. In further experiments we also establish
+our method in the context of existing ML solution approaches.
+Contributions
+1. We identify and describe three independent algorithmic aspects of local
+search for combinatorial optimization, each with several alternatives, and
+formalize their sequential selection during an iterative search run as Markov
+Decision Process.
+2. We design a deep graph neural network as policy model for this MDP, yielding a learned controller for local search called NeuroLS.
+3. We provide ample experimental evidence that NeuroLS outperforms both,
+well-known general purpose local search controllers from the Operations
+Research literature (so called meta-heuristics) as well as earlier machine
+learning-based approaches.
+
+2
+
+Related Work
+
+There is a plenitude of approaches and algorithms to tackle combinatorial optimization problems. One common heuristic method is Local Search (LS)[1]. In
+
+Learning to Control Local Search for Combinatorial Optimization
+
+the classical discrete optimization literature it is often embedded into a metaheuristic procedure to escape local optima.
+2.1
+
+Construction Heuristics
+
+Construction algorithms are concerned with finding a first feasible solution for a
+given COP. They usually start with an empty solution and consecutively assign
+values to the respective decision variables to construct a full solution. Well-known
+methods are e.g. the Savings heuristic[7] for vehicle routing problems or priority
+dispatching rules (PDR)[5] for scheduling. Most improvement and meta-heuristic
+methods require a feasible initial solution from which they can start to improve.
+2.2
+
+Meta-Heuristics
+
+Meta-heuristics are the go-to method for complex discrete optimization
+problems. They effectively balance the exploration of the solution space
+(escaping local optima) and the exploitation of promising solutions. There are
+two major types of methods:
+Single Solution Methods Single solution methods include many well-known
+approaches which are used in combination with LS. During the search they only
+maintain a single solution at a time which is iteratively changed and adapted.
+Simulated Annealing (SA) is a probabilistic acceptance strategy based on the
+notion of controlled cooling of materials first proposed in [19]. The idea is to
+also accept solutions which are worse than the best solution found so far to
+enable exploration of the search space but with a decreasing probability to increasingly focus on exploitation the further the search advances. Iterated Local
+Search (ILS)[24] alternates between a diversification and an intensification phase.
+In the diversification step the current solution is perturbed while the alternating
+intensification step executes a greedy local search with a particular neighborhood. Variable Neighborhood Search (VNS)[28] employs a similar diversification
+step but focuses on a systematic control of the LS neighborhood in the intensification phase, by changing the type of the applied LS move frequently after each
+perturbation in a predefined order. Tabu Search (TS) was proposed by Glover[12]
+and is based on the possible acceptance of non-improving moves and a so called
+tabu list, a kind of filter preventing moves which would keep the search stuck in
+local optima. This list acts as a memory which in the simplest case stores the
+solutions of the last k iterations and prevents changes which would move the
+current solution back to solutions encountered in recent steps. Instead of using
+a tabu list, Guided Local Search (GLS)[46] relies on penalties for different moves
+to guide the search. These penalties are often based on problem specific features
+in the solution, e.g. the edges between nodes in a routing problem, and are added
+to the original objective function of the problem when the LS gets stuck.
+Population-based Methods In comparison to single solution approaches
+population-based methods maintain a whole pool of different solutions
+
+3
+
+4
+
+Falkner et al.
+
+throughout the search. Methods include different evolutionary algorithms,
+particle swarm optimization and other bio-inspired algorithms such as ant
+colony optimization [11]. Their main idea is based on different adaption,
+selection and recombination schemes to refine the solution pool during search
+in order to find better solutions.
+While a learned population based meta-heuristic is interesting and potentially
+promising, in this paper we focus on the impact and effectiveness of a learned
+single solution approach. More information on advanced meta-heuristics and
+their extensions can be found in [11].
+2.3
+
+Machine Learning based Methods
+
+In recent years also many approaches employing ML methods have been proposed. While some work [45,18,39] relies on supervised learning, most current
+state-of-the-art methods use reinforcement learning (RL). A large fraction of
+the work focuses on auto-regressive models which learn to sequentially construct feasible solutions from scratch. Such methods have been proposed for
+many common COPs including the TSP[3], CVRP[31,21,22], CVRP-TW[9] and
+JSSP[49,34,15,33]. The second type of methods is concerned with improvement
+approaches. Chen et al.[6] design a model to rewrite sub-sequences of the problem
+solution for the CVRP and JSSP based on a component which selects a specific
+element of the solution and a second component parameterizing a heuristic move
+to change that part of the solution. However, their model is limited to specific
+problem settings with a fixed number of jobs and machines or customers while
+our approach works seamlessly for different problem sizes, as we show in the
+experiments in section 5.3. In contrast, the authors in [25] learn a policy that
+selects a specific LS move at each iteration. However, their method incurs prohibitively large computation times and for this reason is not competitive with
+any of the recent related work [22,20,26]. The authors in [16] learn a repair operator to re-construct heuristically destroyed solutions in a Large Neighborhood
+Search. Finally, da Costa et al.[32] learn a model to select node pairs for 2-opt
+moves in the TSP while Wu et al.[47] learn a similar pair-wise selection scheme
+for 2-opt, node swap and relocation moves in TSP and CVRP. The authors
+in [26] further improve on the method in [47] by introducing the Dual-aspect
+collaborative Transformer (DACT) model. Although there exist advanced inference approaches[15] to further improve the performance of auto-regressive ML
+methods on COPs, here we focus on the vanilla inference via greedy decoding or
+sampling.
+While these methods share some similarities with our approach, they ignore
+the importance of being able to reject unpromising moves to escape local optima,
+whereas our approach specifically focuses on this important decision point to
+effectively control the search. Moreover, our approach is also able to learn when
+to apply a particular perturbation if the rejection of a sequence of moves is not
+sufficient for exploration. A detailed overview of the current machine learning
+approaches to COPs is given in [4,27].
+
+Learning to Control Local Search for Combinatorial Optimization
+
+3
+
+Preliminaries
+
+3.1
+
+Problem Formulation
+
+A Combinatorial Optimization Problem Ω is defined on its domain DΩ which
+is the set of its instances x ∈ DΩ . A COP instance x is usually given by a pair
+(SΩ , fΩ ) of the solution space S consisting of all feasible solutions to Ω and a
+corresponding cost function f : S → R. Combinatorial optimization problems
+normally are either to be minimized or maximized. In this paper we consider all
+COPs to be problems for which the cost of a corresponding objective function
+has to be minimized. The main concern is to find a solution s∗ ∈ S representing
+a global optimum, i.e. f (s∗ ) ≤ f (s) ∀s ∈ S.
+3.2
+
+Local Search
+
+LS is a heuristic search method which is based on the concept of neighborhoods.
+A neighborhood N (s) ⊆ S of solution s ∈ S represents a set of solutions which
+are somehow close to s. This “closeness” is defined by the neighborhood function
+N ϕ w.r.t. some problem specific operator ϕ ∈ ΦΩ (e.g. an exchange of nodes
+in a routing problem). Moreover, we always consider s to be part of its own
+neighborhood, i.e. s ∈ N (s). Then the local optimum ŝ in the neighborhood
+N satisfies f (ŝ) ≤ f (s) ∀s ∈ N (ŝ). A general LS procedure (see algorithm 1)
+iterates through the neighborhood N (s) of the current solution s until it finds
+the local optimum ŝ.
+
+Algorithm 1: Local Search
+input : cost function f , solution s, neighborhood function N ,
+acceptance rule accept, stopping rule stop,
+1 while not stop(s) do
+2
+find s0 ∈ N (s) for which accept(s, s0 )
+3
+s ← s0
+4 return s
+
+3.3
+
+Meta-Heuristics
+
+Meta-heuristics wrap an LS procedure to enable it to escape from local optima
+and to explore the solution space more efficiently. Some of the most common
+meta-heuristic strategies were described in section 2.2. Algorithm 2 describes a
+general formulation of a single solution meta-heuristic procedure. Each particular strategy takes different decisions about restarting or perturbing the current
+solution, configuring the local search and accepting intermediate candidate solutions s0 (see algorithm 1). Some decisions can be fixed and are treated as
+hyper-parameters for some methods. For example, an SA procedure normally
+
+5
+
+6
+
+Falkner et al.
+
+does not select a specific neighborhood but just decides about acceptance during the LS. Other approaches like VNS greedily accept all improving moves but
+apply a perturbation and select a new operator neighborhood every time a local
+optimum has been reached.
+
+Algorithm 2: Meta-Heuristic (Single Solution)
+input : Solution space S, cost function f , stopping criterion
+s ← construct(S)
+// Construct initial solution
+2 while not stopping criterion do
+3
+s ← perturb(S, s)
+// Decide if to perturb/restart
+4
+N ← GetNeighborhood(S, s)
+// Define search neighborhood
+5
+s ← LocalSearch(f, s, N , accept, stop)
+// Execute local search
+6 return s
+
+1
+
+4
+
+Proposed Method
+
+4.1
+
+Intervention Points of Meta-Heuristics for Local Search
+
+The application of meta-heuristic strategies to an underlying LS involves several
+points of intervention, at which decisions can be done to help the search escape
+local optima in order to guide it towards good solutions. In the following, we
+define three such intervention points that have a significant impact on the search:
+1. Acceptance: The first intervention point is the acceptance of candidate solutions s0 in a local search step (algorithm 1, line 2). A simple hill climbing
+heuristic is completely greedy and only accepts improving moves, which often leaves the search stuck in local optima very quickly. In contrast, other
+approaches like SA will also accept non-improving moves with some probability.
+2. Neighborhood : The second possible decision a meta-heuristic can make is the
+selection of a particular operator ϕ that defines the neighborhood function
+N ϕ for the LS (algorithm 2, line 4). Possible operators for scheduling or routing problems could for example be a node exchange. While many standard
+approaches like SA and ILS only use one particular neighborhood which they
+treat as a hyper-parameter, VNS is an example for a method that selects a
+different operator at each step.
+3. Perturbation: Many meta-heuristics like ILS and VNS employ perturbations
+ψ ∈ ΨΩ to the current solution to move to different regions of the search
+space and escape particularly persistent local optima. Such a perturbation
+can simply be a restart from a new stochastically constructed initial solution, a random permutation of (a part of) the current solution or a random
+sequence of node exchanges. The decision when to employ such a perturbation (algorithm 2, line 5) is usually done w.r.t. a specific pre-defined number
+of steps without improvement.
+
+Learning to Control Local Search for Combinatorial Optimization
+
+4.2
+
+Meta-Heuristics as Markov Decision Process
+
+In this section we formulate meta-heuristics in terms of an MDP[37] to enable
+the use of RL approaches to learn a parameterized policy to replace them. In
+general an MDP is given by a tuple (S, A, P(st , at ), R(st , at )) representing the
+set of states S, the set of actions A, a transition probability function P(st , at )
+and a reward function R(st , at ). For our method we define these entities in terms
+of meta-heuristic decisions as follows:
+States We define the state st of the problem at time step t with slight abuse
+of notation as the solution s at time step t, combined with 1) its cost f (s), 2)
+the cost f (ŝt ) of the best solution found so far, 3) the last acceptance decision,
+4) the last operator used, 5) current time step t, 6) number of LS steps without
+improvement and 7) the number of perturbations or restarts.
+Actions Depending on the policy we want to train, we define the action set as
+the combinatorial space of
+1. Acceptance decisions: a boolean decision variable of either accepting or rejecting the last LS step
+AA := {0, 1},
+(1)
+2. Acceptance-Neighborhood decisions: the joint space of the acceptance of the
+last move and the set of possible operators ϕ ∈ Φ to apply in the next step
+AAN := {0, 1} × Φ,
+
+(2)
+
+3. Acceptance-Neighborhood -Perturbation decisions: the joint space of acceptance and the combined sets of operators ϕ ∈ Φ and perturbations ψ ∈ Ψ
+AANP := {0, 1} × {Φ ∪ Ψ }.
+
+(3)
+
+Transitions The transition probability function P(st , at ) models the state transition from state st to the next state st+1 depending on action at representing the
+acceptance decision, the next operator ϕ and a possible perturbation or restart
+(part of the problem state or action in case of AANP ).
+Rewards The reward function R(st , at ) defines the reward for a transition from
+state st to the next state st+1 . Here we define the reward rt of the transition as
+the relative improvement of the last LS step (defined by action at ) w.r.t. the cost
+of the best solution found until t and clamped at 0 to avoid negative rewards:
+rt := max(f (ŝt ) − f (st+1 ), 0)
+
+(4)
+
+Policy We employ Deep Q-Learning[43] and parameterize the learned policy πθ
+via a softmax over the corresponding Q-function Qθ (st , at ) which is represented
+in turn by our GNN-based encoder-decoder model with trainable parameters θ:
+exp(Qθ (st , at ))
+.
+πθ (at | st ) = P
+A exp(Qθ (st , at ))
+
+(5)
+
+7
+
+8
+
+4.3
+
+Falkner et al.
+
+Model Architecture
+
+In this section we describe our encoder and decoder models to parameterize
+Qθ (st , at ). Many COPs like routing and scheduling problems have an underlying
+graph structure which can be used when encoding these problems and that
+provides an effective inductive bias for the corresponding learning methods.
+In general we assume a graph G = (V, E) with the set of nodes V, N = |V| and
+the set of directed edges E ⊆ {(i, j) ⊆ V}. Moreover, we assume an original node
+feature matrix X ∈ RN ×din and edge features ei,j ∈ R for each edge (i, j). To
+leverage this structural information many authors have used Recurrent Neural
+Networks (RNN)[45,3,6], Transformers[44,21,22,26] or Graph Neural Networks
+(GNN)[18,32,49].
+Encoder
+For our model we employ the 1-GNN operator of [29] which is able to work with
+edge weights if they are present. One such layer is defined as
+(l)
+
+(l−1)
+
+hi = GNN(l) (hi
+=σ
+
+)
+
+(l) (l−1)
+(l)
+MLP1 (hi
+) + MLP2 (
+
+X
+
+(l−1) 
+
+ej,i · hj
+
+) ,
+
+(6)
+
+j∈H(i)
+(l−1)
+
+where hi
+∈ R1×demb is the latent feature embedding of node i at the previous
+(l)
+(l)
+layer l − 1, H(i) is the 1-hop graph neighborhood of node i, MLP1 and MLP2
+demb
+demb
+are Multi-Layer Perceptrons MLP : R
+→R
+and σ() is a suitable elementwise non-linearity, for which we use GeLU[14]. Furthermore, we add residual
+connections and layer normalization[2] to each layer.
+(0)
+In the first layer the latent feature vector hi is created by feeding the original
+node features xi into an MLP : Rdin → Rdemb :
+(0)
+
+hi
+
+= MLP(0) (xi ).
+
+(7)
+
+and another MLP(L) : Rdemb → Rdemb is placed at the end of the GNN stack.
+In order to further leverage structural information, we introduce 3 stages
+to compute the latent embeddings. The first stage uses the edge set E stat of
+the static node neighborhood graph, e.g. the K nearest neighbors graph for the
+CVRP or the Directed Acyclic Graph (DAG) representing the order of operations for each job in scheduling problems. This edge set is fixed and does not
+change throughout the search. In contrast, the second stage utilizes the edge set
+E dyna representing e.g. the tours in routing or the machine graph in scheduling,
+which is dynamic and usually changes in every LS step. Our proposed network
+architecture consists of Lstat GNN layers for the static graph, followed by Ldyna
+layers which propagate over the dynamic graph. Finally, we add another layer,
+again using the static edges, to consolidate the dynamic information over the
+static graph, leading to a total of L = Lstat + Ldyna + 1 GNN layers.
+The final stage serves to refine the embedding via aggregation based on the
+dynamic information of group membership which is present in the solution. Each
+
+Learning to Control Local Search for Combinatorial Optimization
+GNN Encoder
+
+Aggregation
+
+Group
+Pool
+
+Decoder
+
+Stage
+3
+
+MLP(L)
+MLPgrp
+GNN (static)
+
+GNN (dynamic)
+
+GNN (static)
+
+Stage
+1
+
+MLP(0)
+
+Mean
+
+Mean
+Stage
+2
+
+Q-Value Head
+
+concat
+
+MLP
+
+IQN
+
+Softmax
+
+state
+features
+
+Fig. 1. Visualization of the NeuroLS model architecture.
+
+node normally belongs to one of K (not necessarily disjoint) groups Mk of the
+solution, e.g. to a particular tour or machine. Following this idea we pool the
+final embeddings ωinode from the GNN stack w.r.t. their membership and feed
+them through another MLP:
+
+ωkgrp = MLPgrp [MAX(ωinode | i ∈ Mk ); MEAN(ωinode | i ∈ Mk )] ,
+
+(8)
+
+with max and mean pooling RN ×demb → RK×demb , K << N over the node
+dimension N , Mk as membership to the k-th group (k-th tour, k-th machine,
+etc.) and [ ; ] representing concatenation in the embedding dimension demb .
+Finally, the additional features of the state representation (current cost, best
+cost, last acceptance, etc.) described in the last section, are concatenated and
+projected by a simple linear layer to create an additional latent feature vector
+ω feat ∈ Rdemb .
+Decoder
+Our decoder takes the different embeddings created in the encoder, aggregates
+the node embeddings ω node ∈ RN ×demb and group embeddings ω grp ∈ RK×demb
+via a simple mean over the node and group dimension and concatenates them
+with the feature embedding ω feat ∈ Rdemb . This representation is the input to
+a final 2-layer MLP regression head R3∗demb → R|A| which outputs the value
+predictions of the Q-function. The full architecture is shown in figure 1.
+
+9
+
+10
+
+4.4
+
+Falkner et al.
+
+Reinforcement Learning Algorithm
+
+To train our policy model we employ Double Deep Q-Learning[43] with n-step
+returns[37] and Implicit Quantile Networks (IQN)[8]. IQNs enable a distributional formulation of Q-Learning where the Deep Q-Network is trained w.r.t. an
+underlying value distribution represented by a learned quantile function instead
+of single point estimates. In order to represent this learned quantile function
+IQNs are introduced as a small additional neural network which is jointly trained
+to transform samples from a base distribution (e.g. uniform) to the respective
+quantile values of the target distribution, i.e. the distribution over the returns.
+Further details can be found in appendix A.
+
+5
+
+Experiments
+
+5.1
+
+Applications
+
+Job Shop Scheduling Problem (JSSP) The JSSP is concerned with scheduling a number of jobs J on a set of K machines denoted by M . Each job consists
+of a sequence of operations Oij with fixed processing times pij which need to
+be processed in a predefined order. In the simplest problem variant every job
+has exactly one operation on each machine. A solution to the problem consists
+of the exact order of the operations on all machines. In this paper we choose to
+minimize the makespan, which is the longest time span from start of the first
+operation until the end of the last one to finish, corresponding to the longest
+path in the respective DAG representation of the problem. In the following we
+denote the size of a JSSP instances as |J| × |M |. We follow [49] in creating instances for training and validation by sampling processing times from a uniform
+distribution.
+Capacitated Vehicle Routing Problem (CVRP) The CVRP consists of
+a set of N customer nodes and a depot node. It is concerned with serving the
+demands qi of the customer nodes in tours starting and ending at the depot node
+by employing K homogeneous vehicles with a fixed capacity Q > 0. The tour
+of vehicle k ∈ K is a sequence of indices w.r.t. a subset of all customers nodes
+representing the order in which vehicle k visits the respective nodes. A set of
+feasible tours serving all customer nodes represents a solution to the problem,
+whereas the objective is to minimize the total length of all tours. We follow
+[21] in creating the training and validation sets by generating instances with
+coordinates uniformly sampled in the unit square.
+5.2
+
+Setup
+
+For the JSSP we implement a custom LS solver in python. It implements four
+different node moves and a perturbation operator based on a sequence of such
+moves. As construction heuristic and for restarts we implement several stochastic
+variants of common PDRs (see appendix C for more details). The LS for the
+
+Learning to Control Local Search for Combinatorial Optimization
+
+CVRP uses the C++ based open source solver VRPH[13] for which we implement
+a custom wrapper and interface to expose and support the necessary intervention
+points. VRPH includes several different LS moves and perturbation operators
+including 2-opt, 3-opt and different exchange and point moves. We provide our
+model code and that of our JSSP solver in our github repository1 .
+Preliminary experiments showed that the CET and 2-opt moves performed
+best for the JSSP and CVRP respectively, when used for meta-heuristics which
+do not select the operator. Thus, we employ these operators in our main experiments. We train all our models for 80 epochs with 19200 transitions each and
+pick the model checkpoint with the best validation performance.
+Hyperparameters for NeuroLS and all meta-heuristics are tuned on a validation set consisting of 512 generated random instances. This is in contrast to
+most classical approaches which fine tune their hyper-parameters directly on the
+benchmark dataset. We argue that our approach facilitates a better and more
+objective comparison between these methods. Furthermore, we fix the random
+seed for all experiments.
+We train 3 different types of policies for NeuroLS, one for each of the action
+spaces described in section 4.2. In the experiments we denote these policies as
+NLSA , NLSAN and NLSANP . As analyzed in [47], random solutions do not provide a good starting point for improvement approaches. For that reason we initialize the solutions of NeuroLS and the meta-heuristics with the FDD/MWKR
+PDR[36] for scheduling and the well known savings construction heuristic[7] for
+the CVRP. Further details on training and hyper-parameters can be found in
+Appendix B.
+5.3
+
+Results
+
+JSSP We evaluate all methods on the well-known benchmark dataset of
+Taillard[38]. It consists of 80 instances of size 15x15 up to 100x20. We compare
+our model against common meta-heuristic baselines including SA, SA with
+restarts, ILS, ILS with SA acceptance and VNS. Moreover, we report the
+results of three recent state-of-the-art ML-based approaches: Learning to
+dispatch (L2D)[49], Learning to schedule (L2S)[34] and ScheduleNet (SN)[33].
+We follow [49] in training different models for problem sizes 15x15 up to 30x20
+and apply the 30x15 and 30x20 model to larger instances of size 50x15, 50x20
+and 100x20 to evaluate its generalization capacity. All models are trained for
+100 LS iterations but evaluated for 50-200. The aggregated results per group of
+same size are shown in table 1 (results per instance can be found in appendix
+E). Results are reported as percentage gaps to the best known solution.
+First of all, the results show that NeuroLS is able to outperform all other
+meta-heuristics on all sizes of instances. The different policies differ in how well
+they work for different problem sizes. While NLSA works best for the smallest
+15x15 instances, it is outperformed by NLSAN on medium sized instances and
+1
+
+https://github.com/jokofa/NeuroLS
+
+11
+
+12
+
+Falkner et al.
+
+Table 1. Results of state-of-the-art machine learning based construction methods and
+local search approaches (100 iterations) on the Taillard benchmark[38]. For instances
+of size 50x15, 50x20 and 100x20 we use the NeuroLS model trained on instances of
+size 30x15 and 30x20 respectively. Percentages are the average gap to the best known
+upper bound. Best gap is marked in bold.
+Model
+15x15
+
+20x15
+
+20x20
+
+Instance size
+30x15 30x20
+
+Avg
+50x15
+
+50x20 100x20
+
+ML-based
+L2D[49] 25.92% 30.03% 31.58% 32.88% 33.64% 22.35% 26.37% 13.64% 27.05%
+L2S[34] 20.12% 24.83% 29.25% 24.59% 31.91% 15.89% 21.39% 9.26% 22.16%
+SN[33] 15.32% 19.43% 17.23% 18.95% 23.75% 13.83% 13.56% 6.67% 16.09%
+Meta-heuristic + Local Search
+SA
+13.92% 17.01% 17.16% 17.53% 21.59% 12.50% 13.11%
+SArestart 13.77% 17.01% 17.57% 17.62% 21.78% 12.54% 13.22%
+ILS
+11.57% 13.57% 13.85% 16.07% 18.72% 12.65% 12.15%
+ILS+SA 13.32% 16.05% 15.38% 16.93% 19.74% 13.07% 13.43%
+VNS
+9.96% 13.71% 14.51% 15.77% 18.69% 11.64% 11.92%
+
+6.61%
+6.75%
+6.72%
+7.08%
+6.26%
+
+14.93%
+15.03%
+13.16%
+14.37%
+12.81%
+
+NeuroLS
+9.76% 13.33% 13.02% 15.29% 17.94% 11.81% 11.96% 6.33% 12.43%
+NLSA
+NLSAN 10.32% 13.18% 12.95% 14.91% 17.78% 11.87% 12.02% 6.22% 12.41%
+NLSANP 10.49% 16.32% 15.24% 15.35% 17.64% 11.62% 11.76% 6.09% 13.06%
+
+NLSANP achieves the best results for large instances. This is to some extent
+expected, since the effect of specific LS operators and more precise perturbations
+is greater for larger instances while this does not seem to be necessary for rather
+small instances. VNS is the best of the meta-heuristic approaches which is able
+to beat NLSANP on the smaller instances and NLSA and NLSAN at least on some
+of the larger ones.
+In general, the iterative methods based on LS achieve much better results
+than the ML-based auto-regressive methods, which can be seen by the large
+improvements that can be achieved in just 100 iterations, reducing the gap by
+an average of 3.7% compared to the best ML-method SN[33].
+CVRP For the CVRP we use the recent benchmark dataset of Uchoa et
+al.[42] and select all instance up to 300 customer nodes. We define four groups
+of instances with 100-149 nodes as n100, 150-199 nodes as n150, 200-249 as
+n200 and 250-299 as n250. We compare against the same meta-heuristics
+mentioned above and additionally to GLS and TS provided by the OR-Tools
+(ORT) library[35]. Furthermore, we compare to the recent state-of-the-art
+ML approaches POMO[22] and DACT[26] which outperformed all other ML
+methods mentioned in section 2.3 in their experiments and provide open source
+code, which is why we consider them to be sufficient for a suitable comparison.
+Since most ML-based methods (POMO, DACT, etc.) do not respect the maximum vehicle constraint for all instances of the Uchoa benchmark, we follow[26]
+
+Learning to Control Local Search for Combinatorial Optimization
+Table 2. Results of state-of-the-art machine learning based methods and local search
+approaches (200 iterations) on the Uchoa benchmark[42]. For all instances sizes we use
+the NeuroLS model trained on instances of size 100. Percentages are the average gap
+to the best known solution. Best gap is marked in bold.
+Model
+n100
+cost time
+
+Instance Group
+n150
+n200
+cost time
+cost time
+
+Avg
+n250
+cost time
+
+ML-based
+17.24% 0.3 12.81% 0.4 20.52% 0.4 15.14% 0.4 16.43%
+POMO[22]
+POMO[22] (aug) 6.32% 0.1 9.41% 0.1 13.47% 0.1 9.21% 0.1 9.60%
+DACT[26]
+13.19% 15.1 20.26% 21.2 16.91% 27.2 24.93% 33 18.82%
+DACT[26] (aug) 11.52% 16.6 17.75% 23.1 15.34% 29.8 21.86% 37.8 16.62%
+ORT[35] GLS
+ORT[35] TS
+SA
+SArestart
+ILS
+ILS+SA
+VNS
+
+Meta-heuristic + Local Search
+6.91% 9.4 10.46% 10.9 7.80% 13.4 12.12%
+6.78% 39.0 10.55% 109.5 7.85% 126.6 12.13%
+6.92% 0.7 5.79% 1.3 16.63% 2.1 5.92%
+6.96% 0.7 5.79% 1.3 16.67% 2.0 5.99%
+6.56% 0.8 5.96% 1.5 16.73% 2.4 6.08%
+6.94% 0.6 6.01% 1.2 16.72% 1.9 6.04%
+7.99% 0.4 6.55% 0.7 17.27% 0.9 6.36%
+
+NLSA
+NLSAN
+NLSANP
+
+NeuroLS
+5.43% 1.5 5.23% 2.4 15.97%
+5.42% 1.7 4.90% 2.7 15.85%
+5.42% 1.7 4.90% 2.7 15.85%
+
+5.0
+7.0
+3.3
+3.0
+3.7
+2.8
+1.4
+
+9.32%
+9.33%
+8.81%
+8.85%
+8.83%
+8.93%
+9.54%
+
+3.6 5.22% 5.3 7.96%
+4.0 5.08% 5.9 7.81%
+4.0 5.08% 6.1 7.81%
+
+in removing this constraint and treat the benchmark dataset as a highly diverse
+test set w.r.t. the distributions of customers and number of required vehicles.
+This is also consistent with the general goal of the ML-based methods, which
+is not to achieve the best known results but to find sufficiently good results
+in reasonable time. In this case we control the computational resources spent
+on the search by specifying a particular number of iterations for the search.
+Furthermore, we evaluate all models with a batch size of 1.
+The results presented in table 2 show that NeuroLS is also able to outperform
+the meta-heuristic approaches mentioned above on all instance groups. Moreover,
+our approach also outperforms the best state-of-the-art ML-based methods on
+all groups but n200, where [22] and [26] with additional instance augmentations
+(aug) outperform NeuroLS by a small margin. The OR-Tools implementation of
+GLS and TS outperforms our method only on the n200 instances, although they
+require prohibitively large runtimes (wall-clock time) several magnitudes larger
+than our approach. In terms of runtimes we also outperform DACT[26] by a
+magnitude, while the learned auto-regressive construction method POMO[22] is
+the fastest over all.
+Finally, the experiment results also show that our method is well able to
+generalize to problem sizes as well as numbers of iterations unseen in training. We
+
+13
+
+14
+
+Falkner et al.
+
+show this on the JSSP instances of size 50x15, 50x20 and 100x20 and basically on
+all Uchoa instances for the CVRP, which are larger than the 100 node instances
+used during training.
+
+6
+
+Conclusion
+
+In this paper we identify three important intervention points in meta-heuristics
+for LS on COPs and incorporate them in a Markov Decision Process. We then
+design a GNN-based controller model which is trained with RL to parameterize three different types of learned meta-heuristics. The resulting methods learn
+to control the local search by deciding about acceptance, neighborhood selection and perturbations. In comprehensive experiments on two common COPs in
+scheduling and vehicle routing, NeuroLS outperforms several well-known metaheuristics as well as state-of-the-art ML-based approaches, confirming the efficacy of our method.
+For future work we consider to replace the problem graph representation
+with a graph representation of the corresponding local search graph, in which
+every node represents a feasible solution together with its respective cost. A
+Curriculum learning strategy (cp. [26]) could also yield further improvements
+regarding performance and generalization.
+
+References
+1. Aarts, E., Aarts, E.H., Lenstra, J.K.: Local search in combinatorial optimization.
+Princeton University Press (2003)
+2. Ba, J.L., Kiros, J.R., Hinton, G.E.: Layer normalization. arXiv preprint
+arXiv:1607.06450 (2016)
+3. Bello, I., Pham, H., Le, Q.V., Norouzi, M., Bengio, S.: Neural combinatorial optimization with reinforcement learning. arXiv preprint arXiv:1611.09940 (2016)
+4. Bengio, Y., Lodi, A., Prouvost, A.: Machine learning for combinatorial optimization: a methodological tour d’horizon. European Journal of Operational Research
+290(2), 405–421 (2021)
+5. Blackstone, J.H., Phillips, D.T., Hogg, G.L.: A state-of-the-art survey of dispatching rules for manufacturing job shop operations. The International Journal of Production Research 20(1), 27–45 (1982)
+6. Chen, X., Tian, Y.: Learning to perform local rewriting for combinatorial optimization. Advances in Neural Information Processing Systems 32 (2019)
+7. Clarke, G., Wright, J.W.: Scheduling of vehicles from a central depot to a number
+of delivery points. Operations research 12(4), 568–581 (1964)
+8. Dabney, W., Ostrovski, G., Silver, D., Munos, R.: Implicit quantile networks for distributional reinforcement learning. In: International conference on machine learning. pp. 1096–1105. PMLR (2018)
+9. Falkner, J.K., Schmidt-Thieme, L.: Learning to solve vehicle routing problems with
+time windows through joint attention. arXiv preprint arXiv:2006.09100 (2020)
+10. Gasse, M., Chételat, D., Ferroni, N., Charlin, L., Lodi, A.: Exact combinatorial
+optimization with graph convolutional neural networks. Advances in Neural Information Processing Systems 32 (2019)
+
+Learning to Control Local Search for Combinatorial Optimization
+11. Gendreau, M., Potvin, J.Y., et al.: Handbook of metaheuristics, vol. 2. Springer
+(2010)
+12. Glover, F.: Future paths for integer programming and links to artificial intelligence.
+Computers & operations research 13(5), 533–549 (1986)
+13. Groër, C., Golden, B., Wasil, E.: A library of local search heuristics for the vehicle
+routing problem. Mathematical Programming Computation 2(2), 79–101 (2010)
+14. Hendrycks, D., Gimpel, K.: Gaussian error linear units (gelus). arXiv preprint
+arXiv:1606.08415 (2016)
+15. Hottung, A., Kwon, Y.D., Tierney, K.: Efficient active search for combinatorial
+optimization problems. arXiv preprint arXiv:2106.05126 (2021)
+16. Hottung, A., Tierney, K.: Neural large neighborhood search for the capacitated
+vehicle routing problem. arXiv preprint arXiv:1911.09539 (2019)
+17. Hu, H., Zhang, X., Yan, X., Wang, L., Xu, Y.: Solving a new 3d bin packing problem
+with deep reinforcement learning method. arXiv preprint arXiv:1708.05930 (2017)
+18. Joshi, C.K., Laurent, T., Bresson, X.: An efficient graph convolutional network
+technique for the travelling salesman problem. arXiv preprint arXiv:1906.01227
+(2019)
+19. Kirkpatrick, S., Gelatt Jr, C.D., Vecchi, M.P.: Optimization by simulated annealing. science 220(4598), 671–680 (1983)
+20. Kool, W., van Hoof, H., Gromicho, J., Welling, M.: Deep policy dynamic programming for vehicle routing problems. arXiv preprint arXiv:2102.11756 (2021)
+21. Kool, W., Van Hoof, H., Welling, M.: Attention, learn to solve routing problems!
+arXiv preprint arXiv:1803.08475 (2018)
+22. Kwon, Y.D., Choo, J., Kim, B., Yoon, I., Gwon, Y., Min, S.: Pomo: Policy optimization with multiple optima for reinforcement learning. Advances in Neural
+Information Processing Systems 33, 21188–21198 (2020)
+23. Lawler, E.L., Wood, D.E.: Branch-and-bound methods: A survey. Operations research 14(4), 699–719 (1966)
+24. Lourenço, H.R., Martin, O.C., Stützle, T.: Iterated local search: Framework and
+applications. In: Handbook of metaheuristics, pp. 129–168. Springer (2019)
+25. Lu, H., Zhang, X., Yang, S.: A learning-based iterative method for solving vehicle
+routing problems. In: International conference on learning representations (2019)
+26. Ma, Y., Li, J., Cao, Z., Song, W., Zhang, L., Chen, Z., Tang, J.: Learning to iteratively solve routing problems with dual-aspect collaborative transformer. Advances
+in Neural Information Processing Systems 34 (2021)
+27. Mazyavkina, N., Sviridov, S., Ivanov, S., Burnaev, E.: Reinforcement learning for
+combinatorial optimization: A survey. Computers & Operations Research 134,
+105400 (2021)
+28. Mladenović, N., Hansen, P.: Variable neighborhood search. Computers & operations research 24(11), 1097–1100 (1997)
+29. Morris, C., Ritzert, M., Fey, M., Hamilton, W.L., Lenssen, J.E., Rattan, G., Grohe,
+M.: Weisfeiler and leman go neural: Higher-order graph neural networks. In: Proceedings of the AAAI conference on artificial intelligence. vol. 33, pp. 4602–4609
+(2019)
+30. Nair, V., Bartunov, S., Gimeno, F., von Glehn, I., Lichocki, P., Lobov, I.,
+O’Donoghue, B., Sonnerat, N., Tjandraatmadja, C., Wang, P., et al.: Solving mixed
+integer programs using neural networks. arXiv preprint arXiv:2012.13349 (2020)
+31. Nazari, M., Oroojlooy, A., Snyder, L., Takác, M.: Reinforcement learning for solving the vehicle routing problem. Advances in neural information processing systems
+31 (2018)
+
+15
+
+16
+
+Falkner et al.
+
+32. d O Costa, P.R., Rhuggenaath, J., Zhang, Y., Akcay, A.: Learning 2-opt heuristics for the traveling salesman problem via deep reinforcement learning. In: Asian
+Conference on Machine Learning. pp. 465–480. PMLR (2020)
+33. Park, J., Bakhtiyar, S., Park, J.: Schedulenet: Learn to solve multi-agent scheduling
+problems with reinforcement learning. arXiv preprint arXiv:2106.03051 (2021)
+34. Park, J., Chun, J., Kim, S.H., Kim, Y., Park, J.: Learning to schedule job-shop
+problems: representation and policy learning using graph neural network and reinforcement learning. International Journal of Production Research 59(11), 3360–
+3377 (2021)
+35. Perron, L., Furnon, V.: Or-tools, https://developers.google.com/optimization/
+36. Sels, V., Gheysen, N., Vanhoucke, M.: A comparison of priority rules for the job
+shop scheduling problem under different flow time-and tardiness-related objective
+functions. International Journal of Production Research 50(15), 4255–4270 (2012)
+37. Sutton, R.S., Barto, A.G.: Reinforcement learning: An introduction. MIT press
+(2018)
+38. Taillard, E.: Benchmarks for basic scheduling problems. european journal of operational research 64(2), 278–285 (1993)
+39. Thyssens, D., Falkner, J., Schmidt-Thieme, L.: Supervised permutation invariant networks for solving the cvrp with bounded fleet size. arXiv preprint
+arXiv:2201.01529 (2022)
+40. Toth, P., Vigo, D.: The vehicle routing problem. SIAM (2002)
+41. Tsang, E.: Foundations of constraint satisfaction: the classic text. BoD–Books on
+Demand (2014)
+42. Uchoa, E., Pecin, D., Pessoa, A., Poggi, M., Vidal, T., Subramanian, A.: New
+benchmark instances for the capacitated vehicle routing problem. European Journal of Operational Research 257(3), 845–858 (2017)
+43. Van Hasselt, H., Guez, A., Silver, D.: Deep reinforcement learning with double qlearning. In: Proceedings of the AAAI conference on artificial intelligence. vol. 30
+(2016)
+44. Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser,
+Ł., Polosukhin, I.: Attention is all you need. Advances in neural information processing systems 30 (2017)
+45. Vinyals, O., Fortunato, M., Jaitly, N.: Pointer networks. Advances in neural information processing systems 28 (2015)
+46. Voudouris, C., Tsang, E.P., Alsheddy, A.: Guided local search. In: Handbook of
+metaheuristics, pp. 321–361. Springer (2010)
+47. Wu, Y., Song, W., Cao, Z., Zhang, J., Lim, A.: Learning improvement heuristics for
+solving routing problems.. IEEE Transactions on Neural Networks and Learning
+Systems (2021)
+48. Wu, Z., Pan, S., Chen, F., Long, G., Zhang, C., Philip, S.Y.: A comprehensive survey on graph neural networks. IEEE transactions on neural networks and learning
+systems 32(1), 4–24 (2020)
+49. Zhang, C., Song, W., Cao, Z., Zhang, J., Tan, P.S., Chi, X.: Learning to dispatch
+for job shop scheduling via deep reinforcement learning. Advances in Neural Information Processing Systems 33, 1621–1632 (2020)
+
+Learning to Control Local Search for Combinatorial Optimization
+
+Appendices
+A
+
+Reinforcement Learning Algorithm
+
+Let π be a policy, then the discounted sum of future rewards is given by the
+random variable
+∞
+X
+Z π (s, a) =
+γ t R(st , at )
+(9)
+t=0
+
+with st ∼ P (st−1 , at+1 ). Then the action-value function Q(s, a) = E[Z π (s, a)]
+can be written in terms of the Bellman equation as
+Qπ (st , at ) = E[R(st , at )] + γE[Qπ (st+1 , at+1 )].
+
+(10)
+
+Furthermore, the real action-value function can be approximated by a parameterized value estimator Qθ (s, a) which is trained via minimization of the squared
+error of the temporal difference defined as
+
+2
+0
+TDE = rt + γ max
+Qθ (st+1 , a ) − Qθ (st , at )
+0
+a ∈A
+
+(11)
+
+based on an -greedy policy.
+Distributional RL[2] aims to replace the scalar value function Qπ with a distribution over the returns Z π . For the distributional case there exist analogous
+formulations for the Bellman equation and the corresponding distributional Bellman optimality operator. Implicit Quantile Networks[3] are used to transform
+random samples from a base distribution to the respective quantile values of a
+target distribution, in this case the distribution over the returns. It is formulated
+as a risk-sensitive greedy policy (w.r.t. a distortion measure β) represented by a
+weighted sum over the quantiles:
+πβ (s) = argmax Qβ (s, a).
+
+(12)
+
+a∈A
+
+Then, assuming two samples x, x0 ∼ U([0, 1]), the respective TD error is
+defined as
+TDEx,x0 = rt + γZx0 (st+1 , πβ (st+1 )) − Zx (st , at )
+(13)
+and the corresponding loss is estimated over multiple i.i.d. samples xi , x0j ∼
+U([0, 1]).
+B
+
+Training and Inference Setup
+
+For training we use the Adam optimizer[4] with a learning rate of 0.0005. We use
+ = 0.95 for our -greedy policy which we discount over the course of training
+to a final value of  = 0.05. During inference we set  = 0.0. Moreover, we use
+n-step returns with n = 3 and a discount factor γ = 0.99. The target network
+of our DQN is updated ever 500 steps. We use a replay buffer of size 32000 and
+prioritized experience replay[15] with α = 0.6 and β = 0.4.
+
+17
+
+18
+
+Falkner et al.
+
+All MLPs in our model have a hidden dimension of 128 and we set the
+embedding dimension of all components to demb = 128. The IQN has a hidden
+dimension of 256. In the GNN encoder we use Lstat = 3 and Ldyna = 2 layers.
+We train all our models for 80 epochs with 19200 transitions each. All experiments are run on an i7-7700K CPU (4.20GHz) and a NVIDIA GeForce 1080TI
+GPU.
+Moreover, all our networks as well as the ML-based baselines are implemented in PyTorch[13] and we use the tianshou library[22] for an efficient RL
+implementation.
+The meta-heuristics use different hyper-parameter configurations which
+where tuned on the validation set consisting of 512 generated instances. The
+exact configurations for all methods can be found in the configuration files in
+our github repository.
+C
+
+JSSP Solver
+
+To solve the JSSP we implement a local search solver in python. We implement
+several different swap and insertion heuristics to provide a suitable number of LS
+operators and corresponding neighborhoods. The first one is the CT operator
+proposed by [21] which tries to swap adjacent nodes in critical blocks. Next,
+we have the CET[10] and ECET[5] moves which respectively either swap only
+nodes at the start or the end of a critical block or both simultaneously. The final
+implemented operator is the CEI move introduced by [1], which shifts a node
+in a critical block to a new position within the same block. [5] provide a nice
+visualization and explanation of how all these operators work.
+In order to quickly evaluate how good some moves are, without applying
+them and completely recalculating the resulting makespan, we use the potential
+estimation strategies by [19] and [9] which are computed in O(m) where m is
+the number of nodes between the initial and the final position of the moved
+nodes. Finally, our perturbation operator is a sequence of random CT moves
+without any evaluation of potentials, somehow similar to the shaking operator
+in [17]. The initial solution for our iterative solver is created by the FDD/MWKR
+priority dispatching rule introduced in [16], which we implement as a stochastic
+variant for restarting as proposed in [7]. We will provide the implementation of
+our solver together with our model code.
+D
+
+Additional Results
+
+We provide more detailed results for different methods and several different
+numbers of iterations in table 3 for the JSSP and table 4 for the CVRP.
+
+Learning to Control Local Search for Combinatorial Optimization
+Table 3. Results of PDRs and local search methods running for 50/100/200 iterations
+on the Taillard benchmark. For instance sizes 50x15, 50x20 and 100x20 we use the
+NeuroLS model trained on instances of size 30x15 and 30x20 respectively. Percentages
+are the gap to the best known upper bound. Best gap is marked in bold.
+Model
+15x15
+
+20x15
+
+20x20
+
+Instance size
+30x15 30x20
+
+PDRs
+RND
+28.90% 36.81% 31.71% 34.97% 36.30%
+FIFO
+23.92% 31.50% 27.42% 31.20% 32.14%
+SPT
+27.14% 32.92% 25.30% 34.54% 34.59%
+MWKR 18.72% 23.94% 21.52% 23.91% 24.97%
+MOPNR 20.54% 23.99% 21.60% 22.44% 25.10%
+FDD
+22.56% 24.79% 22.10% 23.40% 27.37%
+FDD
+17.50% 21.30% 20.11% 21.39% 24.01%
+MWKR
+
+Avg
+50x15
+
+50x20 100x20
+
+22.86% 28.05% 16.47%
+21.15% 23.62% 13.06%
+23.81% 24.96% 15.39%
+16.76% 17.54% 8.33%
+17.32% 17.96% 9.24%
+17.48% 18.11% 8.14%
+15.55% 15.95% 7.75%
+
+29.51%
+25.50%
+27.33%
+19.46%
+19.77%
+20.49%
+17.95%
+
+Local Search
+50 iterations
+14.61% 18.54% 18.87% 18.65% 22.80% 13.63% 14.24% 7.13% 16.06%
+SA
+SArestart 14.61% 18.54% 18.87% 18.65% 22.90% 13.63% 14.24% 7.15% 16.08%
+ILS
+13.03% 15.52% 15.14% 16.76% 19.67% 13.01% 13.18% 7.00% 14.16%
+ILS+SA 13.59% 16.77% 16.48% 17.35% 20.03% 13.36% 13.66% 7.12% 14.79%
+VNS
+11.78% 14.78% 15.67% 16.91% 19.69% 12.64% 12.94% 6.71% 13.89%
+11.03% 14.98% 14.78% 16.04% 18.96% 12.84% 12.89% 6.66% 13.52%
+NLSA
+NLSAN 11.27% 14.66% 14.46% 16.27% 19.27% 12.76% 12.79% 6.82% 13.54%
+NLSANP 11.67% 16.80% 18.60% 16.05% 19.39% 12.11% 12.47% 6.61% 14.21%
+100 iterations
+13.92% 17.01% 17.16% 17.53% 21.59% 12.50% 13.11% 6.61% 14.93%
+SA
+SArestart 13.77% 17.01% 17.57% 17.62% 21.78% 12.54% 13.22% 6.75% 15.03%
+11.57% 13.57% 13.85% 16.07% 18.72% 12.65% 12.15% 6.72% 13.16%
+ILS
+ILS+SA 13.32% 16.05% 15.38% 16.93% 19.74% 13.07% 13.43% 7.08% 14.37%
+VNS
+9.96% 13.71% 14.51% 15.77% 18.69% 11.64% 11.92% 6.26% 12.81%
+NLSA
+9.76% 13.33% 13.02% 15.29% 17.94% 11.81% 11.96% 6.33% 12.43%
+NLSAN 10.32% 13.18% 12.95% 14.91% 17.78% 11.87% 12.02% 6.22% 12.41%
+NLSANP 10.49% 16.32% 15.24% 15.35% 17.64% 11.62% 11.76% 6.09% 13.06%
+200 iterations
+SA
+13.12% 15.92% 15.58% 15.73% 20.02% 11.35% 12.22% 6.01% 13.74%
+SArestart 13.56% 16.25% 16.80% 16.83% 21.25% 11.62% 12.60% 6.12% 14.38%
+ILS
+9.55% 12.49% 12.39% 15.28% 17.51% 11.82% 11.51% 6.42% 12.12%
+ILS+SA 12.50% 14.83% 14.70% 16.41% 18.75% 12.81% 12.60% 6.88% 13.69%
+VNS
+9.04% 13.07% 12.69% 14.65% 17.81% 10.88% 11.48% 5.65% 11.91%
+NLSA
+7.74% 12.16% 11.54% 14.13% 16.35% 11.01% 11.25% 5.90% 11.26%
+NLSAN
+8.74% 11.39% 11.64% 14.10% 16.53% 10.95% 11.18% 5.84% 11.29%
+NLSANP 10.44% 16.29% 13.83% 13.61% 16.06% 10.62% 10.88% 5.73% 12.18%
+ML-based
+L2D[23] 25.92% 30.03% 31.58% 32.88% 33.64% 22.35% 26.37% 13.64% 27.05%
+L2S[11] 20.12% 24.83% 29.25% 24.59% 31.91% 15.89% 21.39% 9.26% 22.16%
+SN[12]
+15.32% 19.43% 17.23% 18.95% 23.75% 13.83% 13.56% 6.67% 16.09%
+
+19
+
+20
+
+Falkner et al.
+
+Table 4. Results of state-of-the-art machine learning based methods and local search
+approaches (200/500/1000 iterations) on the Uchoa benchmark[20]. For all instances
+sizes we use the NeuroLS model trained on instances of size 100. Percentages are the
+average gap to the best known upper bound. Best gap is marked in bold.
+Model
+n100
+cost time
+POMO[6] (single) 23.49%
+POMO[6]
+17.24%
+POMO[6] (aug)
+6.32%
+
+Instance Group
+n150
+n200
+cost time
+cost time
+
+constructive
+0.3 15.65%
+0.4 25.86%
+0.3 12.81%
+0.4 20.52%
+0.1 9.41%
+0.1 13.47%
+
+Avg
+n250
+cost time
+
+0.4 22.93%
+0.4 15.14%
+0.1 9.21%
+
+0.4 21.98%
+0.4 16.43%
+0.1 9.60%
+
+ORT[14] GLS
+ORT[14] TS
+SA
+SArestart
+ILS
+ILS+SA
+VNS
+DACT[8]
+DACT[8] (aug)
+NLSA
+NLSAN
+NLSANP
+
+iterative (200)
+6.91% 9.4 10.46% 10.9 7.80% 13.4 12.12%
+6.78% 39.0 10.55% 109.5 7.85% 126.6 12.13%
+6.92% 0.7 5.79%
+1.3 16.63%
+2.1 5.92%
+6.96% 0.7 5.79%
+1.3 16.67%
+2.0 5.99%
+6.56% 0.8 5.96%
+1.5 16.73%
+2.4 6.08%
+6.94% 0.6 6.01%
+1.2 16.72%
+1.9 6.04%
+7.99% 0.4 6.55%
+0.7 17.27%
+0.9 6.36%
+13.19% 15.1 20.26% 21.2 16.91% 27.2 24.93%
+11.52% 16.6 17.75% 23.1 15.34% 29.8 21.86%
+5.43% 1.5 5.23%
+2.4 15.97%
+3.6 5.22%
+5.42% 1.7 4.90%
+2.7 15.85%
+4.0 5.08%
+5.42% 1.7 4.90%
+2.7 15.85%
+4.0 5.08%
+
+5.0 9.32%
+7.0 9.33%
+3.3 8.81%
+3.0 8.85%
+3.7 8.83%
+2.8 8.93%
+1.4 9.54%
+33 18.82%
+37.8 16.62%
+5.3 7.96%
+5.9 7.81%
+6.1 7.81%
+
+ORT[14] GLS
+ORT[14] TS
+SA
+SArestart
+ILS
+ILS+SA
+VNS
+DACT[8]
+DACT[8] (aug)
+NLSA
+NLSAN
+NLSANP
+
+iterative (500)
+5.69% 39.6 7.91% 64.9 5.06%
+83 8.66% 88.7 6.83%
+5.33% 525.8 7.44% 1267.1 5.16% 1021.3 8.54% 633.4 6.62%
+6.92% 1.7 5.79%
+3.1 16.63%
+4.7 5.92%
+7.4 8.81%
+6.91% 1.7 5.79%
+3.1 16.67%
+4.7 5.99%
+6.9 8.84%
+6.22% 2.0 5.70%
+3.8 16.66%
+6.2 6.08%
+9.2 8.67%
+6.78% 1.6 5.66%
+2.8 16.72%
+4.4 6.04%
+6.5 8.80%
+7.99% 1.1 6.08%
+1.8 17.27%
+2.4 6.36%
+3.5 9.42%
+11.09% 37.5 16.95% 53.3 16.70% 67.5 23.02% 84.8 16.94%
+10.55% 42.2 15.02% 59.1 14.76% 76.0 20.85% 94.0 15.29%
+5.04% 3.3 4.56%
+5.6 15.61%
+8.5 4.87% 13.0 7.52%
+4.80% 3.9 4.30%
+6.4 15.70%
+9.6 4.78% 14.4 7.40%
+4.80% 3.8 4.30%
+6.5 15.70%
+9.6 4.78% 14.4 7.40%
+
+ORT[14] GLS
+ORT[14] TS
+SA
+SArestart
+ILS
+ILS+SA
+VNS
+DACT[8]
+DACT[8] (aug)
+NLSA
+NLSAN
+NLSANP
+
+iterative (1000)
+4.84% 96.3 6.89% 160.4 4.16% 235.7 6.91% 290.4 5.70%
+4.17% 899.9 5.70% 2945.4 4.30% 2752.1 9.76% 2752.1 5.98%
+6.92% 3.2 5.79%
+5.9 16.63%
+9.0 5.92% 13.6 8.81%
+6.91% 3.2 5.79%
+5.8 16.67%
+8.9 5.99% 13.3 8.84%
+5.73% 4.0 5.51%
+7.6 16.66% 12.0 6.08% 18.4 8.50%
+6.78% 3.2 5.66%
+5.7 16.72%
+8.8 6.04% 13.0 8.80%
+7.71% 2.1 6.08%
+3.7 17.27%
+4.8 6.36%
+7.1 9.35%
+10.24% 79.6 15.32% 110.7 15.34% 138.1 21.59% 171.1 15.62%
+10.06% 82.9 14.19% 114.5 14.07% 148.2 20.21% 188.0 14.63%
+4.33% 6.5 4.12% 11.0 15.37% 16.7 4.60% 25.2 7.10%
+4.40% 8.6 3.89% 14.3 15.42% 21.6 4.48% 32.4 7.05%
+4.40% 7.5 3.89% 12.5 15.42% 18.9 4.48% 28.5 7.05%
+
+Learning to Control Local Search for Combinatorial Optimization
+
+E
+
+Detailed Benchmark Results
+
+In this last section we give the per instance results on the Taillard and Uchoa
+benchmark datasets for different methods and different number of iterations.
+
+21
+
+22
+
+Falkner et al.
+
+Table 5. Detailed Results on the Taillard benchmark[18].
+Instance
+
+BKS
+
+15x15
+ta01
+ta02
+ta03
+ta04
+ta05
+ta06
+ta07
+ta08
+ta09
+ta10
+20x15
+ta11
+ta12
+ta13
+ta14
+ta15
+ta16
+ta17
+ta18
+ta19
+ta20
+
+PDRs
+FDD
+RND FIFO SPT MWKR MOPNR FDD MWKR
+
+cost 1231
+time
+cost 1244
+time
+cost 1218
+time
+cost 1175
+time
+cost 1224
+time
+cost 1238
+time
+cost 1227
+time
+cost 1217
+time
+cost 1274
+time
+cost 1241
+time
+
+1655
+0.04
+1682
+0.04
+1596
+0.04
+1478
+0.04
+1672
+0.04
+1463
+0.04
+1650
+0.04
+1467
+0.04
+1605
+0.04
+1572
+0.04
+
+1486 1462
+0.03 0.03
+1486 1450
+0.04 0.03
+1461 1526
+0.03 0.03
+1575 1730
+0.03 0.03
+1457 1618
+0.03 0.03
+1528 1522
+0.03 0.03
+1497 1434
+0.03 0.03
+1496 1563
+0.03 0.03
+1642 1622
+0.03 0.03
+1600 1697
+0.03 0.03
+
+1491
+0.03
+1449
+0.03
+1426
+0.03
+1382
+0.03
+1494
+0.03
+1369
+0.03
+1470
+0.03
+1491
+0.03
+1541
+0.03
+1476
+0.03
+
+1438 1439
+0.03 0.03
+1452 1447
+0.03 0.03
+1418 1618
+0.03 0.03
+1457 1453
+0.03 0.03
+1448 1532
+0.03 0.03
+1486 1453
+0.03 0.03
+1456 1543
+0.03 0.03
+1482 1425
+0.03 0.03
+1594 1627
+0.03 0.03
+1582 1524
+0.03 0.03
+
+1417
+0.03
+1413
+0.03
+1423
+0.03
+1442
+0.03
+1431
+0.03
+1398
+0.03
+1368
+0.03
+1429
+0.03
+1603
+0.03
+1516
+0.03
+
+cost 1357
+time
+cost 1367
+time
+cost 1342
+time
+cost 1345
+time
+cost 1339
+time
+cost 1360
+time
+cost 1462
+time
+cost 1396
+time
+cost 1332
+time
+cost 1348
+time
+
+1748
+0.05
+1957
+0.05
+1715
+0.05
+1746
+0.05
+1927
+0.05
+1911
+0.05
+2141
+0.05
+1872
+0.05
+1777
+0.05
+1878
+0.05
+
+1701 1865
+0.04 0.04
+1810 1667
+0.04 0.04
+1882 1843
+0.04 0.04
+1795 1635
+0.04 0.04
+1788 1835
+0.04 0.04
+1696 1965
+0.04 0.04
+1899 2059
+0.04 0.04
+1833 1770
+0.04 0.04
+1716 1789
+0.04 0.04
+1827 1713
+0.04 0.04
+
+1685
+0.04
+1692
+0.04
+1690
+0.04
+1563
+0.04
+1700
+0.04
+1584
+0.04
+1851
+0.04
+1751
+0.04
+1696
+0.04
+1703
+0.04
+
+1665 1766
+0.04 0.04
+1739 1631
+0.04 0.04
+1642 1619
+0.04 0.04
+1662 1687
+0.04 0.04
+1682 1659
+0.04 0.04
+1638 1681
+0.04 0.04
+1856 1950
+0.04 0.04
+1710 1721
+0.04 0.04
+1651 1659
+0.04 0.04
+1677 1658
+0.04 0.04
+
+1663
+0.04
+1712
+0.04
+1644
+0.04
+1553
+0.04
+1674
+0.04
+1608
+0.04
+1816
+0.04
+1684
+0.04
+1590
+0.04
+1611
+0.04
+
+Learning to Control Local Search for Combinatorial Optimization
+
+Table 6. Detailed Results on the Taillard benchmark[18].
+Instance
+
+BKS
+
+20x20
+ta21
+ta22
+ta23
+ta24
+ta25
+ta26
+ta27
+ta28
+ta29
+ta30
+30x15
+ta31
+ta32
+ta33
+ta34
+ta35
+ta36
+ta37
+ta38
+ta39
+ta40
+
+PDRs
+FDD
+RND FIFO SPT MWKR MOPNR FDD MWKR
+
+cost 1642
+time
+cost 1600
+time
+cost 1557
+time
+cost 1644
+time
+cost 1595
+time
+cost 1643
+time
+cost 1680
+time
+cost 1603
+time
+cost 1625
+time
+cost 1584
+time
+
+2075
+0.07
+1985
+0.07
+2194
+0.08
+2092
+0.07
+2172
+0.08
+2231
+0.07
+2094
+0.07
+2420
+0.07
+2112
+0.08
+1926
+0.08
+
+2089 2175
+0.06 0.06
+2146 1893
+0.06 0.06
+2010 1990
+0.06 0.06
+1989 2073
+0.06 0.06
+2160 1950
+0.06 0.06
+2182 1955
+0.06 0.06
+2112 2096
+0.06 0.06
+1980 1968
+0.06 0.06
+1999 2166
+0.06 0.06
+1941 1999
+0.05 0.07
+
+2044
+0.06
+1914
+0.05
+1954
+0.06
+1982
+0.06
+1905
+0.06
+1967
+0.06
+2091
+0.06
+1997
+0.06
+1860
+0.06
+1939
+0.06
+
+1964 1962
+0.06 0.06
+1905 1921
+0.05 0.06
+1922 1945
+0.05 0.06
+1918 1903
+0.06 0.05
+1912 1959
+0.05 0.06
+2018 1958
+0.08 0.06
+2160 2080
+0.07 0.06
+1952 2032
+0.06 0.06
+1899 2081
+0.06 0.06
+2017 1906
+0.06 0.05
+
+1930
+0.05
+1928
+0.06
+1833
+0.06
+1946
+0.06
+1901
+0.06
+1997
+0.05
+2140
+0.06
+1875
+0.06
+1948
+0.06
+1927
+0.06
+
+cost 1764
+time
+cost 1784
+time
+cost 1791
+time
+cost 1829
+time
+cost 2007
+time
+cost 1819
+time
+cost 1771
+time
+cost 1673
+time
+cost 1795
+time
+cost 1669
+time
+
+2207
+0.08
+2411
+0.08
+2527
+0.08
+2635
+0.08
+2612
+0.08
+2379
+0.1
+2393
+0.08
+2344
+0.08
+2494
+0.08
+2160
+0.08
+
+2277 2335
+0.06 0.06
+2322 2432
+0.06 0.06
+2481 2428
+0.06 0.06
+2507 2534
+0.06 0.06
+2478 2497
+0.06 0.07
+2393 2364
+0.06 0.07
+2254 2664
+0.06 0.06
+2355 2201
+0.06 0.07
+2352 2465
+0.06 0.06
+2069 2166
+0.07 0.06
+
+2134
+0.07
+2211
+0.06
+2349
+0.06
+2245
+0.06
+2226
+0.06
+2365
+0.06
+2151
+0.06
+2076
+0.06
+2220
+0.06
+2205
+0.06
+
+2143 2240
+0.06 0.06
+2188 2308
+0.06 0.08
+2308 2340
+0.07 0.06
+2187 2158
+0.07 0.07
+2255 2195
+0.07 0.06
+2307 2236
+0.07 0.07
+2190 2233
+0.06 0.06
+2179 2163
+0.07 0.06
+2135 2189
+0.07 0.07
+2028 2029
+0.06 0.06
+
+2116
+0.06
+2273
+0.06
+2278
+0.07
+2168
+0.06
+2225
+0.08
+2186
+0.06
+2232
+0.06
+1991
+0.06
+2154
+0.06
+2109
+0.06
+
+23
+
+24
+
+Falkner et al.
+
+Table 7. Detailed Results on the Taillard benchmark[18].
+Instance
+
+BKS
+
+30x20
+ta41
+ta42
+ta43
+ta44
+ta45
+ta46
+ta47
+ta48
+ta49
+ta50
+50x15
+ta51
+ta52
+ta53
+ta54
+ta55
+ta56
+ta57
+ta58
+ta59
+ta60
+
+PDRs
+FDD
+RND FIFO SPT MWKR MOPNR FDD MWKR
+
+cost 2005
+time
+cost 1937
+time
+cost 1846
+time
+cost 1979
+time
+cost 2000
+time
+cost 2004
+time
+cost 1889
+time
+cost 1941
+time
+cost 1961
+time
+cost 1923
+time
+
+2863
+0.11
+2664
+0.11
+2468
+0.11
+2622
+0.11
+2577
+0.11
+2778
+0.11
+2682
+0.11
+2630
+0.11
+2602
+0.12
+2673
+0.11
+
+2556 2463
+0.08 0.09
+2648 2773
+0.08 0.09
+2442 2412
+0.09 0.09
+2687 2906
+0.08 0.09
+2607 2734
+0.09 0.08
+2606 2650
+0.09 0.08
+2471 2531
+0.09 0.09
+2606 2620
+0.09 0.09
+2604 2652
+0.08 0.09
+2520 2483
+0.08 0.09
+
+2620
+0.09
+2424
+0.08
+2348
+0.08
+2493
+0.09
+2524
+0.09
+2447
+0.08
+2282
+0.09
+2356
+0.09
+2382
+0.09
+2474
+0.09
+
+2538 2445
+0.09 0.09
+2448 2567
+0.08 0.09
+2425 2269
+0.09 0.09
+2419 2402
+0.09 0.09
+2522 2511
+0.09 0.09
+2498 2646
+0.08 0.09
+2286 2660
+0.09 0.09
+2371 2420
+0.09 0.09
+2399 2492
+0.09 0.09
+2469 2406
+0.09 0.09
+
+2537
+0.09
+2388
+0.09
+2354
+0.09
+2423
+0.09
+2450
+0.09
+2525
+0.09
+2400
+0.09
+2280
+0.09
+2431
+0.09
+2376
+0.09
+
+cost 2760
+time
+cost 2756
+time
+cost 2717
+time
+cost 2839
+time
+cost 2679
+time
+cost 2781
+time
+cost 2943
+time
+cost 2885
+time
+cost 2655
+time
+cost 2723
+time
+
+3518
+0.14
+3429
+0.14
+3296
+0.15
+3498
+0.17
+3367
+0.16
+3385
+0.14
+3444
+0.14
+3481
+0.14
+3352
+0.14
+3309
+0.15
+
+3705 3856
+0.11 0.11
+3368 3266
+0.11 0.11
+3199 3273
+0.1 0.1
+3221 3167
+0.1 0.1
+3267 3289
+0.1 0.11
+3326 3554
+0.1 0.11
+3654 3745
+0.11 0.11
+3370 3459
+0.11 0.11
+3357 3341
+0.1 0.1
+3137 3393
+0.1 0.11
+
+3435
+0.11
+3394
+0.11
+3090
+0.1
+3294
+0.1
+3198
+0.11
+3134
+0.1
+3261
+0.11
+3380
+0.11
+3080
+0.1
+3122
+0.11
+
+3567 3263
+0.11 0.11
+3278 3332
+0.1 0.1
+3115 3188
+0.1 0.11
+3265 3223
+0.11 0.11
+3279 3174
+0.11 0.11
+3100 3293
+0.11 0.11
+3335 3420
+0.11 0.11
+3420 3382
+0.1 0.11
+3139 3121
+0.1 0.11
+3044 3191
+0.1 0.11
+
+3486
+0.11
+3276
+0.11
+3059
+0.11
+3053
+0.11
+3103
+0.11
+3302
+0.11
+3298
+0.12
+3311
+0.12
+3156
+0.11
+3006
+0.11
+
+Learning to Control Local Search for Combinatorial Optimization
+
+Table 8. Detailed Results on the Taillard benchmark[18].
+Instance
+
+BKS
+
+50x20
+ta61
+ta62
+ta63
+ta64
+ta65
+ta66
+ta67
+ta68
+ta69
+ta70
+100x20
+ta71
+ta72
+ta73
+ta74
+ta75
+ta76
+ta77
+ta78
+ta79
+ta80
+
+PDRs
+FDD
+RND FIFO SPT MWKR MOPNR FDD MWKR
+
+cost 2868
+time
+cost 2869
+time
+cost 2755
+time
+cost 2702
+time
+cost 2725
+time
+cost 2845
+time
+cost 2825
+time
+cost 2784
+time
+cost 3071
+time
+cost 2995
+time
+
+3523
+0.22
+3810
+0.2
+3408
+0.19
+3547
+0.19
+3559
+0.2
+3589
+0.2
+3779
+0.22
+3626
+0.2
+3653
+0.21
+3922
+0.2
+
+3690 3587
+0.15 0.15
+3672 3487
+0.15 0.17
+3320 3277
+0.16 0.15
+3161 3627
+0.16 0.16
+3263 3313
+0.15 0.15
+3594 3595
+0.15 0.16
+3612 3401
+0.17 0.15
+3380 3440
+0.15 0.16
+3675 3811
+0.16 0.16
+3790 3998
+0.17 0.15
+
+3343
+0.15
+3423
+0.15
+3233
+0.15
+3173
+0.16
+3429
+0.15
+3287
+0.15
+3305
+0.15
+3203
+0.16
+3550
+0.15
+3482
+0.16
+
+3329 3303
+0.16 0.15
+3417 3415
+0.16 0.15
+3226 3247
+0.16 0.15
+3118 3138
+0.16 0.15
+3287 3267
+0.15 0.16
+3366 3309
+0.15 0.22
+3411 3374
+0.15 0.16
+3276 3380
+0.15 0.15
+3526 3655
+0.15 0.16
+3590 3500
+0.15 0.15
+
+3366
+0.15
+3437
+0.16
+3139
+0.15
+3122
+0.15
+3298
+0.15
+3324
+0.16
+3251
+0.16
+3157
+0.16
+3530
+0.15
+3352
+0.15
+
+cost 5464
+time
+cost 5181
+time
+cost 5568
+time
+cost 5339
+time
+cost 5392
+time
+cost 5342
+time
+cost 5436
+time
+cost 5394
+time
+cost 5358
+time
+cost 5183
+time
+
+6436
+0.42
+6002
+0.43
+6605
+0.41
+6026
+0.43
+6801
+0.42
+6096
+0.44
+5972
+0.42
+6280
+0.44
+6186
+0.44
+6088
+0.44
+
+6203 6377
+0.33 0.33
+5672 6080
+0.36 0.35
+6302 6371
+0.36 0.33
+5903 6283
+0.33 0.32
+6361 6208
+0.33 0.36
+6213 6583
+0.34 0.33
+5836 5915
+0.32 0.31
+6331 6156
+0.32 0.33
+6006 6029
+0.35 0.33
+5839 5912
+0.33 0.32
+
+5979
+0.32
+5583
+0.32
+6047
+0.33
+5669
+0.34
+5997
+0.33
+5902
+0.33
+5905
+0.32
+5738
+0.32
+5743
+0.32
+5565
+0.31
+
+5938 6102
+0.31 0.32
+5639 5543
+0.32 0.31
+6161 6098
+0.31 0.34
+5634 5727
+0.32 0.32
+6212 6122
+0.32 0.33
+5936 5799
+0.32 0.33
+5829 5706
+0.31 0.31
+5895 5793
+0.32 0.34
+5652 5598
+0.32 0.33
+5720 5538
+0.31 0.31
+
+5863
+0.32
+5539
+0.32
+6233
+0.32
+5628
+0.32
+6062
+0.32
+5851
+0.32
+5736
+0.32
+5762
+0.32
+5667
+0.32
+5476
+0.33
+
+25
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+NLSA
+NLSAN
+NLSANP
+50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200
+
+ta01 cost 1378 1378 1378 1378 1378 1378 1365 1352 1352 1365 1365 1365 1361 1361 1361 1346 1346 1320 1359 1339 1331 1365 1365 1350
+1 2.18 4.74 0.88 1.62 2.96 1.03 1.89 4.01 1.07 1.94 3.75
+time 0.39 0.78 1.57 0.39 0.81 1.66 0.43 0.87 1.88 0.42 0.78 1.5
+ta02 cost 1387 1387 1386 1387 1387 1387 1376 1351 1332 1376 1376 1376 1361 1326 1326 1333 1311 1311 1369 1369 1326 1369 1369 1369
+time 0.43 0.79 1.58 0.4 0.82 1.64 0.47 0.97 1.93 0.43 0.9 1.77 0.96 2.02 4.51 0.87 1.56 3.07 1.02 1.92 3.67 1.04 1.94 3.85
+ta03 cost 1391 1391 1383 1391 1391 1391 1333 1332 1321 1353 1333 1333 1373 1330 1330 1334 1333 1318 1333 1333 1333 1353 1339 1339
+time 0.46 0.78 1.59 0.4 0.82 1.88 0.43 0.95 1.96 0.35 0.82 1.72 1.01 2.11 4.63 0.84 1.57 3.09 0.96 1.86 3.94 1.01 1.87 3.69
+ta04 cost 1426 1426 1393 1426 1412 1405 1396 1396 1349 1416 1416 1396 1371 1350 1343 1377 1347 1287 1364 1354 1321 1364 1364 1358
+time 0.42 0.79 1.66 0.43 0.82 1.64 0.43 0.88 1.86 0.39 0.8 1.51 0.93 1.99 4.74 0.86 1.55 2.94 1.04 1.92 3.75 1.08 2.11 3.76
+ta05 cost 1364 1360 1345 1364 1360 1360 1364 1322 1292 1379 1370 1356 1333 1330 1329 1356 1334 1323 1356 1328 1292 1356 1328 1328
+time 0.4 0.79 1.6 0.4 0.8 1.65 0.42 0.9 1.88 0.35 0.71 1.55 0.93 2.09 4.9 0.94 1.57
+3 1.04 1.89 3.62 1.07 1.94 3.74
+ta06 cost 1392 1368 1329 1392 1368 1365 1363 1363 1330 1370 1370 1363 1355 1355 1329 1345 1335 1311 1362 1349 1326 1355 1328 1361
+time 0.39 0.78 1.66 0.39 0.8 1.64 0.42 0.85 1.82 0.38 0.72 1.46 1.09 2.19 4.68 0.86 1.53 2.97 1.03 1.92 3.8 0.99 1.83 3.84
+ta07 cost 1315 1315 1315 1315 1315 1315 1309 1294 1284 1310 1309 1294 1315 1315 1304 1294 1294 1270 1309 1309 1309 1294 1294 1294
+time 0.38 0.78 1.61 0.38 0.82 1.63 0.4 0.83 1.75 0.36 0.73 1.47 1.16 2.19 4.6 0.84 1.56 2.95 1.02 1.86 3.77 1.01 1.92 3.7
+ta08 cost 1384 1381 1380 1384 1381 1379 1395 1387 1342 1395 1395 1395 1366 1350 1350 1337 1333 1305 1332 1310 1295 1332 1332 1324
+time 0.38 0.79 1.6 0.4 0.79 1.59 0.47 1.01 2.03 0.43 0.88 1.77 1.01 2.12 4.79 0.91 1.97 3.09 0.96 1.84 3.6 0.99 1.87 4.02
+ta09 cost 1587 1533 1533 1587 1533 1533 1531 1531 1487 1534 1531 1531 1478 1458 1390 1500 1492 1461 1492 1492 1461 1540 1493 1484
+time 0.39 0.79 1.58 0.4 0.84 1.61 0.46 0.96 2.03 0.43 0.86 1.79 0.93 2.08 4.69 0.86 1.52 2.9 0.97 2.02 3.64 1.02 1.95 4.22
+ta10 cost 1461 1461 1459 1461 1456 1442 1458 1383 1373 1461 1461 1416 1424 1338 1338 1422 1364 1334 1398 1374 1369 1395 1366 1365
+time 0.38 0.78 1.58 0.38 0.81 1.63 0.46 0.98 1.88 0.42 0.88 1.81 1.01 2.03 4.49 0.93 1.61 3.07 1.02 1.9 3.68 1.02 1.82 3.68
+
+15x15
+
+Inst.
+
+Table 9. Detailed Results on the Taillard benchmark[18].
+
+26
+Falkner et al.
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+NLSA
+NLSAN
+NLSANP
+50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200
+
+ta11 cost 1615 1615 1579 1615 1615 1615 1601 1579 1556 1611 1609 1579 1611 1579 1553 1575 1555 1555 1579 1568 1549 1608 1611 1611
+1 2.12 0.51 1.09 2.23 0.66 1.28 2.68 0.6 1.17 2.47 1.42 2.86 5.97 1.38 2.08 4.44 1.16 2.26 5.08 1.31 3.21 6.79
+time 0.55
+ta12 cost 1642 1642 1611 1642 1642 1597 1571 1507 1485 1575 1571 1571 1594 1532 1509 1537 1512 1510 1542 1523 1472 1594 1594 1573
+time 0.49 1.01 2.12 0.51 1.07 2.24 0.52 1.07 2.29 0.47 0.95 2.05 1.3 2.66 5.72 0.97 2.11 4.35 1.12 2.29 4.5 1.31 3.08 7.32
+ta13 cost 1605 1556 1556 1605 1556 1556 1559 1548 1532 1564 1559 1558 1559 1559 1539 1541 1539 1496 1559 1541 1530 1556 1559 1559
+time 0.53 1.03 2.14 0.55 1.03 2.23 0.52 1.14 2.42 0.47 0.96 2.17 1.24 2.87 6.01 0.99 1.95 4.28 1.25 2.37 4.84 1.21 3.03 6.86
+ta14 cost 1497 1488 1484 1497 1488 1488 1489 1470 1470 1492 1492 1484 1492 1492 1487 1476 1474 1474 1473 1474 1448 1494 1480 1480
+2 4.41 1.16 2.53 4.82 1.27 2.94 6.67
+time 0.5 1.02 2.13 0.5 1.02 2.22 0.6 1.17 2.41 0.56 1.13 2.56 1.26 2.87 6.13 1.11
+ta15 cost 1652 1553 1552 1652 1553 1553 1576 1547 1525 1598 1573 1554 1530 1530 1530 1556 1553 1526 1557 1551 1512 1624 1624 1624
+time 0.5
+1 2.12 0.5 1.01 2.19 0.51 1.14 2.35 0.47 0.96 2.14 0.97 2.6 5.78
+1 1.9 4.54 1.18 2.26 4.83 1.36 3.17 7.22
+ta16 cost 1605 1599 1599 1605 1599 1599 1565 1517 1508 1565 1565 1547 1550 1547 1543 1559 1559 1536 1539 1539 1539 1560 1560 1560
+time 0.49 1.01 2.14 0.5 1.07 2.23 0.62 1.21 2.57 0.55 1.16 2.44 1.26 2.74 5.96 1.07 2.25 4.5 1.23 2.44 4.87 1.19 3.26 7.19
+ta17 cost 1766 1760 1711 1766 1760 1711 1696 1663 1640 1751 1749 1696 1661 1661 1661 1742 1631 1628 1683 1606 1594 1745 1710 1738
+time 0.49 0.99 2.11 0.6 1.01 2.12 0.51 1.1 2.33 0.47 0.95 2.09 1.01 2.67 5.88 1.12 1.96 4.19 1.12 2.13 4.58 1.39 3.23 6.77
+ta18 cost 1644 1620 1611 1644 1620 1611 1663 1649 1630 1663 1663 1663 1620 1571 1571 1663 1606 1578 1663 1619 1560 1663 1641 1636
+time 0.5 1.01 2.09 0.57 1.02 2.2 0.64 1.23 2.42 0.57 1.16 2.34 1.17 2.53 5.79 1.15 1.99 4.27 1.33 2.39 4.71 1.4 3.24 6.83
+ta19 cost 1581 1581 1563 1581 1581 1581 1542 1516 1507 1586 1553 1516 1516 1516 1507 1535 1535 1516 1545 1526 1518 1566 1566 1566
+time 0.51 1.04 2.15 0.5 1.08 2.3 0.53 1.07 2.34 0.46 0.97 2.11 1.07 2.7 5.84 1.07 2.1 4.48 1.24 2.49 4.93 1.53 3.41 7.1
+ta20 cost 1572 1555 1555 1572 1555 1555 1504 1504 1499 1532 1504 1504 1532 1532 1532 1509 1503 1488 1509 1500 1480 1531 1531 1524
+time 0.5 1.03 2.15 0.57 1.04 2.2 0.5 1.12 2.37 0.46 0.98 2.24 1.13 2.75 5.98 0.98 1.88 4.34 1.16 2.45 4.66 1.23 2.91 6.57
+
+20x15
+
+Inst.
+
+Table 10. Detailed Results on the Taillard benchmark[18].
+Learning to Control Local Search for Combinatorial Optimization
+27
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+NLSA
+NLSAN
+NLSANP
+50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200
+
+ta21 cost 1930 1880 1865 1930 1930 1904 1835 1813 1795 1848 1835 1824 1871 1867 1858 1835 1819 1806 1835 1800 1803 1898 1863 1867
+time 0.65 1.34 2.83 0.7 1.44 2.95 0.67 1.54 3.09 0.66 1.33 2.66 1.59 3.66 7.8 1.27 2.41 4.57 1.41 2.8 5.93 2.13 3.74 7.01
+ta22 cost 1914 1871 1867 1914 1871 1871 1798 1796 1787 1812 1798 1796 1808 1808 1781 1789 1786 1772 1829 1774 1793 1911 1848 1821
+time 0.66 1.33 2.74 0.65 1.32 2.83 0.65 1.46 3.11 0.59 1.3 2.82 1.46 3.71 7.53 1.19 2.38 4.75 1.36 2.76 6.16 2.28 3.7 7.01
+ta23 cost 1811 1788 1786 1811 1791 1791 1745 1738 1722 1745 1745 1742 1796 1796 1757 1745 1745 1736 1765 1729 1736 1793 1804 1761
+time 0.66 1.33 2.81 0.66 1.39 2.89 0.74 1.72 3.18 0.69 1.52 3.03 1.97 3.89 7.71 1.24 2.43 4.77 1.52 2.86 6.36 2.15 4.01 6.86
+ta24 cost 1931 1897 1883 1931 1931 1931 1915 1838 1777 1937 1917 1882 1917 1880 1810 1882 1809 1809 1859 1820 1794 1946 1852 1825
+5 1.38 2.72 5.8 2.21 3.74 6.9
+time 0.76 1.32 2.81 0.66 1.45 2.95 0.69 1.39 2.94 0.65 1.33 2.6 1.82 3.67 7.57 1.36 2.57
+ta25 cost 1852 1842 1793 1852 1842 1793 1796 1778 1778 1862 1796 1780 1796 1796 1796 1844 1790 1775 1787 1788 1772 1901 1812 1758
+time 0.68 1.35 2.76 0.67 1.35 2.81 0.69 1.48 3.33 0.61 1.35 2.77 1.54 3.57 7.81 1.26 2.51 5.1 1.46 2.68 5.87 2.36 3.86 6.66
+ta26 cost 1997 1977 1932 1997 1944 1942 1918 1906 1870 1935 1918 1918 1940 1879 1879 1918 1893 1855 1890 1894 1857 1925 1932 1874
+time 0.65 1.32 2.73 0.81 1.35 2.87 0.76 1.58 3.36 0.73 1.69 3.06 1.84 3.46 7.74 1.3 2.42
+5 1.41 2.86 5.75 2.11 3.81 6.87
+ta27 cost 2116 2050 2004 2116 2050 2004 2050 2010 2008 2075 2049 2050 1990 1990 1969 2008 1990 1915 2022 1978 1928 2094 1993 1983
+time 0.7 1.33 2.72 0.66 1.47 2.76 0.77 1.45 3.1 0.62 1.23 2.53 1.23 3.33 7.48 1.28 2.45 4.96 1.47 2.75 5.82 2.33 3.84 6.7
+ta28 cost 1868 1866 1859 1868 1866 1866 1832 1816 1779 1855 1848 1827 1860 1860 1808 1823 1805 1783 1810 1814 1777 1871 1805 1828
+time 0.78 1.36 2.77 0.66 1.45 2.92 0.84 1.62 3.78 0.73 1.49 3.1 1.8 3.91 7.62 1.27 2.35 4.67 1.33 2.84 5.99 2.32 3.76 7.01
+ta29 cost 1911 1899 1845 1911 1911 1909 1856 1842 1787 1882 1876 1856 1882 1827 1780 1846 1813 1785 1844 1813 1801 1915 1840 1831
+time 0.69 1.34 2.75 0.76 1.51 2.9 0.74 1.48 3.24 0.72 1.49 2.8 1.76 3.69 7.67 1.26 2.33 4.65 1.34 2.82 5.84 2.2 3.71 6.83
+ta30 cost 1895 1879 1859 1895 1879 1879 1876 1876 1874 1887 1879 1876 1848 1816 1788 1874 1828 1803 1871 1858 1795 1927 1888 1862
+time 0.7 1.36 2.77 0.68 1.42 2.91 0.68 1.47 3.18 0.62 1.24 2.58 1.45 3.27 7.2 1.32 2.45 4.94 1.44 2.9 5.78 2.29 3.77 7.1
+
+20x20
+
+Inst.
+
+Table 11. Detailed Results on the Taillard benchmark[18].
+
+28
+Falkner et al.
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+NLSA
+NLSAN
+NLSANP
+50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200 50 100 200
+
+ta31 cost 2089 2081 2049 2089 2089 2089 2085 2077 2058 2089 2089 2077 2072 2072 2026 2072 2049 2001 2072 2067 2046 2081 2079 2048
+7 1.77 4.24 6.77
+time 0.81 1.56 3.12 0.76 1.62 3.53 0.91 1.83 3.65 0.84 1.57 3.35 1.93 4.2 8.78 1.43 2.72 5.26 1.64 3.45
+ta32 cost 2148 2124 2065 2148 2124 2065 2125 2125 2125 2125 2125 2125 2125 2125 2125 2102 2065 2054 2125 2084 2058 2120 2087 2031
+time 0.77 1.55 3.16 0.77 1.71 3.5 0.96 2.17 4.39 0.78 1.73 3.73 1.64 4.06 8.94 1.32 2.57 5.76 1.53 2.91 6.7 1.53 3.39 6.94
+ta33 cost 2228 2200 2158 2228 2200 2172 2187 2154 2138 2255 2194 2154 2182 2134 2101 2169 2157 2133 2206 2130 2125 2169 2153 2099
+time 0.8 1.6 3.15 0.82 1.7 3.47 0.89 1.91 3.83 0.81 1.72 3.48 1.24 2.96 7.22 1.27 2.58 5.92 1.46 3.11 6.7 1.27 3.2 6.16
+ta34 cost 2082 2082 2067 2082 2082 2082 2076 2076 2070 2076 2076 2076 2076 2076 2066 2076 2076 2046 2067 2050 2055 2056 2056 2056
+9 1.46 2.95 5.66 1.62 3.33 7.12 1.66 3.86 6.71
+time 0.72 1.71 3.09 0.76 1.69 3.48 0.97 2.16 3.89 0.82 1.77 3.51 2.06 4.26
+ta35 cost 2201 2173 2146 2201 2163 2163 2159 2138 2109 2178 2178 2178 2178 2159 2159 2159 2159 2130 2155 2122 2122 2149 2149 2122
+time 0.76 1.67 3.11 0.83 1.75 3.58 0.94 2.06 3.84 0.82 1.7 3.15 2.04 4.25 9.07 1.52 2.74 5.36 1.69 3.1 6.86 1.79 3.86 7.27
+ta36 cost 2154 2150 2140 2154 2154 2154 2150 2150 2150 2150 2150 2150 2150 2112 2112 2136 2136 2113 2135 2104 2118 2132 2105 2064
+time 0.78 1.6 3.15 0.79 1.87 3.65 0.83 1.88 3.63 0.75 1.49 2.88 2.11 3.98 8.77 1.48 2.89 5.59 1.6 3.17 6.93 1.51 3.5 6.32
+ta37 cost 2201 2149 2121 2201 2149 2121 2131 2108 2084 2131 2131 2108 2079 2079 2060 2084 2084 2075 2101 2060 2060 2118 2095 2075
+time 0.74 1.56 3.08 0.77 1.69 3.26 0.96 1.93 3.76 0.85 1.76 3.27 1.61 3.82 8.54 1.31 2.51 5.57 1.58 3.04 6.79 1.73 3.73 6.64
+ta38 cost 1991 1978 1961 1991 1991 1991 1961 1946 1911 1961 1961 1952 1974 1974 1919 1971 1946 1919 1938 1976 1889 1933 1933 1917
+time 0.71 1.55 3.12 0.83 1.75 3.58 0.85 1.71 3.66 0.69 1.43 2.85 2.22 4.54 8.97 1.58 2.88 5.59 1.6 3.58 6.59 1.53 3.79 7.25
+ta39 cost 2123 2100 2074 2123 2100 2074 2051 2043 2043 2066 2051 2043 2056 2041 2041 2043 2043 2036 2056 2043 2043 2056 2046 1991
+time 0.78 1.57 3.15 0.77 1.67 3.5 0.83 1.85 4.15 0.83 1.73 3.51 1.6 3.69 8.53 1.42 2.72 5.68 1.5 3.19 7.29 1.56 3.57 7.26
+ta40 cost 2023 2004 1937 2023 2004 2004 1977 1961 1949 1977 1977 1977 2037 1954 1915 1961 1925 1924 1959 1935 1911 1962 1947 1936
+time 0.74 1.57 3.16 0.82 1.74 3.64 0.92 1.9 3.94 0.78 1.69 3.62 1.99 3.83 8.26 1.46 2.69 5.56 1.48 3.02 7.02 1.47 3.48 7.26
+
+30x15
+
+Inst.
+
+Table 12. Detailed Results on the Taillard benchmark[18].
+Learning to Control Local Search for Combinatorial Optimization
+29
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+50 100 200 50 100 200 50 100 200 50 100 200 50 100
+200
+
+NLSA
+NLSAN
+NLSANP
+50 100 200 50 100 200 50 100 200
+
+ta41 cost 2490 2465 2429 2490 2465 2465 2427 2405 2404 2465 2427 2405 2465 2442 2442 2423 2414 2384 2434 2413 2372 2430 2408 2351
+time 0.95 2.02 4.12 1.08 2.12 4.37 1.03 2.28 4.92 1.07 2.16 4.52 2.42 5.13 11.14 1.68 3.39 7.39 1.88 4.1 8.26 1.88 3.89 7.94
+ta42 cost 2355 2331 2309 2374 2354 2307 2341 2330 2302 2341 2341 2333 2315 2277 2277 2291 2291 2254 2295 2295 2285 2291 2241 2233
+time 0.98 2.03 4.16 1.29 2.15 4.3 1.25 2.61 5.16 1.08 2.26 4.7 2.38 5.13 11.29 1.63 3.39 7.29 1.93 4.14 8.44 1.96 3.95 8.61
+ta43 cost 2354 2342 2308 2354 2296 2282 2297 2248 2247 2297 2297 2248 2268 2251 2216 2259 2228 2208 2272 2253 2201 2265 2232 2182
+time 1.01 2.08 4.15 1.23 2.1 4.38 1.11 2.33 5.37 0.99 2.21 4.52 2.1 4.91 10.7 1.67 3.26 7.21 1.83 3.88 7.97 1.98 3.92 8.57
+ta44 cost 2399 2388 2346 2399 2399 2399 2317 2317 2304 2318 2317 2317 2318 2309 2309 2317 2305 2260 2308 2308 2291 2303 2301 2280
+time 0.98 2.02 4.15 1.09 2.14 4.7 1.08 2.41 5.5 1.02 2.2 4.53 2.05 4.97 11.03 1.62 3.45 7.16 1.81 4.1 8.42 1.89 3.9 8.55
+ta45 cost 2421 2362 2344 2421 2362 2362 2278 2251 2241 2278 2274 2241 2278 2278 2243 2278 2262 2241 2278 2248 2228 2278 2244 2241
+time 0.98 2.04 4.16 1.09 2.09 4.31 0.87 2.07 4.6 0.91 2.04 4.28 1.2 4.21 9.81 1.41 3.14 6.65 1.42 3.46 8.23 1.53 3.41 8.04
+ta46 cost 2525 2489 2432 2525 2525 2525 2424 2395 2320 2437 2424 2395 2433 2366 2366 2424 2358 2324 2437 2371 2322 2437 2366 2324
+time 0.97 2.03 4.36 1.25 2.2 4.63 0.94 2.04 4.31 0.88 2.01 3.82 2.08 4.55 10.59 1.57 3.22 6.46 1.9 3.75 7.93
+2 3.58 7.76
+ta47 cost 2350 2308 2259 2350 2308 2274 2281 2269 2252 2295 2295 2269 2269 2269 2237 2252 2246 2192 2247 2209 2209 2281 2235 2213
+time 0.98 2.21 4.17 1.21 2.05 4.9 1.14 2.42 5.16 1.01 2.21 4.69 1.92 4.96 10.59 1.63 3.37 7.16 1.87 3.51 7.99 2.16 3.71 8.22
+ta48 cost 2279 2264 2242 2279 2264 2257 2253 2243 2227 2256 2256 2243 2264 2227 2227 2256 2233 2217 2268 2230 2230 2268 2253 2225
+time 0.96 2.16 4.15 1.06 2.01 4.69 1.1 2.5 5.71 1.1 2.22 4.59 2.73 5.38 11.69 1.73 3.51 6.86 2.3 4.14 8.7 2.43 4.3 8.92
+ta49 cost 2398 2395 2395 2398 2398 2398 2368 2351 2335 2368 2368 2356 2352 2352 2352 2356 2356 2333 2359 2356 2314 2378 2353 2324
+time 0.99 2.07 4.18 1.25 2.11 4.44 1.12 2.39 5.15
+1 2.2 4.59 1.71 4.69 10.86 1.6 3.4 6.8 1.85 4.1 8.14 2.13 3.97 8.73
+ta50 cost 2357 2348 2321 2357 2357 2357 2332 2324 2264 2332 2332 2331 2359 2356 2286 2323 2288 2257 2342 2266 2253 2332 2289 2242
+time 0.99 2.14 4.1 1.24 2.18 5.1 1.01 2.3 4.76 0.96 1.97 4.05 2.83 5.8 10.91 1.72 3.19 6.62 2.14 3.68 7.95 2.18 3.86 9.01
+
+30x20
+
+Inst.
+
+Table 13. Detailed Results on the Taillard benchmark[18].
+
+30
+Falkner et al.
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+50 100 200 50 100 200 50 100 200 50 100 200 50 100
+200
+
+NLSA
+NLSAN
+50 100 200 50 100
+
+200
+
+NLSANP
+50 100
+
+200
+
+ta51 cost 3444 3381 3320 3444 3381 3320 3391 3355 3333 3391 3391 3355 3326 3287 3283 3391 3314 3273 3387 3300 3281 3373 3361 3281
+time 1.34 2.65 5.51 1.37 2.71 5.37 1.46 2.9 6.31 1.33 2.81 5.66 1.71 4.38 12.36 2.25 4.22 8.48 2.23 4.31 9.56 2.29 4.83 9.99
+ta52 cost 3254 3225 3210 3254 3225 3210 3228 3224 3198 3276 3240 3228 3276 3193 3160 3267 3231 3188 3240 3231 3161 3231 3231 3205
+time 1.33 2.62 5.25 1.31 2.64 5.21 1.48 3.16 6.63 1.48 2.88 5.98 3.72 5.69 13.07 2.55 4.95 9.53 2.91 5.23 10.11 2.52 5.6 10.37
+ta53 cost 2998 2987 2933 2998 2998 2998 3000 2994 2994 3014 3005 2994 2994 2968 2967 3010 2980 2974 2994 2990 2974 2983 2983 2974
+time 1.27 2.58 5.19 1.33 2.7 5.55 1.51 3.31 6.81 1.41 2.89 5.85 2.63 5.84 13.65 2.39 4.54 9.45 2.43 5.06 10.75 2.43 5.3 10.43
+ta54 cost 2989 2944 2935 2989 2944 2943 3011 2997 2956 3011 3011 3011 2981 2961 2941 2953 2923 2914 2960 2930 2910 2961 2924 2924
+time 1.26 2.81 5.25 1.24 2.68 5.2 1.66 3.36 6.82 1.39 2.9 5.84 3.09 6.54 13.93 1.95 3.94 8.34 2.26 4.39 9.73 2.56 4.89 9.94
+ta55 cost 3071 3057 3037 3071 3057 3037 3063 3059 3059 3065 3063 3059 3063 3052 3026 3059 3027 3027 3063 3044 3026 3059 3027 3026
+time 1.32 2.75 5.41 1.3 2.7 5.49 1.59 3.42 6.97 1.4 3.16 5.94 2.87 6.42 13.61 2.24 4.57 8.9 2.45 4.96 10.46 2.47 4.99 10.28
+ta56 cost 3177 3102 3068 3177 3102 3068 3117 3117 3062 3150 3117 3117 3117 3117 3087 3116 3082 3082 3140 3096 3062 3078 3078 3015
+time 1.31 2.68 5.38 1.3 2.69 5.34 1.51 3.31 6.36 1.38 3.07 5.73 2.43 6.21 13.08 2.24 4.48 9.21 2.37 4.95 10.48 2.11
+5 9.71
+ta57 cost 3248 3228 3213 3248 3228 3213 3266 3266 3239 3266 3266 3266 3266 3243 3213 3266 3266 3219 3239 3225 3207 3221 3213 3204
+time 1.32 2.62 5.4 1.29 2.65 5.36 1.66 3.62 7.27 1.41 2.94 5.88 3.27 6.43 13.91 2.49 4.86 9.54 2.4 5.02 10.7 2.21 4.91 9.99
+ta58 cost 3243 3223 3217 3243 3223 3201 3249 3223 3217 3249 3249 3249 3237 3217 3176 3261 3229 3206 3249 3219 3223 3208 3204 3185
+time 1.27 2.59 5.18 1.28 2.54 5.29 1.71 3.38 6.95 1.43 2.91 5.96 3.17 6.47 13.38 2.48 4.71 9.23 2.71 5.31 11.32 2.39 5.25 10.29
+ta59 cost 3119 3083 3007 3119 3083 3007 3015 3006 2982 3015 3015 3006 3015 2988 2974 3015 3009 2961 3015 3004 2953 3015 2973 2945
+time 1.32 2.68 5.37 1.34 2.61 5.32 1.4 3.21 6.43 1.28 2.82 5.73 2.2 5.66 12.98 1.98 4.39 8.41 2.13 4.63 10.53 2.23 4.51 9.12
+ta60 cost 2977 2974 2945 2977 2974 2964 3006 3006 2977 3006 3006 3006 2968 2940 2929 2961 2953 2948 2991 2991 2977 2968 2968 2926
+time 1.31 2.64 5.4 1.31 2.61 5.37 1.77 3.62 7.16 1.5 3.05 6.12 2.71 5.68 13.28 2.27 4.42 9.24 2.67 5.43 11.57 2.33 5.5 9.58
+
+50x15
+
+Inst.
+
+Table 14. Detailed Results on the Taillard benchmark[18].
+Learning to Control Local Search for Combinatorial Optimization
+31
+
+LS
+SA
+SAre
+ILS
+ILS+SA
+VNS
+50 100 200 50 100 200 50 100 200 50 100 200 50 100
+200
+
+NLSA
+50 100
+200
+
+NLSAN
+50 100
+
+200
+
+NLSANP
+50 100
+
+200
+
+ta61 cost 3252 3236 3205 3252 3236 3217 3215 3196 3175 3215 3196 3196 3204 3192 3192 3208 3167 3143 3208 3196 3181 3208 3188 3173
+7 1.71 3.47 7.24 1.55 3.38 7.09 1.55 3.31 6.47 2.25 6.33 16.52 2.26 4.47 9.85 2.2 5.39 12.45 2.21 5.56 13.09
+time 1.71 3.5
+ta62 cost 3368 3337 3299 3368 3337 3299 3321 3321 3317 3321 3321 3321 3329 3329 3308 3329 3321 3296 3329 3295 3290 3322 3290 3269
+time 1.66 3.44 7.02 1.67 3.42 7.19 1.72 3.59 7.99 1.7 3.28 6.5 3.31 8.29 18.25 2.79 5.74 12.01 2.96 5.69 12.79 3.09 5.89 13.02
+ta63 cost 3095 3090 3065 3095 3090 3090 3076 3046 3030 3076 3076 3054 3076 3033 3025 3058 3049 3019 3058 3058 3011 3053 3028 3009
+time 1.73 3.45 6.76 1.74 3.52 7.35 1.85 3.89 8.4 1.68 3.77 7.63 3.08 6.68 16.19 2.65 5.65 10.94 2.54 6.16 11.96 2.7 5.77 12.45
+ta64 cost 3084 3066 3057 3084 3066 3056 3080 3058 2996 3080 3080 3080 3080 3069 3009 3074 3028 2998 3071 3047 3001 3055 3045 3003
+time 1.7 3.5 7.02 1.71 3.49 7.19 1.72 3.77 7.68 1.54 3.16 6.71 3.9 7.86 16.36 2.74 5.02 10.43 2.97 5.8 13.44 2.59 6.48 12.73
+ta65 cost 3257 3188 3150 3257 3188 3150 3224 3182 3150 3270 3252 3188 3190 3148 3119 3213 3166 3140 3219 3169 3111 3209 3195 3103
+time 1.65 3.35 6.95 1.65 3.35 6.92 1.91 3.93 8.12 1.87 3.79 7.79 3.72 8.05 17.31 2.6 5.12 10.67 2.92 5.88
+12 2.64 5.9 11.58
+ta66 cost 3264 3204 3171 3264 3204 3171 3227 3166 3163 3273 3273 3163 3179 3166 3166 3202 3170 3166 3194 3157 3157 3166 3166 3150
+time 1.7 3.52 7.15 1.7 3.52 7.33 1.89 3.61 8.25 1.85 3.71 7.82 2.73 7.1 17.28 2.48 6.32 11.58 2.5 5.25 12.52 2.38 6.07 13.64
+ta67 cost 3242 3203 3190 3242 3203 3190 3195 3181 3168 3211 3194 3184 3224 3155 3155 3211 3152 3137 3180 3169 3158 3185 3142 3122
+time 1.7 3.46 6.76 1.7 3.46 6.99 1.84 4.06 8.43 1.74 3.68 8.01 4.51 7.11 17.44 2.83 5.45 11.31 2.78 6.12 13.15 2.89 5.43 12.47
+ta68 cost 3115 3097 3071 3115 3127 3127 3114 3042 3029 3115 3114 3114 3114 3035 3031 3091 3083 3039 3101 3062 3021 3068 3029 3015
+time 1.64 3.28 6.78 1.68 3.47 7.2 1.72 3.4 7.27 1.57 3.14 6.3 4.39 5.95 15.78 2.6 5.6 10.97 2.91 5.8 11.68 2.63 5.47 12.5
+ta69 cost 3487 3434 3411 3487 3434 3429 3443 3427 3408 3472 3459 3431 3431 3410 3408 3427 3413 3413 3427 3416 3407 3427 3409 3407
+time 1.73 3.47 6.97 1.71 3.51 7.33 1.98 4.19 8.68 1.82 3.82 7.7 3.1
+7 16.89 2.56 5.4 12.13 2.75 6.05 13.65 2.92 6.1 13.69
+ta70 cost 3325 3313 3294 3325 3313 3294 3292 3276 3275 3292 3292 3292 3292 3292 3292 3292 3292 3288 3289 3289 3281 3292 3292 3283
+time 1.69 3.45 6.85 1.67 3.43 6.88 1.7 3.55 7.48 1.52 3.12 6.4 3.9 8.62 18.89 2.7 5.86 11.83 3.14 6.58 13.89 3.11 6.63 14.51
+
+50x20
+
+Inst.
+
+Table 15. Detailed Results on the Taillard benchmark[18].
+
+32
+Falkner et al.
+
+SA
+50 100
+
+SAre
+200 50 100
+
+ILS
+200 50
+100
+
+ILS+SA
+200 50 100
+200
+
+LS
+VNS
+50
+100
+
+200
+
+NLSA
+50 100
+200
+
+NLSAN
+50 100
+
+200
+
+NLSANP
+50 100
+
+200
+
+ta71 cost 5855 5822 5813 5855 5855 5807 5855 5855 5855 5855 5855 5855 5848 5820 5810 5832 5817 5811 5855 5821 5811 5842 5810 5799
+time 3.79 7.22 14.21 4.11 8.33 15.63 4.85 9.83 19.8 3.94 8.1 16.26 9.97 18.47 38.01 6.06 11.69 24.48 7.48 13.23 26.77 7.17 12.63 25.61
+ta72 cost 5531 5528 5490 5531 5531 5531 5499 5474 5460 5499 5499 5480 5496 5496 5458 5480 5471 5446 5480 5465 5448 5480 5445 5431
+time 3.61 7.19 14.75 3.58 7.99 16.08 3.8 8.16 17.58 3.66 7.74 15.61 5.56 15.53 31.26 4.27 10.56 22.76 4.5 11.51 26.33 4.69 10.54 24.12
+ta73 cost 6178 6142 6091 6178 6142 6091 6173 6173 6173 6173 6173 6173 6148 6102 6032 6118 6079 6079 6173 6090 6042 6149 6149 6123
+time 3.56 7.04 14.28 3.56 7.1 14.44 4.2 9.11 19.5 3.65 7.85 16.33 6.3 14.01 28.39 4.69 10.25 24.22 6.26 12.2 25.01 5.91 12.78 27.29
+ta74 cost 5590 5561 5537 5590 5561 5537 5556 5534 5534 5556 5556 5536 5556 5523 5502 5556 5531 5495 5556 5534 5504 5556 5534 5524
+time 3.53 7.1 14.54 3.61 7.14 14.5 3.86 7.8 17.69 3.5 7.67 15.61 6.04 11.97 29.92 4.9 10.18 20.99 5.39 11.32 24.27 5.44 11.94 25.85
+ta75 cost 6000 5965 5914 6000 5965 5914 5966 5928 5909 5966 5966 5937 5957 5911 5911 5966 5940 5900 5966 5966 5966 5966 5937 5903
+time 3.57 7.16 14.67 3.59 7.2 14.93 3.74 7.84 17.02 3.35 7.47 15.51 5.1 9.92 30.23 4.8 10.97 21.83 5.05 12.37 27.38 5.06 11.31 25.26
+ta76 cost 5812 5782 5755 5812 5782 5755 5836 5836 5775 5836 5836 5836 5789 5758 5694 5795 5785 5736 5798 5770 5715 5795 5728 5701
+time 3.83 7.16 15.01 3.66 7.4 14.89 4.86 10.01 19.1 3.91 7.99 16.19 7.16 14.52 29.82 5.64 11.39
+22 6.48 12.65 23.72 5.67 10.47 22.87
+ta77 cost 5682 5629 5585 5682 5629 5585 5718 5690 5644 5736 5718 5718 5677 5647 5593 5644 5624 5593 5662 5598 5552 5636 5596 5593
+time 3.55 7.15 15.47 3.64 7.26 14.6 4.66 9.18 17.58 3.97 8.23 16.1 7.83 15.29 31.8 5.5 10.43 22.2 6.08 10.8 22.99 5.56 11.25 25.24
+ta78 cost 5732 5719 5688 5732 5719 5688 5726 5726 5724 5756 5756 5726 5726 5724 5723 5749 5724 5695 5756 5726 5724 5756 5726 5724
+time 3.63 7.27 15.32 3.62 7.25 15.19 4.37 9.33 19.33 3.92 8.36 16.4 9.17 19.11 39.43 6.62 12.62 24.92 7.36 13.07 27.1 7.78 13.6 27.5
+ta79 cost 5640 5622 5586 5640 5622 5586 5641 5600 5584 5641 5641 5641 5616 5590 5547 5649 5649 5649 5649 5606 5606 5606 5586 5531
+time 3.72 7.44 14.32 3.57 7.25 14.52 4.55 9.26 18.53 3.89 8.07 16.64 7.73 16.25 33.4 6.18 12.55 24.73 7.1 13.58 27.64 6.34 12.9 25.11
+ta80 cost 5464 5433 5421 5474 5474 5445 5445 5445 5445 5457 5457 5445 5445 5445 5421 5440 5431 5419 5421 5421 5421 5420 5413 5405
+time 3.62 7.05 14.61 3.99 7.81 15.33 4.21 9.42 19.11 3.92 8.15 16.19 8.47 18.83 36.55 5.83 11.28 24.77 5.32 12.84 27.61 5.28 11.65 25.99
+
+100x20
+
+Inst.
+
+Table 16. Detailed Results on the Taillard benchmark[18].
+
+Learning to Control Local Search for Combinatorial Optimization
+33
+
+34
+
+Falkner et al.
+Table 17. Detailed Results on the Uchoa benchmark[20].
+Instance
+n100
+
+BKS POMO[6]
+VRPH
+single multi aug=8 Sweep Savings
+
+X-n101-k25 cost 27591 29627 29025 28596
+28
+27
+27
+k
+time
+0.29
+0.3 0.04
+X-n106-k14 cost 26362 27521 27140 26849
+k
+14
+14
+14
+time
+0.28 0.29 0.04
+X-n110-k13 cost 14971 15850 15316 15278
+k
+14
+13
+13
+time
+0.28 0.29 0.04
+X-n115-k10 cost 12747 13523 13192 13192
+k
+10
+10
+10
+0.28 0.29 0.04
+time
+X-n120-k6 cost 13332 14077 13846 13614
+k
+6
+6
+6
+time
+0.28 0.29 0.04
+X-n125-k30 cost 55539 79994 74465 59504
+41
+38
+32
+k
+time
+0.31 0.32 0.04
+X-n129-k18 cost 28940 29576 29220 29220
+k
+18
+18
+18
+time
+0.3
+0.3 0.04
+X-n134-k13 cost 10916 11803 11601 11377
+k
+14
+14
+14
+time
+0.3
+0.3 0.04
+X-n139-k10 cost 13590 14714 14147 13900
+11
+11
+10
+k
+time
+0.3
+0.3 0.04
+X-n143-k7 cost 15700 16195 16138 16138
+7
+7
+7
+k
+time
+0.3 0.31 0.04
+X-n148-k46 cost 43448 72057 64407 52085
+k
+77
+66
+52
+0.34 0.35 0.05
+time
+
+35807
+30
+0
+34811
+14
+0
+20435
+14
+0
+18727
+11
+0
+33166
+6
+0
+71695
+36
+0
+48717
+19
+0
+19640
+14
+0
+22174
+11
+0
+41910
+7
+0
+61758
+57
+0
+
+29674
+30
+0
+27442
+14
+0
+15883
+13
+0
+13585
+11
+0
+14745
+6
+0
+60561
+34
+0
+30407
+18
+0
+11415
+14
+0
+14726
+11
+0
+17664
+7
+0
+48048
+53
+0
+
+Learning to Control Local Search for Combinatorial Optimization
+
+Table 18. Detailed Results on the Uchoa benchmark[20].
+Instance
+n150
+
+BKS POMO[6]
+VRPH
+single multi aug=8 Sweep Savings
+
+X-n153-k22 cost 21220 25709 24591 23833
+k
+27
+26
+26
+time
+0.67 0.39 0.05
+X-n157-k13 cost 16876 17544 17331 17164
+k
+13
+13
+13
+0.33 0.43 0.04
+time
+X-n162-k11 cost 14138 15142 14844 14813
+k
+11
+11
+11
+time
+0.32 0.37 0.04
+X-n167-k10 cost 20557 22039 21564 21390
+10
+10
+10
+k
+time
+0.33 0.35 0.04
+X-n172-k51 cost 45607 61768 60867 55635
+k
+69
+66
+56
+0.37 0.39 0.05
+time
+X-n176-k26 cost 47812 55315 53233 52723
+k
+28
+28
+28
+0.35 0.36 0.05
+time
+X-n181-k23 cost 25569 26255 26101 26101
+23
+23
+23
+k
+time
+0.35 0.38 0.05
+X-n186-k15 cost 24145 25673 24683 24683
+k
+15
+15
+15
+0.35 0.39 0.05
+time
+X-n190-k8 cost 16980 20053 19642 18550
+k
+8
+8
+8
+time
+0.55 0.38 0.05
+X-n195-k51 cost 44225 51016 49771 48308
+k
+56
+55
+54
+time
+0.41 0.46 0.06
+
+31639
+29
+0
+25353
+15
+0
+24262
+11
+0
+47099
+10
+0
+61324
+63
+0
+79892
+33
+0
+33162
+23
+0
+48964
+15
+0
+40624
+8
+0
+60623
+62
+0
+
+22649
+26
+0
+19171
+15
+0
+15708
+11
+0
+22004
+10
+0
+48634
+57
+0
+52866
+29
+0
+26561
+23
+0
+25690
+15
+0
+17816
+8
+0
+45976
+55
+0
+
+35
+
+36
+
+Falkner et al.
+
+Table 19. Detailed Results on the Uchoa benchmark[20].
+Instance
+n200
+
+BKS POMO[6]
+VRPH
+single multi aug=8 Sweep Savings
+
+X-n200-k36 cost 58578 63316 61811 61512 72574 61911
+k
+37
+37
+37
+39
+38
+time
+0.39
+0.38
+0.06
+0
+0
+X-n204-k19 cost 19565 21581 20853 20657 33405 21004
+k
+20
+19
+19
+19
+19
+0.37
+0.37
+0.06
+0
+0
+time
+X-n209-k16 cost 30656 33346 32316 32145 66836 32793
+k
+16
+16
+16
+17
+16
+time
+0.36
+0.38
+0.05
+0
+0
+X-n214-k11 cost 10856 17074 14923 14129 25760 11949
+k
+20
+15
+14
+12
+12
+0.38
+0.38
+0.06
+0
+0
+time
+X-n219-k73 cost 117595 164917 157869 148715 199383 172876
+k
+104
+101
+87
+109
+109
+time
+0.44
+0.44
+0.07
+0
+0
+X-n223-k34 cost 40437 42884 42162 42161 56590 42639
+34
+35
+35
+37
+36
+k
+time
+0.4
+0.4
+0.06
+0
+0
+X-n228-k23 cost 25742 30048 28727 27596 44883 27296
+k
+24
+24
+23
+29
+25
+time
+0.38
+0.4
+0.06
+0
+0
+X-n233-k16 cost 19230 27044 25061 20983 33749 20585
+k
+17
+17
+17
+17
+17
+0.38
+0.4
+0.06
+0
+0
+time
+X-n237-k14 cost 27042 29262 29041 28835 71726 30571
+k
+14
+14
+14
+14
+14
+time
+0.37
+0.4
+0.07
+0
+0
+X-n242-k48 cost 82751 85689 85463 85325 123830 89918
+k
+48
+48
+48
+55
+52
+time
+0.4
+0.41
+0.07
+0
+0.01
+X-n247-k50 cost 37274 76015 67888 50926 56494 41935
+94
+81
+58
+65
+59
+k
+time
+0.43
+0.47
+0.08
+0
+0.01
+
+Learning to Control Local Search for Combinatorial Optimization
+
+Table 20. Detailed Results on the Uchoa benchmark[20].
+Instance
+n250
+
+BKS POMO[6]
+VRPH
+single multi aug=8 Sweep Savings
+
+X-n251-k28 cost 38684 41465 40784 40466 60078
+k
+28
+28
+28
+29
+time
+0.43
+0.43 0.07
+0
+X-n256-k16 cost 18839 39858 29117 22825 28514
+k
+35
+23
+19
+17
+0.42
+0.41 0.08
+0
+time
+X-n261-k13 cost 26558 30107 29300 28842 70523
+k
+13
+13
+13
+13
+time
+0.39
+0.4 0.07
+0
+X-n266-k58 cost 75478 81464 80122 80122 115703
+k
+60
+60
+60
+67
+0.41
+0.44 0.08
+0
+time
+X-n270-k35 cost 35291 39142 38535 38367 48710
+k
+36
+37
+37
+38
+time
+0.41
+0.45 0.08
+0
+X-n275-k28 cost 21245 28811 25833 23360 35048
+32
+29
+28
+31
+k
+time
+0.41
+0.42 0.08
+0
+X-n280-k17 cost 33503 36961 36503 35835 88461
+k
+17
+17
+17
+21
+time
+0.41
+0.41 0.08
+0
+X-n284-k15 cost 20215 47812 38875 25404 44890
+k
+35
+24
+16
+15
+0.44
+0.45 0.09
+0
+time
+X-n289-k60 cost 95151 104199 101303 99850 146744
+k
+66
+64
+63
+70
+time
+0.44
+0.54 0.09
+0
+X-n294-k50 cost 47161 58954 55642 55011 67614
+k
+54
+53
+53
+56
+time
+0.43
+0.47
+0.1
+0
+X-n298-k31 cost 34231 39956 37929 37363 57847
+32
+32
+32
+33
+k
+time
+0.43
+0.44 0.09
+0
+
+40285
+28
+0.01
+20518
+17
+0.01
+28638
+13
+0.01
+81046
+64
+0.01
+37181
+37
+0.01
+24177
+31
+0.01
+35951
+18
+0.01
+21924
+15
+0.01
+99808
+65
+0.01
+49307
+53
+0.01
+35996
+32
+0.01
+
+37
+
+29243 29674 30927 29562 28506
+30
+30
+27
+28
+27
+0.43 0.27 12.37 13.36 1.07
+27099 27442 28323 28085 26928
+14
+14
+14
+14
+14
+0.44 0.27 12.89 14.01 1.17
+15883 15883 17071 16376 15883
+13
+13
+13
+13
+13
+0.46
+0.3 13.7 14.48 1.15
+13585 13585 15535 14454 13381
+11
+11
+10
+10
+11
+0.56 0.42 14.61 14.97 1.39
+14655 14745 15713 16316 14745
+6
+6
+6
+6
+6
+0.68 0.55 14.53 16.03 1.49
+59239 60561 60585 59489 57805
+34
+34
+31
+31
+32
+0.65 0.36 14.99 17.04
+1.4
+30407 30407 33014 32825 30407
+18
+18
+18
+18
+18
+0.6 0.36 15.68 17.41 1.46
+11415 11415 13240 13182 11415
+14
+14
+15
+14
+14
+0.7
+0.4
+16 18.18 1.64
+14726 14726 16436 15261 14635
+11
+11
+13
+11
+10
+0.76 0.43 16.6 18.05 1.65
+17544 17664 20067 19960 16932
+7
+7
+7
+7
+7
+1.03 0.82 17.08 18.57 2.01
+47606 48048 46923 47938 46788
+53
+53
+49
+48
+51
+0.78 0.45 18.02 20.12 1.65
+
+28444
+27
+1.23
+27057
+14
+1.31
+15738
+13
+1.36
+13382
+11
+1.58
+14487
+6
+1.68
+57774
+32
+1.63
+30407
+18
+1.67
+11415
+14
+1.85
+14552
+10
+1.93
+17243
+7
+2.24
+46891
+49
+1.96
+
+28444
+27
+1.25
+27057
+14
+1.36
+15738
+13
+1.48
+13382
+11
+1.67
+14487
+6
+1.75
+57774
+32
+1.75
+30407
+18
+1.74
+11415
+14
+2.03
+14552
+10
+1.9
+17243
+7
+2.17
+46891
+49
+2.02
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n101-k25 cost 27591 28906 29804 29181 29243 28845
+k
+26
+26
+30
+30
+27
+2.09
+5.73 0.59 0.47
+0.5
+time
+X-n106-k14 cost 26362 27182 27182 27099 27099 27442
+k
+14
+14
+14
+14
+14
+time
+2.53
+5.52 0.45 0.48 0.54
+X-n110-k13 cost 14971 16266 15956 15883 15883 15883
+13
+13
+13
+13
+13
+k
+time
+11.93 86.13 0.55
+0.5 0.58
+X-n115-k10 cost 12747 13169 13169 13567 13585 13553
+k
+10
+10
+11
+11
+11
+4.13
+5.92 0.69 0.62 0.83
+time
+X-n120-k6 cost 13332 13988 13981 14643 14655 14745
+k
+6
+6
+6
+6
+6
+30.55
+8.72 0.77 0.79
+0.9
+time
+X-n125-k30 cost 55539 58333 58352 59239 59239 58461
+k
+31
+31
+34
+34
+32
+time
+1.88
+1.46 0.65 0.66 0.74
+X-n129-k18 cost 28940 31063 30827 30407 30407 30407
+k
+18
+18
+18
+18
+18
+time
+11.15 30.97 0.73 0.67 0.77
+X-n134-k13 cost 10916 12514 12520 11415 11415 11415
+k
+13
+13
+14
+14
+14
+time
+3.76 10.06 0.86 0.79 0.94
+X-n139-k10 cost 13590 14995 14560 14726 14726 14726
+k
+10
+10
+11
+11
+11
+time
+13.36 261.77 0.93 0.82 0.98
+X-n143-k7 cost 15700 17544 17258 17598 17598 17126
+k
+7
+7
+7
+7
+7
+time
+10.22
+7.38 1.12 1.09 1.29
+X-n148-k46 cost 43448 47362 47362 47593 47593 47789
+k
+46
+46
+53
+53
+51
+11.84
+5.44 0.79 0.81 1.02
+time
+
+Instance
+n100
+
+Table 21. Detailed Results on the Uchoa benchmark[20] (200 iterations).
+
+38
+Falkner et al.
+
+22597 22649 26294 25312 22587
+26
+26
+26
+25
+26
+0.93 0.49 19.78 20.39 2.09
+19171 19171 18556 18352 18782
+15
+15
+13
+13
+15
+0.86 0.49 19.44 20.86 1.98
+14898 15708 17539 16034 14958
+11
+11
+12
+12
+11
+1.21
+0.6 19.65 21.05
+2.1
+22004 22004 25399 25062 21695
+10
+10
+10
+10
+10
+1.16 0.72 19.95 22.11 2.37
+47924 47921 55282 51166 47125
+57
+57
+55
+54
+53
+1.04 0.62
+21 24.02 2.09
+51433 51783 61411 60630 51241
+29
+29
+29
+29
+28
+1.25 0.64 21.13 23.29 2.46
+26352 26561 27557 27939 26324
+23
+23
+23
+23
+23
+1.17 0.54 21.94 23.81 2.38
+25690 25690 28652 28979 25595
+15
+15
+15
+16
+15
+1.27 0.66 22.14 24.14 2.59
+17742 17816 19990 20064 17709
+8
+8
+8
+8
+8
+1.87 1.67 23.28 24.99
+3.4
+45976 45976 52594 52788 45612
+55
+55
+53
+54
+54
+1.23 0.66 23.5 26.25
+2.5
+
+22548
+26
+2.24
+18810
+15
+2.16
+14847
+11
+2.41
+21836
+10
+2.64
+46846
+54
+2.45
+50822
+28
+2.68
+26301
+23
+2.56
+25493
+15
+2.89
+17689
+8
+3.59
+45520
+54
+2.92
+
+22548
+26
+2.21
+18810
+15
+2.08
+14847
+11
+2.71
+21836
+10
+2.67
+46846
+54
+2.79
+50822
+28
+2.78
+26301
+23
+2.66
+25493
+15
+2.99
+17689
+8
+3.58
+45520
+54
+3.01
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n153-k22 cost 21220 24812 24812 22597 22597 22649
+25
+25
+26
+26
+26
+k
+time
+0.74
+0.76 1.12 1.01 1.27
+X-n157-k13 cost 16876 17257 17286 18963 18963 19050
+k
+13
+13
+15
+15
+15
+time
+13.77 10.37 0.96 1.01
+1.2
+X-n162-k11 cost 14138 14782 14920 14898 14898 15227
+k
+11
+11
+11
+11
+11
+11.89 629.62 1.26 1.22 1.36
+time
+X-n167-k10 cost 20557 22629 22678 21656 21656 22004
+k
+10
+10
+10
+10
+10
+time
+17.69
+7.74
+1.4 1.44 1.64
+X-n172-k51 cost 45607 50686 50779 47924 47924 47790
+52
+52
+57
+57
+54
+k
+time
+8.46 71.76
+1.1 1.08 1.32
+X-n176-k26 cost 47812 55614 55614 51382 51382 50872
+27
+27
+29
+29
+28
+k
+time
+0.66
+0.63 1.43 1.39 1.54
+X-n181-k23 cost 25569 26346 26277 26355 26355 26561
+k
+23
+23
+23
+23
+23
+time
+33.52 274.17 1.17 1.19
+1.4
+X-n186-k15 cost 24145 26063 26073 25690 25690 25690
+k
+15
+15
+15
+15
+15
+time
+12.37 91.63
+1.5 1.35 1.71
+X-n190-k8 cost 16980 17949 17949 17742 17742 17816
+8
+8
+8
+8
+8
+k
+time
+7.86
+6.1 2.16
+2.1 2.37
+X-n195-k51 cost 44225 49975 49975 45976 45976 45976
+k
+52
+52
+55
+55
+55
+2.03
+2.06 1.37
+1.3
+1.6
+time
+
+Instance
+n100
+
+Table 22. Detailed Results on the Uchoa benchmark[20] (200 iterations).
+
+Learning to Control Local Search for Combinatorial Optimization
+39
+
+BKS ORTools[14] Meta-VRPH
+GLS
+TS
+SA SAre
+ILS ILS+SA
+60337
+37
+3.12
+20587
+19
+3.41
+32602
+16
+3.63
+11915
+12
+4.1
+172876
+109
+3.35
+42230
+35
+3.55
+26996
+24
+4.18
+20385
+17
+4.99
+29828
+14
+4.59
+87097
+50
+4.06
+39349
+55
+5.06
+
+DACT[8]
+NeuroLS
+VNS aug=1
+aug=8 NLSA NLSAN NLSANP
+
+X-n200-k36 cost 58578 61080 61080 60902 60913 61051 60920 61911 64205
+64746 60373 60337
+k
+37
+37
+38
+38
+38
+38
+38
+37
+38
+37
+37
+4.99
+9.32
+1.57
+1.49
+1.65
+1.35
+0.66 24.31
+26.05
+2.76
+3.03
+time
+X-n204-k19 cost 19565 21828 21922 20906 20970 21004 21004 21004 24188
+23259 20925 20587
+k
+19
+19
+19
+19
+19
+19
+19
+20
+19
+19
+19
+time
+25.3 12.72
+1.71
+1.58
+2.02
+1.55
+0.7 25.05
+28.41
+2.88
+3.26
+X-n209-k16 cost 30656 32553 32724 32793 32793 32793 32793 32793 35254
+36933 32636 32602
+16
+16
+16
+16
+16
+16
+16
+16
+16
+16
+16
+k
+time
+10.64 59.37
+1.77
+1.71
+2.18
+1.6
+0.81 25.14
+27.97
+3.25
+3.52
+X-n214-k11 cost 10856 12498 12507 11910 11949 11949 11949 11949 14626
+14231 11756 11915
+k
+11
+11
+12
+12
+12
+12
+12
+11
+12
+12
+12
+16.36 17.37
+2.36
+2.07
+2.65
+1.94
+1.21 26.41
+27.61
+3.79
+4.06
+time
+X-n219-k73 cost 117595 118423 118373 172876 172876 172876 172876 172876 120142 120293 172876 172876
+k
+73
+73
+109
+109
+109
+109
+109
+73
+73
+109
+109
+77.09 1280.43
+1.41
+1.39
+1.79
+1.31
+0.72 26.31
+28.92
+2.81
+3.22
+time
+X-n223-k34 cost 40437 44320 44320 42343 42343 42639 42299 42639 51570
+47983 42190 42230
+k
+34
+34
+36
+36
+36
+36
+36
+35
+34
+35
+35
+time
+1.57
+1.61
+1.82
+1.81
+2.17
+1.74
+0.8 27.24
+28.34
+3.28
+3.68
+X-n228-k23 cost 25742 32143 32143 27076 27076 27296 27105 27296 35231
+33820 27064 26996
+k
+23
+23
+25
+25
+25
+25
+25
+25
+26
+24
+24
+time
+1.49
+1.58
+2.36
+2.29
+2.61
+2.19
+0.93 28.31
+30.94
+3.78
+4.12
+X-n233-k16 cost 19230 23128 23128 20478 20585 20585 20585 20585 27821
+25915 20432 20385
+k
+17
+17
+17
+17
+17
+17
+17
+20
+18
+17
+17
+time
+2.08
+2.25
+2.41
+2.38
+3.05
+2.19
+1.15 29.32
+30.83
+4.31
+4.74
+X-n237-k14 cost 27042 29175 29175 30341 30341 30571 30433 30571 32205
+32948 30003 29828
+k
+14
+14
+14
+14
+14
+14
+14
+14
+14.00
+14
+14
+time
+4.81
+4.86
+2.46
+2.45
+2.95
+2.32
+1.19 29.15
+31.69
+4.09
+4.75
+X-n242-k48 cost 82751 87069 87069 88179 88179 88320 88179 88696 95420 94,852.00 86973 87097
+k
+48
+48
+52
+52
+52
+52
+52
+48
+48.00
+50
+50
+time
+1.64
+1.66
+2.08
+2.07
+2.48
+2.13
+0.95 29.05
+32.75
+3.75
+4.19
+46782 39514 39349
+X-n247-k50 cost 37274 44134 44134 40022 40022 39246 40123 40508 48507
+k
+52
+52
+59
+59
+55
+59
+59
+54
+54
+55
+55
+1.02
+0.99
+2.68
+2.71
+3.01
+2.4
+1.19 28.92
+33.92
+4.4
+4.88
+time
+
+Instance
+n100
+
+Table 23. Detailed Results on the Uchoa benchmark[20] (200 iterations).
+
+40
+Falkner et al.
+
+40285 40285 42297 42545 40285
+28
+28
+28
+28
+28
+2.09 0.95 30.17 34.44 4.04
+20518 20518 23949 22469 20390
+17
+17
+17
+17
+17
+2.49 1.24 31.66 35.04 4.98
+28638 28638 36604 34448 28638
+13
+13
+13
+14
+13
+3 1.86 31.61 36.04 5.49
+80657 80979 83468 83310 79913
+64
+64
+61
+61
+62
+2.22 1.04
+32 36.59 4.54
+37181 37181 40547 40415 36862
+37
+37
+37
+37
+36
+2.39 1.08
+32.6 37.08 4.59
+24177 24177 26052 26044 23961
+31
+31
+31
+32
+31
+2.56 1.08 32.71 37.01 4.86
+35951 35951 46179 45719 35531
+18
+18
+18
+18
+17
+3.52
+2 33.58 38.56 6.47
+21924 21924 26201 26436 21891
+15
+15
+15
+16
+15
+3.48 2.12
+33.8
+39.2 6.55
+98686 99808 117218 113473 97618
+65
+65
+62
+63
+63
+2.9 1.29
+34.1 39.93 5.35
+49307 49307 66687 62413 48934
+53
+53
+59
+54
+52
+2.77 1.31 35.26
+39.9 5.39
+35996 35996 48423 46636 35617
+32
+32
+31
+32
+32
+3.03 1.37 35.89 41.82 5.74
+
+40285
+28
+4.73
+20185
+17
+5.31
+28638
+13
+6.09
+79308
+61
+4.94
+36529
+36
+5.21
+23776
+31
+5.49
+35760
+18
+7.23
+21757
+15
+7.24
+98070
+63
+6.21
+48947
+52
+6.22
+35767
+32
+6.44
+
+40285
+28
+4.5
+20185
+17
+5.54
+28638
+13
+6.72
+79308
+61
+5.28
+36529
+36
+5.53
+23776
+31
+5.66
+35760
+18
+7.27
+21757
+15
+7.84
+98070
+63
+5.92
+48947
+52
+6.08
+35767
+32
+7.07
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n251-k28 cost 38684 40417 40424 40279 40285 40285
+k
+28
+28
+28
+28
+28
+14.7
+32.3 2.63 2.23 2.82
+time
+X-n256-k16 cost 18839 21363 21361 20518 20518 20518
+k
+17
+17
+17
+17
+17
+time
+5.47
+5.27 3.11 2.66 3.94
+X-n261-k13 cost 26558 30665 30665 28638 28638 28638
+13
+13
+13
+13
+13
+k
+time
+4.07
+4.2 3.51 3.33 4.12
+X-n266-k58 cost 75478 80064 80064 80553 80553 80792
+k
+59
+59
+64
+64
+64
+6.33
+5.7 2.34 2.36 2.85
+time
+X-n270-k35 cost 35291 39152 39152 37181 37181 37181
+k
+36
+36
+37
+37
+37
+5.67
+5.22 2.78 2.36 3.13
+time
+X-n275-k28 cost 21245 22562 22591 23907 23907 24177
+k
+28
+28
+31
+31
+31
+time
+9.36 15.92 2.87 2.82 3.33
+X-n280-k17 cost 33503 40878 40878 35951 35951 35951
+k
+18
+18
+18
+18
+18
+time
+1.7
+1.69
+4.5 3.64 4.95
+X-n284-k15 cost 20215 23695 23695 21924 21924 21924
+k
+15
+15
+15
+15
+15
+time
+1.98
+1.87 4.01 3.91 4.78
+X-n289-k60 cost 95151 103936 103936 98648 98824 98743
+k
+62
+62
+65
+65
+65
+time
+2.06
+1.51 3.39 2.99 3.62
+X-n294-k50 cost 47161 54834 54834 49169 49307 49307
+k
+51
+51
+53
+53
+53
+time
+1.57
+1.48 3.51 2.99 3.61
+X-n298-k31 cost 34231 42908 42908 35996 35996 35996
+k
+31
+31
+32
+32
+32
+1.76
+2.15 3.58 3.18
+4.1
+time
+
+Instance
+n100
+
+Table 24. Detailed Results on the Uchoa benchmark[20] (200 iterations).
+
+Learning to Control Local Search for Combinatorial Optimization
+41
+
+29243 29674 29561 29554 28458
+30
+30
+27
+27
+27
+1.01 0.71 31.32 34.52 2.32
+27099 27442 28052 28085 26875
+14
+14
+14
+14
+14
+1.14 0.77 32.58 36.42 2.62
+15883 15883 16389 16170 15612
+13
+13
+13
+13
+13
+1.11 0.73 32.8 37.45 2.57
+13585 13585 15033 13868 13362
+11
+11
+11
+10
+11
+1.4 0.98 33.91 38.87 3.07
+14655 14745 15713 16047 14554
+6
+6
+6
+6
+6
+1.61 1.43 35.76 40.68 3.27
+59239 60561 60115 59489 57597
+34
+34
+32
+31
+32
+1.53 0.95
+38 43.3 3.11
+30407 30407 32572 32832 30302
+18
+18
+18
+18
+18
+1.54 0.95 38.36 43.12
+3.2
+11415 11415 13140 13182 11374
+14
+14
+14
+14
+13
+1.78 1.06 40.06 45.47 3.75
+14726 14726 15616 15261 14635
+11
+11
+13
+11
+10
+1.84 1.15 41.82 46.71 3.78
+17115 17664 20067 19499 16847
+7
+7
+7
+7
+7
+2.54 2.18 41.76 47.04 4.63
+47606 48048 46059 46905 46788
+53
+53
+48
+48
+51
+1.84 1.24 46.1 50.66 3.71
+
+28309
+27
+2.75
+26747
+14
+2.96
+15738
+13
+3.04
+13382
+11
+3.58
+14456
+6
+4
+57549
+32
+3.71
+30407
+18
+3.82
+11320
+13
+4.3
+14514
+10
+4.48
+16696
+7
+5.25
+46653
+49
+4.55
+
+28309
+27
+2.74
+26747
+14
+2.79
+15738
+13
+3.06
+13382
+11
+3.54
+14456
+6
+3.85
+57549
+32
+3.69
+30407
+18
+3.79
+11320
+13
+4.22
+14514
+10
+4.43
+16696
+7
+5.27
+46653
+49
+4.6
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n101-k25 cost 27591 28725 29430 29181 29211 28845
+k
+26
+26
+30
+30
+27
+18.79 134.68 1.08 1.06 1.31
+time
+X-n106-k14 cost 26362 27182 27182 27099 27099 27442
+k
+14
+14
+14
+14
+14
+time
+20.28 38.39 1.15 1.19 1.34
+X-n110-k13 cost 14971 15698 15568 15883 15883 15883
+13
+13
+13
+13
+13
+k
+time
+36.63 199.29 1.23 1.21
+1.4
+X-n115-k10 cost 12747 13169 13138 13567 13585 13553
+k
+10
+10
+11
+11
+11
+31.74 917.03 1.56 1.58 1.84
+time
+X-n120-k6 cost 13332 13899 13730 14643 14655 14745
+k
+6
+6
+6
+6
+6
+85.32 740.25 1.76 1.89 2.11
+time
+X-n125-k30 cost 55539 57951 57916 59239 59239 57845
+k
+31
+31
+34
+34
+31
+time
+25.07
+145 1.57
+1.6 1.91
+X-n129-k18 cost 28940 31061 30448 30407 30407 30407
+k
+18
+18
+18
+18
+18
+time
+37.55 171.38 1.71 1.58 1.99
+X-n134-k13 cost 10916 11964 12152 11415 11415 11415
+k
+13
+13
+14
+14
+14
+time
+28.02 183.34
+1.9 1.91 2.23
+X-n139-k10 cost 13590 14489 14457 14726 14726 14619
+k
+10
+10
+11
+11
+10
+time
+47.74 1779.76 2.06 2.11 2.49
+X-n143-k7 cost 15700 16975 16675 17598 17598 17126
+k
+7
+7
+7
+7
+7
+time
+40.74 1105.7 2.51 2.53 3.16
+X-n148-k46 cost 43448 47003 46473 47593 47494 47621
+k
+46
+46
+53
+53
+50
+63.94 369.25 1.88 1.97 2.33
+time
+
+Instance
+n100
+
+Table 25. Detailed Results on the Uchoa benchmark[20] (500 iterations).
+
+42
+Falkner et al.
+
+22597 22649 25709 24538 22587
+26
+26
+25
+24
+26
+2.3 1.25 46.37 51.29 4.78
+19171 19171 18556 18352 18782
+15
+15
+13
+13
+15
+2.11 1.19 48.52 52.49 4.51
+14898 15708 17524 16034 14958
+11
+11
+12
+12
+11
+2.66 1.53 49.46 54.97 5.01
+22004 22004 24880 25062 21695
+10
+10
+10
+10
+10
+2.82 1.93 50.64 55.89 5.53
+47924 47921 50753 49283 47114
+57
+57
+54
+53
+53
+2.44 1.45 53.19 58.27 4.83
+50454 50472 59133 57878 49978
+29
+29
+29
+28
+28
+3.01
+1.6 55.44 59.67 5.76
+26352 26561 27479 27924 26265
+23
+23
+23
+23
+23
+2.63 1.39 55.36
+62 5.44
+25690 25690 28652 28709 25215
+15
+15
+15
+16
+15
+3.03 1.62 56.36 62.7 6.16
+17742 17816 19552 20064 17709
+8
+8
+8
+8
+8
+4.49 4.49 58.07 66.91 8.16
+45976 45976 51860 50913 45460
+55
+55
+54
+55
+54
+2.94 1.66 59.75 66.44 5.87
+
+22495
+25
+5.23
+18696
+15
+5.04
+14847
+11
+5.74
+21836
+10
+6.4
+46846
+54
+5.75
+49851
+28
+6.44
+26201
+23
+6.08
+25278
+15
+7.19
+17689
+8
+9.19
+45302
+54
+7.23
+
+22495
+25
+5.5
+18696
+15
+5.55
+14847
+11
+5.8
+21836
+10
+6.45
+46846
+54
+5.83
+49851
+28
+6.51
+26201
+23
+6.34
+25278
+15
+7.12
+17689
+8
+9.14
+45302
+54
+6.75
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n153-k22 cost 21220 22507 22670 22597 22597 22649
+25
+25
+26
+26
+26
+k
+time
+19.98 327.65 2.55 2.52 3.16
+X-n157-k13 cost 16876 17238 17286 18963 18963 19050
+k
+13
+13
+15
+15
+15
+time
+47.88 564.82 2.31 2.32 2.93
+X-n162-k11 cost 14138 14782 14746 14898 14898 15215
+k
+11
+11
+11
+11
+11
+79.83 3074.87 2.97 2.81 3.45
+time
+X-n167-k10 cost 20557 22561 22394 21656 21656 22004
+k
+10
+10
+10
+10
+10
+time
+101 2112.88 3.25 3.24 3.96
+X-n172-k51 cost 45607 49782 48519 47924 47924 47790
+52
+52
+57
+57
+54
+k
+time
+48.91 393.94 2.57 2.54 3.38
+X-n176-k26 cost 47812 53100 52794 51382 51382 50185
+26
+26
+29
+29
+28
+k
+time
+13.46
+8.37 3.09 3.04 3.79
+X-n181-k23 cost 25569 26346 26243 26355 26355 26561
+k
+23
+23
+23
+23
+23
+time
+97.27 1256.51 2.74 2.89 3.41
+X-n186-k15 cost 24145 25692 25910 25690 25690 25690
+k
+15
+15
+15
+15
+15
+time
+74.41 1137.01 3.38 3.31 4.24
+X-n190-k8 cost 16980 17864 17925 17742 17742 17816
+8
+8
+8
+8
+8
+k
+time
+94.32 3646.07 4.82 4.89 6.08
+X-n195-k51 cost 44225 49181 49248 45976 45976 45976
+k
+52
+52
+55
+55
+55
+71.58 148.58 3.22 3.14 3.97
+time
+
+Instance
+n100
+
+Table 26. Detailed Results on the Uchoa benchmark[20] (500 iterations).
+
+Learning to Control Local Search for Combinatorial Optimization
+43
+
+BKS ORTools[14] Meta-VRPH
+GLS
+TS
+SA SAre
+ILS ILS+SA
+
+VNS
+60315
+37
+7.26
+20587
+19
+8.12
+32602
+16
+8.5
+11739
+12
+9.78
+172876
+109
+7.74
+41981
+35
+8.86
+26974
+24
+10.35
+20385
+17
+11.52
+29828
+14
+11.28
+86843
+50
+10.13
+39349
+55
+11.85
+
+DACT[8]
+NeuroLS
+aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n200-k36 cost 58578 60475 60865 60902 60913 61051 60920 61911
+64112 64640 60316 60315
+k
+37
+37
+38
+38
+38
+38
+38
+37
+37
+37
+37
+62.28 1629.3
+3.45
+3.38
+4.07
+3.23
+1.65
+60.76 67.26
+6.5
+7.43
+time
+X-n204-k19 cost 19565 20897 21330 20906 20970 21004 21004 21004
+24187 23045 20481 20587
+k
+19
+19
+19
+19
+19
+19
+19
+19
+19
+19
+19
+time
+129.9 1503.12
+3.84
+3.74
+4.83
+3.61
+1.77
+61.87 67.71
+6.84
+7.8
+X-n209-k16 cost 30656 32419 32324 32793 32793 32793 32793 32793
+35254 36933 32636 32602
+16
+16
+16
+16
+16
+16
+16
+16
+16
+16
+16
+k
+time
+104.84 1009.65
+4.18
+4.12
+5.86
+3.84
+2.03
+62.16 70.68
+7.42
+8.47
+X-n214-k11 cost 10856 12498 12627 11910 11949 11949 11949 11949
+14626 14186 11711 11739
+k
+11
+11
+12
+12
+12
+12
+12
+11
+12
+12
+12
+63.84
+1975
+5.29
+5.12
+6.83
+4.74
+3.12
+63.67 72.79
+9.12 10.12
+time
+X-n219-k73 cost 117595 118420 118029 172876 172876 172876 172876 172876 120127 120293 172876 172876
+k
+73
+73
+109
+109
+109
+109
+109
+73
+73
+109
+109
+209.5 2412.98
+3.34
+3.3
+4.43
+3.21
+1.72
+66.32
+73.6
+6.61
+7.71
+time
+X-n223-k34 cost 40437 42810 42810 42343 42343 42639 42299 42639
+51486 48485 42073 41981
+k
+34
+34
+36
+36
+36
+36
+36
+36
+35
+34
+35
+time
+42.6 680.88
+4.29
+4.25
+5.51
+3.92
+2.23
+68 77.52
+7.66
+8.81
+X-n228-k23 cost 25742 29817 29648 27076 27076 27296 27105 27296
+34924 32931 26995 26974
+k
+23
+23
+25
+25
+25
+25
+25
+27
+25
+24
+24
+time
+12.83 530.02
+5.21
+5.3
+7.67
+4.71
+2.37
+68.55 77.19
+9.06 10.18
+X-n233-k16 cost 19230 20530 20618 20478 20585 20585 20585 20585
+27468 25457 20066 20385
+k
+17
+17
+17
+17
+17
+17
+17
+22
+18
+17
+17
+time
+72.48 286.46
+5.66
+5.58
+7.63
+5.45
+2.9
+72.53 79.31 10.52 11.45
+X-n237-k14 cost 27042 28836 28928 30341 30341 30571 30433 30571
+32205 32948 30003 29828
+k
+14
+14
+14
+14
+14
+14
+14
+14.00
+14
+14
+14
+time
+136.25 790.7
+5.92
+5.79
+7.43
+5.44
+3
+69.62
+80.9
+9.96 11.19
+X-n242-k48 cost 82751 86419 86408 88179 88179 88320 88179 88696 95,260.00 94031 86682 86843
+k
+48
+48
+52
+52
+52
+52
+52
+48.00
+48
+50
+50
+time
+73.45 411.85
+4.77
+4.77
+6.15
+4.72
+2.37
+75.44 83.39
+8.88 10.52
+48507 46088 39207 39349
+X-n247-k50 cost 37274 40372 40372 40022 40022 38876 40123 40508
+k
+52
+52
+59
+59
+53
+59
+59
+54
+54
+54
+55
+4.72
+4.87
+5.87
+6.18
+7.42
+5.76
+2.7
+74.11 85.21 10.54 11.76
+time
+
+Instance
+n100
+
+Table 27. Detailed Results on the Uchoa benchmark[20] (500 iterations).
+
+44
+Falkner et al.
+
+40285 40285 42297 42545 40071
+28
+28
+28
+28
+28
+5.1 2.56 78.34 85.31 9.84
+20518 20518 23910 22469 20084
+17
+17
+17
+17
+17
+6.18 3.33 79.97 89.58 11.68
+28638 28638 36604 34448 28601
+13
+13
+13
+14
+13
+7.23 4.97 83.13 89.54 13.37
+80657 80979 83468 83296 79722
+64
+64
+61
+61
+61
+5.23 2.68 81.35 89.48 10.64
+37181 37181 40547 40415 36445
+37
+37
+37
+37
+36
+5.39 2.53 80.68 90.59 11.27
+24177 24177 26052 25589 23865
+31
+31
+31
+31
+31
+5.84 2.78
+87.4 93.01 12.02
+35951 35951 46179 45719 35531
+18
+18
+18
+18
+17
+8.15 4.73 84.99 94.03 16.18
+21924 21924 25621 26436 21891
+15
+15
+15
+16
+15
+8.63 5.18
+85.8 96.51 16.52
+98686 99808 114545 112830 97618
+65
+65
+62
+63
+63
+6.64 3.31 89.92 100.13 13.59
+49307 49307 61648 59086 48629
+53
+53
+55
+55
+51
+6.29
+3.3 88.93 102.38 13.4
+35996 35996 48235 46590 35617
+32
+32
+38
+37
+32
+7.15 3.35 92.33 103.76 14.34
+
+40233
+28
+11.13
+20021
+17
+13.22
+28638
+13
+15.25
+79150
+61
+11.96
+36492
+36
+12.53
+23776
+31
+13.32
+35760
+18
+17.94
+21456
+15
+17.86
+97654
+62
+15.21
+48764
+52
+14.7
+35767
+32
+15.48
+
+40233
+28
+11.63
+20021
+17
+13.29
+28638
+13
+15.23
+79150
+61
+12.21
+36492
+36
+12.89
+23776
+31
+13.5
+35760
+18
+17.62
+21456
+15
+17.19
+97654
+62
+14.49
+48764
+52
+14.82
+35767
+32
+16.04
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n251-k28 cost 38684 40322 40215 40279 40285 40285
+k
+28
+28
+28
+28
+28
+107.2 1223.66 5.39 5.25 7.02
+time
+X-n256-k16 cost 18839 19856 20274 20518 20518 20518
+k
+17
+17
+17
+17
+17
+time
+136.78 54.78 6.84 6.33 8.53
+X-n261-k13 cost 26558 29596 29476 28638 28638 28638
+13
+13
+13
+13
+13
+k
+time
+88.99 272.73 8.25 7.91
+11
+X-n266-k58 cost 75478 78318 78291 80553 80553 80792
+k
+59
+59
+64
+64
+64
+81.38 1296.57 5.41 5.57
+7.1
+time
+X-n270-k35 cost 35291 37521 37615 37181 37181 37181
+k
+36
+36
+37
+37
+37
+94.71 109.27 5.91 5.81 7.54
+time
+X-n275-k28 cost 21245 22434 22528 23907 23907 24177
+k
+28
+28
+31
+31
+31
+time
+135.55 1880.31 6.61 6.34 8.08
+X-n280-k17 cost 33503 41455 41442 35951 35951 35951
+k
+17
+17
+18
+18
+18
+time
+26.14 23.69 9.63 8.83 11.71
+X-n284-k15 cost 20215 22010 22049 21924 21924 21924
+k
+15
+15
+15
+15
+15
+time
+92.56 531.23 9.77 9.02 12.05
+X-n289-k60 cost 95151 102712 102712 98648 98824 98743
+k
+61
+61
+65
+65
+65
+time
+10.86
+9.97 7.29 6.83 9.19
+X-n294-k50 cost 47161 50946 50466 49169 49307 49307
+k
+51
+51
+53
+53
+53
+time
+90.68 925.2 7.69 6.91 9.02
+X-n298-k31 cost 34231 39855 39395 35996 35996 35996
+k
+31
+31
+32
+32
+32
+111.07 640.51 8.43 7.62 10.08
+time
+
+Instance
+n100
+
+Table 28. Detailed Results on the Uchoa benchmark[20] (500 iterations).
+
+Learning to Control Local Search for Combinatorial Optimization
+45
+
+29243 29674 29322 29315 28414
+30
+30
+27
+27
+27
+2.04 1.35 67.91 67.28 4.75
+27099 27442 27885 28069 26656
+14
+14
+14
+14
+14
+2.31 1.44 67.19 70.63 5.37
+15883 15883 16144 15954 15612
+13
+13
+13
+13
+13
+2.31 1.42 71.38 72.5 5.16
+13585 13585 14863 13766 13361
+11
+11
+11
+10
+11
+2.91 1.97 74.94 75.52 6.35
+14655 14745 15656 16047 14120
+6
+6
+6
+6
+6
+3.37 2.93 75.3
+82 6.49
+59239 59837 60100 59407 57023
+34
+34
+32
+31
+31
+3.08 1.83 79.55 84.21 5.92
+30407 30407 32387 32832 30287
+18
+18
+18
+18
+18
+3.22 1.88 82.23 85.99
+6.3
+11415 11415 13128 12696 11374
+14
+14
+14
+14
+13
+3.66 2.04 86.3 88.15 7.26
+14726 14726 14990 15261 14308
+11
+11
+11
+11
+10
+3.79 2.22 88.16 92.42 7.31
+17115 17664 19614 19499 16686
+7
+7
+7
+7
+7
+5 4.16 89.59 93.87 9.31
+47606 48048 46003 46760 46678
+53
+53
+48
+48
+49
+3.77 2.38 93.46 98.81 7.25
+
+28261
+26
+5.88
+26747
+14
+6.68
+15568
+13
+7.43
+13321
+11
+7.85
+14386
+6
+8.27
+57240
+31
+8.32
+30276
+18
+8.63
+11320
+13
+9.6
+14368
+10
+10.15
+16605
+7
+11.86
+46612
+49
+10.07
+
+28261
+26
+5.31
+26747
+14
+5.7
+15568
+13
+5.92
+13321
+11
+6.94
+14386
+6
+7.55
+57240
+31
+7.14
+30276
+18
+7.78
+11320
+13
+8.23
+14368
+10
+8.78
+16605
+7
+10.39
+46612
+49
+8.84
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n101-k25 cost 27591 28725 28614 29181 29211 28845
+k
+26
+26
+30
+30
+27
+52.8 231.94 2.03
+2 2.39
+time
+X-n106-k14 cost 26362 27182 26789 27099 27099 27190
+k
+14
+14
+14
+14
+14
+time
+45.25 165.72 2.21 2.37 2.67
+X-n110-k13 cost 14971 15545 15408 15883 15883 15883
+13
+13
+13
+13
+13
+k
+time
+71.76 267.08 2.33
+2.3 2.77
+X-n115-k10 cost 12747 13151 13138 13567 13585 13551
+k
+10
+10
+11
+11
+10
+84.82 1538.97 2.93 2.85 3.89
+time
+X-n120-k6 cost 13332 13738 13730 14643 14655 14745
+k
+6
+6
+6
+6
+6
+196.8 1143.29
+3.4 3.27 4.53
+time
+X-n125-k30 cost 55539 57766 57567 59239 59239 57494
+k
+30
+31
+34
+34
+31
+time
+57.32 369.91 2.92 3.01 3.62
+X-n129-k18 cost 28940 31061 30406 30407 30407 30407
+k
+18
+18
+18
+18
+18
+time
+89.46 388.64 3.18 3.06 3.92
+X-n134-k13 cost 10916 11615 12095 11415 11415 11415
+k
+13
+13
+14
+14
+14
+time
+77.84 364.38 3.61 3.65 4.49
+X-n139-k10 cost 13590 14261 14385 14726 14726 14411
+k
+10
+10
+11
+11
+10
+time
+118.8 3041.7 3.93 3.72 4.81
+X-n143-k7 cost 15700 16871 16676 17598 17598 17126
+k
+7
+7
+7
+7
+7
+time
+121.62 1827.76 4.85 4.77 6.48
+X-n148-k46 cost 43448 45953 45293 47593 47494 47157
+k
+46
+46
+53
+53
+50
+142.41 559.28 3.72 3.71
+4.9
+time
+
+Instance
+n100
+
+Table 29. Detailed Results on the Uchoa benchmark[20] (1000 iterations).
+
+46
+Falkner et al.
+
+22597 22649 24792 24260 22486
+26
+26
+24
+24
+25
+4.51 2.44 99.17 100.44 9.18
+19171 19171 18556 18352 18782
+15
+15
+13
+13
+15
+4.31 2.37 99.23 103.26 8.86
+14898 15708 17063 16012 14775
+11
+11
+12
+12
+11
+5.25 3.09 102.87 103.87 9.69
+22004 22004 24511 25062 21695
+10
+10
+10
+10
+10
+5.73 3.76 106.48 108.99
+11
+47924 47921 50319 49216 47052
+57
+57
+54
+53
+53
+5.01
+3.1 109.6 115.82 9.34
+50454 50472 57753 57029 49403
+29
+29
+28
+27
+27
+5.98
+3.1
+112 116.58 12.01
+26352 26561 27408 27568 26045
+23
+23
+23
+23
+23
+5.19
+2.9 113.25 119.85 10.61
+25690 25690 28368 28709 25150
+15
+15
+16
+16
+15
+6.06 3.33 120.08 124.02 11.85
+17742 17816 19552 20064 17709
+8
+8
+8
+8
+8
+8.72 9.29 121.17 123.99 15.85
+45976 45976 51250 50167 45441
+55
+55
+54
+54
+53
+6.06 3.41 123.37 128.23 11.44
+
+22495
+25
+12.26
+18696
+15
+11.51
+14677
+11
+12.98
+21836
+10
+14.01
+46762
+53
+13.02
+49416
+27
+14.46
+25999
+23
+13.73
+25179
+15
+15.5
+17689
+8
+19.78
+45167
+53
+15.66
+
+22495
+25
+10.27
+18696
+15
+9.95
+14677
+11
+11.18
+21836
+10
+12.35
+46762
+53
+11.41
+49416
+27
+12.52
+25999
+23
+12.02
+25179
+15
+13.79
+17689
+8
+17.63
+45167
+53
+13.95
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n153-k22 cost 21220 22441 22876 22597 22597 22328
+25
+24
+26
+26
+25
+k
+time
+95.8 851.36
+4.7 4.55 6.15
+X-n157-k13 cost 16876 17209 17298 18963 18963 19050
+k
+13
+13
+15
+15
+15
+time
+119.01 957.66 4.56 4.73 5.69
+X-n162-k11 cost 14138 14782 14487 14898 14898 15029
+k
+11
+11
+11
+11
+11
+179.75 8348.19
+5.3
+5.3 6.84
+time
+X-n167-k10 cost 20557 22365 22176 21656 21656 22004
+k
+10
+10
+10
+10
+10
+time
+215.65 6219.87 5.93 5.86 7.94
+X-n172-k51 cost 45607 49782 47940 47924 47924 47790
+52
+52
+57
+57
+54
+k
+time
+179.88 927.46 5.01 4.84 6.94
+X-n176-k26 cost 47812 51466 51233 51382 51382 50150
+26
+26
+29
+29
+27
+k
+time
+60.6 151.31 5.89 5.74 7.51
+X-n181-k23 cost 25569 26346 26243 26355 26355 26561
+k
+23
+23
+23
+23
+23
+time
+197.02 2715.74 5.23 5.29 7.02
+X-n186-k15 cost 24145 25667 25910 25690 25690 25690
+k
+15
+15
+15
+15
+15
+time
+184.65 2340.14 6.56 6.32 8.42
+X-n190-k8 cost 16980 17831 17758 17742 17742 17816
+8
+8
+8
+8
+8
+k
+time
+191.15 6243.92
+9.2 9.38 11.82
+X-n195-k51 cost 44225 48330 46999 45976 45976 45976
+k
+52
+52
+55
+55
+55
+180.69 697.97 6.52 5.91 7.95
+time
+
+Instance
+n100
+
+Table 30. Detailed Results on the Uchoa benchmark[20] (1000 iterations).
+
+Learning to Control Local Search for Combinatorial Optimization
+47
+
+BKS ORTools[14] Meta-VRPH
+GLS
+TS
+SA SAre
+ILS ILS+SA
+60315
+37
+13.9
+20587
+19
+15.7
+32602
+16
+16.7
+11654
+12
+19.64
+172876
+109
+15.29
+41981
+35
+17.54
+26974
+24
+20.49
+20212
+17
+23.36
+29828
+14
+22.12
+86612
+50
+20
+38530
+53
+23.43
+
+DACT[8]
+NeuroLS
+VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n200-k36 cost 58578 60473 60810 60902 60913 61051 60920 61911 64112 64677 60290 60315
+k
+37
+37
+38
+38
+38
+38
+38
+37
+37
+37
+37
+156.86 1853.73
+6.43
+6.18
+8.23
+6.2
+3.39 125.59 130.62 12.69 16.04
+time
+X-n204-k19 cost 19565 20840 21045 20906 20970 21004 21004 21004 23895 22868 20481 20587
+k
+19
+19
+19
+19
+19
+19
+19
+19
+19
+19
+19
+time
+297.17 2850.43
+7.32
+7.21
+9.61
+7.17
+3.69 129.61 135.19 13.58 18.25
+X-n209-k16 cost 30656 32268 32324 32793 32793 32793 32793 32793 35254 36933 32592 32602
+16
+16
+16
+16
+16
+16
+16
+16
+16
+16
+16
+k
+time
+249.75 2389.62
+8.28
+7.84 10.83
+7.67
+4.32 130.94 137.71 14.93 19.17
+X-n214-k11 cost 10856 12499 12281 11910 11949 11949 11949 11949 14626 13879 11711 11654
+k
+11
+11
+12
+12
+12
+12
+12
+11
+13
+12
+12
+169.87 3546.43 10.34 10.27 13.23
+9.56
+6.6 132.5 145.47 18.29 22.44
+time
+X-n219-k73 cost 117595 118420 118029 172876 172876 172876 172876 172876 120127 120053 172876 172876
+k
+73
+73
+109
+109
+109
+109
+109
+73
+73
+109
+109
+384.66 6480.44
+6.62
+6.26
+8.72
+6.42
+3.62 135.41 145.65 13.35 18.17
+time
+X-n223-k34 cost 40437 42810 42810 42343 42343 42639 42299 42639 51322 47618 41724 41981
+k
+34
+34
+36
+36
+36
+36
+36
+36
+35
+34
+35
+time
+166.89 1242.28
+8.22
+8.04 10.63
+7.8
+4.07 137.28 149.75 15.37 19.77
+X-n228-k23 cost 25742 27759 28008 27076 27076 27296 27105 27296 33420 32341 26714 26974
+k
+23
+23
+25
+25
+25
+25
+25
+25
+25
+23
+24
+time
+123.99 1675.92
+9.97
+9.87 13.32
+9.81
+4.86 141.83 153.01 17.35 21.95
+X-n233-k16 cost 19230 20483 20215 20478 20585 20585 20585 20585 25884 25427 20066 20212
+k
+17
+17
+17
+17
+17
+17
+17
+18
+18
+17
+17
+time
+296.93 2849.93 10.98
+10.7 15.49
+10.97
+5.79 134.9 151.9
+20.5 26.24
+X-n237-k14 cost 27042 28748 28850 30341 30341 30571 30433 30571 32205 32791 30003 29828
+k
+14
+14
+14
+14
+14
+14
+14
+14
+14
+14
+14
+time
+370.75 3986.04 11.01 10.93 14.81
+10.62
+6.09 147.2 156.38 19.54 25.89
+X-n242-k48 cost 82751 85879 86408 88179 88179 88320 88179 88696 95260 93756 86584 86612
+k
+48
+48
+52
+52
+52
+52
+52
+48
+48
+50
+50
+time
+213 1207.66
+9.26
+9.15 12.39
+9.25
+4.7 154.18 160.67 17.66 22.76
+X-n247-k50 cost 37274 39090 39136 40022 40022 38876 40123 40508 45682 45488 38869 38530
+k
+51
+51
+59
+59
+53
+59
+59
+55
+54
+54
+53
+163.3
+2191 11.08 11.18
+14.8
+11.02
+5.58 149.93 163.7 20.67 26.65
+time
+
+Instance
+n100
+
+Table 31. Detailed Results on the Uchoa benchmark[20] (1000 iterations).
+
+48
+Falkner et al.
+
+40285 40285 42297 42540 40015
+28
+28
+28
+28
+28
+9.92 5.15 155.26 166.65 19.54
+20518 20518 23292 22172 19845
+17
+17
+17
+17
+17
+12.32 6.45 154.69 172.04 22.68
+28638 28638 35139 34448 28587
+13
+13
+13
+14
+13
+14.42 10.11 162.02 176.41 26.86
+80657 80979 83349 83296 79497
+64
+64
+61
+61
+61
+10.26 5.38 159.12 182.19 20.78
+37181 37181 40547 40165 36265
+37
+37
+37
+38
+36
+10.83
+5.3 171.85
+185 21.98
+24177 24177 25964 25355 23865
+31
+31
+30
+31
+31
+11.47 5.62 165.78 185.29 24.17
+35951 35951 44726 45269 35531
+18
+18
+18
+18
+17
+16.28 9.76 177.71 191.53 30.76
+21924 21924 25621 26089 21688
+15
+15
+15
+16
+15
+16.9 10.51 180.56 195.5 31.57
+98686 99808 113817 112830 97481
+65
+65
+62
+63
+62
+13.13 6.31 185.42 200.77 25.49
+49307 49307 60510 58229 48494
+53
+53
+55
+54
+51
+12.86 6.48 183.91 206.46 25.57
+35996 35996 47477 46191 35617
+32
+32
+36
+34
+32
+14.3 6.75 185.8 205.82 27.66
+
+40062
+28
+25.48
+20021
+17
+29.79
+28638
+13
+34.45
+79132
+61
+26.8
+36288
+36
+28.38
+23776
+31
+29.22
+35760
+18
+39.78
+21448
+15
+40.34
+97182
+62
+32.6
+48350
+51
+33.7
+35683
+32
+35.56
+
+40062
+28
+22.31
+20021
+17
+26.32
+28638
+13
+29.91
+79132
+61
+24.02
+36288
+36
+24.37
+23776
+31
+26.23
+35760
+18
+34.03
+21448
+15
+34.41
+97182
+62
+30.98
+48350
+51
+29.83
+35683
+32
+31.47
+
+BKS ORTools[14] Meta-VRPH
+DACT[8]
+NeuroLS
+GLS
+TS
+SA SAre ILS ILS+SA VNS aug=1 aug=8 NLSA NLSAN NLSANP
+
+X-n251-k28 cost 38684 40320 40215 40279 40285 40285
+k
+28
+28
+28
+28
+28
+269.72 2767.31 10.44 10.37 13.78
+time
+X-n256-k16 cost 18839 19464 20274 20518 20518 20518
+k
+17
+17
+17
+17
+17
+time
+422.55 1168.37 12.65 12.26 17.36
+X-n261-k13 cost 26558 29094 29476 28638 28638 28638
+13
+13
+13
+13
+13
+k
+time
+212.79 2006.18 15.18 14.79 21.12
+X-n266-k58 cost 75478 78063 78291 80553 80553 80792
+k
+59
+59
+64
+64
+64
+234.45 1746.06 10.62 10.44 13.96
+time
+X-n270-k35 cost 35291 37516 36999 37181 37181 37181
+k
+36
+36
+37
+37
+37
+283.61 2120.87 11.57 11.08 15.03
+time
+X-n275-k28 cost 21245 22434 22377 23907 23907 24177
+k
+28
+28
+31
+31
+31
+time
+374.72 6795.72 12.19 11.95 15.98
+X-n280-k17 cost 33503 37558 38819 35951 35951 35951
+k
+17
+17
+18
+18
+18
+time
+205.65 1134.45 17.03 16.58 23.44
+X-n284-k15 cost 20215 21719 21984 21924 21924 21924
+k
+15
+15
+15
+15
+15
+time
+328 2745.15 17.66 17.19 24.49
+X-n289-k60 cost 95151 100823 101783 98648 98824 98743
+k
+61
+61
+65
+65
+65
+time
+216.52 621.48 13.77 13.17 18.27
+X-n294-k50 cost 47161 50946 50429 49169 49307 49307
+k
+51
+51
+53
+53
+53
+time
+341.68 1550.54 13.73 13.47 18.64
+X-n298-k31 cost 34231 39244 38074 35996 35996 35996
+k
+31
+31
+32
+32
+32
+304.55 1806.41 15.27 14.85 20.63
+time
+
+Instance
+n100
+
+Table 32. Detailed Results on the Uchoa benchmark[20] (1000 iterations).
+
+Learning to Control Local Search for Combinatorial Optimization
+49
+
+50
+
+Falkner et al.
+
+References
+1. Balas, E., and Vazacopoulos, A. (1998). Guided local search with shifting bottleneck
+for job shop scheduling. Management science, 44(2), 262-275.
+2. Bellemare, M. G., Dabney, W., and Munos, R. (2017, July). A distributional perspective on reinforcement learning. In International Conference on Machine Learning (pp. 449-458). PMLR.
+3. Dabney, W., Ostrovski, G., Silver, D., and Munos, R. (2018, July). Implicit quantile
+networks for distributional reinforcement learning. In International conference on
+machine learning (pp. 1096-1105). PMLR.
+4. Kingma, D. P., and Ba, J. (2014). Adam: A method for stochastic optimization.
+arXiv preprint arXiv:1412.6980.
+5. Kuhpfahl, J., and Bierwirth, C. (2016). A study on local search neighborhoods for
+the job shop scheduling problem with total weighted tardiness objective. Computers
+& Operations Research, 66, 44-57.
+6. Kwon, Y. D., Choo, J., Kim, B., Yoon, I., Gwon, Y., and Min, S. (2020). Pomo:
+Policy optimization with multiple optima for reinforcement learning. Advances in
+Neural Information Processing Systems, 33, 21188-21198.
+7. Lourenço, H. R. (1995). Job-shop scheduling: Computational study of local search
+and large-step optimization methods. European Journal of Operational Research,
+83(2), 347-364.
+8. Ma, Y., Li, J., Cao, Z., Song, W., Zhang, L., Chen, Z., and Tang, J. (2021). Learning
+to Iteratively Solve Routing Problems with Dual-Aspect Collaborative Transformer.
+Advances in Neural Information Processing Systems, 34.
+9. Murovec, B. (2015). Job-shop local-search move evaluation without direct consideration of the criterion’s value. European Journal of Operational Research, 241(2),
+320-329.
+10. Nowicki E, Smutnicki. C. (1996) A fast taboo search algorithm for the job shop
+problem. Management science, 42(6), 797–813.
+11. Park, J., Chun, J., Kim, S. H., Kim, Y., and Park, J. (2021). Learning to schedule
+job-shop problems: representation and policy learning using graph neural network
+and reinforcement learning. International Journal of Production Research, 59(11),
+3360-3377.
+12. Park, J., Bakhtiyar, S., and Park, J. (2021). ScheduleNet: Learn to solve
+multi-agent scheduling problems with reinforcement learning. arXiv preprint
+arXiv:2106.03051.
+13. Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G., ... and
+Chintala, S. (2019). Pytorch: An imperative style, high-performance deep learning
+library. Advances in neural information processing systems, 32.
+14. Perron, L., and Furnon, V. (2019). Or-tools. URL https://developers. google.
+com/optimization, 5411.
+15. Schaul, T., Quan, J., Antonoglou, I., and Silver, D. (2015). Prioritized experience
+replay. arXiv preprint arXiv:1511.05952.
+16. Sels, V., Gheysen, N., and Vanhoucke, M. (2012). A comparison of priority rules
+for the job shop scheduling problem under different flow time-and tardiness-related
+objective functions. International Journal of Production Research, 50(15), 42554270.
+17. Sevkli, M., and Aydin, M. E. (2006). Variable Neighbourhood Search for Job Shop
+Scheduling Problems. J. Softw., 1(2), 34-39.
+
+Learning to Control Local Search for Combinatorial Optimization
+18. Taillard, E. (1993). Benchmarks for basic scheduling problems. european journal
+of operational research, 64(2), 278-285.
+19. Taillard, E. D. (1994). Parallel taboo search techniques for the job shop scheduling
+problem. ORSA Journal of Computing, 62, 108–117.
+20. Uchoa, E., Pecin, D., Pessoa, A., Poggi, M., Vidal, T., and Subramanian, A. (2017).
+New benchmark instances for the capacitated vehicle routing problem. European
+Journal of Operational Research, 257(3), 845-858.
+21. Van Laarhoven, P. J., Aarts, E. H., and Lenstra, J. K. (1992). Job shop scheduling
+by simulated annealing. Operations research, 40(1), 113-125.
+22. Weng, J., Chen, H., Yan, D., You, K., Duburcq, A., Zhang, M., ... and Zhu, J.
+(2021). Tianshou: a Highly Modularized Deep Reinforcement Learning Library.
+arXiv preprint arXiv:2107.14171.
+23. Zhang, C., Song, W., Cao, Z., Zhang, J., Tan, P. S., and Chi, X. (2020). Learning
+to dispatch for job shop scheduling via deep reinforcement learning. Advances in
+Neural Information Processing Systems, 33, 1621-1632.
+
+51
+
+

@@ -18,6 +18,9 @@ from dataclasses import dataclass, asdict
 from PaST.config import DataConfig
 
 
+HOURS_PER_DAY = 20
+
+
 def discrete_uniform(a: int, b: int, rng: random.Random) -> int:
     """Inclusive discrete uniform U[a,b]."""
     return rng.randint(a, b)
@@ -107,6 +110,8 @@ class RawInstance:
 
     instance_id: int
     scale: str  # "small", "mls", "vls"
+    D_days: int  # Number of operational days (New Benchmark)
+    hours_per_day: int  # Slots per day (New Benchmark, default 20)
     m: int  # Number of machines
     n: int  # Number of jobs
     T_max: int  # Total horizon length
@@ -155,6 +160,7 @@ def generate_raw_instance(
     T_max: Optional[int] = None,
     m: Optional[int] = None,
     n: Optional[int] = None,
+    D_days: Optional[int] = None,
 ) -> RawInstance:
     """
     Generate a raw benchmark-style instance.
@@ -170,6 +176,119 @@ def generate_raw_instance(
     Returns:
         RawInstance with all fields populated
     """
+    sampling_mode = getattr(config, "sampling_mode", "uniform_range")
+
+    # -----------------------------------------------------------------
+    # New Benchmark grid sampling (New Benchmark/new_data.py)
+    # -----------------------------------------------------------------
+    if sampling_mode == "new_benchmark_grid":
+        # Choose benchmark category, then sample integer (N, M, D).
+        cats = ("small", "medium", "large")
+        cat = cats[int(rng.randrange(len(cats)))]
+
+        if cat == "small":
+            N_choices = list(getattr(config, "nb_small_Ns"))
+            M_choices = list(getattr(config, "nb_small_Ms"))
+            D_choices = list(getattr(config, "nb_small_Ds"))
+            u_low, u_high = tuple(getattr(config, "nb_small_u_range"))
+            target_util = float(getattr(config, "nb_small_target_util"))
+            scale = "small"
+            ck_min, ck_max = 1, 4
+        elif cat == "medium":
+            N_choices = list(getattr(config, "nb_medium_Ns"))
+            M_choices = list(getattr(config, "nb_medium_Ms"))
+            D_choices = list(getattr(config, "nb_medium_Ds"))
+            u_low, u_high = tuple(getattr(config, "nb_medium_u_range"))
+            target_util = float(getattr(config, "nb_medium_target_util"))
+            scale = "mls"  # keep legacy naming used throughout PaST
+            ck_min, ck_max = 1, 4
+        else:
+            N_choices = list(getattr(config, "nb_large_Ns"))
+            M_choices = list(getattr(config, "nb_large_Ms"))
+            D_choices = list(getattr(config, "nb_large_Ds"))
+            u_low, u_high = tuple(getattr(config, "nb_large_u_range"))
+            target_util = float(getattr(config, "nb_large_target_util"))
+            scale = "vls"  # keep legacy naming used throughout PaST
+            ck_min, ck_max = 1, 8
+
+        if D_days is None:
+            D_days = int(rng.choice(D_choices))
+        else:
+            D_days = int(D_days)
+
+        hours_per_day = int(getattr(config, "hours_per_day", HOURS_PER_DAY))
+        T_max = int(hours_per_day * int(D_days))
+
+        if m is None:
+            m = int(rng.choice(M_choices))
+        else:
+            m = int(m)
+
+        if n is None:
+            n = int(rng.choice(N_choices))
+        else:
+            n = int(n)
+
+        # Generate period structure (still using Tk_choices for compact period representation)
+        Tk = sample_intervals_sum_to_T(T_max, config.Tk_choices, rng)
+        K = len(Tk)
+        ck = [discrete_uniform(int(ck_min), int(ck_max), rng) for _ in range(K)]
+        ct = expand_ck_to_ct(Tk, ck)
+        period_starts = compute_period_start_slots(Tk)
+
+        # Sample job processing times and enforce the New Benchmark utilization cap
+        p_min = int(getattr(config, "p_min", 1))
+        p_max = int(getattr(config, "p_max_benchmark", getattr(config, "p_max", 4)))
+        if p_min != 1:
+            # new_data.py assumes p in 1..pmax, but keep config flexibility
+            pass
+
+        cap = int(float(target_util) * int(m) * int(T_max))
+        if cap < int(n):
+            raise ValueError(
+                f"Infeasible cap for new_benchmark_grid: cap={cap} < n={n}"
+            )
+
+        p = [int(rng.randint(int(p_min), int(p_max))) for _ in range(int(n))]
+        total = int(sum(p))
+        guard = 0
+        while total > cap:
+            # pick a random job with p>1 to decrement
+            dec_candidates = [i for i, pj in enumerate(p) if int(pj) > 1]
+            if not dec_candidates:
+                raise ValueError(
+                    "Cannot reduce processing times enough to satisfy utilization cap."
+                )
+            i = int(rng.choice(dec_candidates))
+            p[i] = int(p[i]) - 1
+            total -= 1
+            guard += 1
+            if guard > 10_000_000:
+                raise RuntimeError("Guard triggered while reducing processing times.")
+
+        # Machine energy rates
+        e = [int(rng.randint(int(u_low), int(u_high))) for _ in range(int(m))]
+
+        return RawInstance(
+            instance_id=int(instance_id),
+            scale=str(scale),
+            D_days=int(D_days),
+            hours_per_day=int(hours_per_day),
+            m=int(m),
+            n=int(n),
+            T_max=int(T_max),
+            p=[int(x) for x in p],
+            e=[int(x) for x in e],
+            Tk=[int(x) for x in Tk],
+            ck=[int(x) for x in ck],
+            ct=[int(x) for x in ct],
+            period_starts=[int(x) for x in period_starts],
+        )
+
+    # -----------------------------------------------------------------
+    # Legacy sampling modes
+    # -----------------------------------------------------------------
+
     # Sample horizon if not provided
     if T_max is None:
         T_max = rng.choice(config.T_max_choices)
@@ -182,9 +301,7 @@ def generate_raw_instance(
     else:
         scale = "vls"
 
-    sampling_mode = getattr(config, "sampling_mode", "uniform_range")
-
-    # Paper benchmark grid sampling (matches New Benchmark/generate_data.py)
+    # Paper benchmark grid sampling (legacy)
     if sampling_mode == "paper_grid_90":
         if scale == "small":
             m_choices = (3, 5, 7)
@@ -233,18 +350,24 @@ def generate_raw_instance(
     # Generate machine energy rates
     e = [discrete_uniform(e_min, e_max, rng) for _ in range(m)]
 
+    # Legacy modes did not define days; store a best-effort integer value.
+    hours_per_day = int(getattr(config, "hours_per_day", HOURS_PER_DAY))
+    D_days = int(max(1, (int(T_max) + int(hours_per_day) - 1) // int(hours_per_day)))
+
     return RawInstance(
-        instance_id=instance_id,
-        scale=scale,
-        m=m,
-        n=n,
-        T_max=T_max,
-        p=p,
-        e=e,
-        Tk=Tk,
-        ck=ck,
-        ct=ct,
-        period_starts=period_starts,
+        instance_id=int(instance_id),
+        scale=str(scale),
+        D_days=int(D_days),
+        hours_per_day=int(hours_per_day),
+        m=int(m),
+        n=int(n),
+        T_max=int(T_max),
+        p=[int(x) for x in p],
+        e=[int(x) for x in e],
+        Tk=[int(x) for x in Tk],
+        ck=[int(x) for x in ck],
+        ct=[int(x) for x in ct],
+        period_starts=[int(x) for x in period_starts],
     )
 
 
@@ -418,8 +541,8 @@ def generate_episode_batch(
     config: DataConfig,
     seed: Optional[int] = None,
     N_job_pad: int = 50,
-    K_period_pad: int = 250,  # Max periods: T_max=500 / min_period=2 = 250
-    T_max_pad: int = 500,
+    K_period_pad: int = 300,  # Max periods: T_max=600 / min_period=2 = 300
+    T_max_pad: int = 600,
 ) -> Dict[str, np.ndarray]:
     """
     Generate a batch of episodes for training.

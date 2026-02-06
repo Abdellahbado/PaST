@@ -1,0 +1,59 @@
+# Experiment
+exp_name: neurols_AA_none
+seed: 42
+device: cuda
+log_dir: logs/neurols
+checkpoint_dir: checkpoints/neurols
+
+# Data generation
+n_jobs_train: [20, 40, 60]
+n_machines_train: [3, 5, 7]
+n_instances_per_reset: 200
+
+# Environment
+max_steps: 500
+stagnation_limit: 100
+action_space: AA
+reward_mode: improvement
+
+# Model
+d_emb: 128
+n_layers_static: 3
+n_layers_dynamic: 2
+use_iqn: true
+use_dueling: false
+price_mode: none
+dropout: 0.1
+
+# Training
+n_episodes: 10000
+batch_size: 32
+learning_rate: 0.0005
+weight_decay: 0.00001
+gamma: 0.99
+n_step: 3
+
+# Exploration
+epsilon_start: 0.95
+epsilon_end: 0.05
+epsilon_decay: 0.995
+
+# Replay buffer
+buffer_size: 32000
+min_buffer_size: 1000
+
+# Target network
+target_update_freq: 500
+use_soft_update: false
+tau: 0.005
+
+# IQN
+n_quantile_samples: 32
+n_target_quantile_samples: 32
+kappa: 1.0
+
+# Logging
+log_interval: 10
+eval_interval: 100
+save_interval: 500
+n_eval_episodes: 10
