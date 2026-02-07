@@ -226,6 +226,66 @@ if _TORCH_AVAILABLE:
 
             return h_jobs, h_machines, h_global
 
+        def forward_batched(
+            self,
+            job_features: torch.Tensor,
+            machine_features: torch.Tensor,
+            static_edge_index: torch.Tensor,
+            dynamic_edge_index: torch.Tensor,
+        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            """Batched forward: process B graphs in one super-graph scatter.
+
+            All GNN layers operate on the concatenated super-graph.
+            Edges from different graphs never interact because offsets
+            keep their node indices disjoint.
+
+            Args:
+                job_features: (B, n_jobs, d_job_in)
+                machine_features: (B, n_machines, d_machine_in)
+                static_edge_index: (B, 2, E_static) — LOCAL node indices
+                dynamic_edge_index: (B, 2, E_dynamic)
+
+            Returns:
+                job_embeddings: (B, n_jobs, d_emb)
+                machine_embeddings: (B, n_machines, d_emb)
+                global_embedding: (B, d_emb)
+            """
+            B = job_features.size(0)
+            n_jobs = job_features.size(1)
+            n_machines = machine_features.size(1)
+            n_nodes = n_jobs + n_machines
+
+            # --- embed & interleave ---
+            h_j = self.job_embed(job_features.reshape(B * n_jobs, -1)).reshape(
+                B, n_jobs, -1
+            )
+            h_m = self.machine_embed(
+                machine_features.reshape(B * n_machines, -1)
+            ).reshape(B, n_machines, -1)
+            # (B, n+m, d)  →  (B*(n+m), d)
+            h = torch.cat([h_j, h_m], dim=1).reshape(B * n_nodes, -1)
+
+            # --- offset edges for the super-graph ---
+            offsets = (torch.arange(B, device=h.device) * n_nodes).view(B, 1, 1)
+            se = (static_edge_index + offsets).reshape(2, -1)
+            de = (dynamic_edge_index + offsets).reshape(2, -1)
+
+            # --- GNN stages (same layers, bigger graph) ---
+            for layer in self.static_layers:
+                h = layer(h, se)
+            for layer in self.dynamic_layers:
+                h = layer(h, de)
+            h = self.consolidation_layer(h, se)
+            h = self.output_mlp(h)
+
+            # --- split back per graph ---
+            h = h.reshape(B, n_nodes, -1)
+            h_jobs_out = h[:, :n_jobs, :]
+            h_machines_out = h[:, n_jobs:, :]
+            h_global = h.mean(dim=1)  # per-graph mean
+
+            return h_jobs_out, h_machines_out, h_global
+
     class NeuroLSEncoder(nn.Module):
         """Complete NeuroLS encoder with group pooling.
 
@@ -352,6 +412,86 @@ if _TORCH_AVAILABLE:
             omega_state = self.state_proj(state_features)  # (d_emb,)
 
             # Add price embedding if available
+            if price_embedding is not None and self.price_proj is not None:
+                omega_price = self.price_proj(price_embedding)
+                omega_feat = omega_state + omega_price
+            else:
+                omega_feat = omega_state
+
+            return omega_node, omega_group, omega_feat
+
+        def forward_batched(
+            self,
+            job_features: torch.Tensor,
+            machine_features: torch.Tensor,
+            state_features: torch.Tensor,
+            job_to_machine: torch.Tensor,
+            static_edge_index: torch.Tensor,
+            dynamic_edge_index: torch.Tensor,
+            price_embedding: Optional[torch.Tensor] = None,
+        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            """Batched forward for B graphs.
+
+            Args:
+                job_features: (B, n_jobs, d_job_in)
+                machine_features: (B, n_machines, d_machine_in)
+                state_features: (B, d_state_in)
+                job_to_machine: (B, n_jobs)
+                static_edge_index: (B, 2, E_static)
+                dynamic_edge_index: (B, 2, E_dynamic)
+                price_embedding: (B, d_price) or None
+
+            Returns:
+                omega_node: (B, d_emb)
+                omega_group: (B, d_emb)
+                omega_feat: (B, d_emb)
+            """
+            B = job_features.size(0)
+            n_jobs = job_features.size(1)
+            n_machines = machine_features.size(1)
+
+            # GNN
+            h_jobs, h_machines, _ = self.gnn.forward_batched(
+                job_features,
+                machine_features,
+                static_edge_index,
+                dynamic_edge_index,
+            )
+
+            # --- batched group pooling ---
+            h_jobs_flat = h_jobs.reshape(B * n_jobs, -1)
+            machine_offsets = (
+                torch.arange(B, device=job_to_machine.device) * n_machines
+            ).unsqueeze(1)
+            j2m_flat = (job_to_machine + machine_offsets).reshape(-1).long()
+            idx_exp = j2m_flat.unsqueeze(-1).expand(-1, self.d_emb)
+
+            total_groups = B * n_machines
+
+            group_max = torch.zeros(total_groups, self.d_emb, device=h_jobs.device)
+            group_max.scatter_reduce_(
+                0, idx_exp, h_jobs_flat, reduce="amax", include_self=True
+            )
+
+            group_sum = torch.zeros(total_groups, self.d_emb, device=h_jobs.device)
+            group_sum.scatter_add_(0, idx_exp, h_jobs_flat)
+
+            group_count = torch.zeros(total_groups, 1, device=h_jobs.device)
+            group_count.scatter_add_(
+                0,
+                j2m_flat.unsqueeze(-1),
+                torch.ones(B * n_jobs, 1, device=h_jobs.device),
+            )
+
+            group_mean = group_sum / (group_count + 1e-9)
+            group_combined = torch.cat([group_max, group_mean], dim=-1)
+            group_emb = self.group_mlp(group_combined).reshape(B, n_machines, -1)
+
+            # --- aggregate ---
+            omega_node = h_jobs.mean(dim=1)  # (B, d)
+            omega_group = group_emb.mean(dim=1)  # (B, d)
+            omega_state = self.state_proj(state_features)  # (B, d)
+
             if price_embedding is not None and self.price_proj is not None:
                 omega_price = self.price_proj(price_embedding)
                 omega_feat = omega_state + omega_price
@@ -502,3 +642,123 @@ class TripartiteGNNEncoder(nn.Module):
         h_global = h.mean(dim=0)
 
         return h_jobs, h_machines, h_periods, h_global
+
+
+class TripartiteNeuroLSEncoder(nn.Module):
+    """Complete tripartite encoder with group pooling.
+
+    Same role as NeuroLSEncoder but uses Jobs + Machines + Periods graph.
+    Outputs the same (omega_node, omega_group, omega_feat) triple so the
+    decoder is unchanged.
+    """
+
+    def __init__(
+        self,
+        d_job_in: int = 5,
+        d_machine_in: int = 5,
+        d_period_in: int = 5,
+        d_state_in: int = 13,
+        d_price_in: int = 64,
+        d_emb: int = 64,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.d_emb = d_emb
+
+        # Tripartite GNN
+        self.gnn = TripartiteGNNEncoder(
+            d_job_in=d_job_in,
+            d_machine_in=d_machine_in,
+            d_period_in=d_period_in,
+            d_emb=d_emb,
+            n_layers=n_layers,
+            dropout=dropout,
+        )
+
+        # Group pooling (equation 8) – same as bipartite version
+        self.group_mlp = nn.Sequential(
+            nn.Linear(2 * d_emb, d_emb),
+            nn.GELU(),
+        )
+
+        # State feature projection
+        self.state_proj = nn.Sequential(
+            nn.Linear(d_state_in, d_emb),
+            nn.GELU(),
+            nn.Linear(d_emb, d_emb),
+        )
+
+        # Price embedding projection (if used)
+        self.price_proj = (
+            nn.Sequential(
+                nn.Linear(d_price_in, d_emb),
+                nn.GELU(),
+            )
+            if d_price_in > 0
+            else None
+        )
+
+    def forward(
+        self,
+        job_features: torch.Tensor,
+        machine_features: torch.Tensor,
+        period_features: torch.Tensor,
+        state_features: torch.Tensor,
+        job_to_machine: torch.Tensor,
+        edge_index: torch.Tensor,
+        price_embedding: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Args:
+            job_features: (n_jobs, d_job_in)
+            machine_features: (n_machines, d_machine_in)
+            period_features: (n_periods, d_period_in)
+            state_features: (d_state_in,) scalar features
+            job_to_machine: (n_jobs,) machine assignment
+            edge_index: (2, E) all tripartite edges
+            price_embedding: Optional (d_price,)
+
+        Returns:
+            omega_node, omega_group, omega_feat — same as bipartite encoder
+        """
+        n_jobs = job_features.size(0)
+        n_machines = machine_features.size(0)
+
+        h_jobs, h_machines, h_periods, h_global = self.gnn(
+            job_features,
+            machine_features,
+            period_features,
+            edge_index,
+        )
+
+        # Group pooling (same maths as NeuroLSEncoder)
+        idx = job_to_machine.long()
+        idx_exp = idx.unsqueeze(-1).expand(-1, self.d_emb)
+
+        group_max = torch.zeros(n_machines, self.d_emb, device=h_jobs.device)
+        group_max.scatter_reduce_(0, idx_exp, h_jobs, reduce="amax", include_self=True)
+        group_sum = torch.zeros(n_machines, self.d_emb, device=h_jobs.device)
+        group_sum.scatter_add_(0, idx_exp, h_jobs)
+        group_count = torch.zeros(n_machines, 1, device=h_jobs.device)
+        ones = torch.ones(n_jobs, 1, device=h_jobs.device)
+        group_count.scatter_add_(0, idx.unsqueeze(-1), ones)
+        group_mean = group_sum / (group_count + 1e-9)
+
+        group_combined = torch.cat([group_max, group_mean], dim=-1)
+        group_emb = self.group_mlp(group_combined)
+
+        omega_node = h_jobs.mean(dim=0)
+        omega_group = group_emb.mean(dim=0)
+
+        omega_state = self.state_proj(state_features)
+        if price_embedding is not None and self.price_proj is not None:
+            omega_price = self.price_proj(price_embedding)
+            omega_feat = omega_state + omega_price
+        else:
+            omega_feat = omega_state
+
+        return omega_node, omega_group, omega_feat
+
+    def get_output_dim(self) -> int:
+        return 3 * self.d_emb

@@ -241,3 +241,158 @@ PERTURBATION_BY_ID = {p.id: p for p in PERTURBATIONS}
 def get_perturbation(perturbation_id: PerturbationID) -> Perturbation:
     """Get perturbation by ID."""
     return PERTURBATION_BY_ID[perturbation_id]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Destroy / Repair operators (for Tripartite-B learned-destroy)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class DestroyID(IntEnum):
+    """Destroy operator identifiers for learned-destroy variant."""
+
+    RANDOM_3 = 0  # Remove 3 random jobs, reinsert greedily
+    RANDOM_5 = 1  # Remove 5 random jobs
+    WORST_MACHINE = 2  # Remove all jobs from worst (most expensive) machine
+    EXPENSIVE_3 = 3  # Remove 3 most expensive jobs (by per-job cost proxy)
+    BLOCK_2 = 4  # Remove 2 contiguous blocks from random machines
+
+
+@dataclass
+class DestroyOperator:
+    """Destroy-repair operator definition.
+
+    Each operator removes a set of jobs then reinserts them with a greedy
+    heuristic (lowest-load machine, front of sequence).
+    """
+
+    id: DestroyID
+    name: str
+    description: str
+
+    def apply(
+        self,
+        solution: PMALNSSolution,
+        processing_times: np.ndarray,
+        machine_energy_rates: np.ndarray,
+        K: int,
+    ) -> PMALNSSolution:
+        """Apply destroy + greedy repair.
+
+        Returns a new solution (original is not mutated).
+        """
+        new_sol = solution.clone()
+        n = new_sol.n_jobs
+        m = new_sol.n_machines
+
+        if self.id == DestroyID.RANDOM_3:
+            jobs = self._select_random(new_sol, processing_times, 3)
+        elif self.id == DestroyID.RANDOM_5:
+            jobs = self._select_random(new_sol, processing_times, 5)
+        elif self.id == DestroyID.WORST_MACHINE:
+            jobs = self._select_worst_machine(
+                new_sol, processing_times, machine_energy_rates
+            )
+        elif self.id == DestroyID.EXPENSIVE_3:
+            jobs = self._select_expensive(
+                new_sol, processing_times, machine_energy_rates, 3
+            )
+        elif self.id == DestroyID.BLOCK_2:
+            jobs = self._select_blocks(new_sol, processing_times, 2)
+        else:
+            raise ValueError(f"Unknown destroy id {self.id}")
+
+        if not jobs:
+            return new_sol
+
+        # Remove jobs (back-to-front per machine)
+        removal = [
+            (j, new_sol.get_assignment(j), new_sol.get_position(j)) for j in jobs
+        ]
+        removal.sort(key=lambda x: (x[1], -x[2]))
+        for j, mi, _ in removal:
+            pos = new_sol.sequences[mi].index(j)
+            new_sol.sequences[mi].pop(pos)
+
+        # Greedy repair: reinsert at front of lightest machine
+        loads = new_sol.get_machine_loads(processing_times)
+        for j, _, _ in removal:
+            best_m = min(range(m), key=lambda mi: (loads[mi], mi))
+            new_sol.sequences[best_m].insert(0, j)
+            loads[best_m] += processing_times[j]
+
+        new_sol._invalidate_caches()
+        return new_sol
+
+    # ── selection helpers (deterministic, seeded by job indices) ──
+
+    @staticmethod
+    def _select_random(sol: PMALNSSolution, p: np.ndarray, q: int) -> List[int]:
+        """Deterministic pseudo-random selection based on current solution hash."""
+        n = sol.n_jobs
+        q = min(q, n)
+        # Use hash of current assignment as seed for reproducibility
+        h = hash(sol.hash_key()) % (2**31)
+        rng = np.random.RandomState(h)
+        return list(rng.choice(n, size=q, replace=False))
+
+    @staticmethod
+    def _select_worst_machine(
+        sol: PMALNSSolution,
+        p: np.ndarray,
+        e: np.ndarray,
+    ) -> List[int]:
+        """Remove all jobs from the most expensive machine (load * rate)."""
+        m = sol.n_machines
+        loads = sol.get_machine_loads(p)
+        costs = loads * e
+        worst_mi = int(np.argmax(costs))
+        return list(sol.sequences[worst_mi])
+
+    @staticmethod
+    def _select_expensive(
+        sol: PMALNSSolution,
+        p: np.ndarray,
+        e: np.ndarray,
+        q: int,
+    ) -> List[int]:
+        """Remove q jobs with highest proxy cost (p_j * e_m)."""
+        scores = []
+        for j in range(sol.n_jobs):
+            mi = sol.get_assignment(j)
+            scores.append((p[j] * e[mi], j))
+        scores.sort(key=lambda x: (-x[0], x[1]))
+        return [j for _, j in scores[:q]]
+
+    @staticmethod
+    def _select_blocks(sol: PMALNSSolution, p: np.ndarray, n_blocks: int) -> List[int]:
+        """Remove n_blocks contiguous pairs from different machines."""
+        jobs = []
+        h = hash(sol.hash_key()) % (2**31)
+        rng = np.random.RandomState(h)
+        machines = list(range(sol.n_machines))
+        rng.shuffle(machines)
+        for mi in machines[:n_blocks]:
+            seq = sol.sequences[mi]
+            if len(seq) >= 2:
+                start = rng.randint(0, len(seq) - 1)
+                jobs.extend(seq[start : start + 2])
+            elif seq:
+                jobs.extend(seq)
+        return jobs
+
+
+# Destroy operator instances
+DESTROY_OPERATORS: List[DestroyOperator] = [
+    DestroyOperator(DestroyID.RANDOM_3, "Random-3", "Remove 3 random jobs"),
+    DestroyOperator(DestroyID.RANDOM_5, "Random-5", "Remove 5 random jobs"),
+    DestroyOperator(
+        DestroyID.WORST_MACHINE, "Worst-Machine", "Remove worst machine jobs"
+    ),
+    DestroyOperator(
+        DestroyID.EXPENSIVE_3, "Expensive-3", "Remove 3 most expensive jobs"
+    ),
+    DestroyOperator(DestroyID.BLOCK_2, "Block-2", "Remove 2 contiguous blocks"),
+]
+
+DESTROY_BY_ID = {d.id: d for d in DESTROY_OPERATORS}

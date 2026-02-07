@@ -331,6 +331,75 @@ class NeuroLSState:
 
         return np.array(src, dtype=np.int64), np.array(dst, dtype=np.int64)
 
+    def get_period_features(
+        self, ct: np.ndarray, hours_per_day: int = 20
+    ) -> np.ndarray:
+        """Extract per-period (time-block) features for tripartite GNN.
+
+        Periods are the run-length encoded price blocks within the horizon.
+        Each block becomes one node with features describing its price level,
+        duration, and temporal position.
+
+        Returns:
+            (n_periods, 5) feature matrix:
+                - normalized price (1)
+                - fraction of horizon (1)
+                - start position / K (1)
+                - mid-point position / K (1)
+                - one-hot cheap indicator (1)  (below median price)
+        """
+        K = self.K
+        prices = np.asarray(ct[:K], dtype=np.float64)
+        if len(prices) == 0:
+            return np.zeros((1, 5), dtype=np.float32)
+
+        # Run-length encode by price level
+        blocks = []  # [(start, duration, price)]
+        block_start = 0
+        block_price = prices[0]
+        for t in range(1, len(prices)):
+            if prices[t] != block_price:
+                blocks.append((block_start, t - block_start, block_price))
+                block_start = t
+                block_price = prices[t]
+        blocks.append((block_start, len(prices) - block_start, block_price))
+
+        p_min = float(np.min(prices))
+        p_max = float(np.max(prices))
+        p_range = max(1e-9, p_max - p_min)
+        p_median = float(np.median(prices))
+
+        features = []
+        for start, dur, price in blocks:
+            features.append(
+                [
+                    (price - p_min) / p_range,  # normalized price
+                    dur / float(K),  # fraction of horizon
+                    start / float(K),  # start position
+                    (start + dur / 2) / float(K),  # mid-point
+                    1.0 if price <= p_median else 0.0,  # cheap indicator
+                ]
+            )
+
+        return np.array(features, dtype=np.float32)
+
+    def get_period_blocks(self, ct: np.ndarray) -> list:
+        """Return run-length encoded period blocks as [(start, dur, price)]."""
+        K = self.K
+        prices = np.asarray(ct[:K], dtype=np.float64)
+        if len(prices) == 0:
+            return [(0, 1, 0.0)]
+        blocks = []
+        block_start = 0
+        block_price = prices[0]
+        for t in range(1, len(prices)):
+            if prices[t] != block_price:
+                blocks.append((block_start, t - block_start, float(block_price)))
+                block_start = t
+                block_price = prices[t]
+        blocks.append((block_start, len(prices) - block_start, float(block_price)))
+        return blocks
+
     def to_dict(self) -> Dict[str, Any]:
         """Serialize state to dictionary (for logging/debugging)."""
         return {

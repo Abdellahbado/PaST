@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════
-# Run all NeuroLS variants — with optional cross-variant parallelism
+# Run ONLY the tripartite NeuroLS variants (A + B)
+#
+# Uses the same seed, device, and parallelism settings as the
+# bipartite run for a fair comparison.
 #
 # Usage:
-#   bash scripts/run_neurols_all.sh              # all 9, parallel
-#   bash scripts/run_neurols_all.sh AANP_full    # single variant
-#   MAX_PARALLEL=1 bash scripts/run_neurols_all.sh  # sequential
+#   N_PARALLEL=8 MAX_PARALLEL=2 bash scripts/run_neurols_tripartite.sh
+#   bash scripts/run_neurols_tripartite.sh triA_full   # single variant
 # ═══════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -24,17 +26,14 @@ else
     exit 1
 fi
 
-# ── defaults ──────────────────────────────────────────────────────
+# ── defaults (match bipartite run) ────────────────────────────────
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-4}"
 DEVICE="${DEVICE:-cuda}"
 SEED="${SEED:-42}"
-# How many per-variant episode-parallel workers (0 = auto-detect)
 N_PARALLEL="${N_PARALLEL:-0}"
-# How many variants to run concurrently (default 3 for GPU sharing)
-MAX_PARALLEL="${MAX_PARALLEL:-3}"
+MAX_PARALLEL="${MAX_PARALLEL:-2}"
 
-# Optionally activate a conda environment
 if [[ -n "${CONDA_ENV:-}" ]]; then
     eval "$(conda shell.bash hook 2>/dev/null)" || true
     conda activate "$CONDA_ENV" 2>/dev/null || true
@@ -42,24 +41,12 @@ fi
 
 declare -A CONFIGS
 CONFIGS=(
-    ["AA_none"]="configs/neurols_AA_none.yaml"
-    ["AA_zprice"]="configs/neurols_AA_zprice.yaml"
-    ["AA_full"]="configs/neurols_AA_full.yaml"
-    ["AAN_none"]="configs/neurols_AAN_none.yaml"
-    ["AAN_zprice"]="configs/neurols_AAN_zprice.yaml"
-    ["AAN_full"]="configs/neurols_AAN_full.yaml"
-    ["AANP_none"]="configs/neurols_AANP_none.yaml"
-    ["AANP_zprice"]="configs/neurols_AANP_zprice.yaml"
-    ["AANP_full"]="configs/neurols_base.yaml"
-    # Tripartite-A: same AANP actions, tripartite graph encoder
     ["triA_none"]="configs/neurols_triA_AANP_none.yaml"
     ["triA_zprice"]="configs/neurols_triA_AANP_zprice.yaml"
     ["triA_full"]="configs/neurols_triA_AANP_full.yaml"
-    # Tripartite-B: AANPD (learned destroy), tripartite graph encoder
     ["triB_full"]="configs/neurols_triB_AANPD_full.yaml"
 )
 
-# ── helper: run one variant ──────────────────────────────────────
 run_variant() {
     local KEY="$1"
     echo ""
@@ -77,28 +64,31 @@ run_variant() {
 
 # ── single variant mode ──────────────────────────────────────────
 if [[ $# -gt 0 ]]; then
-    KEY="$1"
-    if [[ -z "${CONFIGS[$KEY]+x}" ]]; then
-        echo "Unknown variant: $KEY"
-        echo "Available: ${!CONFIGS[@]}"
-        exit 1
-    fi
-    echo "Running single variant: $KEY"
-    run_variant "$KEY"
+    for KEY in "$@"; do
+        if [[ -z "${CONFIGS[$KEY]+x}" ]]; then
+            echo "Unknown variant: $KEY"
+            echo "Available: ${!CONFIGS[@]}"
+            exit 1
+        fi
+    done
+    echo "Running ${#} variant(s): $*"
+    printf '%s\n' "$@" | xargs -I {} -P "$MAX_PARALLEL" \
+        bash -c "$(declare -f run_variant); $(declare -p CONFIGS TRAIN_MODULE DEVICE SEED N_PARALLEL); run_variant {}"
     exit 0
 fi
 
-# ── run all variants in parallel batches ──────────────────────────
-ALL_KEYS=(AA_none AA_zprice AA_full AAN_none AAN_zprice AAN_full AANP_none AANP_zprice AANP_full triA_none triA_zprice triA_full triB_full)
+# ── run all tripartite variants ───────────────────────────────────
+ALL_KEYS=(triA_none triA_zprice triA_full triB_full)
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  Running ${#ALL_KEYS[@]} variants, up to $MAX_PARALLEL at a time      ║"
+echo "║  Tripartite variants: ${#ALL_KEYS[@]}  (up to $MAX_PARALLEL parallel)     ║"
 echo "║  Per-variant workers: ${N_PARALLEL} (0=auto)                         ║"
+echo "║  Seed: ${SEED}  Device: ${DEVICE}                                   ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 
-# Use xargs for controlled parallelism (works on both Linux and macOS)
-printf '%s\n' "${ALL_KEYS[@]}" | xargs -I {} -P "$MAX_PARALLEL" bash -c "$(declare -f run_variant); $(declare -p CONFIGS TRAIN_MODULE DEVICE SEED N_PARALLEL); run_variant {}"
+printf '%s\n' "${ALL_KEYS[@]}" | xargs -I {} -P "$MAX_PARALLEL" \
+    bash -c "$(declare -f run_variant); $(declare -p CONFIGS TRAIN_MODULE DEVICE SEED N_PARALLEL); run_variant {}"
 
 echo ""
-echo "All ${#ALL_KEYS[@]} variants completed."
+echo "All ${#ALL_KEYS[@]} tripartite variants completed."

@@ -74,13 +74,15 @@ class EnvConfig:
     # Deterministic mode (for evaluation — disables SA acceptance)
     deterministic: bool = False
 
+    # Graph type: "bipartite" (mainline) or "tripartite" (period nodes ablation)
+    graph_type: str = "bipartite"
+
     def __post_init__(self):
         # Ensure action_space is ActionSpace instance
         if isinstance(self.action_space, str):
-            from PaST.neurols.action_space import AA_SPACE, AAN_SPACE, AANP_SPACE
+            from PaST.neurols.action_space import get_action_space
 
-            space_map = {"AA": AA_SPACE, "AAN": AAN_SPACE, "AANP": AANP_SPACE}
-            self.action_space = space_map.get(self.action_space, AANP_SPACE)
+            self.action_space = get_action_space(self.action_space)
 
 
 class NeuroLSEnv:
@@ -117,6 +119,12 @@ class NeuroLSEnv:
 
         # RNG for perturbations
         self._rng = np.random.default_rng()
+
+        # Solution cache: hash_key -> (cost, FullEvaluation)
+        # Avoids re-evaluating solutions already visited in this episode.
+        self._solution_cache: Dict[Any, Tuple[float, FullEvaluation]] = {}
+        self._cache_hits: int = 0
+        self._cache_queries: int = 0
 
     def seed(self, seed: int):
         """Set random seed for reproducibility."""
@@ -232,6 +240,16 @@ class NeuroLSEnv:
         self._no_improve_count = 0
         self.temperature = self.config.initial_temp
 
+        # Reset solution cache for the new episode
+        self._solution_cache = {}
+        self._cache_hits = 0
+        self._cache_queries = 0
+        # Seed cache with initial solution
+        self._solution_cache[solution.hash_key()] = (
+            initial_cost,
+            self._current_eval,
+        )
+
         return self.state
 
     def step(self, action: int) -> Tuple[NeuroLSState, float, bool, Dict[str, Any]]:
@@ -279,11 +297,12 @@ class NeuroLSEnv:
         }
 
         # Handle operator actions
-        if (
-            decoded.action_type == ActionType.OPERATOR
-            and decoded.operator_id is not None
-        ):
-            move_result = self._apply_operator(decoded.operator_id)
+        if decoded.action_type == ActionType.OPERATOR:
+            # For AA space: operator_id is None → try all operators, pick best
+            if decoded.operator_id is not None:
+                move_result = self._apply_operator(decoded.operator_id)
+            else:
+                move_result = self._apply_best_operator()
             info["move_result"] = move_result
 
             if move_result is not None:
@@ -302,17 +321,36 @@ class NeuroLSEnv:
                     new_solution = self.state.solution.clone()
                     OPERATOR_BY_ID[move.operator].apply_move(new_solution, move)
 
-                    # Update evaluator state (FullEvaluation) using incremental results
-                    if isinstance(new_eval, MoveEvaluation):
-                        updated_per_machine = list(self._current_eval.per_machine)
-                        for mi, machine_eval in new_eval.affected_machine_evals.items():
-                            updated_per_machine[int(mi)] = machine_eval
-                        self._current_eval = FullEvaluation(
-                            total_energy=float(new_cost),
-                            makespan=int(new_eval.new_makespan),
-                            feasible=bool(new_eval.feasible),
-                            per_machine=updated_per_machine,
-                            per_job_costs=None,
+                    # Check solution cache before full evaluation update
+                    sol_key = new_solution.hash_key()
+                    self._cache_queries += 1
+                    cached = self._solution_cache.get(sol_key)
+
+                    if cached is not None:
+                        # Cache hit — reuse stored evaluation
+                        self._cache_hits += 1
+                        new_cost = cached[0]
+                        self._current_eval = cached[1]
+                    else:
+                        # Cache miss — update evaluator state incrementally
+                        if isinstance(new_eval, MoveEvaluation):
+                            updated_per_machine = list(self._current_eval.per_machine)
+                            for (
+                                mi,
+                                machine_eval,
+                            ) in new_eval.affected_machine_evals.items():
+                                updated_per_machine[int(mi)] = machine_eval
+                            self._current_eval = FullEvaluation(
+                                total_energy=float(new_cost),
+                                makespan=int(new_eval.new_makespan),
+                                feasible=bool(new_eval.feasible),
+                                per_machine=updated_per_machine,
+                                per_job_costs=None,
+                            )
+                        # Store in cache
+                        self._solution_cache[sol_key] = (
+                            float(new_cost),
+                            self._current_eval,
                         )
 
                     per_machine_energy, per_machine_makespan = (
@@ -372,9 +410,19 @@ class NeuroLSEnv:
                 K=self.K,
             )
 
-            # Evaluate perturbed solution
-            new_eval = self._evaluator.evaluate_solution(new_solution)
-            new_cost = float(new_eval.total_energy)
+            # Evaluate perturbed solution (check cache first)
+            sol_key = new_solution.hash_key()
+            self._cache_queries += 1
+            cached = self._solution_cache.get(sol_key)
+
+            if cached is not None:
+                self._cache_hits += 1
+                new_cost = cached[0]
+                new_eval = cached[1]
+            else:
+                new_eval = self._evaluator.evaluate_solution(new_solution)
+                new_cost = float(new_eval.total_energy)
+                self._solution_cache[sol_key] = (new_cost, new_eval)
 
             per_machine_energy, per_machine_makespan = _per_machine_energy_and_makespan(
                 new_eval
@@ -400,6 +448,68 @@ class NeuroLSEnv:
         ):
             # NONE perturbation — just advance step
             self.state.step_t += 1
+
+        # Handle destroy-repair actions (Tripartite-B)
+        if decoded.action_type == ActionType.DESTROY and decoded.destroy_id is not None:
+            from PaST.neurols.perturbations import DESTROY_BY_ID
+
+            destroy_op = DESTROY_BY_ID[decoded.destroy_id]
+
+            new_solution = destroy_op.apply(
+                solution=self.state.solution,
+                processing_times=self._processing_times,
+                machine_energy_rates=self._machine_energy_rates,
+                K=self.K,
+            )
+
+            # Evaluate destroyed/repaired solution (check cache first)
+            sol_key = new_solution.hash_key()
+            self._cache_queries += 1
+            cached = self._solution_cache.get(sol_key)
+
+            if cached is not None:
+                self._cache_hits += 1
+                new_cost = cached[0]
+                new_eval = cached[1]
+            else:
+                new_eval = self._evaluator.evaluate_solution(new_solution)
+                new_cost = float(new_eval.total_energy)
+                self._solution_cache[sol_key] = (new_cost, new_eval)
+
+            # Accept/reject the destroy-repair result
+            accepted = self._make_acceptance_decision(
+                decoded.accept,
+                self.state.current_cost,
+                new_cost,
+            )
+
+            if accepted:
+                per_machine_energy, per_machine_makespan = (
+                    _per_machine_energy_and_makespan(new_eval)
+                )
+
+                self.state.update_from_perturbation(
+                    new_solution=new_solution,
+                    new_cost=new_cost,
+                    new_per_machine_energy=per_machine_energy,
+                    new_per_machine_makespan=per_machine_makespan,
+                    new_makespan=int(new_eval.makespan),
+                )
+                self._current_eval = new_eval
+
+                info["accepted"] = True
+                info["destroy_applied"] = True
+                info["cost_after_destroy"] = new_cost
+
+                if new_cost < self._best_cost_episode:
+                    self._best_cost_episode = new_cost
+                    self._no_improve_count = 0
+                    info["improved"] = True
+                else:
+                    self._no_improve_count += 1
+            else:
+                self.state.step_t += 1
+                self._no_improve_count += 1
 
         # Compute reward
         reward = self._compute_reward(info)
@@ -431,6 +541,33 @@ class NeuroLSEnv:
 
         # best_result is a MoveEvaluation with .move, .new_cost, etc.
         return best_result.move, best_result.new_cost, best_result
+
+    def _apply_best_operator(self):
+        """Try all operators and return the best move across all of them.
+
+        Used by the AA action space where the agent only controls
+        accept/reject and the operator is chosen automatically.
+
+        Returns:
+            (move, new_cost, move_eval) or None if no valid move from any operator
+        """
+        best_overall = None
+        best_cost = float("inf")
+
+        for op in OPERATORS:
+            result = self._candidate_gen.generate_best_move(
+                solution=self.state.solution,
+                current_eval=self._current_eval,
+                operator=op,
+            )
+            if result is not None and result.new_cost < best_cost:
+                best_cost = result.new_cost
+                best_overall = result
+
+        if best_overall is None:
+            return None
+
+        return best_overall.move, best_overall.new_cost, best_overall
 
     def _make_acceptance_decision(
         self,
@@ -529,6 +666,15 @@ class NeuroLSEnv:
 
         return False
 
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Return cache statistics for the current episode."""
+        return {
+            "hits": self._cache_hits,
+            "queries": self._cache_queries,
+            "size": len(self._solution_cache),
+            "hit_rate": (self._cache_hits / max(1, self._cache_queries)),
+        }
+
     def get_state_features(self) -> Dict[str, np.ndarray]:
         """Get state features for neural network.
 
@@ -586,6 +732,70 @@ class NeuroLSEnv:
             "dynamic_edge_index": dynamic_edge_index,
             "prices": self._ct.astype(np.float32),
             "price_per_hour": self._price_per_hour,  # (hours_per_day, 5)
+            **self._get_tripartite_features(n, m, job_to_machine),
+        }
+
+    def _get_tripartite_features(
+        self, n_jobs: int, n_machines: int, job_to_machine: np.ndarray
+    ) -> Dict[str, np.ndarray]:
+        """Compute period features + tripartite edge index when graph_type == 'tripartite'.
+
+        Returns empty dict for bipartite mode (no extra keys).
+        """
+        if self.config.graph_type != "tripartite":
+            return {}
+
+        # Period features from run-length encoded price blocks
+        period_features = self.state.get_period_features(self._ct)
+        n_periods = period_features.shape[0]
+        blocks = self.state.get_period_blocks(self._ct)
+
+        # Node index layout: [Jobs 0..n-1] [Machines n..n+m-1] [Periods n+m..n+m+P-1]
+        n = n_jobs
+        m = n_machines
+        src, dst = [], []
+
+        # 1. Job <-> assigned Machine (bidirectional)
+        for j in range(n):
+            mi = int(job_to_machine[j])
+            src.append(j)
+            dst.append(n + mi)
+            src.append(n + mi)
+            dst.append(j)
+
+        # 2. Machine <-> all Periods (each machine can use any period)
+        for mi in range(m):
+            for pi in range(n_periods):
+                src.append(n + mi)
+                dst.append(n + m + pi)
+                src.append(n + m + pi)
+                dst.append(n + mi)
+
+        # 3. Job <-> Period where the job's processing time overlaps
+        #    Approximate: job is placed in the period(s) that its machine
+        #    occupies given position in sequence.  Use a simple heuristic:
+        #    connect each job to the period corresponding to the cumulative
+        #    load position on its machine.
+        machine_cum = np.zeros(m, dtype=np.float64)
+        for j in range(n):
+            mi = int(job_to_machine[j])
+            start_approx = machine_cum[mi]
+            end_approx = start_approx + self._processing_times[j]
+            machine_cum[mi] = end_approx
+
+            for pi, (b_start, b_dur, _) in enumerate(blocks):
+                b_end = b_start + b_dur
+                if start_approx < b_end and end_approx > b_start:
+                    src.append(j)
+                    dst.append(n + m + pi)
+                    src.append(n + m + pi)
+                    dst.append(j)
+
+        tripartite_edge_index = np.array([src, dst], dtype=np.int64)
+
+        return {
+            "period_features": period_features,
+            "tripartite_edge_index": tripartite_edge_index,
         }
 
     def get_torch_features(self, device: str = "cpu"):

@@ -409,27 +409,45 @@ if _TORCH_AVAILABLE:
             use_dueling: bool = False,
             dropout: float = 0.1,
             price_mode: str = "full",
+            graph_type: str = "bipartite",
+            d_period_in: int = 5,
         ):
             super().__init__()
 
-            from PaST.neurols.gnn_encoder import NeuroLSEncoder
             from PaST.neurols.price_embedding import PriceEmbedding
 
             self.d_emb = d_emb
             self.n_actions = n_actions
             self.price_mode = price_mode
+            self.graph_type = graph_type
 
-            # Encoder
-            self.encoder = NeuroLSEncoder(
-                d_job_in=d_job_in,
-                d_machine_in=d_machine_in,
-                d_state_in=d_state_in,
-                d_price_in=d_price_in if price_mode != "none" else 0,
-                d_emb=d_emb,
-                n_layers_static=n_layers_static,
-                n_layers_dynamic=n_layers_dynamic,
-                dropout=dropout,
-            )
+            # Encoder — bipartite or tripartite
+            if graph_type == "tripartite":
+                from PaST.neurols.gnn_encoder import TripartiteNeuroLSEncoder
+
+                self.encoder = TripartiteNeuroLSEncoder(
+                    d_job_in=d_job_in,
+                    d_machine_in=d_machine_in,
+                    d_period_in=d_period_in,
+                    d_state_in=d_state_in,
+                    d_price_in=d_price_in if price_mode != "none" else 0,
+                    d_emb=d_emb,
+                    n_layers=n_layers_static,
+                    dropout=dropout,
+                )
+            else:
+                from PaST.neurols.gnn_encoder import NeuroLSEncoder
+
+                self.encoder = NeuroLSEncoder(
+                    d_job_in=d_job_in,
+                    d_machine_in=d_machine_in,
+                    d_state_in=d_state_in,
+                    d_price_in=d_price_in if price_mode != "none" else 0,
+                    d_emb=d_emb,
+                    n_layers_static=n_layers_static,
+                    n_layers_dynamic=n_layers_dynamic,
+                    dropout=dropout,
+                )
 
             # Price embedding
             if price_mode != "none":
@@ -460,6 +478,8 @@ if _TORCH_AVAILABLE:
             price_features: Optional[torch.Tensor] = None,
             machine_exposure: Optional[torch.Tensor] = None,
             tau: Optional[torch.Tensor] = None,
+            period_features: Optional[torch.Tensor] = None,
+            tripartite_edge_index: Optional[torch.Tensor] = None,
         ) -> torch.Tensor:
             """Forward pass for Q-value computation.
 
@@ -480,18 +500,106 @@ if _TORCH_AVAILABLE:
             else:
                 price_emb = None
 
-            # Encode
-            omega_node, omega_group, omega_feat = self.encoder(
-                job_features=job_features,
-                machine_features=machine_features,
-                state_features=state_features,
-                job_to_machine=job_to_machine,
-                static_edge_index=static_edge_index,
-                dynamic_edge_index=dynamic_edge_index,
-                price_embedding=price_emb,
-            )
+            # Encode — route by graph type
+            if self.graph_type == "tripartite":
+                omega_node, omega_group, omega_feat = self.encoder(
+                    job_features=job_features,
+                    machine_features=machine_features,
+                    period_features=period_features,
+                    state_features=state_features,
+                    edge_index=tripartite_edge_index,
+                    job_to_machine=job_to_machine,
+                    price_embedding=price_emb,
+                )
+            else:
+                omega_node, omega_group, omega_feat = self.encoder(
+                    job_features=job_features,
+                    machine_features=machine_features,
+                    state_features=state_features,
+                    job_to_machine=job_to_machine,
+                    static_edge_index=static_edge_index,
+                    dynamic_edge_index=dynamic_edge_index,
+                    price_embedding=price_emb,
+                )
 
             # Decode
+            return self.decoder(omega_node, omega_group, omega_feat, tau)
+
+        def forward_batched(
+            self,
+            job_features: torch.Tensor,
+            machine_features: torch.Tensor,
+            state_features: torch.Tensor,
+            job_to_machine: torch.Tensor,
+            static_edge_index: torch.Tensor,
+            dynamic_edge_index: torch.Tensor,
+            price_features: Optional[torch.Tensor] = None,
+            tau: Optional[torch.Tensor] = None,
+            period_features: Optional[torch.Tensor] = None,
+            tripartite_edge_index: Optional[torch.Tensor] = None,
+        ) -> torch.Tensor:
+            """Batched forward — all B graphs in one pass.
+
+            Args:
+                job_features: (B, n_jobs, d_job)
+                machine_features: (B, n_machines, d_machine)
+                state_features: (B, d_state)
+                job_to_machine: (B, n_jobs)
+                static_edge_index: (B, 2, E_static)
+                dynamic_edge_index: (B, 2, E_dynamic)
+                price_features: (B, H, 5) or None
+                tau: (B, N) for IQN or None
+                period_features: (B, n_periods, d_period) or None
+                tripartite_edge_index: (B, 2, E_tri) or None
+
+            Returns:
+                (B, A) or (B, N, A) Q-values
+            """
+            # Price embedding (CNN already handles batched input)
+            if self.price_embed is not None and price_features is not None:
+                price_emb = self.price_embed(price_features, None)
+            else:
+                price_emb = None
+
+            # Encode via batched path
+            if self.graph_type == "tripartite":
+                # Tripartite encoder doesn't yet have forward_batched,
+                # fall back to looping over batch
+                B = job_features.size(0)
+                omegas = []
+                for i in range(B):
+                    pe = price_emb[i] if price_emb is not None else None
+                    pf = period_features[i] if period_features is not None else None
+                    te = (
+                        tripartite_edge_index[i]
+                        if tripartite_edge_index is not None
+                        else None
+                    )
+                    on, og, of_ = self.encoder(
+                        job_features=job_features[i],
+                        machine_features=machine_features[i],
+                        period_features=pf,
+                        state_features=state_features[i],
+                        edge_index=te,
+                        job_to_machine=job_to_machine[i],
+                        price_embedding=pe,
+                    )
+                    omegas.append((on, og, of_))
+                omega_node = torch.stack([o[0] for o in omegas])
+                omega_group = torch.stack([o[1] for o in omegas])
+                omega_feat = torch.stack([o[2] for o in omegas])
+            else:
+                omega_node, omega_group, omega_feat = self.encoder.forward_batched(
+                    job_features=job_features,
+                    machine_features=machine_features,
+                    state_features=state_features,
+                    job_to_machine=job_to_machine,
+                    static_edge_index=static_edge_index,
+                    dynamic_edge_index=dynamic_edge_index,
+                    price_embedding=price_emb,
+                )
+
+            # Decode (already batched-aware)
             return self.decoder(omega_node, omega_group, omega_feat, tau)
 
         def get_action(
@@ -506,6 +614,8 @@ if _TORCH_AVAILABLE:
             machine_exposure: Optional[torch.Tensor] = None,
             greedy: bool = True,
             epsilon: float = 0.0,
+            period_features: Optional[torch.Tensor] = None,
+            tripartite_edge_index: Optional[torch.Tensor] = None,
         ) -> int:
             """Get action using epsilon-greedy policy.
 
@@ -532,6 +642,8 @@ if _TORCH_AVAILABLE:
                     dynamic_edge_index,
                     price_features,
                     machine_exposure,
+                    period_features=period_features,
+                    tripartite_edge_index=tripartite_edge_index,
                 )
 
                 if greedy:

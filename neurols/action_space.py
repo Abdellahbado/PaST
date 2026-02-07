@@ -23,7 +23,12 @@ from enum import IntEnum
 from typing import List, Tuple, NamedTuple, Optional
 
 from PaST.neurols.operators import OperatorID, OPERATORS
-from PaST.neurols.perturbations import PerturbationID, PERTURBATIONS
+from PaST.neurols.perturbations import (
+    PerturbationID,
+    PERTURBATIONS,
+    DestroyID,
+    DESTROY_OPERATORS,
+)
 
 
 class ActionType(IntEnum):
@@ -31,15 +36,17 @@ class ActionType(IntEnum):
 
     OPERATOR = 0  # Apply an operator move
     PERTURBATION = 1  # Apply a perturbation
+    DESTROY = 2  # Apply a destroy-repair operator (Tripartite-B)
 
 
 class DecodedAction(NamedTuple):
     """Decoded action components."""
 
     accept: bool  # Accept/reject the resulting move
-    action_type: ActionType  # Operator or perturbation
+    action_type: ActionType  # Operator, perturbation, or destroy
     operator_id: Optional[OperatorID]  # If operator
     perturbation_id: Optional[PerturbationID]  # If perturbation
+    destroy_id: Optional[DestroyID] = None  # If destroy (Tripartite-B)
 
 
 @dataclass
@@ -57,14 +64,19 @@ class ActionSpace:
     n_actions: int
     operators: List[OperatorID]
     perturbations: List[PerturbationID]
+    destroys: List[DestroyID] = None  # Tripartite-B destroy operators
 
     # Derived
     n_operators: int = 0
     n_perturbations: int = 0
+    n_destroys: int = 0
 
     def __post_init__(self):
+        if self.destroys is None:
+            self.destroys = []
         self.n_operators = len(self.operators)
         self.n_perturbations = len(self.perturbations)
+        self.n_destroys = len(self.destroys)
 
         # Verify action count
         if self.name == "AA":
@@ -73,6 +85,8 @@ class ActionSpace:
             expected = 2 * self.n_operators
         elif self.name == "AANP":
             expected = 2 * (self.n_operators + self.n_perturbations)
+        elif self.name == "AANPD":
+            expected = 2 * (self.n_operators + self.n_perturbations + self.n_destroys)
         else:
             expected = self.n_actions
 
@@ -84,12 +98,14 @@ class ActionSpace:
         accept: bool,
         operator_id: Optional[OperatorID] = None,
         perturbation_id: Optional[PerturbationID] = None,
+        destroy_id: Optional[DestroyID] = None,
     ) -> int:
         """Encode action components to discrete action index.
 
         For AA: just accept (1) or reject (0)
         For AAN: accept + operator
         For AANP: accept + operator/perturbation
+        For AANPD: accept + operator/perturbation/destroy
         """
         accept_bit = 1 if accept else 0
 
@@ -102,7 +118,7 @@ class ActionSpace:
             op_idx = self.operators.index(operator_id)
             return accept_bit + 2 * op_idx
 
-        elif self.name == "AANP":
+        elif self.name in ("AANP", "AANPD"):
             if operator_id is not None:
                 op_idx = self.operators.index(operator_id)
                 return accept_bit + 2 * op_idx
@@ -110,8 +126,16 @@ class ActionSpace:
                 # Perturbations come after operators
                 pert_idx = self.perturbations.index(perturbation_id)
                 return accept_bit + 2 * (self.n_operators + pert_idx)
+            elif destroy_id is not None and self.name == "AANPD":
+                # Destroys come after perturbations
+                dest_idx = self.destroys.index(destroy_id)
+                return accept_bit + 2 * (
+                    self.n_operators + self.n_perturbations + dest_idx
+                )
             else:
-                raise ValueError("AANP requires operator_id or perturbation_id")
+                raise ValueError(
+                    f"{self.name} requires operator_id, perturbation_id, or destroy_id"
+                )
 
         else:
             raise ValueError(f"Unknown action space: {self.name}")
@@ -139,7 +163,7 @@ class ActionSpace:
                 perturbation_id=None,
             )
 
-        elif self.name == "AANP":
+        elif self.name in ("AANP", "AANPD"):
             accept = bool(action % 2)
             item_idx = action // 2
 
@@ -149,14 +173,25 @@ class ActionSpace:
                     action_type=ActionType.OPERATOR,
                     operator_id=self.operators[item_idx],
                     perturbation_id=None,
+                    destroy_id=None,
                 )
-            else:
+            elif item_idx < self.n_operators + self.n_perturbations:
                 pert_idx = item_idx - self.n_operators
                 return DecodedAction(
                     accept=accept,
                     action_type=ActionType.PERTURBATION,
                     operator_id=None,
                     perturbation_id=self.perturbations[pert_idx],
+                    destroy_id=None,
+                )
+            else:
+                dest_idx = item_idx - self.n_operators - self.n_perturbations
+                return DecodedAction(
+                    accept=accept,
+                    action_type=ActionType.DESTROY,
+                    operator_id=None,
+                    perturbation_id=None,
+                    destroy_id=self.destroys[dest_idx],
                 )
 
         else:
@@ -175,6 +210,11 @@ class ActionSpace:
                 return f"{accept_str}+{op.name}"
             else:
                 return accept_str
+        elif decoded.action_type == ActionType.DESTROY:
+            from PaST.neurols.perturbations import DESTROY_BY_ID
+
+            destroy = DESTROY_BY_ID[decoded.destroy_id]
+            return f"{accept_str}+{destroy.name}"
         else:
             from PaST.neurols.perturbations import PERTURBATION_BY_ID
 
@@ -248,6 +288,31 @@ AANP_SPACE = ActionSpace(
     ],
 )
 
+# AANPD: Acceptance + Operator/Perturbation/Destroy (24 actions = 2 × 12)
+# Tripartite-B variant: learns which destroy-repair operator to invoke
+AANPD_SPACE = ActionSpace(
+    name="AANPD",
+    n_actions=24,
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.INTRA_INSERT,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[
+        PerturbationID.NONE,
+        PerturbationID.SHAKE_SMALL,
+        PerturbationID.RESTART,
+    ],
+    destroys=[
+        DestroyID.RANDOM_3,
+        DestroyID.RANDOM_5,
+        DestroyID.WORST_MACHINE,
+        DestroyID.EXPENSIVE_3,
+        DestroyID.BLOCK_2,
+    ],
+)
+
 
 def get_action_space(name: str) -> ActionSpace:
     """Get action space by name."""
@@ -258,5 +323,7 @@ def get_action_space(name: str) -> ActionSpace:
         return AAN_SPACE
     elif name == "AANP":
         return AANP_SPACE
+    elif name == "AANPD":
+        return AANPD_SPACE
     else:
         raise ValueError(f"Unknown action space: {name}")

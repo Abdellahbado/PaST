@@ -83,8 +83,9 @@ class TrainConfig:
     # Environment
     max_steps: int = 500
     stagnation_limit: int = 100
-    action_space: str = "AANP"  # AA, AAN, AANP
+    action_space: str = "AANP"  # AA, AAN, AANP, AANPD
     reward_mode: str = "improvement"
+    graph_type: str = "bipartite"  # bipartite or tripartite
 
     # Model — aligned with NeuroLS paper Appendix B
     d_emb: int = 128
@@ -127,6 +128,9 @@ class TrainConfig:
     eval_interval: int = 100
     save_interval: int = 500
     n_eval_episodes: int = 10
+
+    # Parallelism
+    n_parallel_envs: int = 0  # 0 = auto (cpu_count // 4, capped 16); 1 = serial
 
 
 class ReplayBuffer:
@@ -206,26 +210,80 @@ class ReplayBuffer:
             "dones": np.array(dones, dtype=np.float32),
         }
 
+    def push_episode(self, transitions):
+        """Push a complete episode's transitions (handles n-step internally).
+
+        This is used by the parallel collector where transitions arrive
+        as a batch after the episode finishes.  A *separate* n-step buffer
+        is used so the main self.n_step_buffer is not corrupted.
+        """
+        temp = deque(maxlen=self.n_step)
+
+        for state, action, reward, next_state, done in transitions:
+            temp.append((state, action, reward, next_state, done))
+
+            if len(temp) < self.n_step:
+                continue
+
+            s0, a0, _, _, _ = temp[0]
+            n_reward = sum(self.gamma**i * r for i, (_, _, r, _, _) in enumerate(temp))
+            _, _, _, ns, d = temp[-1]
+            self.buffer.append((s0, a0, n_reward, ns, d))
+
+        # Flush remaining (episode is done)
+        while len(temp) > 1:
+            temp.popleft()
+            if temp:
+                s0, a0, _, _, _ = temp[0]
+                n_reward = sum(
+                    self.gamma**i * r for i, (_, _, r, _, _) in enumerate(temp)
+                )
+                _, _, _, ns, d = temp[-1]
+                self.buffer.append((s0, a0, n_reward, ns, d))
+        temp.clear()
+
 
 def collate_states(states: List[Dict], device: str) -> Dict[str, torch.Tensor]:
-    """Collate list of state dicts into batched tensors."""
+    """Collate list of state dicts into batched tensors.
+
+    Handles variable-length fields (e.g. period_features, tripartite_edge_index)
+    by zero-padding to the maximum size in the batch.
+    """
     keys = states[0].keys()
+
+    # Keys that may have variable lengths across batch items
+    _VAR_LEN_KEYS = {"period_features", "tripartite_edge_index"}
+    _LONG_KEYS = {
+        "job_to_machine",
+        "assignment_edges",
+        "static_edge_index",
+        "dynamic_edge_index",
+        "tripartite_edge_index",
+    }
 
     batched = {}
     for key in keys:
         arrays = [s[key] for s in states]
 
-        # Stack arrays
-        stacked = np.stack(arrays, axis=0)
+        # Check if shapes vary (for variable-length keys)
+        shapes = [a.shape for a in arrays]
+        if key in _VAR_LEN_KEYS and len(set(shapes)) > 1:
+            # Pad to max shape along each axis
+            max_shape = tuple(max(s[i] for s in shapes) for i in range(len(shapes[0])))
+            padded = []
+            for a in arrays:
+                pad_widths = [
+                    (0, max_shape[i] - a.shape[i]) for i in range(len(max_shape))
+                ]
+                padded.append(np.pad(a, pad_widths, mode="constant", constant_values=0))
+            stacked = np.stack(padded, axis=0)
+        else:
+            stacked = np.stack(arrays, axis=0)
+
         batched[key] = torch.tensor(stacked, device=device)
 
         # Set appropriate dtype
-        if key in [
-            "job_to_machine",
-            "assignment_edges",
-            "static_edge_index",
-            "dynamic_edge_index",
-        ]:
+        if key in _LONG_KEYS:
             batched[key] = batched[key].long()
         else:
             batched[key] = batched[key].float()
@@ -279,6 +337,20 @@ class NeuroLSTrainer:
         self.episode_rewards = deque(maxlen=100)
         self.episode_lengths = deque(maxlen=100)
         self.episode_improvements = deque(maxlen=100)
+        self.episode_losses = deque(maxlen=100)
+        self.episode_accept_rates = deque(maxlen=100)
+        self.episode_improve_rates = deque(maxlen=100)
+        self.episode_times = deque(maxlen=100)
+        self.episode_grad_norms = deque(maxlen=100)
+        self.episode_q_values = deque(maxlen=100)  # avg Q for monitoring
+
+        # Best-ever tracking
+        self.best_ever_cost = float("inf")
+        self.best_ever_improvement = 0.0
+        self.best_ever_episode = -1
+
+        # Timing
+        self.train_start_time = None
 
         # Logging
         self.writer = SummaryWriter(log_dir=str(self.log_dir))
@@ -286,15 +358,13 @@ class NeuroLSTrainer:
     def _init_model(self):
         """Initialize policy and target networks."""
         from PaST.neurols.decoder import NeuroLSPolicy
-        from PaST.neurols.action_space import AA_SPACE, AAN_SPACE, AANP_SPACE
+        from PaST.neurols.action_space import get_action_space
 
         # Get action space size
-        space_map = {"AA": AA_SPACE, "AAN": AAN_SPACE, "AANP": AANP_SPACE}
-        action_space = space_map.get(self.config.action_space, AANP_SPACE)
+        action_space = get_action_space(self.config.action_space)
         n_actions = action_space.n_actions
 
-        # Create policy network
-        self.policy_net = NeuroLSPolicy(
+        model_kwargs = dict(
             d_emb=self.config.d_emb,
             n_actions=n_actions,
             n_layers_static=self.config.n_layers_static,
@@ -303,19 +373,14 @@ class NeuroLSTrainer:
             use_dueling=self.config.use_dueling,
             price_mode=self.config.price_mode,
             dropout=self.config.dropout,
-        ).to(self.device)
+            graph_type=self.config.graph_type,
+        )
+
+        # Create policy network
+        self.policy_net = NeuroLSPolicy(**model_kwargs).to(self.device)
 
         # Create target network
-        self.target_net = NeuroLSPolicy(
-            d_emb=self.config.d_emb,
-            n_actions=n_actions,
-            n_layers_static=self.config.n_layers_static,
-            n_layers_dynamic=self.config.n_layers_dynamic,
-            use_iqn=self.config.use_iqn,
-            use_dueling=self.config.use_dueling,
-            price_mode=self.config.price_mode,
-            dropout=self.config.dropout,
-        ).to(self.device)
+        self.target_net = NeuroLSPolicy(**model_kwargs).to(self.device)
 
         # Copy weights to target
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -369,6 +434,16 @@ class NeuroLSTrainer:
                 static_edge_index=state_tensors["static_edge_index"].long(),
                 dynamic_edge_index=state_tensors["dynamic_edge_index"].long(),
                 price_features=state_tensors.get("price_per_hour", None),
+                period_features=(
+                    state_tensors["period_features"].float()
+                    if "period_features" in state_tensors
+                    else None
+                ),
+                tripartite_edge_index=(
+                    state_tensors["tripartite_edge_index"].long()
+                    if "tripartite_edge_index" in state_tensors
+                    else None
+                ),
             )
 
             return q_values.argmax().item()
@@ -507,28 +582,23 @@ class NeuroLSTrainer:
         net: nn.Module,
         states: Dict[str, torch.Tensor],
     ) -> torch.Tensor:
-        """Forward pass for batch of states.
-
-        The GNN encoder operates on single graphs, so we loop over the
-        batch and stack the resulting Q-value vectors.
-        """
-        batch_size = states["job_features"].size(0)
-        q_list = []
+        """Batched forward — single super-graph scatter, no loop."""
         has_price = "price_per_hour" in states
-        for i in range(batch_size):
-            q = net(
-                job_features=states["job_features"][i].float(),
-                machine_features=states["machine_features"][i].float(),
-                state_features=states["state_features"][i].float(),
-                job_to_machine=states["job_to_machine"][i].long(),
-                static_edge_index=states["static_edge_index"][i].long(),
-                dynamic_edge_index=states["dynamic_edge_index"][i].long(),
-                price_features=(
-                    states["price_per_hour"][i].float() if has_price else None
-                ),
-            )
-            q_list.append(q)  # (A,)
-        return torch.stack(q_list, dim=0)  # (B, A)
+        has_period = "period_features" in states
+        has_tri = "tripartite_edge_index" in states
+        return net.forward_batched(
+            job_features=states["job_features"].float(),
+            machine_features=states["machine_features"].float(),
+            state_features=states["state_features"].float(),
+            job_to_machine=states["job_to_machine"].long(),
+            static_edge_index=states["static_edge_index"].long(),
+            dynamic_edge_index=states["dynamic_edge_index"].long(),
+            price_features=(states["price_per_hour"].float() if has_price else None),
+            period_features=(states["period_features"].float() if has_period else None),
+            tripartite_edge_index=(
+                states["tripartite_edge_index"].long() if has_tri else None
+            ),
+        )  # (B, A)
 
     def _forward_batch_iqn(
         self,
@@ -536,30 +606,33 @@ class NeuroLSTrainer:
         states: Dict[str, torch.Tensor],
         tau: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass with quantile samples (loops over batch)."""
-        batch_size = states["job_features"].size(0)
-        q_list = []
+        """Batched IQN forward — single super-graph scatter, no loop."""
         has_price = "price_per_hour" in states
-        for i in range(batch_size):
-            q = net(
-                job_features=states["job_features"][i].float(),
-                machine_features=states["machine_features"][i].float(),
-                state_features=states["state_features"][i].float(),
-                job_to_machine=states["job_to_machine"][i].long(),
-                static_edge_index=states["static_edge_index"][i].long(),
-                dynamic_edge_index=states["dynamic_edge_index"][i].long(),
-                price_features=(
-                    states["price_per_hour"][i].float() if has_price else None
-                ),
-                tau=tau[i : i + 1],  # keep (1, N) shape
-            )
-            q_list.append(q)  # (N, A) after squeeze
-        return torch.stack(q_list, dim=0)  # (B, N, A)
+        has_period = "period_features" in states
+        has_tri = "tripartite_edge_index" in states
+        return net.forward_batched(
+            job_features=states["job_features"].float(),
+            machine_features=states["machine_features"].float(),
+            state_features=states["state_features"].float(),
+            job_to_machine=states["job_to_machine"].long(),
+            static_edge_index=states["static_edge_index"].long(),
+            dynamic_edge_index=states["dynamic_edge_index"].long(),
+            price_features=(states["price_per_hour"].float() if has_price else None),
+            tau=tau,
+            period_features=(states["period_features"].float() if has_period else None),
+            tripartite_edge_index=(
+                states["tripartite_edge_index"].long() if has_tri else None
+            ),
+        )  # (B, N, A)
 
-    def train_step(self) -> float:
-        """Perform one training step."""
+    def train_step(self) -> Tuple[float, float]:
+        """Perform one training step.
+
+        Returns:
+            (loss, grad_norm) — both 0.0 if buffer not ready.
+        """
         if len(self.buffer) < self.config.min_buffer_size:
-            return 0.0
+            return 0.0, 0.0
 
         # Sample batch
         batch = self.buffer.sample(self.config.batch_size)
@@ -571,8 +644,10 @@ class NeuroLSTrainer:
         self.optimizer.zero_grad()
         loss.backward()
 
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+        # Gradient clipping (returns the total norm before clipping)
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+            self.policy_net.parameters(), 1.0
+        ).item()
 
         self.optimizer.step()
 
@@ -584,24 +659,41 @@ class NeuroLSTrainer:
 
         self.global_step += 1
 
-        return loss.item()
+        return loss.item(), grad_norm
 
     def run_episode(self, env, instance, K: int) -> Dict[str, float]:
         """Run one episode and collect experience."""
+        ep_start = time.time()
         state = env.reset(instance, K)
         state_features = env.get_state_features()
 
         episode_reward = 0.0
         episode_length = 0
         initial_cost = state.current_cost
+        n_accepted = 0
+        n_improved = 0
+        n_operator_steps = 0
+        losses = []
+        grad_norms = []
+        q_values_seen = []
+        action_counts: Dict[int, int] = {}
 
         while True:
             # Select action
             action = self._get_action(state_features)
+            action_counts[action] = action_counts.get(action, 0) + 1
 
             # Step environment
             next_state, reward, done, info = env.step(action)
             next_state_features = env.get_state_features()
+
+            # Track acceptance / improvement
+            if info.get("accepted", False):
+                n_accepted += 1
+            if info.get("improved", False):
+                n_improved += 1
+            if info.get("move_result") is not None or info.get("perturbed", False):
+                n_operator_steps += 1
 
             # Store transition
             self.buffer.push(
@@ -613,7 +705,10 @@ class NeuroLSTrainer:
             )
 
             # Train
-            loss = self.train_step()
+            loss, grad_norm = self.train_step()
+            if loss > 0:
+                losses.append(loss)
+                grad_norms.append(grad_norm)
 
             # Update state
             state = next_state
@@ -624,8 +719,16 @@ class NeuroLSTrainer:
             if done:
                 break
 
+        ep_time = time.time() - ep_start
         # Compute improvement
         improvement = (initial_cost - state.best_cost) / initial_cost * 100
+        accept_rate = n_accepted / max(1, n_operator_steps)
+        improve_rate = n_improved / max(1, n_operator_steps)
+        avg_loss = float(np.mean(losses)) if losses else 0.0
+        avg_grad_norm = float(np.mean(grad_norms)) if grad_norms else 0.0
+
+        # Cache stats from env
+        cache_stats = getattr(env, "get_cache_stats", lambda: {})()
 
         return {
             "reward": episode_reward,
@@ -633,7 +736,16 @@ class NeuroLSTrainer:
             "improvement": improvement,
             "initial_cost": initial_cost,
             "best_cost": state.best_cost,
-            "loss": loss,
+            "loss": avg_loss,
+            "accept_rate": accept_rate,
+            "improve_rate": improve_rate,
+            "ep_time": ep_time,
+            "n_grad_steps": len(losses),
+            "action_counts": action_counts,
+            "cache_hits": cache_stats.get("hits", 0),
+            "cache_size": cache_stats.get("size", 0),
+            "cache_hit_rate": cache_stats.get("hit_rate", 0.0),
+            "avg_grad_norm": avg_grad_norm,
         }
 
     def train(self):
@@ -652,6 +764,7 @@ class NeuroLSTrainer:
             stagnation_limit=self.config.stagnation_limit,
             action_space=self.config.action_space,
             reward_mode=self.config.reward_mode,
+            graph_type=self.config.graph_type,
         )
         env = NeuroLSEnv(env_config)
         env.seed(self.config.seed)
@@ -683,117 +796,390 @@ class NeuroLSTrainer:
             )
             train_instances.append((instance, fixed_K))
 
-        # Training loop
-        for episode in range(self.config.n_episodes):
-            # Select random instance
-            instance, K = random.choice(train_instances)
+        # ── Resolve parallelism level ─────────────────────────
+        n_parallel = self.config.n_parallel_envs
+        if n_parallel <= 0:
+            import multiprocessing as _mp
 
-            # Run episode
+            n_parallel = max(1, min(16, _mp.cpu_count() // 4))
+        use_parallel = n_parallel > 1
+
+        # Training loop
+        self.train_start_time = time.time()
+        print(
+            f"\n{'='*70}\n"
+            f"  Instances: {len(train_instances)}  |  n={fixed_n}  m={fixed_m}  K={fixed_K}\n"
+            f"  Action space: {self.config.action_space} ({self.policy_net.n_actions} actions)\n"
+            f"  Price mode: {self.config.price_mode}\n"
+            f"  Buffer: {self.config.min_buffer_size}/{self.config.buffer_size}  "
+            f"(training starts after {self.config.min_buffer_size} transitions)\n"
+            f"  Parallel workers: {n_parallel}\n"
+            f"{'='*70}"
+        )
+
+        if use_parallel:
+            self._train_parallel(env, env_config, train_instances, n_parallel)
+        else:
+            self._train_serial(env, train_instances)
+
+        # ── Finish ────────────────────────────────────────────
+        total_time = time.time() - self.train_start_time
+        self.save_checkpoint("final.pt")
+        self.writer.close()
+
+        print(
+            f"\n{'='*70}\n"
+            f"  Training complete!\n"
+            f"  Total time: {total_time/3600:.1f}h\n"
+            f"  Best cost ever: {self.best_ever_cost:.2f} "
+            f"({self.best_ever_improvement:.2f}% improvement, ep {self.best_ever_episode})\n"
+            f"  Final epsilon: {self.epsilon:.4f}\n"
+            f"  Global steps: {self.global_step}\n"
+            f"{'='*70}"
+        )
+
+    # ── Serial training (original loop) ──────────────────────────────────
+
+    def _train_serial(self, env, train_instances):
+        """Original serial training loop (1 episode at a time)."""
+        for episode in range(self.config.n_episodes):
+            instance, K = random.choice(train_instances)
             metrics = self.run_episode(env, instance, K)
 
-            # Update exploration
             self.epsilon = max(
                 self.config.epsilon_end, self.epsilon * self.config.epsilon_decay
             )
 
-            # Track metrics
-            self.episode_rewards.append(metrics["reward"])
-            self.episode_lengths.append(metrics["length"])
-            self.episode_improvements.append(metrics["improvement"])
-
-            # Logging
-            if episode % self.config.log_interval == 0:
-                avg_reward = np.mean(self.episode_rewards)
-                avg_length = np.mean(self.episode_lengths)
-                avg_improvement = np.mean(self.episode_improvements)
-
-                self.writer.add_scalar("train/reward", avg_reward, episode)
-                self.writer.add_scalar("train/length", avg_length, episode)
-                self.writer.add_scalar("train/improvement", avg_improvement, episode)
-                self.writer.add_scalar("train/epsilon", self.epsilon, episode)
-                self.writer.add_scalar("train/loss", metrics["loss"], episode)
-                self.writer.add_scalar("train/buffer_size", len(self.buffer), episode)
-
-                print(
-                    f"Episode {episode:5d} | "
-                    f"Reward: {avg_reward:8.2f} | "
-                    f"Length: {avg_length:6.1f} | "
-                    f"Improve: {avg_improvement:5.2f}% | "
-                    f"Eps: {self.epsilon:.3f} | "
-                    f"Loss: {metrics['loss']:.4f}"
-                )
-
-            # Evaluation
-            if episode % self.config.eval_interval == 0:
-                eval_metrics = self.evaluate(env, train_instances)
-
-                self.writer.add_scalar("eval/reward", eval_metrics["reward"], episode)
-                self.writer.add_scalar(
-                    "eval/improvement", eval_metrics["improvement"], episode
-                )
-
-                print(
-                    f"  [EVAL] Reward: {eval_metrics['reward']:.2f} | "
-                    f"Improve: {eval_metrics['improvement']:.2f}%"
-                )
-
-            # Save checkpoint
-            if episode % self.config.save_interval == 0:
-                self.save_checkpoint(f"checkpoint_{episode}.pt")
-
-            # Update learning rate
-            self.scheduler.step()
-
+            self._track_and_log(episode, metrics, train_instances, env)
             self.episode = episode
 
-        # Final save
-        self.save_checkpoint("final.pt")
-        self.writer.close()
+    # ── Parallel training ────────────────────────────────────────────────
 
-        print("Training complete!")
+    def _train_parallel(self, env, env_config, train_instances, n_parallel):
+        """Parallel training: N workers collect episodes on CPU, GPU trains."""
+        from PaST.neurols.parallel_collector import ParallelCollector
+
+        collector = ParallelCollector(n_workers=n_parallel)
+        collector.start()
+
+        env_config_dict = {
+            "max_steps": env_config.max_steps,
+            "stagnation_limit": env_config.stagnation_limit,
+            "action_space": self.config.action_space,
+            "reward_mode": env_config.reward_mode,
+            "graph_type": self.config.graph_type,
+        }
+        model_config = {
+            "d_emb": self.config.d_emb,
+            "n_layers_static": self.config.n_layers_static,
+            "n_layers_dynamic": self.config.n_layers_dynamic,
+            "use_iqn": self.config.use_iqn,
+            "use_dueling": self.config.use_dueling,
+            "price_mode": self.config.price_mode,
+            "dropout": self.config.dropout,
+            "action_space": self.config.action_space,
+            "graph_type": self.config.graph_type,
+        }
+
+        episodes_done = 0
+        round_idx = 0
+
+        try:
+            while episodes_done < self.config.n_episodes:
+                round_start = time.time()
+                n_collect = min(n_parallel, self.config.n_episodes - episodes_done)
+
+                # Select instances for this round
+                round_instances = [
+                    random.choice(train_instances) for _ in range(n_collect)
+                ]
+
+                # ── Phase 1: collect in parallel ──
+                results = collector.collect_episodes(
+                    instances_and_Ks=round_instances,
+                    model_state_dict=self.policy_net.state_dict(),
+                    env_config_dict=env_config_dict,
+                    model_config=model_config,
+                    epsilon=self.epsilon,
+                    base_seed=self.config.seed + episodes_done,
+                )
+
+                # ── Phase 2: feed transitions into replay buffer ──
+                total_transitions = 0
+                for result in results:
+                    self.buffer.push_episode(result.transitions)
+                    total_transitions += len(result.transitions)
+
+                # ── Phase 3: GPU training steps ──
+                round_losses = []
+                round_grad_norms = []
+                if len(self.buffer) >= self.config.min_buffer_size:
+                    n_train = max(1, total_transitions // self.config.batch_size)
+                    for _ in range(n_train):
+                        loss, gn = self.train_step()
+                        if loss > 0:
+                            round_losses.append(loss)
+                            round_grad_norms.append(gn)
+
+                round_time = time.time() - round_start
+
+                # ── Phase 4: update metrics for each collected episode ──
+                for i, result in enumerate(results):
+                    episode = episodes_done + i
+                    m = result.metrics
+
+                    # Epsilon decay per episode
+                    self.epsilon = max(
+                        self.config.epsilon_end,
+                        self.epsilon * self.config.epsilon_decay,
+                    )
+
+                    # Inject training loss/grad info into metrics
+                    m["loss"] = float(np.mean(round_losses)) if round_losses else 0.0
+                    m["avg_grad_norm"] = (
+                        float(np.mean(round_grad_norms)) if round_grad_norms else 0.0
+                    )
+                    m["n_grad_steps"] = len(round_losses)
+                    # Time per episode = round_time / n_collect (amortised)
+                    m["ep_time"] = round_time / max(1, n_collect)
+
+                    self._track_and_log(episode, m, train_instances, env)
+                    self.episode = episode
+
+                episodes_done += n_collect
+                round_idx += 1
+
+        finally:
+            collector.stop()
+
+    # ── Common helpers for both modes ─────────────────────────────────────
+
+    def _track_and_log(self, episode, metrics, train_instances, env):
+        """Track metrics, log, evaluate, and save checkpoints."""
+        self.episode_rewards.append(metrics["reward"])
+        self.episode_lengths.append(metrics["length"])
+        self.episode_improvements.append(metrics["improvement"])
+        self.episode_losses.append(metrics.get("loss", 0.0))
+        self.episode_accept_rates.append(metrics["accept_rate"])
+        self.episode_improve_rates.append(metrics.get("improve_rate", 0.0))
+        self.episode_times.append(metrics["ep_time"])
+        self.episode_grad_norms.append(metrics.get("avg_grad_norm", 0.0))
+
+        # Best-ever tracking
+        if metrics["best_cost"] < self.best_ever_cost:
+            self.best_ever_cost = metrics["best_cost"]
+            self.best_ever_improvement = metrics["improvement"]
+            self.best_ever_episode = episode
+
+        # ── Logging ──────────────────────────────────────────
+        if episode % self.config.log_interval == 0:
+            elapsed = time.time() - self.train_start_time
+            avg_reward = float(np.mean(self.episode_rewards))
+            avg_length = float(np.mean(self.episode_lengths))
+            avg_improvement = float(np.mean(self.episode_improvements))
+            avg_loss = float(np.mean(self.episode_losses))
+            avg_accept = float(np.mean(self.episode_accept_rates))
+            avg_improve = float(np.mean(self.episode_improve_rates))
+            avg_ep_time = float(np.mean(self.episode_times))
+            avg_grad_norm = float(np.mean(self.episode_grad_norms))
+            lr_now = self.optimizer.param_groups[0]["lr"]
+
+            # ETA
+            eps_done = episode + 1
+            eps_left = self.config.n_episodes - eps_done
+            eta_s = avg_ep_time * eps_left if avg_ep_time > 0 else 0
+            eta_str = (
+                f"{int(eta_s//3600)}h{int((eta_s%3600)//60):02d}m"
+                if eta_s > 3600
+                else f"{int(eta_s//60)}m{int(eta_s%60):02d}s"
+            )
+
+            # TensorBoard
+            self.writer.add_scalar("train/reward", avg_reward, episode)
+            self.writer.add_scalar("train/length", avg_length, episode)
+            self.writer.add_scalar("train/improvement", avg_improvement, episode)
+            self.writer.add_scalar("train/epsilon", self.epsilon, episode)
+            self.writer.add_scalar("train/loss", avg_loss, episode)
+            self.writer.add_scalar("train/lr", lr_now, episode)
+            self.writer.add_scalar("train/buffer_size", len(self.buffer), episode)
+            self.writer.add_scalar("train/accept_rate", avg_accept, episode)
+            self.writer.add_scalar("train/improve_rate", avg_improve, episode)
+            self.writer.add_scalar("train/ep_time", avg_ep_time, episode)
+            self.writer.add_scalar("train/grad_norm", avg_grad_norm, episode)
+            self.writer.add_scalar(
+                "train/grad_steps", metrics.get("n_grad_steps", 0), episode
+            )
+            self.writer.add_scalar("train/best_ever_cost", self.best_ever_cost, episode)
+            if metrics.get("cache_size", 0) > 0:
+                self.writer.add_scalar(
+                    "train/cache_hit_rate", metrics["cache_hit_rate"], episode
+                )
+                self.writer.add_scalar(
+                    "train/cache_size", metrics["cache_size"], episode
+                )
+
+            # GPU memory
+            gpu_str = ""
+            if self.device != "cpu" and torch.cuda.is_available():
+                mem_mb = torch.cuda.max_memory_allocated() / 1e6
+                gpu_str = f" | GPU: {mem_mb:.0f}MB"
+                self.writer.add_scalar("train/gpu_mem_mb", mem_mb, episode)
+
+            # Buffer progress
+            buf_pct = min(
+                100, len(self.buffer) * 100 // max(1, self.config.min_buffer_size)
+            )
+            buf_str = (
+                f"Buf: {len(self.buffer)}/{self.config.min_buffer_size} ({buf_pct}%)"
+                if len(self.buffer) < self.config.min_buffer_size
+                else f"Buf: {len(self.buffer)}"
+            )
+
+            print(
+                f"Ep {episode:5d}/{self.config.n_episodes} | "
+                f"R: {avg_reward:8.1f} | "
+                f"Imp: {avg_improvement:5.2f}% | "
+                f"Acc: {avg_accept:.0%} | "
+                f"L: {avg_loss:.4f} | "
+                f"GN: {avg_grad_norm:.3f} | "
+                f"Eps: {self.epsilon:.3f} | "
+                f"{buf_str} | "
+                f"Best*: {self.best_ever_cost:.1f} ({self.best_ever_improvement:.2f}%) | "
+                f"LR: {lr_now:.1e} | "
+                f"{avg_ep_time:.1f}s/ep | "
+                f"ETA: {eta_str}"
+                f"{gpu_str}"
+            )
+
+        # ── Evaluation ───────────────────────────────────────
+        if episode % self.config.eval_interval == 0:
+            eval_start = time.time()
+            eval_metrics = self.evaluate(env, train_instances)
+            eval_time = time.time() - eval_start
+
+            self.writer.add_scalar("eval/reward", eval_metrics["reward"], episode)
+            self.writer.add_scalar(
+                "eval/improvement", eval_metrics["improvement"], episode
+            )
+            self.writer.add_scalar("eval/best_cost", eval_metrics["best_cost"], episode)
+            self.writer.add_scalar(
+                "eval/random_improvement",
+                eval_metrics["random_improvement"],
+                episode,
+            )
+            self.writer.add_scalar(
+                "eval/advantage_over_random",
+                eval_metrics["advantage_over_random"],
+                episode,
+            )
+            self.writer.add_scalar("eval/avg_q", eval_metrics["avg_q"], episode)
+            self.writer.add_scalar("eval/time", eval_time, episode)
+
+            adv = eval_metrics["advantage_over_random"]
+            adv_str = f"+{adv:.2f}pp" if adv >= 0 else f"{adv:.2f}pp"
+            print(
+                f"  [EVAL] Greedy: {eval_metrics['improvement']:.2f}% | "
+                f"Random: {eval_metrics['random_improvement']:.2f}% | "
+                f"Advantage: {adv_str} | "
+                f"AvgQ: {eval_metrics['avg_q']:.3f} | "
+                f"Best: {eval_metrics['best_cost']:.1f} | "
+                f"({eval_time:.1f}s)"
+            )
+
+        # Save checkpoint
+        if episode % self.config.save_interval == 0:
+            self.save_checkpoint(f"checkpoint_{episode}.pt")
+
+        # Update learning rate
+        self.scheduler.step()
 
     def evaluate(self, env, instances: List[Tuple]) -> Dict[str, float]:
-        """Evaluate policy on held-out instances."""
+        """Evaluate policy on held-out instances vs random baseline."""
         self.policy_net.eval()
 
         # Save and override epsilon for greedy evaluation
         saved_epsilon = self.epsilon
         self.epsilon = 0.0
 
-        rewards = []
-        improvements = []
+        greedy_rewards = []
+        greedy_improvements = []
+        greedy_best_costs = []
+        random_improvements = []
+        random_best_costs = []
+        avg_q_values = []
+
+        n_eval = min(self.config.n_eval_episodes, len(instances))
 
         with torch.no_grad():
-            for i in range(min(self.config.n_eval_episodes, len(instances))):
+            for i in range(n_eval):
                 instance, K = instances[i]
 
-                # Run episode with greedy policy (epsilon=0)
+                # ── Greedy policy (epsilon=0) ──
                 state = env.reset(instance, K)
                 state_features = env.get_state_features()
-
                 episode_reward = 0.0
                 initial_cost = state.current_cost
+                q_vals_episode = []
 
                 while True:
-                    action = self._get_action(state_features)
+                    # Also track Q-values for diagnostics
+                    state_tensors = {
+                        k: torch.tensor(v, device=self.device)
+                        for k, v in state_features.items()
+                    }
+                    q_values = self.policy_net(
+                        job_features=state_tensors["job_features"].float(),
+                        machine_features=state_tensors["machine_features"].float(),
+                        state_features=state_tensors["state_features"].float(),
+                        job_to_machine=state_tensors["job_to_machine"].long(),
+                        static_edge_index=state_tensors["static_edge_index"].long(),
+                        dynamic_edge_index=state_tensors["dynamic_edge_index"].long(),
+                        price_features=state_tensors.get("price_per_hour", None),
+                    )
+                    q_vals_episode.append(q_values.max().item())
+                    action = q_values.argmax().item()
+
                     state, reward, done, _ = env.step(action)
                     state_features = env.get_state_features()
                     episode_reward += reward
-
                     if done:
                         break
 
                 improvement = (initial_cost - state.best_cost) / initial_cost * 100
-                rewards.append(episode_reward)
-                improvements.append(improvement)
+                greedy_rewards.append(episode_reward)
+                greedy_improvements.append(improvement)
+                greedy_best_costs.append(state.best_cost)
+                if q_vals_episode:
+                    avg_q_values.append(float(np.mean(q_vals_episode)))
+
+                # ── Random baseline (same instance) ──
+                state = env.reset(instance, K)
+                initial_cost_r = state.current_cost
+
+                while True:
+                    action = random.randrange(self.policy_net.n_actions)
+                    state, reward, done, _ = env.step(action)
+                    if done:
+                        break
+
+                rand_imp = (initial_cost_r - state.best_cost) / initial_cost_r * 100
+                random_improvements.append(rand_imp)
+                random_best_costs.append(state.best_cost)
 
         # Restore epsilon
         self.epsilon = saved_epsilon
         self.policy_net.train()
 
         return {
-            "reward": np.mean(rewards),
-            "improvement": np.mean(improvements),
+            "reward": float(np.mean(greedy_rewards)),
+            "improvement": float(np.mean(greedy_improvements)),
+            "best_cost": float(np.mean(greedy_best_costs)),
+            "random_improvement": float(np.mean(random_improvements)),
+            "random_best_cost": float(np.mean(random_best_costs)),
+            "advantage_over_random": float(
+                np.mean(greedy_improvements) - np.mean(random_improvements)
+            ),
+            "avg_q": float(np.mean(avg_q_values)) if avg_q_values else 0.0,
         }
 
     def save_checkpoint(self, filename: str):
@@ -847,7 +1233,20 @@ def main():
         help="Enable/disable IQN (distributional RL)",
     )
     parser.add_argument(
-        "--action-space", type=str, default=None, choices=["AA", "AAN", "AANP"]
+        "--action-space", type=str, default=None, choices=["AA", "AAN", "AANP", "AANPD"]
+    )
+    parser.add_argument(
+        "--graph-type",
+        type=str,
+        default=None,
+        choices=["bipartite", "tripartite"],
+        help="Graph representation: bipartite (default) or tripartite (adds period nodes)",
+    )
+    parser.add_argument(
+        "--n-parallel",
+        type=int,
+        default=None,
+        help="Parallel env workers (0=auto, 1=serial)",
     )
 
     args = parser.parse_args()
@@ -879,6 +1278,10 @@ def main():
         config.use_iqn = args.use_iqn
     if args.action_space is not None:
         config.action_space = args.action_space
+    if args.graph_type is not None:
+        config.graph_type = args.graph_type
+    if args.n_parallel is not None:
+        config.n_parallel_envs = args.n_parallel
 
     # Train
     trainer = NeuroLSTrainer(config)

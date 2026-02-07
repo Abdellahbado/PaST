@@ -21,9 +21,23 @@ Key design constraints:
 
 from PaST.neurols.solution import PMALNSSolution
 from PaST.neurols.state import NeuroLSState
-from PaST.neurols.action_space import ActionSpace, AA_SPACE, AAN_SPACE, AANP_SPACE
+from PaST.neurols.action_space import (
+    ActionSpace,
+    AA_SPACE,
+    AAN_SPACE,
+    AANP_SPACE,
+    AANPD_SPACE,
+    get_action_space,
+)
 from PaST.neurols.operators import Operator, OPERATORS, OperatorID
-from PaST.neurols.perturbations import Perturbation, PERTURBATIONS, PerturbationID
+from PaST.neurols.perturbations import (
+    Perturbation,
+    PERTURBATIONS,
+    PerturbationID,
+    DestroyOperator,
+    DESTROY_OPERATORS,
+    DestroyID,
+)
 from PaST.neurols.candidate_generator import (
     CandidateGenerator,
     DeterministicMoveSelector,
@@ -35,7 +49,12 @@ from PaST.neurols.train import NeuroLSTrainer, TrainConfig
 # Lazy imports for torch-dependent modules
 try:
     from PaST.neurols.price_embedding import PriceEmbedding, PriceCNNEncoder
-    from PaST.neurols.gnn_encoder import BipartiteGNNEncoder, NeuroLSEncoder
+    from PaST.neurols.gnn_encoder import (
+        BipartiteGNNEncoder,
+        NeuroLSEncoder,
+        TripartiteGNNEncoder,
+        TripartiteNeuroLSEncoder,
+    )
     from PaST.neurols.decoder import NeuroLSDecoder, NeuroLSPolicy, IQNQHead
 
     _TORCH_AVAILABLE = True
@@ -45,6 +64,8 @@ except ImportError:
     PriceCNNEncoder = None
     BipartiteGNNEncoder = None
     NeuroLSEncoder = None
+    TripartiteGNNEncoder = None
+    TripartiteNeuroLSEncoder = None
     NeuroLSDecoder = None
     NeuroLSPolicy = None
     IQNQHead = None
