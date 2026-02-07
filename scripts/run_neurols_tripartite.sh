@@ -41,7 +41,6 @@ fi
 
 declare -A CONFIGS
 CONFIGS=(
-    ["triA_none"]="configs/neurols_triA_AANP_none.yaml"
     ["triA_zprice"]="configs/neurols_triA_AANP_zprice.yaml"
     ["triA_full"]="configs/neurols_triA_AANP_full.yaml"
     ["triB_full"]="configs/neurols_triB_AANPD_full.yaml"
@@ -78,7 +77,7 @@ if [[ $# -gt 0 ]]; then
 fi
 
 # ── run all tripartite variants ───────────────────────────────────
-ALL_KEYS=(triA_none triA_zprice triA_full triB_full)
+ALL_KEYS=(triA_zprice triA_full triB_full)
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"

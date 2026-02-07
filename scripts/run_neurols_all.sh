@@ -42,17 +42,13 @@ fi
 
 declare -A CONFIGS
 CONFIGS=(
-    ["AA_none"]="configs/neurols_AA_none.yaml"
     ["AA_zprice"]="configs/neurols_AA_zprice.yaml"
     ["AA_full"]="configs/neurols_AA_full.yaml"
-    ["AAN_none"]="configs/neurols_AAN_none.yaml"
     ["AAN_zprice"]="configs/neurols_AAN_zprice.yaml"
     ["AAN_full"]="configs/neurols_AAN_full.yaml"
-    ["AANP_none"]="configs/neurols_AANP_none.yaml"
     ["AANP_zprice"]="configs/neurols_AANP_zprice.yaml"
     ["AANP_full"]="configs/neurols_AANP_full.yaml"
     # Tripartite-A: same AANP actions, tripartite graph encoder
-    ["triA_none"]="configs/neurols_triA_AANP_none.yaml"
     ["triA_zprice"]="configs/neurols_triA_AANP_zprice.yaml"
     ["triA_full"]="configs/neurols_triA_AANP_full.yaml"
     # Tripartite-B: AANPD (learned destroy), tripartite graph encoder
@@ -89,7 +85,7 @@ if [[ $# -gt 0 ]]; then
 fi
 
 # ── run all variants in parallel batches ──────────────────────────
-ALL_KEYS=(AA_none AA_zprice AA_full AAN_none AAN_zprice AAN_full AANP_none AANP_zprice AANP_full triA_none triA_zprice triA_full triB_full)
+ALL_KEYS=(AA_zprice AA_full AAN_zprice AAN_full AANP_zprice AANP_full triA_zprice triA_full triB_full)
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
