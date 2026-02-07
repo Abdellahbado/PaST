@@ -50,7 +50,7 @@ CONFIGS=(
     ["AAN_full"]="configs/neurols_AAN_full.yaml"
     ["AANP_none"]="configs/neurols_AANP_none.yaml"
     ["AANP_zprice"]="configs/neurols_AANP_zprice.yaml"
-    ["AANP_full"]="configs/neurols_base.yaml"
+    ["AANP_full"]="configs/neurols_AANP_full.yaml"
     # Tripartite-A: same AANP actions, tripartite graph encoder
     ["triA_none"]="configs/neurols_triA_AANP_none.yaml"
     ["triA_zprice"]="configs/neurols_triA_AANP_zprice.yaml"

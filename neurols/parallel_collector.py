@@ -129,6 +129,11 @@ def _collect_episode_worker(args: Tuple) -> EpisodeResult:
                     static_edge_index=st["static_edge_index"].long(),
                     dynamic_edge_index=st["dynamic_edge_index"].long(),
                     price_features=st.get("price_per_hour", None),
+                    machine_exposure=(
+                        st["machine_exposure"].float()
+                        if "machine_exposure" in st
+                        else None
+                    ),
                     period_features=(
                         st["period_features"].float()
                         if "period_features" in st

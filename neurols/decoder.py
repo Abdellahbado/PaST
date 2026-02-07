@@ -433,6 +433,7 @@ if _TORCH_AVAILABLE:
                     d_price_in=d_price_in if price_mode != "none" else 0,
                     d_emb=d_emb,
                     n_layers=n_layers_static,
+                    n_layers_dynamic=n_layers_dynamic,
                     dropout=dropout,
                 )
             else:
@@ -534,6 +535,7 @@ if _TORCH_AVAILABLE:
             static_edge_index: torch.Tensor,
             dynamic_edge_index: torch.Tensor,
             price_features: Optional[torch.Tensor] = None,
+            machine_exposure: Optional[torch.Tensor] = None,
             tau: Optional[torch.Tensor] = None,
             period_features: Optional[torch.Tensor] = None,
             tripartite_edge_index: Optional[torch.Tensor] = None,
@@ -548,6 +550,7 @@ if _TORCH_AVAILABLE:
                 static_edge_index: (B, 2, E_static)
                 dynamic_edge_index: (B, 2, E_dynamic)
                 price_features: (B, H, 5) or None
+                machine_exposure: (B, M, 7) or None
                 tau: (B, N) for IQN or None
                 period_features: (B, n_periods, d_period) or None
                 tripartite_edge_index: (B, 2, E_tri) or None
@@ -557,7 +560,7 @@ if _TORCH_AVAILABLE:
             """
             # Price embedding (CNN already handles batched input)
             if self.price_embed is not None and price_features is not None:
-                price_emb = self.price_embed(price_features, None)
+                price_emb = self.price_embed(price_features, machine_exposure)
             else:
                 price_emb = None
 

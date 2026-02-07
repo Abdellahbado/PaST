@@ -92,6 +92,7 @@ def evaluate_at_K(
         stagnation_limit=train_cfg.get("stagnation_limit", 100),
         action_space=train_cfg.get("action_space", "AANP"),
         graph_type=graph_type,
+        price_mode=train_cfg.get("price_mode", "z_price"),
     )
     env = NeuroLSEnv(env_config)
 
@@ -135,6 +136,11 @@ def evaluate_at_K(
                     static_edge_index=st["static_edge_index"].long(),
                     dynamic_edge_index=st["dynamic_edge_index"].long(),
                     price_features=st.get("price_per_hour", None),
+                    machine_exposure=(
+                        st["machine_exposure"].float()
+                        if "machine_exposure" in st
+                        else None
+                    ),
                     period_features=(
                         st["period_features"].float()
                         if "period_features" in st

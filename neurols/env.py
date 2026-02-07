@@ -77,6 +77,10 @@ class EnvConfig:
     # Graph type: "bipartite" (mainline) or "tripartite" (period nodes ablation)
     graph_type: str = "bipartite"
 
+    # Price mode: "none", "z_price", or "full"
+    # When "full", machine_exposure features are computed each step.
+    price_mode: str = "z_price"
+
     def __post_init__(self):
         # Ensure action_space is ActionSpace instance
         if isinstance(self.action_space, str):
@@ -165,8 +169,8 @@ class NeuroLSEnv:
         m = instance.m
 
         # Cache per-hour price features for the CNN encoder (constant per episode)
-        _price_extractor = PriceFeatureExtractor(self._ct, K)
-        self._price_per_hour = _price_extractor.get_per_hour_features()  # (20, 5)
+        self._price_extractor = PriceFeatureExtractor(self._ct, K)
+        self._price_per_hour = self._price_extractor.get_per_hour_features()  # (20, 5)
 
         # Create evaluator
         self._evaluator = MoveEvaluator(
@@ -292,6 +296,7 @@ class NeuroLSEnv:
             "operator_id": decoded.operator_id,
             "perturbation_id": decoded.perturbation_id,
             "cost_before": self.state.current_cost,
+            "best_cost_before": self.state.best_cost,
             "accepted": False,
             "improved": False,
         }
@@ -622,15 +627,15 @@ class NeuroLSEnv:
 
         if mode == "improvement":
             # Reward = improvement in best cost, clamped at 0
-            # Paper eq. (4): r_t = max(f(s_hat_t) - f(s_{t+1}), 0)
-            old_best = info["cost_before"]
+            # Paper eq. (4): r_t = max(f(s_hat_t) - f(s_hat_{t+1}), 0)
+            old_best = info["best_cost_before"]
             new_best = self.state.best_cost
             improvement = old_best - new_best
             reward = max(improvement, 0.0) * self.config.improvement_scale
 
         elif mode == "normalized":
             # Normalize by initial cost
-            old_best = info["cost_before"]
+            old_best = info["best_cost_before"]
             new_best = self.state.best_cost
             improvement = old_best - new_best
             reward = (
@@ -732,8 +737,48 @@ class NeuroLSEnv:
             "dynamic_edge_index": dynamic_edge_index,
             "prices": self._ct.astype(np.float32),
             "price_per_hour": self._price_per_hour,  # (hours_per_day, 5)
+            **self._get_machine_exposure(),
             **self._get_tripartite_features(n, m, job_to_machine),
         }
+
+    def _get_machine_exposure(self) -> Dict[str, np.ndarray]:
+        """Compute per-machine price exposure stats when price_mode == 'full'.
+
+        Returns:
+            {"machine_exposure": (M, 7)} if price_mode == "full", else empty dict.
+        """
+        if self.config.price_mode != "full":
+            return {}
+
+        m = self.instance.m
+        solution = self.state.solution
+        exposures = []
+
+        for mi in range(m):
+            seq = solution.sequences[mi]
+            if not seq:
+                # Empty machine → zero exposure
+                exposures.append(np.zeros(7, dtype=np.float32))
+                continue
+
+            # Get start times — prefer cached from current eval
+            me = self._current_eval.per_machine[mi]
+            if me.start_times and len(me.start_times) == len(seq):
+                start_times = me.start_times
+            else:
+                # start_times missing (incremental eval cache hit) → re-solve
+                result = self._evaluator._solvers[mi].solve_with_checkpoints(seq)
+                start_times = result.start_times
+
+            proc_times = [int(self._processing_times[j]) for j in seq]
+            e_rate = float(self._machine_energy_rates[mi])
+
+            exp = self._price_extractor.compute_machine_price_exposure(
+                start_times, proc_times, e_rate
+            )
+            exposures.append(exp)
+
+        return {"machine_exposure": np.stack(exposures, axis=0)}  # (M, 7)
 
     def _get_tripartite_features(
         self, n_jobs: int, n_machines: int, job_to_machine: np.ndarray

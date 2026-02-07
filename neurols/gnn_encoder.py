@@ -94,16 +94,31 @@ if _TORCH_AVAILABLE:
             # Neighbor aggregation
             src, dst = edge_index[0], edge_index[1]
 
+            # Filter out padding edges (sentinel value -1)
+            valid_mask = (src >= 0) & (dst >= 0)
+            if not valid_mask.all():
+                src = src[valid_mask]
+                dst = dst[valid_mask]
+
             # Gather source node features
             h_src = h[src]  # (E, d_emb)
 
             # Apply edge weights if provided
             if edge_weight is not None and self.use_edge_weights:
+                if valid_mask is not None and not valid_mask.all():
+                    edge_weight = edge_weight[valid_mask]
                 h_src = h_src * edge_weight.unsqueeze(-1)
 
             # Aggregate by destination (scatter_add)
             h_agg = torch.zeros(N, self.d_emb, device=h.device, dtype=h.dtype)
             h_agg.scatter_add_(0, dst.unsqueeze(-1).expand(-1, self.d_emb), h_src)
+
+            # Degree normalization to prevent magnitude explosion
+            degree = torch.zeros(N, 1, device=h.device, dtype=h.dtype)
+            degree.scatter_add_(
+                0, dst.unsqueeze(-1), torch.ones_like(dst.unsqueeze(-1), dtype=h.dtype)
+            )
+            h_agg = h_agg / (degree + 1e-9)
 
             h_neigh = self.mlp_neigh(h_agg)
 
@@ -582,7 +597,8 @@ class TripartiteGNNEncoder(nn.Module):
         d_machine_in: int,
         d_period_in: int,
         d_emb: int = 64,
-        n_layers: int = 3,
+        n_layers_static: int = 3,
+        n_layers_dynamic: int = 2,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -593,10 +609,18 @@ class TripartiteGNNEncoder(nn.Module):
         self.machine_embed = nn.Linear(d_machine_in, d_emb)
         self.period_embed = nn.Linear(d_period_in, d_emb)
 
-        # GNN layers
-        self.layers = nn.ModuleList(
-            [GNNLayer(d_emb, dropout=dropout) for _ in range(n_layers)]
+        # Stage 1: All tripartite edges (broad cross-type message passing)
+        self.static_layers = nn.ModuleList(
+            [GNNLayer(d_emb, dropout=dropout) for _ in range(n_layers_static)]
         )
+
+        # Stage 2: Job-machine edges only (fine-grained assignment-aware)
+        self.dynamic_layers = nn.ModuleList(
+            [GNNLayer(d_emb, dropout=dropout) for _ in range(n_layers_dynamic)]
+        )
+
+        # Consolidation layer after dynamic stage
+        self.consolidation_layer = GNNLayer(d_emb, dropout=dropout)
 
         # Output
         self.output_mlp = nn.Sequential(
@@ -618,6 +642,7 @@ class TripartiteGNNEncoder(nn.Module):
         n_jobs = job_features.size(0)
         n_machines = machine_features.size(0)
         n_periods = period_features.size(0)
+        n_jm = n_jobs + n_machines
 
         # Embed
         h = torch.cat(
@@ -629,9 +654,21 @@ class TripartiteGNNEncoder(nn.Module):
             dim=0,
         )
 
-        # GNN
-        for layer in self.layers:
+        # Stage 1: All tripartite edges (broad message passing)
+        for layer in self.static_layers:
             h = layer(h, edge_index)
+
+        # Stage 2: Job-machine edges only (state-dependent fine-grained)
+        # Extract edges where both endpoints are in job/machine range
+        src, dst = edge_index[0], edge_index[1]
+        jm_mask = (src < n_jm) & (dst < n_jm) & (src >= 0) & (dst >= 0)
+        jm_edge_index = edge_index[:, jm_mask]
+
+        for layer in self.dynamic_layers:
+            h = layer(h, jm_edge_index)
+
+        # Consolidation with all edges
+        h = self.consolidation_layer(h, edge_index)
 
         h = self.output_mlp(h)
 
@@ -661,6 +698,7 @@ class TripartiteNeuroLSEncoder(nn.Module):
         d_price_in: int = 64,
         d_emb: int = 64,
         n_layers: int = 3,
+        n_layers_dynamic: int = 2,
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -672,7 +710,8 @@ class TripartiteNeuroLSEncoder(nn.Module):
             d_machine_in=d_machine_in,
             d_period_in=d_period_in,
             d_emb=d_emb,
-            n_layers=n_layers,
+            n_layers_static=n_layers,
+            n_layers_dynamic=n_layers_dynamic,
             dropout=dropout,
         )
 

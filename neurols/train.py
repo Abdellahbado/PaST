@@ -260,6 +260,12 @@ def collate_states(states: List[Dict], device: str) -> Dict[str, torch.Tensor]:
         "dynamic_edge_index",
         "tripartite_edge_index",
     }
+    # Edge index keys must be padded with -1 (not 0) to avoid spurious self-loops
+    _EDGE_INDEX_KEYS = {
+        "static_edge_index",
+        "dynamic_edge_index",
+        "tripartite_edge_index",
+    }
 
     batched = {}
     for key in keys:
@@ -270,12 +276,15 @@ def collate_states(states: List[Dict], device: str) -> Dict[str, torch.Tensor]:
         if key in _VAR_LEN_KEYS and len(set(shapes)) > 1:
             # Pad to max shape along each axis
             max_shape = tuple(max(s[i] for s in shapes) for i in range(len(shapes[0])))
+            pad_val = -1 if key in _EDGE_INDEX_KEYS else 0
             padded = []
             for a in arrays:
                 pad_widths = [
                     (0, max_shape[i] - a.shape[i]) for i in range(len(max_shape))
                 ]
-                padded.append(np.pad(a, pad_widths, mode="constant", constant_values=0))
+                padded.append(
+                    np.pad(a, pad_widths, mode="constant", constant_values=pad_val)
+                )
             stacked = np.stack(padded, axis=0)
         else:
             stacked = np.stack(arrays, axis=0)
@@ -434,6 +443,11 @@ class NeuroLSTrainer:
                 static_edge_index=state_tensors["static_edge_index"].long(),
                 dynamic_edge_index=state_tensors["dynamic_edge_index"].long(),
                 price_features=state_tensors.get("price_per_hour", None),
+                machine_exposure=(
+                    state_tensors["machine_exposure"].float()
+                    if "machine_exposure" in state_tensors
+                    else None
+                ),
                 period_features=(
                     state_tensors["period_features"].float()
                     if "period_features" in state_tensors
@@ -586,6 +600,7 @@ class NeuroLSTrainer:
         has_price = "price_per_hour" in states
         has_period = "period_features" in states
         has_tri = "tripartite_edge_index" in states
+        has_exposure = "machine_exposure" in states
         return net.forward_batched(
             job_features=states["job_features"].float(),
             machine_features=states["machine_features"].float(),
@@ -594,6 +609,9 @@ class NeuroLSTrainer:
             static_edge_index=states["static_edge_index"].long(),
             dynamic_edge_index=states["dynamic_edge_index"].long(),
             price_features=(states["price_per_hour"].float() if has_price else None),
+            machine_exposure=(
+                states["machine_exposure"].float() if has_exposure else None
+            ),
             period_features=(states["period_features"].float() if has_period else None),
             tripartite_edge_index=(
                 states["tripartite_edge_index"].long() if has_tri else None
@@ -610,6 +628,7 @@ class NeuroLSTrainer:
         has_price = "price_per_hour" in states
         has_period = "period_features" in states
         has_tri = "tripartite_edge_index" in states
+        has_exposure = "machine_exposure" in states
         return net.forward_batched(
             job_features=states["job_features"].float(),
             machine_features=states["machine_features"].float(),
@@ -618,6 +637,9 @@ class NeuroLSTrainer:
             static_edge_index=states["static_edge_index"].long(),
             dynamic_edge_index=states["dynamic_edge_index"].long(),
             price_features=(states["price_per_hour"].float() if has_price else None),
+            machine_exposure=(
+                states["machine_exposure"].float() if has_exposure else None
+            ),
             tau=tau,
             period_features=(states["period_features"].float() if has_period else None),
             tripartite_edge_index=(
@@ -639,6 +661,10 @@ class NeuroLSTrainer:
 
         # Compute loss
         loss = self._compute_loss(batch)
+
+        # Guard against NaN/inf loss (can happen with corrupted replay data)
+        if not torch.isfinite(loss):
+            return 0.0, 0.0
 
         # Optimize
         self.optimizer.zero_grad()
@@ -765,6 +791,7 @@ class NeuroLSTrainer:
             action_space=self.config.action_space,
             reward_mode=self.config.reward_mode,
             graph_type=self.config.graph_type,
+            price_mode=self.config.price_mode,
         )
         env = NeuroLSEnv(env_config)
         env.seed(self.config.seed)
@@ -868,6 +895,7 @@ class NeuroLSTrainer:
             "action_space": self.config.action_space,
             "reward_mode": env_config.reward_mode,
             "graph_type": self.config.graph_type,
+            "price_mode": self.config.price_mode,
         }
         model_config = {
             "d_emb": self.config.d_emb,
@@ -1135,6 +1163,21 @@ class NeuroLSTrainer:
                         static_edge_index=state_tensors["static_edge_index"].long(),
                         dynamic_edge_index=state_tensors["dynamic_edge_index"].long(),
                         price_features=state_tensors.get("price_per_hour", None),
+                        machine_exposure=(
+                            state_tensors["machine_exposure"].float()
+                            if "machine_exposure" in state_tensors
+                            else None
+                        ),
+                        period_features=(
+                            state_tensors["period_features"].float()
+                            if "period_features" in state_tensors
+                            else None
+                        ),
+                        tripartite_edge_index=(
+                            state_tensors["tripartite_edge_index"].long()
+                            if "tripartite_edge_index" in state_tensors
+                            else None
+                        ),
                     )
                     q_vals_episode.append(q_values.max().item())
                     action = q_values.argmax().item()
