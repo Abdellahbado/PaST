@@ -1125,6 +1125,15 @@ class NeuroLSTrainer:
         """Evaluate policy on held-out instances vs random baseline."""
         self.policy_net.eval()
 
+        # Make evaluation deterministic: disable stochastic acceptance of worsening moves.
+        # This reduces variance and makes greedy vs random comparisons meaningful.
+        prev_deterministic = getattr(env.config, "deterministic", False)
+        env.config.deterministic = True
+
+        # Use a local RNG so the random baseline is stable and does not depend on
+        # global `random` state advanced elsewhere.
+        eval_rng = random.Random(self.config.seed + 100_000 + int(self.episode))
+
         # Save and override epsilon for greedy evaluation
         saved_epsilon = self.epsilon
         self.epsilon = 0.0
@@ -1141,6 +1150,12 @@ class NeuroLSTrainer:
         with torch.no_grad():
             for i in range(n_eval):
                 instance, K = instances[i]
+
+                # Reseed env per instance for reproducibility.
+                try:
+                    env.seed(self.config.seed + 200_000 + i)
+                except Exception:
+                    pass
 
                 # ── Greedy policy (epsilon=0) ──
                 state = env.reset(instance, K)
@@ -1200,7 +1215,7 @@ class NeuroLSTrainer:
                 initial_cost_r = state.current_cost
 
                 while True:
-                    action = random.randrange(self.policy_net.n_actions)
+                    action = eval_rng.randrange(self.policy_net.n_actions)
                     state, reward, done, _ = env.step(action)
                     if done:
                         break
@@ -1211,6 +1226,8 @@ class NeuroLSTrainer:
 
         # Restore epsilon
         self.epsilon = saved_epsilon
+        # Restore env setting
+        env.config.deterministic = prev_deterministic
         self.policy_net.train()
 
         return {

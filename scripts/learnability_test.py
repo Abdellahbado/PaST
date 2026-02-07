@@ -9,9 +9,10 @@ fundamental bugs (NaN, frozen gradients, wrong reward signal) quickly.
 Design:
   • Small instances  : n=10 jobs, m=2 machines, K=40
   • Short training   : 500 episodes, 200 steps/episode
-  • Serial (1 worker): simpler debugging, still CPU-fast
-  • Pass criterion   : greedy improvement > random improvement by ≥ 0.5 pp
-                       AND loss decreased (end avg < start avg)
+        • Parallel rollouts: optional via `--n-parallel` (default is serial for signal)
+    • Pass criterion   : (non-AA variants) greedy improvement > random improvement
+                                             by ≥ threshold (default 0.5pp), evaluated deterministically.
+                                             AA is treated as a baseline sanity-check (not expected to win).
   • Variants tested  : 9 (6 bipartite + 3 tripartite), no "none" price mode
 
 Expected runtime: ~10-15 min per variant → ~1.5-2.5 h total on a single GPU.
@@ -22,6 +23,8 @@ Usage:
     python -m PaST.scripts.learnability_test --variant AANP_zprice  # single
     python -m PaST.scripts.learnability_test --device cpu         # force CPU
     python -m PaST.scripts.learnability_test --episodes 300       # override
+    python -m PaST.scripts.learnability_test --n-parallel 16       # use 16 CPU workers
+    python -m PaST.scripts.learnability_test --worker-threads 1    # 1 thread per worker
 """
 
 from __future__ import annotations
@@ -99,7 +102,7 @@ class TestConfig:
 
     # Eval
     eval_interval: int = 50
-    n_eval_episodes: int = 5
+    n_eval_episodes: int = 20
     n_instances: int = 30
 
     # Target net
@@ -113,11 +116,18 @@ class TestConfig:
 
     # Thresholds for pass/fail
     min_advantage_pp: float = 0.5  # Greedy must beat random by ≥ 0.5 pp
-    loss_decrease_ratio: float = 0.8  # Avg loss in last 25% < first 25%
+    # NOTE: TD/IQN loss is not monotonic; do not gate pass/fail on loss trend.
 
     # Misc
     seed: int = 42
     device: str = "cuda"
+
+    # Parallelism
+    # Default to serial to get a stronger learning signal per wall-clock.
+    # Use --n-parallel to speed up, but expect to increase episodes accordingly.
+    n_parallel_envs: int = 1
+    # Threads per worker process (controls OMP/MKL/torch threads inside workers)
+    worker_threads: int = 1
 
 
 # ── Core test runner ──────────────────────────────────────────────────────────
@@ -134,17 +144,18 @@ def run_single_variant(
         - final_advantage_pp, final_greedy_imp, final_random_imp
         - avg_loss_first, avg_loss_last
         - avg_grad_norm, any_nan
+        - global_steps
         - wall_time_s, n_episodes_run
     """
     import numpy as np
     import random as py_random
 
+    # Ensure worker thread settings propagate to child processes.
+    # (ParallelCollector reads NEUROLS_WORKER_THREADS in the worker entrypoint.)
+    os.environ.setdefault("NEUROLS_WORKER_THREADS", str(test_cfg.worker_threads))
+
     # Lazy imports to keep startup fast
     from PaST.neurols.train import TrainConfig, NeuroLSTrainer
-    from PaST.neurols.env import NeuroLSEnv, EnvConfig
-    from PaST.neurols.action_space import get_action_space
-    from PaST.data.sm_benchmark_data import generate_raw_instance
-    from PaST.config import DataConfig
 
     print(f"\n{'━'*60}")
     print(f"  VARIANT: {variant.name}")
@@ -210,7 +221,7 @@ def run_single_variant(
             eval_interval=test_cfg.eval_interval,
             save_interval=99999,  # Don't save checkpoints
             n_eval_episodes=test_cfg.n_eval_episodes,
-            n_parallel_envs=1,  # Serial for simplicity
+            n_parallel_envs=int(test_cfg.n_parallel_envs),
         )
 
         # Create trainer
@@ -249,13 +260,15 @@ def run_single_variant(
         # Run training
         trainer.train()
 
+        result["global_steps"] = int(getattr(trainer, "global_step", 0))
+
         # ── Analyze results ──
         wall_time = time.time() - t0
         result["wall_time_s"] = round(wall_time, 1)
         result["n_episodes_run"] = test_cfg.n_episodes
         result["any_nan"] = any_nan
 
-        # Loss analysis: compare first 25% vs last 25%
+        # Loss analysis (diagnostic only): compare first 25% vs last 25%
         if loss_history:
             n = len(loss_history)
             q1 = max(1, n // 4)
@@ -263,13 +276,9 @@ def run_single_variant(
             avg_last = float(np.mean(loss_history[-q1:]))
             result["avg_loss_first"] = round(avg_first, 6)
             result["avg_loss_last"] = round(avg_last, 6)
-            result["loss_decreased"] = (
-                avg_last < avg_first * test_cfg.loss_decrease_ratio
-            )
         else:
             result["avg_loss_first"] = None
             result["avg_loss_last"] = None
-            result["loss_decreased"] = False
 
         # Gradient norm
         if grad_history:
@@ -310,17 +319,16 @@ def run_single_variant(
         if any_nan:
             reasons.append("NaN/Inf detected in loss or gradients")
 
-        if result["final_advantage_pp"] is not None:
-            if result["best_advantage_pp"] >= test_cfg.min_advantage_pp:
-                pass  # OK
-            else:
-                reasons.append(
-                    f"Best advantage {result['best_advantage_pp']:.2f}pp < "
-                    f"{test_cfg.min_advantage_pp:.1f}pp threshold"
-                )
-
-        if not result.get("loss_decreased", False):
-            reasons.append("Loss did not decrease (end avg >= start avg)")
+        # Advantage gate: not meaningful for AA (operator chosen by env).
+        if variant.action_space != "AA":
+            if result["final_advantage_pp"] is not None:
+                if result["best_advantage_pp"] >= test_cfg.min_advantage_pp:
+                    pass  # OK
+                else:
+                    reasons.append(
+                        f"Best advantage {result['best_advantage_pp']:.2f}pp < "
+                        f"{test_cfg.min_advantage_pp:.1f}pp threshold"
+                    )
 
         if not reasons:
             result["passed"] = True
@@ -348,7 +356,7 @@ def run_single_variant(
     if result.get("avg_loss_first") is not None:
         print(
             f"    Loss: {result['avg_loss_first']:.4f} → {result['avg_loss_last']:.4f} "
-            f"({'↓' if result.get('loss_decreased') else '↑'})"
+            f"(diagnostic only)"
         )
     if not result["passed"]:
         print(f"    Reason: {result['reason']}")
@@ -385,6 +393,18 @@ def main():
         default=None,
         help="Min advantage (pp) to pass. Default: 0.5",
     )
+    parser.add_argument(
+        "--n-parallel",
+        type=int,
+        default=None,
+        help="CPU rollout workers per variant (ParallelCollector). Example: 16",
+    )
+    parser.add_argument(
+        "--worker-threads",
+        type=int,
+        default=None,
+        help="Threads per rollout worker process. Example: 1",
+    )
     args = parser.parse_args()
 
     test_cfg = TestConfig()
@@ -396,6 +416,13 @@ def main():
         test_cfg.seed = args.seed
     if args.threshold is not None:
         test_cfg.min_advantage_pp = args.threshold
+    if args.n_parallel is not None:
+        test_cfg.n_parallel_envs = int(args.n_parallel)
+    if args.worker_threads is not None:
+        test_cfg.worker_threads = int(args.worker_threads)
+
+    # Apply worker thread settings early so forked/spawned workers inherit it.
+    os.environ.setdefault("NEUROLS_WORKER_THREADS", str(test_cfg.worker_threads))
 
     # Select variants
     if args.variant:
@@ -423,6 +450,9 @@ def main():
     )
     print(f"║  Device   : {test_cfg.device:<10}                                 ║")
     print(
+        f"║  CPU rollouts: {test_cfg.n_parallel_envs:>2} workers  ×  {test_cfg.worker_threads} thr                 ║"
+    )
+    print(
         f"║  Pass thr : advantage ≥ {test_cfg.min_advantage_pp:.1f}pp                         ║"
     )
     print("╚══════════════════════════════════════════════════════════════╝")
@@ -443,10 +473,8 @@ def main():
     print(f"\n{'='*60}")
     print(f"  LEARNABILITY TEST SUMMARY")
     print(f"{'='*60}")
-    print(
-        f"  {'Variant':<20} {'Status':<8} {'Advantage':>10} {'Loss ↓':>8} {'Time':>8}"
-    )
-    print(f"  {'─'*20} {'─'*8} {'─'*10} {'─'*8} {'─'*8}")
+    print(f"  {'Variant':<20} {'Status':<8} {'Advantage':>10} {'NaN?':>6} {'Time':>8}")
+    print(f"  {'─'*20} {'─'*8} {'─'*10} {'─'*6} {'─'*8}")
 
     for r in all_results:
         status = "PASS" if r["passed"] else "FAIL"
@@ -455,9 +483,9 @@ def main():
             if r.get("best_advantage_pp") is not None
             else "N/A"
         )
-        loss_ok = "yes" if r.get("loss_decreased") else "no"
+        loss_ok = "yes" if r.get("any_nan") else "no"
         t = f"{r.get('wall_time_s', 0):.0f}s"
-        print(f"  {r['name']:<20} {status:<8} {adv:>10} {loss_ok:>8} {t:>8}")
+        print(f"  {r['name']:<20} {status:<8} {adv:>10} {loss_ok:>6} {t:>8}")
 
     print(
         f"\n  Result: {n_passed}/{n_total} passed  |  Total time: {total_time/60:.1f} min"

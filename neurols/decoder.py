@@ -490,12 +490,17 @@ if _TORCH_AVAILABLE:
             # Price embedding
             if self.price_embed is not None and price_features is not None:
                 pf = price_features
+                me = machine_exposure
                 squeezed_price = False
                 if pf.dim() == 2:
                     # Unbatched (H, 5) → (1, H, 5) for CNN
                     pf = pf.unsqueeze(0)
                     squeezed_price = True
-                price_emb = self.price_embed(pf, machine_exposure)
+                    # Keep machine_exposure consistent with batched price_features
+                    # Expected by PriceEmbedding: (B, M, 7)
+                    if me is not None and me.dim() == 2:
+                        me = me.unsqueeze(0)
+                price_emb = self.price_embed(pf, me)
                 if squeezed_price:
                     price_emb = price_emb.squeeze(0)  # back to (d_price,)
             else:
