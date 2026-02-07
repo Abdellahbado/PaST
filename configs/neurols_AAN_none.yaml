@@ -36,7 +36,7 @@ n_step: 3
 # Exploration
 epsilon_start: 0.95
 epsilon_end: 0.05
-epsilon_decay: 0.995
+epsilon_decay: null
 
 # Replay buffer
 buffer_size: 32000

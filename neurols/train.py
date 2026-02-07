@@ -107,7 +107,9 @@ class TrainConfig:
     # Exploration — aligned with paper
     epsilon_start: float = 0.95  # Paper: 0.95
     epsilon_end: float = 0.05
-    epsilon_decay: float = 0.995
+    # If None, compute a smooth exponential decay so that epsilon reaches
+    # ~epsilon_end near the end of training (n_episodes).
+    epsilon_decay: Optional[float] = None
 
     # Replay buffer — aligned with paper
     buffer_size: int = 32000  # Paper: 32000
@@ -131,6 +133,35 @@ class TrainConfig:
 
     # Parallelism
     n_parallel_envs: int = 0  # 0 = auto (cpu_count // 4, capped 16); 1 = serial
+
+    def __post_init__(self) -> None:
+        # Auto-compute epsilon decay if not provided.
+        # We apply decay once per episode, so choose decay such that:
+        #   epsilon_start * decay**n_episodes ~= epsilon_end
+        if self.epsilon_decay is None:
+            if self.n_episodes <= 0:
+                self.epsilon_decay = 1.0
+                return
+            # Degenerate / safety cases
+            if self.epsilon_start <= 0 or self.epsilon_end <= 0:
+                self.epsilon_decay = 1.0
+                return
+            if self.epsilon_end >= self.epsilon_start:
+                self.epsilon_decay = 1.0
+                return
+
+            self.epsilon_decay = float(
+                np.exp(
+                    np.log(self.epsilon_end / self.epsilon_start)
+                    / float(max(1, self.n_episodes))
+                )
+            )
+
+        # Final validation
+        if not (0.0 < float(self.epsilon_decay) <= 1.0):
+            raise ValueError(
+                f"epsilon_decay must be in (0, 1], got {self.epsilon_decay}"
+            )
 
 
 class ReplayBuffer:
