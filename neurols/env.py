@@ -232,6 +232,16 @@ class NeuroLSEnv:
         self._initial_cost = initial_cost
         self._best_cost_episode = initial_cost
 
+        # Initialize exposure potential scale for dense_best_exposure shaping.
+        if str(self.config.reward_mode).lower() == "dense_best_exposure":
+            self._initial_exposure_potential = float(
+                self._compute_peak_exposure_potential(self._current_eval)
+            )
+            if (not np.isfinite(self._initial_exposure_potential)) or (
+                self._initial_exposure_potential <= 0.0
+            ):
+                self._initial_exposure_potential = 1.0
+
         if str(self.config.reward_mode).lower() == "dense_best_exposure":
             self._initial_exposure_potential = float(
                 self._compute_peak_exposure_potential(self._current_eval)

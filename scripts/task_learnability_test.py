@@ -204,6 +204,22 @@ def _oracle_one_step(
     current_cost_before = float(env._current_eval.total_energy)
     denom = float(env._initial_cost) + float(env.config.reward_eps)
 
+    mode = str(env.config.reward_mode)
+    use_exposure = (
+        mode == "dense_best_exposure"
+        and float(getattr(env.config, "exposure_bonus_lambda", 0.0)) != 0.0
+    )
+
+    phi_before = 0.0
+    exp_denom = 1.0
+    if use_exposure:
+        phi_before = float(env._compute_peak_exposure_potential(env._current_eval))
+        exp_denom = float(getattr(env, "_initial_exposure_potential", 1.0)) + float(
+            getattr(env.config, "exposure_eps", 1e-8)
+        )
+        if (not np.isfinite(exp_denom)) or exp_denom <= 0.0:
+            exp_denom = 1.0
+
     def _accept_prob(*, accept_flag: bool, new_cost: float) -> float:
         if not np.isfinite(new_cost):
             return 0.0
@@ -230,7 +246,9 @@ def _oracle_one_step(
         p = float(np.exp(ratio))
         return float(min(1.0, max(0.0, p)))
 
-    def _expected_reward(*, accept_flag: bool, new_cost: Optional[float]) -> float:
+    def _expected_reward(
+        *, accept_flag: bool, new_cost: Optional[float], phi_after: Optional[float]
+    ) -> float:
         if new_cost is None:
             return float(-env.config.step_penalty)
 
@@ -257,13 +275,16 @@ def _oracle_one_step(
                 exp_r_cur + float(env.config.best_bonus_lambda) * exp_r_best
             ) * float(env.config.improvement_scale)
         elif mode == "dense_best_exposure":
-            # Oracle currently uses cost-only expected reward.
-            # (Exposure shaping depends on schedule structure and is omitted here.)
             exp_r_cur = p * (current_cost_before - new_cost_f) / denom
             exp_r_best = p * max(best_cost_before - new_cost_f, 0.0) / denom
-            reward = (
+            base = (
                 exp_r_cur + float(env.config.best_bonus_lambda) * exp_r_best
             ) * float(env.config.improvement_scale)
+            if use_exposure and phi_after is not None and np.isfinite(float(phi_after)):
+                r_exp = p * (float(phi_before) - float(phi_after)) / float(exp_denom)
+                reward = base + float(env.config.exposure_bonus_lambda) * r_exp
+            else:
+                reward = base
         else:
             raise ValueError(f"Unknown reward_mode: {mode}")
 
@@ -303,6 +324,7 @@ def _oracle_one_step(
         decoded = env.config.action_space.decode_action(a_rep)
 
         new_cost: Optional[float] = None
+        new_phi: Optional[float] = None
 
         if decoded.action_type == ActionType.OPERATOR:
             if decoded.operator_id is not None:
@@ -310,8 +332,28 @@ def _oracle_one_step(
             else:
                 result = env._apply_best_operator()
             if result is not None:
-                _move, c, _eval = result
+                _move, c, move_eval = result
                 new_cost = float(c)
+                if use_exposure and move_eval is not None:
+                    try:
+                        # Reconstruct the per-machine schedule for the new solution
+                        # using affected machine evals (mirrors env incremental update).
+                        updated_per_machine = list(env._current_eval.per_machine)
+                        if hasattr(move_eval, "affected_machine_evals"):
+                            for mi, me in move_eval.affected_machine_evals.items():
+                                updated_per_machine[int(mi)] = me
+                        from PaST.neurols.move_evaluator import FullEvaluation
+
+                        full_new = FullEvaluation(
+                            total_energy=float(new_cost),
+                            makespan=int(getattr(move_eval, "new_makespan", 0)),
+                            feasible=bool(getattr(move_eval, "feasible", True)),
+                            per_machine=updated_per_machine,
+                            per_job_costs=None,
+                        )
+                        new_phi = float(env._compute_peak_exposure_potential(full_new))
+                    except Exception:
+                        new_phi = None
 
         elif decoded.action_type == ActionType.PERTURBATION:
             if (
@@ -333,9 +375,23 @@ def _oracle_one_step(
                 cached = env._solution_cache.get(sol_key)
                 if cached is not None:
                     new_cost = float(cached[0])
+                    if use_exposure:
+                        try:
+                            new_phi = float(
+                                env._compute_peak_exposure_potential(cached[1])
+                            )
+                        except Exception:
+                            new_phi = None
                 else:
                     new_eval = env._evaluator.evaluate_solution(new_solution)
                     new_cost = float(new_eval.total_energy)
+                    if use_exposure:
+                        try:
+                            new_phi = float(
+                                env._compute_peak_exposure_potential(new_eval)
+                            )
+                        except Exception:
+                            new_phi = None
 
         elif decoded.action_type == ActionType.DESTROY:
             if decoded.destroy_id is None:
@@ -352,15 +408,31 @@ def _oracle_one_step(
                 cached = env._solution_cache.get(sol_key)
                 if cached is not None:
                     new_cost = float(cached[0])
+                    if use_exposure:
+                        try:
+                            new_phi = float(
+                                env._compute_peak_exposure_potential(cached[1])
+                            )
+                        except Exception:
+                            new_phi = None
                 else:
                     new_eval = env._evaluator.evaluate_solution(new_solution)
                     new_cost = float(new_eval.total_energy)
+                    if use_exposure:
+                        try:
+                            new_phi = float(
+                                env._compute_peak_exposure_potential(new_eval)
+                            )
+                        except Exception:
+                            new_phi = None
 
         accept_reward = None
         reject_reward = None
         for a in gen_to_actions[gen_key]:
             a_decoded = env.config.action_space.decode_action(a)
-            r = _expected_reward(accept_flag=bool(a_decoded.accept), new_cost=new_cost)
+            r = _expected_reward(
+                accept_flag=bool(a_decoded.accept), new_cost=new_cost, phi_after=new_phi
+            )
             action_rewards[a] = r
             if bool(a_decoded.accept):
                 accept_reward = r
@@ -574,6 +646,9 @@ def run_variant(
     device: str,
     top_k: int,
     use_proxy: bool,
+    proxy_mode: Optional[str] = None,
+    reward_mode_override: Optional[str] = None,
+    exposure_bonus_lambda_override: Optional[float] = None,
     step_penalty_override: Optional[float] = None,
     verbose: bool = False,
 ) -> Dict[str, Any]:
@@ -587,6 +662,26 @@ def run_variant(
     action_space_name = str(cfg.get("action_space", "AANP"))
     graph_type = str(cfg.get("graph_type", "bipartite"))
     price_mode = str(cfg.get("price_mode", "z_price"))
+
+    reward_mode = (
+        str(reward_mode_override)
+        if reward_mode_override is not None
+        else str(cfg.get("reward_mode", "dense_best"))
+    )
+
+    exposure_bonus_lambda = (
+        float(exposure_bonus_lambda_override)
+        if exposure_bonus_lambda_override is not None
+        else float(cfg.get("exposure_bonus_lambda", 0.0))
+    )
+
+    exposure_eps = float(cfg.get("exposure_eps", 1e-8))
+
+    proxy_mode_val = (
+        str(proxy_mode)
+        if proxy_mode is not None
+        else str(cfg.get("proxy_mode", "load"))
+    )
 
     # Use small fixed instance sizes for speed
     n_jobs_list = cfg.get("n_jobs_train", [20])
@@ -604,13 +699,16 @@ def run_variant(
         max_steps=int(cfg.get("max_steps", 200)),
         stagnation_limit=int(cfg.get("stagnation_limit", 100)),
         action_space=get_action_space(action_space_name),
-        reward_mode=str(cfg.get("reward_mode", "dense_best")),
+        reward_mode=reward_mode,
         improvement_scale=float(cfg.get("improvement_scale", 1.0)),
         reward_eps=float(cfg.get("reward_eps", 1e-8)),
         best_bonus_lambda=float(cfg.get("best_bonus_lambda", 0.3)),
         step_penalty=step_penalty,
         top_k=int(top_k),
         use_proxy=bool(use_proxy),
+        proxy_mode=proxy_mode_val,
+        exposure_bonus_lambda=float(exposure_bonus_lambda),
+        exposure_eps=float(exposure_eps),
         graph_type=graph_type,
         price_mode=price_mode,
     )
@@ -764,6 +862,13 @@ def main() -> None:
         help="Disable proxy ranking in candidate generation (slower).",
     )
     parser.add_argument(
+        "--proxy-mode",
+        type=str,
+        default=None,
+        choices=["load", "price_aware"],
+        help="Proxy mode override (default: from variant config).",
+    )
+    parser.add_argument(
         "--device",
         type=str,
         default="cpu",
@@ -774,6 +879,18 @@ def main() -> None:
         type=float,
         default=None,
         help="Override step_penalty for this run (e.g., 1e-4).",
+    )
+    parser.add_argument(
+        "--reward-mode",
+        type=str,
+        default=None,
+        help="Reward mode override (e.g., dense_best, dense_best_exposure).",
+    )
+    parser.add_argument(
+        "--exposure-bonus-lambda",
+        type=float,
+        default=None,
+        help="Override exposure shaping coefficient (dense_best_exposure only).",
     )
     parser.add_argument(
         "--out",
@@ -813,6 +930,9 @@ def main() -> None:
             device=str(args.device),
             top_k=int(args.top_k),
             use_proxy=not bool(args.no_proxy),
+            proxy_mode=args.proxy_mode,
+            reward_mode_override=args.reward_mode,
+            exposure_bonus_lambda_override=args.exposure_bonus_lambda,
             step_penalty_override=args.step_penalty,
             verbose=bool(args.verbose),
         )
