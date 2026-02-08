@@ -172,6 +172,7 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
     machine_policy = str(args_dict["machine_policy"])
     machine_index = int(args_dict["machine_index"])
     bnb_time_limit = float(args_dict["bnb_time_limit"])
+    dp_time_limit = float(args_dict.get("dp_time_limit", -1.0))
     dp_tie_break = str(args_dict.get("dp_tie_break", "early"))
     out_dir = str(args_dict["out_dir"])
 
@@ -213,6 +214,7 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
         prices,
         job_ids=range(len(p_subset)),
         tie_break=dp_tie_break,
+        time_limit=dp_time_limit,
     )
     dp_time = float(time.perf_counter() - t0)
 
@@ -324,6 +326,12 @@ def main() -> None:
         default="early",
         help="Tie-break among equal-cost DP optima (early = prefer earlier schedule)",
     )
+    ap.add_argument(
+        "--dp-time-limit",
+        type=float,
+        default=-1.0,
+        help="Seconds for DP. -1 means no limit.",
+    )
 
     args = ap.parse_args()
 
@@ -353,6 +361,7 @@ def main() -> None:
         "machine_policy": str(args.machine_policy),
         "machine_index": int(args.machine_index),
         "bnb_time_limit": float(args.bnb_time_limit),
+        "dp_time_limit": float(args.dp_time_limit),
         "dp_tie_break": str(args.dp_tie_break),
         "out_dir": str(out_dir),
     }

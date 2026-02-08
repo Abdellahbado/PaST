@@ -55,10 +55,21 @@ This module is intended for the PaST benchmark where p is small (e.g., 1..4).
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
+
+# Import accelerated solver (with fallback)
+try:
+    from PaST.solvers.optimal_benchmark_dp_numba import (
+        solve_sparse_dp_python,
+        is_numba_available,
+    )
+    _ACCEL_AVAILABLE = True
+except ImportError:
+    _ACCEL_AVAILABLE = False
 
 
 _EPS = 1e-12
@@ -91,12 +102,145 @@ def _interval_cost(prefix: np.ndarray, start: int, length: int) -> float:
     return float(prefix[end] - prefix[start])
 
 
+def _solve_sparse_dp_inline(
+    lengths_list: List[int],
+    totals: np.ndarray,
+    prefix: np.ndarray,
+    T: int,
+    radices: np.ndarray,
+    mult: np.ndarray,
+    K: int,
+    final_state: int,
+    tie_break: str = "early",
+    time_limit: float = -1.0,
+) -> Tuple[float, int, Dict, bool]:
+    """Inline sparse DP fallback with early pruning and time limit."""
+    import time as time_module
+    start_time = time_module.perf_counter()
+    
+    totals_arr = totals
+    inc = [int(m) for m in mult]
+    
+    # State decoding cache
+    used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * K)}
+    
+    def decode_used(state: int) -> Tuple[int, ...]:
+        cached = used_cache.get(state)
+        if cached is not None:
+            return cached
+        u = [0] * K
+        x = state
+        for i in range(K):
+            r = int(radices[i])
+            u[i] = x % r
+            x //= r
+        tup = tuple(u)
+        used_cache[state] = tup
+        return tup
+    
+    def remaining_work(used: Tuple[int, ...]) -> int:
+        work = 0
+        for i in range(K):
+            work += (int(totals_arr[i]) - used[i]) * lengths_list[i]
+        return work
+    
+    # DP layers
+    dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
+    dp_layers[0][0] = (0.0, 0)
+    parent: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+    
+    best_final_cost = float("inf")
+    best_final_pen = 2**63 - 1
+    best_final_time = -1
+    timed_out = False
+    
+    for t in range(T + 1):
+        # Check timeout
+        if time_limit > 0 and (time_module.perf_counter() - start_time) > time_limit:
+            timed_out = True
+            break
+        
+        layer = dp_layers[t]
+        if not layer:
+            continue
+        
+        # Check for final state
+        v_final = layer.get(final_state)
+        if v_final is not None:
+            c_final, p_final = float(v_final[0]), int(v_final[1])
+            better = c_final < best_final_cost
+            if tie_break == "early" and not better and abs(c_final - best_final_cost) <= _EPS:
+                better = p_final < best_final_pen or (p_final == best_final_pen and t < best_final_time)
+            if better:
+                best_final_cost = c_final
+                best_final_pen = p_final
+                best_final_time = t
+        
+        if t == T:
+            continue
+        
+        # Idle + job transitions
+        next_layer = dp_layers[t + 1]
+        for state, (c0, p0) in layer.items():
+            # Early pruning
+            used = decode_used(state)
+            if remaining_work(used) > T - t:
+                continue
+            
+            # Idle transition
+            prev = next_layer.get(state)
+            if prev is None:
+                next_layer[state] = (float(c0), int(p0))
+                parent[(t + 1, state)] = (t, state, 0)
+            else:
+                c_prev, p_prev = float(prev[0]), int(prev[1])
+                better = c0 < c_prev
+                if tie_break == "early" and not better and abs(float(c0) - c_prev) <= _EPS:
+                    better = p0 < p_prev
+                if better:
+                    next_layer[state] = (float(c0), int(p0))
+                    parent[(t + 1, state)] = (t, state, 0)
+            
+            # Job transitions
+            for i, L in enumerate(lengths_list):
+                if used[i] >= int(totals_arr[i]):
+                    continue
+                end = t + L
+                if end > T:
+                    continue
+                
+                new_state = state + inc[i]
+                cand_cost = float(c0 + (prefix[end] - prefix[t]))
+                cand_pen = int(p0)
+                if tie_break == "early":
+                    cand_pen += t
+                
+                target_layer = dp_layers[end]
+                prev = target_layer.get(new_state)
+                if prev is None:
+                    target_layer[new_state] = (cand_cost, cand_pen)
+                    parent[(end, new_state)] = (t, state, L)
+                else:
+                    prev_cost, prev_pen = float(prev[0]), int(prev[1])
+                    better = cand_cost < prev_cost
+                    if tie_break == "early" and not better and abs(cand_cost - prev_cost) <= _EPS:
+                        better = cand_pen < prev_pen
+                    if better:
+                        target_layer[new_state] = (cand_cost, cand_pen)
+                        parent[(end, new_state)] = (t, state, L)
+    
+    return best_final_cost, best_final_time, parent, timed_out
+
+
+
+
 def solve_optimal_benchmark_dp(
     processing_times: Iterable[int],
     prices: np.ndarray,
     *,
     job_ids: Optional[Iterable[int]] = None,
     tie_break: str = "cost",
+    time_limit: float = -1.0,
 ) -> DPResult:
     """Solve the simplified benchmark exactly.
 
@@ -176,114 +320,35 @@ def solve_optimal_benchmark_dp(
     n_states = int(np.prod(radices, dtype=np.int64))
     max_cells = 12_000_000  # conservative guard
     if (T + 1) * n_states > max_cells:
-        # Fallback: sparse exact DP by time layers.
-        # dp[t][state] = best cost to finish exactly at time t having used `state`.
-        # This avoids allocating O(T*n_states) and enumerating unreachable states.
-        used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * K)}
-
-        def decode_used(state: int) -> Tuple[int, ...]:
-            cached = used_cache.get(state)
-            if cached is not None:
-                return cached
-            u = [0] * K
-            x = state
-            for i in range(K):
-                r = int(radices[i])
-                u[i] = x % r
-                x //= r
-            tup = tuple(u)
-            used_cache[state] = tup
-            return tup
-
-        # dp_layers[t][state] = (cost, penalty)
-        # penalty is used only when tie_break == "early".
-        dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
-        dp_layers[0][0] = (0.0, 0)
-        parent: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
-        # parent[(t2, s2)] = (t1, s1, L) with L=0 for idle, else job length.
-
-        best_final_cost = float("inf")
-        best_final_pen = 2**63 - 1
-        best_final_time = -1
-
-        for t in range(T + 1):
-            layer = dp_layers[t]
-            if not layer:
-                continue
-
-            # If final state reached at time t, track best.
-            v_final = layer.get(final_state)
-            if v_final is not None:
-                c_final, p_final = float(v_final[0]), int(v_final[1])
-                better = c_final < best_final_cost
-                if (
-                    tie_break == "early"
-                    and not better
-                    and abs(c_final - best_final_cost) <= _EPS
-                ):
-                    better = p_final < best_final_pen or (
-                        p_final == best_final_pen and int(t) < best_final_time
-                    )
-                if better:
-                    best_final_cost = c_final
-                    best_final_pen = p_final
-                    best_final_time = int(t)
-
-            if t == T:
-                continue
-
-            # Idle transition: (t,state)->(t+1,state)
-            next_layer = dp_layers[t + 1]
-            for state, (c0, p0) in layer.items():
-                prev = next_layer.get(state)
-                if prev is None:
-                    next_layer[state] = (float(c0), int(p0))
-                    parent[(t + 1, state)] = (t, state, 0)
-                else:
-                    c_prev, p_prev = float(prev[0]), int(prev[1])
-                    better = c0 < c_prev
-                    if (
-                        tie_break == "early"
-                        and not better
-                        and abs(float(c0) - c_prev) <= _EPS
-                    ):
-                        better = p0 < p_prev
-                    if better:
-                        next_layer[state] = (float(c0), int(p0))
-                        parent[(t + 1, state)] = (t, state, 0)
-
-            # Job transitions
-            for state, (c0, p0) in layer.items():
-                used = decode_used(state)
-                for i, L in enumerate(lengths_list):
-                    if used[i] >= int(totals[i]):
-                        continue
-                    end = t + int(L)
-                    if end > T:
-                        continue
-
-                    new_state = state + int(inc[i])
-                    cand_cost = float(c0 + (prefix[end] - prefix[t]))
-                    cand_pen = int(p0)
-                    if tie_break == "early":
-                        cand_pen += int(t)
-                    target_layer = dp_layers[end]
-                    prev = target_layer.get(new_state)
-                    if prev is None:
-                        target_layer[new_state] = (cand_cost, cand_pen)
-                        parent[(end, new_state)] = (t, state, int(L))
-                    else:
-                        prev_cost, prev_pen = float(prev[0]), int(prev[1])
-                        better = cand_cost < prev_cost
-                        if (
-                            tie_break == "early"
-                            and not better
-                            and abs(cand_cost - prev_cost) <= _EPS
-                        ):
-                            better = cand_pen < prev_pen
-                        if better:
-                            target_layer[new_state] = (cand_cost, cand_pen)
-                            parent[(end, new_state)] = (t, state, int(L))
+        # Fallback: use optimized sparse DP with early pruning and time limit.
+        # This is much faster than the inline version due to early feasibility checks.
+        if _ACCEL_AVAILABLE:
+            best_final_cost, best_final_time, parent, timed_out = solve_sparse_dp_python(
+                lengths=lengths,
+                totals=totals,
+                prefix=prefix,
+                T=T,
+                radices=radices,
+                mult=mult,
+                K=K,
+                final_state=final_state,
+                time_limit=time_limit,
+                tie_break=tie_break,
+            )
+        else:
+            # Inline fallback if accelerated module not available
+            best_final_cost, best_final_time, parent, timed_out = _solve_sparse_dp_inline(
+                lengths_list=[int(x) for x in lengths.tolist()],
+                totals=totals,
+                prefix=prefix,
+                T=T,
+                radices=radices,
+                mult=mult,
+                K=K,
+                final_state=final_state,
+                tie_break=tie_break,
+                time_limit=time_limit,
+            )
 
         if not np.isfinite(best_final_cost) or best_final_time < 0:
             return DPResult(False, float("inf"), (), 0)
@@ -313,6 +378,7 @@ def solve_optimal_benchmark_dp(
                 finish_time = int(e)
 
         return DPResult(True, float(best_final_cost), tuple(sched), finish_time)
+
 
     # used[s, i] = used count of length i in state s
     used = np.zeros((n_states, K), dtype=np.int16)

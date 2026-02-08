@@ -26,6 +26,9 @@ Notes:
 Usage:
   python -m PaST.scripts.task_learnability_test --variants AAN_zprice AAN_full
 
+To run a more stable estimate, increase instances:
+    python -m PaST.scripts.task_learnability_test --variants AAN_zprice --n-instances 50
+
 Defaults are chosen to be reasonably fast on CPU.
 """
 
@@ -176,7 +179,7 @@ def _vectorize_features(features: Dict[str, np.ndarray]) -> np.ndarray:
 
 def _oracle_one_step(
     env, *, rng: random.Random, verbose: bool = False
-) -> Tuple[int, Dict[str, float]]:
+) -> Tuple[int, Dict[str, float], List[int]]:
     """Exhaustive one-step oracle (expected immediate reward).
 
     This oracle does NOT call env.step() for each action (too slow). Instead it
@@ -376,6 +379,8 @@ def _oracle_one_step(
     else:
         best_gen = int(rng.choice(best_gen_idxs.tolist()))
 
+    best_gen_set = [int(idx) for idx in best_gen_idxs.tolist()]
+
     sorted_gen_rewards = np.sort(gen_rewards) if gen_rewards.size else np.array([0.0])
     second_r = (
         float(sorted_gen_rewards[-2])
@@ -449,7 +454,7 @@ def _oracle_one_step(
         "accept_tie_rate": float(accept_tie) / float(accept_pairs),
     }
 
-    return best_gen, stats
+    return best_gen, stats, best_gen_set
 
 
 def _train_probe(
@@ -458,6 +463,7 @@ def _train_probe(
     n_actions: int,
     seed: int,
     device: str = "cpu",
+    best_sets: Optional[Sequence[Sequence[int]]] = None,
 ) -> Dict[str, float]:
     """Train a small MLP probe to predict oracle action from pooled features."""
 
@@ -510,9 +516,19 @@ def _train_probe(
         acc = (pred == y_test).float().mean().item() if y_test.numel() else 0.0
         ce = loss_fn(test_logits, y_test).item() if y_test.numel() else 0.0
 
+    tie_acc = 0.0
+    if best_sets is not None and y_test.numel():
+        hits = 0
+        total = int(y_test.numel())
+        for i, pi in enumerate(pred.tolist()):
+            if pi in set(best_sets[test_idx[i]]):
+                hits += 1
+        tie_acc = float(hits / max(1, total))
+
     return {
         "probe_enabled": 1.0,
         "probe_test_acc": float(acc),
+        "probe_test_acc_tie": float(tie_acc),
         "probe_test_ce": float(ce),
         "n_train": float(n_train),
         "n_test": float(n - n_train),
@@ -526,6 +542,19 @@ def _chance_accuracy(y: np.ndarray, n_actions: int) -> float:
     return float(counts.max() / counts.sum())
 
 
+def _chance_accuracy_tie(best_sets: Sequence[Sequence[int]], n_actions: int) -> float:
+    """Tie-aware chance accuracy for a uniform-random predictor.
+
+    If you pick a generator uniformly at random, probability of being correct
+    under tie-aware scoring is |argmax_set| / n_actions.
+    """
+
+    if n_actions <= 0 or not best_sets:
+        return 0.0
+    sizes = [len(set(bs)) for bs in best_sets]
+    return float(np.mean(np.asarray(sizes, dtype=np.float64) / float(n_actions)))
+
+
 def run_variant(
     key: str,
     config_path: Path,
@@ -537,6 +566,7 @@ def run_variant(
     device: str,
     top_k: int,
     use_proxy: bool,
+    step_penalty_override: Optional[float] = None,
     verbose: bool = False,
 ) -> Dict[str, Any]:
     from PaST.neurols.env import NeuroLSEnv, EnvConfig
@@ -556,6 +586,12 @@ def run_variant(
     fixed_n = int(n_jobs_list[0])
     fixed_m = int(n_machines_list[0])
 
+    step_penalty = (
+        float(step_penalty_override)
+        if step_penalty_override is not None
+        else float(cfg.get("step_penalty", 0.0))
+    )
+
     env_config = EnvConfig(
         max_steps=int(cfg.get("max_steps", 200)),
         stagnation_limit=int(cfg.get("stagnation_limit", 100)),
@@ -564,7 +600,7 @@ def run_variant(
         improvement_scale=float(cfg.get("improvement_scale", 1.0)),
         reward_eps=float(cfg.get("reward_eps", 1e-8)),
         best_bonus_lambda=float(cfg.get("best_bonus_lambda", 0.3)),
-        step_penalty=float(cfg.get("step_penalty", 0.0)),
+        step_penalty=step_penalty,
         top_k=int(top_k),
         use_proxy=bool(use_proxy),
         graph_type=graph_type,
@@ -587,6 +623,7 @@ def run_variant(
     X_rows: List[np.ndarray] = []
     y_rows: List[int] = []
     oracle_stats: List[Dict[str, float]] = []
+    best_sets: List[List[int]] = []
 
     for instance_id in range(n_instances):
         instance = generate_raw_instance(
@@ -606,10 +643,13 @@ def run_variant(
 
             # Oracle label from the *current* state.
             # Oracle label from the *current* state.
-            best_action, stats = _oracle_one_step(env, rng=inst_rng, verbose=verbose)
+            best_action, stats, best_set = _oracle_one_step(
+                env, rng=inst_rng, verbose=verbose
+            )
             X_rows.append(_vectorize_features(features))
             y_rows.append(best_action)
             oracle_stats.append(stats)
+            best_sets.append(best_set)
 
             # Step randomly to explore state space.
             a = int(inst_rng.randrange(env.action_space_size))
@@ -629,6 +669,10 @@ def run_variant(
         n_generators = 0
     n_generators = max(1, int(n_generators))
     chance = _chance_accuracy(y, n_generators)
+    chance_tie = _chance_accuracy_tie(best_sets, n_generators)
+    tie_set_size_mean = float(
+        np.mean([len(set(bs)) for bs in best_sets]) if best_sets else 0.0
+    )
 
     stats_mean = {
         k: float(np.mean([d[k] for d in oracle_stats])) if oracle_stats else 0.0
@@ -655,7 +699,14 @@ def run_variant(
         )
     }
 
-    probe = _train_probe(X, y, n_actions=n_generators, seed=seed + 123, device=device)
+    probe = _train_probe(
+        X,
+        y,
+        n_actions=n_generators,
+        seed=seed + 123,
+        device=device,
+        best_sets=best_sets,
+    )
 
     return {
         "variant": key,
@@ -667,6 +718,8 @@ def run_variant(
         "n_generators": int(n_generators),
         "n_samples": int(y.size),
         "chance_acc": float(chance),
+        "chance_acc_tie": float(chance_tie),
+        "tie_set_size_mean": float(tie_set_size_mean),
         **stats_mean,
         **probe,
     }
@@ -683,7 +736,12 @@ def main() -> None:
         help=f"Variants to test. Default: all ({len(_VARIANT_TO_CONFIG)})",
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--n-instances", type=int, default=8)
+    parser.add_argument(
+        "--n-instances",
+        type=int,
+        default=32,
+        help="Number of instances to sample per variant (higher = more stable, slower).",
+    )
     parser.add_argument("--states-per-instance", type=int, default=20)
     parser.add_argument("--K", type=int, default=40)
     parser.add_argument(
@@ -702,6 +760,12 @@ def main() -> None:
         type=str,
         default="cpu",
         help="Probe device (cpu/cuda). Training itself is env-only.",
+    )
+    parser.add_argument(
+        "--step-penalty",
+        type=float,
+        default=None,
+        help="Override step_penalty for this run (e.g., 1e-4).",
     )
     parser.add_argument(
         "--out",
@@ -741,6 +805,7 @@ def main() -> None:
             device=str(args.device),
             top_k=int(args.top_k),
             use_proxy=not bool(args.no_proxy),
+            step_penalty_override=args.step_penalty,
             verbose=bool(args.verbose),
         )
         results.append(res)
@@ -751,6 +816,11 @@ def main() -> None:
             if res.get("probe_enabled", 0.0) > 0
             else "probe=off"
         )
+        probe_tie_str = (
+            f"probe_tie={res.get('probe_test_acc_tie', 0.0):.3f}"
+            if res.get("probe_enabled", 0.0) > 0
+            else ""
+        )
         tie_str = f"tie={res.get('tie_best', 0.0):.2%}"
         tie_action_str = f"tie_action={res.get('tie_best_action', 0.0):.2%}"
         zero_str = f"all0={res.get('all_zero', 0.0):.2%}"
@@ -758,10 +828,13 @@ def main() -> None:
             f"accept>reject={res.get('accept_better_rate', 0.0):.2%}"
             f"/tie={res.get('accept_tie_rate', 0.0):.2%}"
         )
+        chance_tie_str = f"chance_tie={res.get('chance_acc_tie', 0.0):.3f}"
+        tie_sz_str = f"tie_sz={res.get('tie_set_size_mean', 0.0):.2f}"
         print(
             f"[{key:9s}] samples={res['n_samples']:4d}  "
             f"gens={int(res.get('n_generators', 0)):3d}  "
-            f"chance={res['chance_acc']:.3f}  {probe_str}  {tie_str}  "
+            f"chance={res['chance_acc']:.3f}  {chance_tie_str}  {tie_sz_str}  "
+            f"{probe_str}  {probe_tie_str}  {tie_str}  "
             f"{tie_action_str}  {zero_str}  {accept_str}  "
             f"best-mean={res['adv_best_minus_mean']:.4g}  "
             f"margin(best,2nd)={res['margin_best_second']:.4g}  "
