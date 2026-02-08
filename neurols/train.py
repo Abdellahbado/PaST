@@ -1288,22 +1288,31 @@ class NeuroLSTrainer:
     def save_checkpoint(self, filename: str):
         """Save checkpoint."""
         path = self.checkpoint_dir / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        torch.save(
-            {
-                "episode": self.episode,
-                "global_step": self.global_step,
-                "policy_net": self.policy_net.state_dict(),
-                "target_net": self.target_net.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
-                "scheduler": self.scheduler.state_dict(),
-                "epsilon": self.epsilon,
-                "config": asdict(self.config),
-            },
-            path,
-        )
+        payload = {
+            "episode": self.episode,
+            "global_step": self.global_step,
+            "policy_net": self.policy_net.state_dict(),
+            "target_net": self.target_net.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
+            "epsilon": self.epsilon,
+            "config": asdict(self.config),
+        }
 
-        print(f"Saved checkpoint: {path}")
+        tmp_path = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+        try:
+            torch.save(payload, tmp_path)
+            os.replace(tmp_path, path)
+            print(f"Saved checkpoint: {path}")
+        except Exception as exc:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                pass
+            print(f"[WARN] Failed to save checkpoint to {path}: {exc}")
 
     def load_checkpoint(self, path: str):
         """Load checkpoint."""

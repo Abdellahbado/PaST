@@ -202,6 +202,8 @@ def _oracle_one_step(
     denom = float(env._initial_cost) + float(env.config.reward_eps)
 
     def _accept_prob(*, accept_flag: bool, new_cost: float) -> float:
+        if not np.isfinite(new_cost):
+            return 0.0
         if new_cost < current_cost_before:
             return 1.0
         if not accept_flag:
@@ -212,16 +214,24 @@ def _oracle_one_step(
             return 1.0
 
         delta = float(new_cost) - float(current_cost_before)
+        if not np.isfinite(delta):
+            return 0.0
         if delta <= 0.0:
             return 1.0
         temp = float(getattr(env, "temperature", 0.0))
         if temp <= 0.0:
             return 0.0
-        p = float(np.exp(-delta / temp))
+        ratio = -delta / temp
+        if not np.isfinite(ratio):
+            return 0.0
+        p = float(np.exp(ratio))
         return float(min(1.0, max(0.0, p)))
 
     def _expected_reward(*, accept_flag: bool, new_cost: Optional[float]) -> float:
         if new_cost is None:
+            return float(-env.config.step_penalty)
+
+        if not np.isfinite(float(new_cost)):
             return float(-env.config.step_penalty)
 
         p = _accept_prob(accept_flag=accept_flag, new_cost=float(new_cost))
@@ -247,38 +257,35 @@ def _oracle_one_step(
             raise ValueError(f"Unknown reward_mode: {mode}")
 
         reward -= float(env.config.step_penalty)
+        if not np.isfinite(float(reward)):
+            return float(-env.config.step_penalty)
         return float(reward)
 
     n_actions = int(env.action_space_size)
 
-    collapse_accept = str(env.config.reward_mode) in {"improvement", "normalized"}
-    gen_to_actions: Dict[Tuple[Any, Any, Any, Any, Any], List[int]] = {}
+    gen_to_actions: Dict[Tuple[Any, Any, Any, Any], List[int]] = {}
     for a in range(n_actions):
         d = env.config.action_space.decode_action(a)
-        accept_key: Any = None if collapse_accept else bool(d.accept)
-        gen_key = (
-            d.action_type,
-            d.operator_id,
-            d.perturbation_id,
-            d.destroy_id,
-            accept_key,
-        )
+        gen_key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id)
         gen_to_actions.setdefault(gen_key, []).append(a)
 
-    def _stable_key(
-        k: Tuple[Any, Any, Any, Any, Any],
-    ) -> Tuple[int, int, int, int, int]:
-        at, op, pert, dest, acc = k
+    def _stable_key(k: Tuple[Any, Any, Any, Any]) -> Tuple[int, int, int, int]:
+        at, op, pert, dest = k
         return (
             int(at),
             int(op) if op is not None else -1,
             int(pert) if pert is not None else -1,
             int(dest) if dest is not None else -1,
-            1 if bool(acc) else 0,
         )
 
     gen_keys = sorted(gen_to_actions.keys(), key=_stable_key)
     gen_rewards = np.zeros((len(gen_keys),), dtype=np.float32)
+    action_rewards = np.zeros((n_actions,), dtype=np.float32)
+
+    accept_pairs = 0
+    accept_better = 0
+    reject_better = 0
+    accept_tie = 0
 
     for gi, gen_key in enumerate(gen_keys):
         a_rep = gen_to_actions[gen_key][0]
@@ -338,9 +345,27 @@ def _oracle_one_step(
                     new_eval = env._evaluator.evaluate_solution(new_solution)
                     new_cost = float(new_eval.total_energy)
 
-        gen_rewards[gi] = _expected_reward(
-            accept_flag=bool(decoded.accept), new_cost=new_cost
-        )
+        accept_reward = None
+        reject_reward = None
+        for a in gen_to_actions[gen_key]:
+            a_decoded = env.config.action_space.decode_action(a)
+            r = _expected_reward(accept_flag=bool(a_decoded.accept), new_cost=new_cost)
+            action_rewards[a] = r
+            if bool(a_decoded.accept):
+                accept_reward = r
+            else:
+                reject_reward = r
+
+        if accept_reward is not None and reject_reward is not None:
+            accept_pairs += 1
+            if accept_reward > reject_reward:
+                accept_better += 1
+            elif accept_reward < reject_reward:
+                reject_better += 1
+            else:
+                accept_tie += 1
+
+        gen_rewards[gi] = float(np.max(action_rewards[gen_to_actions[gen_key]]))
 
     best_r = float(gen_rewards.max()) if gen_rewards.size else 0.0
     best_gen_idxs = np.flatnonzero(gen_rewards == best_r)
@@ -365,6 +390,13 @@ def _oracle_one_step(
     best_is_zero = float(1.0 if best_r <= 0.0 else 0.0)
     tie_best_nonzero = float(1.0 if (best_gen_idxs.size > 1 and best_r > 0.0) else 0.0)
 
+    best_a = float(action_rewards.max()) if action_rewards.size else 0.0
+    best_action_idxs = np.flatnonzero(action_rewards == best_a)
+    tie_best_action = float(1.0 if best_action_idxs.size > 1 else 0.0)
+    nonzero_action_frac = (
+        float(np.mean(action_rewards > 0.0)) if action_rewards.size else 0.0
+    )
+
     if verbose and tie_best_nonzero > 0.5:
         print(f"\n[Tie Detected] Best Reward: {best_r:.6f}")
         for idx in best_gen_idxs:
@@ -373,9 +405,6 @@ def _oracle_one_step(
             at_str = str(at_type.name)
 
             parts = []
-            if not collapse_accept:
-                parts.append(f"accept={bool(gk[4])}")
-
             if at_type == ActionType.OPERATOR:
                 OP_NAMES = {0: "SWAP", 1: "INSERT", 2: "MOVE", 3: "CROSS"}
                 if gk[1] is not None and gk[1] != -1:
@@ -396,6 +425,8 @@ def _oracle_one_step(
             details = " ".join(parts)
             print(f"  Gen {idx}: {at_str:12s} {details}")
 
+    accept_pairs = max(1, int(accept_pairs))
+
     stats = {
         "best_reward": best_r,
         "second_best_reward": second_r,
@@ -405,12 +436,17 @@ def _oracle_one_step(
         "mean_reward": mean_r,
         "median_reward": median_r,
         "nonzero_reward_frac": nonzero_frac,
+        "nonzero_action_frac": nonzero_action_frac,
         "n_generators": float(len(gen_keys)),
         "tie_best_count": float(best_gen_idxs.size),
         "tie_best": float(1.0 if best_gen_idxs.size > 1 else 0.0),
+        "tie_best_action": tie_best_action,
         "tie_best_nonzero": tie_best_nonzero,
         "best_is_zero": best_is_zero,
         "all_zero": all_zero,
+        "accept_better_rate": float(accept_better) / float(accept_pairs),
+        "reject_better_rate": float(reject_better) / float(accept_pairs),
+        "accept_tie_rate": float(accept_tie) / float(accept_pairs),
     }
 
     return best_gen, stats
@@ -603,13 +639,18 @@ def run_variant(
             "margin_best_median",
             "adv_best_minus_mean",
             "nonzero_reward_frac",
+            "nonzero_action_frac",
             "mean_reward",
             "median_reward",
             "tie_best",
             "tie_best_count",
+            "tie_best_action",
             "tie_best_nonzero",
             "best_is_zero",
             "all_zero",
+            "accept_better_rate",
+            "reject_better_rate",
+            "accept_tie_rate",
             "n_generators",
         )
     }
@@ -711,11 +752,17 @@ def main() -> None:
             else "probe=off"
         )
         tie_str = f"tie={res.get('tie_best', 0.0):.2%}"
+        tie_action_str = f"tie_action={res.get('tie_best_action', 0.0):.2%}"
         zero_str = f"all0={res.get('all_zero', 0.0):.2%}"
+        accept_str = (
+            f"accept>reject={res.get('accept_better_rate', 0.0):.2%}"
+            f"/tie={res.get('accept_tie_rate', 0.0):.2%}"
+        )
         print(
             f"[{key:9s}] samples={res['n_samples']:4d}  "
             f"gens={int(res.get('n_generators', 0)):3d}  "
-            f"chance={res['chance_acc']:.3f}  {probe_str}  {tie_str}  {zero_str}  "
+            f"chance={res['chance_acc']:.3f}  {probe_str}  {tie_str}  "
+            f"{tie_action_str}  {zero_str}  {accept_str}  "
             f"best-mean={res['adv_best_minus_mean']:.4g}  "
             f"margin(best,2nd)={res['margin_best_second']:.4g}  "
             f"nonzero={res['nonzero_reward_frac']:.2%}"
