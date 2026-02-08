@@ -256,6 +256,14 @@ def _oracle_one_step(
             reward = (
                 exp_r_cur + float(env.config.best_bonus_lambda) * exp_r_best
             ) * float(env.config.improvement_scale)
+        elif mode == "dense_best_exposure":
+            # Oracle currently uses cost-only expected reward.
+            # (Exposure shaping depends on schedule structure and is omitted here.)
+            exp_r_cur = p * (current_cost_before - new_cost_f) / denom
+            exp_r_best = p * max(best_cost_before - new_cost_f, 0.0) / denom
+            reward = (
+                exp_r_cur + float(env.config.best_bonus_lambda) * exp_r_best
+            ) * float(env.config.improvement_scale)
         else:
             raise ValueError(f"Unknown reward_mode: {mode}")
 

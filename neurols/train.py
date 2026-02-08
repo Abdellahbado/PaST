@@ -91,6 +91,15 @@ class TrainConfig:
     step_penalty: float = 0.0
     graph_type: str = "bipartite"  # bipartite or tripartite
 
+    # Candidate generation
+    top_k: int = 10
+    use_proxy: bool = True
+    proxy_mode: str = "load"  # load | price_aware
+
+    # Optional exposure-based shaping (reward_mode == dense_best_exposure)
+    exposure_bonus_lambda: float = 0.0
+    exposure_eps: float = 1e-8
+
     # Model — aligned with NeuroLS paper Appendix B
     d_emb: int = 128
     n_layers_static: int = 3  # Paper: L_stat = 3
@@ -829,6 +838,11 @@ class NeuroLSTrainer:
             reward_eps=self.config.reward_eps,
             best_bonus_lambda=self.config.best_bonus_lambda,
             step_penalty=self.config.step_penalty,
+            top_k=self.config.top_k,
+            use_proxy=self.config.use_proxy,
+            proxy_mode=self.config.proxy_mode,
+            exposure_bonus_lambda=self.config.exposure_bonus_lambda,
+            exposure_eps=self.config.exposure_eps,
             graph_type=self.config.graph_type,
             price_mode=self.config.price_mode,
         )
@@ -1345,7 +1359,10 @@ def main():
         help="Enable/disable IQN (distributional RL)",
     )
     parser.add_argument(
-        "--action-space", type=str, default=None, choices=["AA", "AAN", "AANP", "AANPD"]
+        "--action-space",
+        type=str,
+        default=None,
+        choices=["AA", "AAN", "AANP", "AANP_PRICE", "AANPD"],
     )
     parser.add_argument(
         "--graph-type",

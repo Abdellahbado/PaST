@@ -62,15 +62,22 @@ class EnvConfig:
     # Candidate generation
     top_k: int = 10  # Top-K moves per operator
     use_proxy: bool = True  # Use proxy ranking for large instances
+    proxy_mode: str = "load"  # load (legacy) | price_aware
 
     # Reward shaping
-    reward_mode: str = "dense_best"  # improvement, normalized, potential, dense_best
+    reward_mode: str = (
+        "dense_best"  # improvement, normalized, potential, dense_best, dense_best_exposure
+    )
     improvement_scale: float = 1.0
     # For dense/normalized rewards: denominator = f(s0) + reward_eps
     reward_eps: float = 1e-8
     # For dense_best reward: r = r_cur + best_bonus_lambda * r_best - step_penalty
     best_bonus_lambda: float = 0.3
     step_penalty: float = 0.0  # Small penalty per step to encourage faster convergence
+
+    # Optional: exposure-based shaping (used by reward_mode == "dense_best_exposure")
+    exposure_bonus_lambda: float = 0.0
+    exposure_eps: float = 1e-8
 
     # Solution initialization
     init_mode: str = "load_balanced"  # load_balanced, random, assignment
@@ -118,6 +125,7 @@ class NeuroLSEnv:
         self._no_improve_count: int = 0
         self._best_cost_episode: float = float("inf")
         self._initial_cost: float = float("inf")
+        self._initial_exposure_potential: float = 1.0
 
         # Cached instance data (set in reset)
         self._processing_times: Optional[np.ndarray] = None
@@ -190,6 +198,7 @@ class NeuroLSEnv:
         cand_config = CandidateConfig(
             max_moves_topk=self.config.top_k,
             use_proxy_ranking=self.config.use_proxy,
+            proxy_mode=self.config.proxy_mode,
         )
         self._candidate_gen = CandidateGenerator(
             evaluator=self._evaluator,
@@ -222,6 +231,15 @@ class NeuroLSEnv:
 
         self._initial_cost = initial_cost
         self._best_cost_episode = initial_cost
+
+        if str(self.config.reward_mode).lower() == "dense_best_exposure":
+            self._initial_exposure_potential = float(
+                self._compute_peak_exposure_potential(self._current_eval)
+            )
+            if (not np.isfinite(self._initial_exposure_potential)) or (
+                self._initial_exposure_potential <= 0
+            ):
+                self._initial_exposure_potential = 1.0
 
         # Initialize state using StateBuilder
         self.state = StateBuilder.from_instance(
@@ -304,6 +322,11 @@ class NeuroLSEnv:
             "accepted": False,
             "improved": False,
         }
+
+        if str(self.config.reward_mode).lower() == "dense_best_exposure":
+            info["exposure_before"] = float(
+                self._compute_peak_exposure_potential(self._current_eval)
+            )
 
         # Handle operator actions
         if decoded.action_type == ActionType.OPERATOR:
@@ -565,6 +588,11 @@ class NeuroLSEnv:
                 )
                 self._no_improve_count += 1
 
+        if str(self.config.reward_mode).lower() == "dense_best_exposure":
+            info["exposure_after"] = float(
+                self._compute_peak_exposure_potential(self._current_eval)
+            )
+
         # Compute reward
         reward = self._compute_reward(info)
         info["reward"] = reward
@@ -719,6 +747,31 @@ class NeuroLSEnv:
                 self.config.improvement_scale
             )
 
+        elif mode == "dense_best_exposure":
+            # Dense-best reward + auxiliary shaping that rewards reducing peak/expensive exposure.
+            old_cost = float(info["cost_before"])
+            new_cost = float(self.state.current_cost)
+            r_cur = (old_cost - new_cost) / denom
+
+            old_best = float(info["best_cost_before"])
+            new_best = float(self.state.best_cost)
+            r_best = max(old_best - new_best, 0.0) / denom
+
+            base = (r_cur + float(self.config.best_bonus_lambda) * r_best) * float(
+                self.config.improvement_scale
+            )
+
+            phi_before = float(info.get("exposure_before", 0.0))
+            phi_after = float(info.get("exposure_after", phi_before))
+            exp_denom = float(self._initial_exposure_potential) + float(
+                self.config.exposure_eps
+            )
+            if (not np.isfinite(exp_denom)) or exp_denom <= 0:
+                exp_denom = 1.0
+
+            r_exp = (phi_before - phi_after) / exp_denom
+            reward = base + float(self.config.exposure_bonus_lambda) * r_exp
+
         else:
             reward = 0.0
 
@@ -726,6 +779,46 @@ class NeuroLSEnv:
         reward -= self.config.step_penalty
 
         return reward
+
+    def _compute_peak_exposure_potential(self, full_eval: FullEvaluation) -> float:
+        """Compute a scalar potential measuring peak/expensive exposure.
+
+        This is an auxiliary signal used for shaping (not the true objective).
+        It's computed from the *current* DP schedule (start_times) and the
+        price levels from the instance.
+        """
+        if self.instance is None or self.state is None:
+            return 0.0
+
+        solution = self.state.solution
+        p = self._processing_times
+        if p is None or self._machine_energy_rates is None:
+            return 0.0
+
+        pot = 0.0
+        m = int(self.instance.m)
+        for mi in range(m):
+            seq = solution.sequences[mi]
+            if not seq:
+                continue
+
+            me = full_eval.per_machine[mi]
+            if (not me.start_times) or (len(me.start_times) != len(seq)):
+                continue
+
+            proc_times = [int(p[j]) for j in seq]
+            e_rate = float(self._machine_energy_rates[mi])
+            exp = self._price_extractor.compute_machine_price_exposure(
+                me.start_times, proc_times, e_rate
+            )
+
+            peak_frac = float(exp[3 + 2])
+            avg_price_norm = float(exp[6])
+            pot += e_rate * (0.7 * peak_frac + 0.3 * avg_price_norm)
+
+        if not np.isfinite(pot):
+            return 0.0
+        return float(pot)
 
     def _is_done(self) -> bool:
         """Check if episode should terminate."""

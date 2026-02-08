@@ -63,6 +63,41 @@ class PriceFeatureExtractor:
         # Categorize prices into levels
         self._compute_price_levels()
 
+        # Precompute level-specific prefix sums for fast exposure queries
+        # level_count_prefix[l, t] = number of slots < t in level l
+        # level_price_prefix[l, t] = sum of prices for slots < t in level l
+        n = len(self.ct)
+        self.level_count_prefix = np.zeros((N_PRICE_LEVELS, n + 1), dtype=np.int32)
+        self.level_price_prefix = np.zeros((N_PRICE_LEVELS, n + 1), dtype=np.float64)
+        for l in range(N_PRICE_LEVELS):
+            mask = (self.slot_levels == l).astype(np.int32)
+            self.level_count_prefix[l, 1:] = np.cumsum(mask)
+            self.level_price_prefix[l, 1:] = np.cumsum(self.ct * mask)
+
+    def get_interval_level_counts(self, start: int, duration: int) -> np.ndarray:
+        """Get counts of slots per price level over [start, start+duration).
+
+        Returns:
+            (3,) int array with counts per level.
+        """
+        end = min(start + duration, len(self.ct))
+        if start < 0 or start >= end:
+            return np.zeros(N_PRICE_LEVELS, dtype=np.int32)
+        counts = self.level_count_prefix[:, end] - self.level_count_prefix[:, start]
+        return counts.astype(np.int32)
+
+    def get_interval_level_price_sums(self, start: int, duration: int) -> np.ndarray:
+        """Get sum of prices per level over [start, start+duration).
+
+        Returns:
+            (3,) float array with sum(ct[t]) per level.
+        """
+        end = min(start + duration, len(self.ct))
+        if start < 0 or start >= end:
+            return np.zeros(N_PRICE_LEVELS, dtype=np.float64)
+        sums = self.level_price_prefix[:, end] - self.level_price_prefix[:, start]
+        return sums.astype(np.float64)
+
     def _compute_price_levels(self) -> None:
         """Categorize prices into off-peak/shoulder/peak."""
         unique_prices = sorted(set(self.ct))
@@ -191,13 +226,14 @@ class PriceFeatureExtractor:
         total_price = 0.0
 
         for start, duration in zip(start_times, processing_times):
-            end = min(start + duration, len(self.ct))
-            for t in range(start, end):
-                if 0 <= t < len(self.slot_levels):
-                    level = self.slot_levels[t]
-                    workload_by_level[level] += 1
-                    total_slots += 1
-                    total_price += self.ct[t]
+            duration_i = int(duration)
+            if duration_i <= 0:
+                continue
+
+            counts = self.get_interval_level_counts(int(start), duration_i)
+            workload_by_level += counts.astype(np.float64)
+            total_slots += int(np.sum(counts))
+            total_price += float(self.get_interval_cost(int(start), duration_i))
 
         # Normalize
         total_work = float(np.sum(workload_by_level))

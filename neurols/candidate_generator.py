@@ -19,6 +19,7 @@ import numpy as np
 from PaST.neurols.solution import PMALNSSolution
 from PaST.neurols.operators import Move, Operator, OperatorID, OPERATORS, OPERATOR_BY_ID
 from PaST.neurols.move_evaluator import MoveEvaluator, FullEvaluation, MoveEvaluation
+from PaST.neurols.price_embedding import PriceFeatureExtractor
 
 
 @dataclass
@@ -34,6 +35,17 @@ class CandidateConfig:
 
     # Proxy scores for top-K selection (when full enumeration too expensive)
     use_proxy_ranking: bool = True
+
+    # Proxy mode:
+    # - "load": existing load-balance heuristics (paper-ish)
+    # - "price_aware": uses current DP schedule start_times to bias toward
+    #   moves that reduce peak/expensive exposure and prefer low-rate machines.
+    proxy_mode: str = "load"
+
+    # Weights for price-aware proxy (only used when proxy_mode == "price_aware")
+    price_badness_peak_frac_w: float = 0.7
+    price_badness_avg_price_w: float = 0.3
+    price_rate_w: float = 0.5
 
 
 class CandidateGenerator:
@@ -62,6 +74,12 @@ class CandidateGenerator:
         """
         self.evaluator = evaluator
         self.config = config or CandidateConfig()
+
+        # Local extractor for deterministic, state-dependent proxy signals.
+        # (This is cheap; it only holds prefix sums over ct[:K].)
+        self._price_extractor = PriceFeatureExtractor(
+            self.evaluator.ct, self.evaluator.K
+        )
 
     def generate_best_move(
         self,
@@ -97,7 +115,11 @@ class CandidateGenerator:
             if self.config.use_proxy_ranking:
                 # Use top-K with proxy ranking (heuristic pre-filter)
                 moves_to_eval = self._select_topk_by_proxy(
-                    solution, all_moves, operator, self.config.max_moves_topk
+                    solution,
+                    current_eval,
+                    all_moves,
+                    operator,
+                    self.config.max_moves_topk,
                 )
             else:
                 # No proxy: just take first max_moves_topk moves (deterministic order)
@@ -147,6 +169,7 @@ class CandidateGenerator:
     def _select_topk_by_proxy(
         self,
         solution: PMALNSSolution,
+        current_eval: FullEvaluation,
         moves: List[Move],
         operator: Operator,
         k: int,
@@ -166,10 +189,48 @@ class CandidateGenerator:
         loads = solution.get_machine_loads(p)
         avg_load = float(np.mean(loads))
 
+        # Optional: price-aware badness per machine from the *current* DP schedule.
+        # This is intentionally approximate: we use it for pre-filtering only.
+        price_badness = None
+        if str(self.config.proxy_mode).lower() == "price_aware":
+            m = solution.n_machines
+            bad = np.zeros(m, dtype=np.float64)
+            for mi in range(m):
+                seq = solution.sequences[mi]
+                me = current_eval.per_machine[mi]
+                if (
+                    (not seq)
+                    or (not me.start_times)
+                    or (len(me.start_times) != len(seq))
+                ):
+                    continue
+                proc_times = [int(p[j]) for j in seq]
+                exp = self._price_extractor.compute_machine_price_exposure(
+                    me.start_times,
+                    proc_times,
+                    float(self.evaluator.machine_energy_rates[mi]),
+                )
+                # exp = [work_norm(3), frac(3), avg_price_norm]
+                peak_frac = float(exp[3 + 2])
+                avg_price_norm = float(exp[6])
+                bad[mi] = (
+                    float(self.config.price_badness_peak_frac_w) * peak_frac
+                    + float(self.config.price_badness_avg_price_w) * avg_price_norm
+                )
+            price_badness = bad
+
         scored_moves: List[Tuple[float, int, Move]] = []
 
         for idx, move in enumerate(moves):
-            score = self._compute_proxy_score(move, solution, loads, avg_load, p)
+            score = self._compute_proxy_score(
+                move,
+                solution,
+                current_eval,
+                loads,
+                avg_load,
+                p,
+                price_badness,
+            )
             # Negative score because we want highest scores first
             # Secondary sort by index for determinism
             scored_moves.append((-score, idx, move))
@@ -183,9 +244,11 @@ class CandidateGenerator:
         self,
         move: Move,
         solution: PMALNSSolution,
+        current_eval: FullEvaluation,
         loads: np.ndarray,
         avg_load: float,
         p: np.ndarray,
+        price_badness: Optional[np.ndarray],
     ) -> float:
         """Compute proxy score for a move (higher = more promising).
 
@@ -193,16 +256,39 @@ class CandidateGenerator:
         """
         op = move.operator
 
+        proxy_mode = str(self.config.proxy_mode).lower()
+        if proxy_mode not in ("load", "price_aware"):
+            proxy_mode = "load"
+
+        if proxy_mode == "price_aware" and price_badness is not None:
+            rates = self.evaluator.machine_energy_rates
+
+            def _job_start_level(mi: int, pos: int) -> int:
+                me = current_eval.per_machine[mi]
+                if not me.start_times or pos >= len(me.start_times):
+                    return 0
+                start = int(me.start_times[pos])
+                if start < 0 or start >= len(self._price_extractor.slot_levels):
+                    return 0
+                return int(self._price_extractor.slot_levels[start])
+
         if op == OperatorID.RELOCATE_1:
             from_m, from_pos, to_m, to_pos = move.params
             job = solution.sequences[from_m][from_pos]
             job_p = float(p[job])
 
-            # Score: benefit of moving from overloaded to underloaded
+            if proxy_mode == "price_aware":
+                # Prefer moving long work from high price-badness / high-rate
+                # machines to lower ones. (Approximate; just for top-K.)
+                bad_delta = float(price_badness[from_m]) - float(price_badness[to_m])
+                rate_delta = float(rates[from_m]) - float(rates[to_m])
+                return (
+                    bad_delta + float(self.config.price_rate_w) * rate_delta
+                ) * job_p
+
+            # "load" (legacy)
             from_excess = float(loads[from_m]) - avg_load
             to_deficit = avg_load - float(loads[to_m])
-
-            # Higher score if moving from heavy machine to light machine
             return from_excess + to_deficit + 0.01 * job_p
 
         elif op == OperatorID.SWAP_1:
@@ -214,6 +300,15 @@ class CandidateGenerator:
                 # Intra-machine swap: score by position change potential
                 return abs(float(p[job1]) - float(p[job2]))
             else:
+                if proxy_mode == "price_aware":
+                    # Prefer swapping to move longer job off worse machine.
+                    bad_delta = float(price_badness[m1]) - float(price_badness[m2])
+                    rate_delta = float(rates[m1]) - float(rates[m2])
+                    p_delta = float(p[job1]) - float(p[job2])
+                    return (
+                        bad_delta + float(self.config.price_rate_w) * rate_delta
+                    ) * p_delta
+
                 # Inter-machine: benefit of balancing loads
                 delta1 = float(p[job2]) - float(p[job1])  # Change to machine 1
                 load1_new = float(loads[m1]) + delta1
@@ -230,7 +325,12 @@ class CandidateGenerator:
             m, from_pos, to_pos = move.params
             job = solution.sequences[m][from_pos]
 
-            # Score by distance of move (larger moves might have more impact)
+            if proxy_mode == "price_aware":
+                # If the job currently starts in peak, moving it is more promising.
+                level = _job_start_level(int(m), int(from_pos))
+                peak = 1.0 if level == 2 else 0.0
+                return peak * (abs(to_pos - from_pos) + 0.01 * float(p[job]))
+
             return abs(to_pos - from_pos) * 0.1 + float(p[job]) * 0.01
 
         elif op == OperatorID.BLOCK_RELOCATE:
@@ -243,8 +343,21 @@ class CandidateGenerator:
             )
 
             if from_m == to_m:
+                if proxy_mode == "price_aware":
+                    level = _job_start_level(int(from_m), int(from_start))
+                    peak = 1.0 if level == 2 else 0.0
+                    return peak * (abs(to_pos - from_start) + 0.01 * block_p)
                 return abs(to_pos - from_start) * 0.1 + block_p * 0.01
             else:
+                if proxy_mode == "price_aware":
+                    bad_delta = float(price_badness[from_m]) - float(
+                        price_badness[to_m]
+                    )
+                    rate_delta = float(rates[from_m]) - float(rates[to_m])
+                    return (
+                        bad_delta + float(self.config.price_rate_w) * rate_delta
+                    ) * block_p
+
                 from_excess = float(loads[from_m]) - avg_load
                 to_deficit = avg_load - float(loads[to_m])
                 return from_excess + to_deficit + block_p * 0.01

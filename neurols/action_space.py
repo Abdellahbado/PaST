@@ -14,6 +14,9 @@ Action encoding (AANP, primary):
 
 For AANP with 4 operators and 3 perturbations:
 Total actions = 2 * (4 + 3) = 14
+
+This project also supports an optional extended action space:
+- AANP_PRICE: AANP + an extra price-aware perturbation (Shake-Peak)
 """
 
 from __future__ import annotations
@@ -288,6 +291,25 @@ AANP_SPACE = ActionSpace(
     ],
 )
 
+# AANP_PRICE: Acceptance + Operator/Perturbation with an extra price-aware shake
+# Total actions = 2 × (4 operators + 4 perturbations) = 16
+AANP_PRICE_SPACE = ActionSpace(
+    name="AANP",
+    n_actions=16,
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.INTRA_INSERT,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[
+        PerturbationID.NONE,
+        PerturbationID.SHAKE_SMALL,
+        PerturbationID.SHAKE_PEAK,
+        PerturbationID.RESTART,
+    ],
+)
+
 # AANPD: Acceptance + Operator/Perturbation/Destroy (24 actions = 2 × 12)
 # Tripartite-B variant: learns which destroy-repair operator to invoke
 AANPD_SPACE = ActionSpace(
@@ -323,6 +345,8 @@ def get_action_space(name: str) -> ActionSpace:
         return AAN_SPACE
     elif name == "AANP":
         return AANP_SPACE
+    elif name in ("AANP_PRICE", "AANP-PRICE"):
+        return AANP_PRICE_SPACE
     elif name == "AANPD":
         return AANPD_SPACE
     else:
