@@ -174,18 +174,17 @@ def _vectorize_features(features: Dict[str, np.ndarray]) -> np.ndarray:
     return np.concatenate(vec_parts, axis=0).astype(np.float32)
 
 
-def _oracle_one_step(env, *, rng: random.Random) -> Tuple[int, Dict[str, float]]:
-    """Exhaustive one-step oracle (immediate improvement potential).
+def _oracle_one_step(
+    env, *, rng: random.Random, verbose: bool = False
+) -> Tuple[int, Dict[str, float]]:
+    """Exhaustive one-step oracle (expected immediate reward).
 
-    Critically, this oracle does NOT call env.step() for each action (too slow).
-    Instead, it evaluates the immediate reward signal implied by each action:
-
-      reward(a) = max(best_cost_before - cost_after_applying_a_once, 0)
-
-    where cost_after_applying_a_once is computed using the environment's
-    candidate generator / evaluator without mutating the current state.
-
-    This targets “is the task learnable?” rather than “does RL learn?”.
+    This oracle does NOT call env.step() for each action (too slow). Instead it
+    estimates the *expected* 1-step reward under the environment's current
+    reward shaping mode by:
+    1) computing the cost of applying the generator once (operator/perturb/destroy)
+    2) applying accept/reject semantics analytically (Metropolis / deterministic)
+    3) computing the expected reward (incl. step penalty)
     """
 
     from PaST.neurols.perturbations import (
@@ -199,43 +198,95 @@ def _oracle_one_step(env, *, rng: random.Random) -> Tuple[int, Dict[str, float]]
         raise RuntimeError("Env must be reset() before oracle evaluation")
 
     best_cost_before = float(env.state.best_cost)
+    current_cost_before = float(env._current_eval.total_energy)
+    denom = float(env._initial_cost) + float(env.config.reward_eps)
+
+    def _accept_prob(*, accept_flag: bool, new_cost: float) -> float:
+        if new_cost < current_cost_before:
+            return 1.0
+        if not accept_flag:
+            return 0.0
+        if bool(env.config.deterministic):
+            return 0.0
+        if not bool(env.config.use_acceptance):
+            return 1.0
+
+        delta = float(new_cost) - float(current_cost_before)
+        if delta <= 0.0:
+            return 1.0
+        temp = float(getattr(env, "temperature", 0.0))
+        if temp <= 0.0:
+            return 0.0
+        p = float(np.exp(-delta / temp))
+        return float(min(1.0, max(0.0, p)))
+
+    def _expected_reward(*, accept_flag: bool, new_cost: Optional[float]) -> float:
+        if new_cost is None:
+            return float(-env.config.step_penalty)
+
+        p = _accept_prob(accept_flag=accept_flag, new_cost=float(new_cost))
+        new_cost_f = float(new_cost)
+        mode = str(env.config.reward_mode)
+
+        if mode == "improvement":
+            exp_improve = p * max(best_cost_before - new_cost_f, 0.0)
+            reward = exp_improve * float(env.config.improvement_scale)
+        elif mode == "normalized":
+            exp_improve = p * (best_cost_before - min(best_cost_before, new_cost_f))
+            reward = (exp_improve / denom) * float(env.config.improvement_scale)
+        elif mode == "potential":
+            exp_delta = p * (current_cost_before - new_cost_f)
+            reward = exp_delta * float(env.config.improvement_scale)
+        elif mode == "dense_best":
+            exp_r_cur = p * (current_cost_before - new_cost_f) / denom
+            exp_r_best = p * max(best_cost_before - new_cost_f, 0.0) / denom
+            reward = (
+                exp_r_cur + float(env.config.best_bonus_lambda) * exp_r_best
+            ) * float(env.config.improvement_scale)
+        else:
+            raise ValueError(f"Unknown reward_mode: {mode}")
+
+        reward -= float(env.config.step_penalty)
+        return float(reward)
 
     n_actions = int(env.action_space_size)
 
-    # Collapse accept/reject duplicates.
-    # We evaluate the *generator* (operator/perturbation/destroy choice) once,
-    # since under reward_mode="improvement" the accept bit cannot change the
-    # immediate improvement reward:
-    # - improvements are always accepted
-    # - worsening moves yield 0 reward either way
-    gen_to_actions: Dict[Tuple[Any, Any, Any, Any], List[int]] = {}
+    collapse_accept = str(env.config.reward_mode) in {"improvement", "normalized"}
+    gen_to_actions: Dict[Tuple[Any, Any, Any, Any, Any], List[int]] = {}
     for a in range(n_actions):
         d = env.config.action_space.decode_action(a)
-        gen_key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id)
+        accept_key: Any = None if collapse_accept else bool(d.accept)
+        gen_key = (
+            d.action_type,
+            d.operator_id,
+            d.perturbation_id,
+            d.destroy_id,
+            accept_key,
+        )
         gen_to_actions.setdefault(gen_key, []).append(a)
 
-    # Stable generator ordering (so labels are consistent across runs).
-    def _stable_key(k: Tuple[Any, Any, Any, Any]) -> Tuple[int, int, int, int]:
-        at, op, pert, dest = k
+    def _stable_key(
+        k: Tuple[Any, Any, Any, Any, Any],
+    ) -> Tuple[int, int, int, int, int]:
+        at, op, pert, dest, acc = k
         return (
             int(at),
             int(op) if op is not None else -1,
             int(pert) if pert is not None else -1,
             int(dest) if dest is not None else -1,
+            1 if bool(acc) else 0,
         )
 
     gen_keys = sorted(gen_to_actions.keys(), key=_stable_key)
     gen_rewards = np.zeros((len(gen_keys),), dtype=np.float32)
 
     for gi, gen_key in enumerate(gen_keys):
-        action_ids = gen_to_actions[gen_key]
-        a_rep = action_ids[0]
+        a_rep = gen_to_actions[gen_key][0]
         decoded = env.config.action_space.decode_action(a_rep)
 
         new_cost: Optional[float] = None
 
         if decoded.action_type == ActionType.OPERATOR:
-            # Operator cost via candidate generator (no mutation)
             if decoded.operator_id is not None:
                 result = env._apply_operator(decoded.operator_id)
             else:
@@ -287,15 +338,10 @@ def _oracle_one_step(env, *, rng: random.Random) -> Tuple[int, Dict[str, float]]
                     new_eval = env._evaluator.evaluate_solution(new_solution)
                     new_cost = float(new_eval.total_energy)
 
-        # Immediate reward: improvement in best cost (clamped)
-        score = (
-            0.0
-            if new_cost is None
-            else float(max(best_cost_before - float(new_cost), 0.0))
+        gen_rewards[gi] = _expected_reward(
+            accept_flag=bool(decoded.accept), new_cost=new_cost
         )
-        gen_rewards[gi] = float(score)
 
-    # Tie-aware oracle label: sample uniformly among best generators.
     best_r = float(gen_rewards.max()) if gen_rewards.size else 0.0
     best_gen_idxs = np.flatnonzero(gen_rewards == best_r)
     if best_gen_idxs.size == 0:
@@ -314,6 +360,42 @@ def _oracle_one_step(env, *, rng: random.Random) -> Tuple[int, Dict[str, float]]
     median_r = float(np.median(gen_rewards)) if gen_rewards.size else 0.0
     mean_r = float(np.mean(gen_rewards)) if gen_rewards.size else 0.0
 
+    nonzero_frac = float(np.mean(gen_rewards > 0.0)) if gen_rewards.size else 0.0
+    all_zero = float(1.0 if (best_r <= 0.0 and nonzero_frac == 0.0) else 0.0)
+    best_is_zero = float(1.0 if best_r <= 0.0 else 0.0)
+    tie_best_nonzero = float(1.0 if (best_gen_idxs.size > 1 and best_r > 0.0) else 0.0)
+
+    if verbose and tie_best_nonzero > 0.5:
+        print(f"\n[Tie Detected] Best Reward: {best_r:.6f}")
+        for idx in best_gen_idxs:
+            gk = gen_keys[idx]
+            at_type = ActionType(gk[0])
+            at_str = str(at_type.name)
+
+            parts = []
+            if not collapse_accept:
+                parts.append(f"accept={bool(gk[4])}")
+
+            if at_type == ActionType.OPERATOR:
+                OP_NAMES = {0: "SWAP", 1: "INSERT", 2: "MOVE", 3: "CROSS"}
+                if gk[1] is not None and gk[1] != -1:
+                    parts.append(OP_NAMES.get(gk[1], f"OP_{gk[1]}"))
+                else:
+                    parts.append("BEST_OP")
+            elif at_type == ActionType.PERTURBATION:
+                if gk[2] is not None and gk[2] != -1:
+                    parts.append(PERTURBATION_BY_ID[gk[2]].__class__.__name__)
+                else:
+                    parts.append("NO_PERT")
+            elif at_type == ActionType.DESTROY:
+                if gk[3] is not None and gk[3] != -1:
+                    parts.append(DESTROY_BY_ID[gk[3]].__class__.__name__)
+                else:
+                    parts.append("NO_DEST")
+
+            details = " ".join(parts)
+            print(f"  Gen {idx}: {at_str:12s} {details}")
+
     stats = {
         "best_reward": best_r,
         "second_best_reward": second_r,
@@ -322,12 +404,13 @@ def _oracle_one_step(env, *, rng: random.Random) -> Tuple[int, Dict[str, float]]
         "adv_best_minus_mean": best_r - mean_r,
         "mean_reward": mean_r,
         "median_reward": median_r,
-        "nonzero_reward_frac": (
-            float(np.mean(gen_rewards > 0.0)) if gen_rewards.size else 0.0
-        ),
+        "nonzero_reward_frac": nonzero_frac,
         "n_generators": float(len(gen_keys)),
         "tie_best_count": float(best_gen_idxs.size),
         "tie_best": float(1.0 if best_gen_idxs.size > 1 else 0.0),
+        "tie_best_nonzero": tie_best_nonzero,
+        "best_is_zero": best_is_zero,
+        "all_zero": all_zero,
     }
 
     return best_gen, stats
@@ -418,6 +501,7 @@ def run_variant(
     device: str,
     top_k: int,
     use_proxy: bool,
+    verbose: bool = False,
 ) -> Dict[str, Any]:
     from PaST.neurols.env import NeuroLSEnv, EnvConfig
     from PaST.neurols.action_space import get_action_space
@@ -440,7 +524,11 @@ def run_variant(
         max_steps=int(cfg.get("max_steps", 200)),
         stagnation_limit=int(cfg.get("stagnation_limit", 100)),
         action_space=get_action_space(action_space_name),
-        reward_mode=str(cfg.get("reward_mode", "improvement")),
+        reward_mode=str(cfg.get("reward_mode", "dense_best")),
+        improvement_scale=float(cfg.get("improvement_scale", 1.0)),
+        reward_eps=float(cfg.get("reward_eps", 1e-8)),
+        best_bonus_lambda=float(cfg.get("best_bonus_lambda", 0.3)),
+        step_penalty=float(cfg.get("step_penalty", 0.0)),
         top_k=int(top_k),
         use_proxy=bool(use_proxy),
         graph_type=graph_type,
@@ -481,7 +569,8 @@ def run_variant(
             features = env.get_state_features()
 
             # Oracle label from the *current* state.
-            best_action, stats = _oracle_one_step(env, rng=inst_rng)
+            # Oracle label from the *current* state.
+            best_action, stats = _oracle_one_step(env, rng=inst_rng, verbose=verbose)
             X_rows.append(_vectorize_features(features))
             y_rows.append(best_action)
             oracle_stats.append(stats)
@@ -518,6 +607,9 @@ def run_variant(
             "median_reward",
             "tie_best",
             "tie_best_count",
+            "tie_best_nonzero",
+            "best_is_zero",
+            "all_zero",
             "n_generators",
         )
     }
@@ -576,6 +668,12 @@ def main() -> None:
         default=None,
         help="Optional JSON output path.",
     )
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print details about tied generators.",
+    )
 
     args = parser.parse_args()
 
@@ -602,6 +700,7 @@ def main() -> None:
             device=str(args.device),
             top_k=int(args.top_k),
             use_proxy=not bool(args.no_proxy),
+            verbose=bool(args.verbose),
         )
         results.append(res)
 
@@ -612,10 +711,11 @@ def main() -> None:
             else "probe=off"
         )
         tie_str = f"tie={res.get('tie_best', 0.0):.2%}"
+        zero_str = f"all0={res.get('all_zero', 0.0):.2%}"
         print(
             f"[{key:9s}] samples={res['n_samples']:4d}  "
             f"gens={int(res.get('n_generators', 0)):3d}  "
-            f"chance={res['chance_acc']:.3f}  {probe_str}  {tie_str}  "
+            f"chance={res['chance_acc']:.3f}  {probe_str}  {tie_str}  {zero_str}  "
             f"best-mean={res['adv_best_minus_mean']:.4g}  "
             f"margin(best,2nd)={res['margin_best_second']:.4g}  "
             f"nonzero={res['nonzero_reward_frac']:.2%}"

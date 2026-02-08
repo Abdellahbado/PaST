@@ -14,7 +14,11 @@ n_instances_per_reset: 200
 max_steps: 500
 stagnation_limit: 100
 action_space: AANP
-reward_mode: improvement
+reward_mode: dense_best
+improvement_scale: 1.0
+reward_eps: 1e-8
+best_bonus_lambda: 0.3
+step_penalty: 0.0
 graph_type: tripartite
 
 # Model

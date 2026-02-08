@@ -84,7 +84,11 @@ class TrainConfig:
     max_steps: int = 500
     stagnation_limit: int = 100
     action_space: str = "AANP"  # AA, AAN, AANP, AANPD
-    reward_mode: str = "improvement"
+    reward_mode: str = "dense_best"
+    improvement_scale: float = 1.0
+    reward_eps: float = 1e-8
+    best_bonus_lambda: float = 0.3
+    step_penalty: float = 0.0
     graph_type: str = "bipartite"  # bipartite or tripartite
 
     # Model — aligned with NeuroLS paper Appendix B
@@ -821,6 +825,10 @@ class NeuroLSTrainer:
             stagnation_limit=self.config.stagnation_limit,
             action_space=self.config.action_space,
             reward_mode=self.config.reward_mode,
+            improvement_scale=self.config.improvement_scale,
+            reward_eps=self.config.reward_eps,
+            best_bonus_lambda=self.config.best_bonus_lambda,
+            step_penalty=self.config.step_penalty,
             graph_type=self.config.graph_type,
             price_mode=self.config.price_mode,
         )
@@ -925,6 +933,10 @@ class NeuroLSTrainer:
             "stagnation_limit": env_config.stagnation_limit,
             "action_space": self.config.action_space,
             "reward_mode": env_config.reward_mode,
+            "improvement_scale": env_config.improvement_scale,
+            "reward_eps": env_config.reward_eps,
+            "best_bonus_lambda": env_config.best_bonus_lambda,
+            "step_penalty": env_config.step_penalty,
             "graph_type": self.config.graph_type,
             "price_mode": self.config.price_mode,
         }

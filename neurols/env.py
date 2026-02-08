@@ -64,8 +64,12 @@ class EnvConfig:
     use_proxy: bool = True  # Use proxy ranking for large instances
 
     # Reward shaping
-    reward_mode: str = "improvement"  # improvement, normalized, potential
+    reward_mode: str = "dense_best"  # improvement, normalized, potential, dense_best
     improvement_scale: float = 1.0
+    # For dense/normalized rewards: denominator = f(s0) + reward_eps
+    reward_eps: float = 1e-8
+    # For dense_best reward: r = r_cur + best_bonus_lambda * r_best - step_penalty
+    best_bonus_lambda: float = 0.3
     step_penalty: float = 0.0  # Small penalty per step to encourage faster convergence
 
     # Solution initialization
@@ -670,6 +674,10 @@ class NeuroLSEnv:
         """
         mode = self.config.reward_mode
 
+        denom = float(self._initial_cost) + float(self.config.reward_eps)
+        if not np.isfinite(denom) or denom <= 0:
+            denom = 1.0
+
         if mode == "improvement":
             # Reward = improvement in best cost, clamped at 0
             # Paper eq. (4): r_t = max(f(s_hat_t) - f(s_hat_{t+1}), 0)
@@ -683,11 +691,7 @@ class NeuroLSEnv:
             old_best = info["best_cost_before"]
             new_best = self.state.best_cost
             improvement = old_best - new_best
-            reward = (
-                improvement
-                / (self._initial_cost + 1e-8)
-                * self.config.improvement_scale
-            )
+            reward = improvement / denom * self.config.improvement_scale
 
         elif mode == "potential":
             # Potential-based shaping: phi(s') - phi(s)
@@ -695,6 +699,25 @@ class NeuroLSEnv:
             old_cost = info["cost_before"]
             new_cost = self.state.current_cost
             reward = (old_cost - new_cost) * self.config.improvement_scale
+
+        elif mode == "dense_best":
+            # Dense term: always informative when current cost changes.
+            #   r_cur = (f(s_t) - f(s_{t+1})) / (f(s_0) + eps)
+            # Best-so-far bonus (NeuroLS spirit):
+            #   r_best = max(f(s_hat_t) - f(s_hat_{t+1}), 0) / (f(s_0) + eps)
+            # Final:
+            #   r = r_cur + lambda * r_best - eta
+            old_cost = float(info["cost_before"])
+            new_cost = float(self.state.current_cost)
+            r_cur = (old_cost - new_cost) / denom
+
+            old_best = float(info["best_cost_before"])
+            new_best = float(self.state.best_cost)
+            r_best = max(old_best - new_best, 0.0) / denom
+
+            reward = (r_cur + float(self.config.best_bonus_lambda) * r_best) * float(
+                self.config.improvement_scale
+            )
 
         else:
             reward = 0.0
