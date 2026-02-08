@@ -174,7 +174,7 @@ def _vectorize_features(features: Dict[str, np.ndarray]) -> np.ndarray:
     return np.concatenate(vec_parts, axis=0).astype(np.float32)
 
 
-def _oracle_one_step(env) -> Tuple[int, Dict[str, float]]:
+def _oracle_one_step(env, *, rng: random.Random) -> Tuple[int, Dict[str, float]]:
     """Exhaustive one-step oracle (immediate improvement potential).
 
     Critically, this oracle does NOT call env.step() for each action (too slow).
@@ -199,24 +199,36 @@ def _oracle_one_step(env) -> Tuple[int, Dict[str, float]]:
         raise RuntimeError("Env must be reset() before oracle evaluation")
 
     best_cost_before = float(env.state.best_cost)
-    current_cost_before = float(env.state.current_cost)
 
     n_actions = int(env.action_space_size)
-    rewards = np.zeros((n_actions,), dtype=np.float32)
 
-    # The accept bit (accept/reject) does not affect the *immediate* reward
-    # under the environment's reward definition (worsening moves yield 0 reward,
-    # improvements are always accepted regardless of accept bit).
-    # To keep this test practical, score each unique "move generator" once and
-    # copy the score to both accept/reject variants.
-    group_to_actions: Dict[Tuple[Any, Any, Any, Any], List[int]] = {}
+    # Collapse accept/reject duplicates.
+    # We evaluate the *generator* (operator/perturbation/destroy choice) once,
+    # since under reward_mode="improvement" the accept bit cannot change the
+    # immediate improvement reward:
+    # - improvements are always accepted
+    # - worsening moves yield 0 reward either way
+    gen_to_actions: Dict[Tuple[Any, Any, Any, Any], List[int]] = {}
     for a in range(n_actions):
         d = env.config.action_space.decode_action(a)
-        key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id)
-        group_to_actions.setdefault(key, []).append(a)
+        gen_key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id)
+        gen_to_actions.setdefault(gen_key, []).append(a)
 
-    for _key, action_ids in group_to_actions.items():
-        # Any representative action gives the same immediate reward for this group.
+    # Stable generator ordering (so labels are consistent across runs).
+    def _stable_key(k: Tuple[Any, Any, Any, Any]) -> Tuple[int, int, int, int]:
+        at, op, pert, dest = k
+        return (
+            int(at),
+            int(op) if op is not None else -1,
+            int(pert) if pert is not None else -1,
+            int(dest) if dest is not None else -1,
+        )
+
+    gen_keys = sorted(gen_to_actions.keys(), key=_stable_key)
+    gen_rewards = np.zeros((len(gen_keys),), dtype=np.float32)
+
+    for gi, gen_key in enumerate(gen_keys):
+        action_ids = gen_to_actions[gen_key]
         a_rep = action_ids[0]
         decoded = env.config.action_space.decode_action(a_rep)
 
@@ -281,17 +293,26 @@ def _oracle_one_step(env) -> Tuple[int, Dict[str, float]]:
             if new_cost is None
             else float(max(best_cost_before - float(new_cost), 0.0))
         )
-        for a in action_ids:
-            rewards[a] = score
+        gen_rewards[gi] = float(score)
 
-    best = int(np.argmax(rewards))
-    sorted_rewards = np.sort(rewards)
-    best_r = float(sorted_rewards[-1])
+    # Tie-aware oracle label: sample uniformly among best generators.
+    best_r = float(gen_rewards.max()) if gen_rewards.size else 0.0
+    best_gen_idxs = np.flatnonzero(gen_rewards == best_r)
+    if best_gen_idxs.size == 0:
+        best_gen = 0
+    elif best_gen_idxs.size == 1:
+        best_gen = int(best_gen_idxs[0])
+    else:
+        best_gen = int(rng.choice(best_gen_idxs.tolist()))
+
+    sorted_gen_rewards = np.sort(gen_rewards) if gen_rewards.size else np.array([0.0])
     second_r = (
-        float(sorted_rewards[-2]) if n_actions >= 2 else float(sorted_rewards[-1])
+        float(sorted_gen_rewards[-2])
+        if sorted_gen_rewards.size >= 2
+        else float(sorted_gen_rewards[-1])
     )
-    median_r = float(np.median(rewards))
-    mean_r = float(np.mean(rewards))
+    median_r = float(np.median(gen_rewards)) if gen_rewards.size else 0.0
+    mean_r = float(np.mean(gen_rewards)) if gen_rewards.size else 0.0
 
     stats = {
         "best_reward": best_r,
@@ -301,10 +322,15 @@ def _oracle_one_step(env) -> Tuple[int, Dict[str, float]]:
         "adv_best_minus_mean": best_r - mean_r,
         "mean_reward": mean_r,
         "median_reward": median_r,
-        "nonzero_reward_frac": float(np.mean(rewards > 0.0)),
+        "nonzero_reward_frac": (
+            float(np.mean(gen_rewards > 0.0)) if gen_rewards.size else 0.0
+        ),
+        "n_generators": float(len(gen_keys)),
+        "tie_best_count": float(best_gen_idxs.size),
+        "tie_best": float(1.0 if best_gen_idxs.size > 1 else 0.0),
     }
 
-    return best, stats
+    return best_gen, stats
 
 
 def _train_probe(
@@ -455,7 +481,7 @@ def run_variant(
             features = env.get_state_features()
 
             # Oracle label from the *current* state.
-            best_action, stats = _oracle_one_step(env)
+            best_action, stats = _oracle_one_step(env, rng=inst_rng)
             X_rows.append(_vectorize_features(features))
             y_rows.append(best_action)
             oracle_stats.append(stats)
@@ -470,7 +496,14 @@ def run_variant(
     y = np.asarray(y_rows, dtype=np.int64)
 
     n_actions = int(env.action_space_size)
-    chance = _chance_accuracy(y, n_actions)
+
+    # Oracle/probe are over *generator* labels (accept bit collapsed)
+    if oracle_stats:
+        n_generators = int(round(float(oracle_stats[0].get("n_generators", 0.0))))
+    else:
+        n_generators = 0
+    n_generators = max(1, int(n_generators))
+    chance = _chance_accuracy(y, n_generators)
 
     stats_mean = {
         k: float(np.mean([d[k] for d in oracle_stats])) if oracle_stats else 0.0
@@ -483,10 +516,13 @@ def run_variant(
             "nonzero_reward_frac",
             "mean_reward",
             "median_reward",
+            "tie_best",
+            "tie_best_count",
+            "n_generators",
         )
     }
 
-    probe = _train_probe(X, y, n_actions=n_actions, seed=seed + 123, device=device)
+    probe = _train_probe(X, y, n_actions=n_generators, seed=seed + 123, device=device)
 
     return {
         "variant": key,
@@ -495,6 +531,7 @@ def run_variant(
         "graph_type": graph_type,
         "price_mode": price_mode,
         "n_actions": n_actions,
+        "n_generators": int(n_generators),
         "n_samples": int(y.size),
         "chance_acc": float(chance),
         **stats_mean,
@@ -574,9 +611,11 @@ def main() -> None:
             if res.get("probe_enabled", 0.0) > 0
             else "probe=off"
         )
+        tie_str = f"tie={res.get('tie_best', 0.0):.2%}"
         print(
             f"[{key:9s}] samples={res['n_samples']:4d}  "
-            f"chance={res['chance_acc']:.3f}  {probe_str}  "
+            f"gens={int(res.get('n_generators', 0)):3d}  "
+            f"chance={res['chance_acc']:.3f}  {probe_str}  {tie_str}  "
             f"best-mean={res['adv_best_minus_mean']:.4g}  "
             f"margin(best,2nd)={res['margin_best_second']:.4g}  "
             f"nonzero={res['nonzero_reward_frac']:.2%}"

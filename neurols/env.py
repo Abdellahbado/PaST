@@ -396,7 +396,15 @@ class NeuroLSEnv:
             else:
                 # No valid move found
                 self._no_improve_count += 1
-                self.state.step_t += 1
+                self.state.update_from_move(
+                    new_solution=self.state.solution,
+                    new_cost=self.state.current_cost,
+                    new_per_machine_energy=self.state.per_machine_energy,
+                    new_per_machine_makespan=self.state.per_machine_makespan,
+                    new_makespan=self.state.makespan,
+                    accepted=False,
+                    operator=decoded.operator_id,
+                )
 
         # Handle perturbation actions
         if (
@@ -433,19 +441,48 @@ class NeuroLSEnv:
                 new_eval
             )
 
-            # Update state via update_from_perturbation
-            self.state.update_from_perturbation(
-                new_solution=new_solution,
-                new_cost=new_cost,
-                new_per_machine_energy=per_machine_energy,
-                new_per_machine_makespan=per_machine_makespan,
-                new_makespan=int(new_eval.makespan),
+            # Decide accept/reject for perturbations as well.
+            # NOTE: ActionSpace encodes accept/reject for perturbations, so we
+            # must respect it; otherwise half the actions become redundant.
+            accepted = self._make_acceptance_decision(
+                decoded.accept,
+                self.state.current_cost,
+                new_cost,
             )
-            self._current_eval = new_eval
 
-            info["perturbed"] = True
-            info["cost_after_perturbation"] = new_cost
-            self._no_improve_count = 0
+            if accepted:
+                # Update state via update_from_perturbation
+                self.state.update_from_perturbation(
+                    new_solution=new_solution,
+                    new_cost=new_cost,
+                    new_per_machine_energy=per_machine_energy,
+                    new_per_machine_makespan=per_machine_makespan,
+                    new_makespan=int(new_eval.makespan),
+                )
+                self._current_eval = new_eval
+
+                info["perturbed"] = True
+                info["accepted"] = True
+                info["cost_after_perturbation"] = new_cost
+
+                if new_cost < self._best_cost_episode:
+                    self._best_cost_episode = new_cost
+                    self._no_improve_count = 0
+                    info["improved"] = True
+                else:
+                    self._no_improve_count += 1
+            else:
+                # Rejected perturbation — no solution change
+                self.state.update_from_move(
+                    new_solution=self.state.solution,
+                    new_cost=self.state.current_cost,
+                    new_per_machine_energy=self.state.per_machine_energy,
+                    new_per_machine_makespan=self.state.per_machine_makespan,
+                    new_makespan=self.state.makespan,
+                    accepted=False,
+                    operator=None,
+                )
+                self._no_improve_count += 1
 
         elif decoded.action_type == ActionType.PERTURBATION and (
             decoded.perturbation_id is None
@@ -513,7 +550,15 @@ class NeuroLSEnv:
                 else:
                     self._no_improve_count += 1
             else:
-                self.state.step_t += 1
+                self.state.update_from_move(
+                    new_solution=self.state.solution,
+                    new_cost=self.state.current_cost,
+                    new_per_machine_energy=self.state.per_machine_energy,
+                    new_per_machine_makespan=self.state.per_machine_makespan,
+                    new_makespan=self.state.makespan,
+                    accepted=False,
+                    operator=None,
+                )
                 self._no_improve_count += 1
 
         # Compute reward
