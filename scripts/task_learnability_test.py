@@ -700,10 +700,21 @@ def _oracle_multi_step(
             env.config.deterministic = old_det
             _restore_env(env, snap)
 
-    best_r = float(np.max(gen_scores)) if gen_scores.size else 0.0
-    if not np.isfinite(best_r):
-        best_r = 0.0
-    best_gen_idxs = np.flatnonzero(np.abs(gen_scores - best_r) <= float(tie_eps))
+    if gen_scores.size == 0:
+        gen_scores = np.zeros((1,), dtype=np.float64)
+
+    finite_mask = np.isfinite(gen_scores)
+    if not bool(np.any(finite_mask)):
+        # Degenerate case: every generator produced a non-finite score.
+        # Fall back to all-zeros so downstream summary stats stay finite.
+        gen_scores = np.zeros_like(gen_scores, dtype=np.float64)
+        finite_mask = np.isfinite(gen_scores)
+
+    # Use finite-only max for best selection.
+    best_r = float(np.max(gen_scores[finite_mask]))
+    best_gen_idxs = np.flatnonzero(
+        finite_mask & (np.abs(gen_scores - best_r) <= float(tie_eps))
+    )
 
     if best_gen_idxs.size == 0:
         best_gen = 0
@@ -714,15 +725,16 @@ def _oracle_multi_step(
 
     best_gen_set = [int(idx) for idx in best_gen_idxs.tolist()]
 
-    sorted_scores = np.sort(gen_scores) if gen_scores.size else np.array([0.0])
+    finite_scores = gen_scores[finite_mask]
+    sorted_scores = np.sort(finite_scores) if finite_scores.size else np.array([0.0])
     second_r = (
         float(sorted_scores[-2])
         if sorted_scores.size >= 2
         else float(sorted_scores[-1])
     )
-    median_r = float(np.median(gen_scores)) if gen_scores.size else 0.0
-    mean_r = float(np.mean(gen_scores)) if gen_scores.size else 0.0
-    nonzero_frac = float(np.mean(gen_scores > 0.0)) if gen_scores.size else 0.0
+    median_r = float(np.median(finite_scores)) if finite_scores.size else 0.0
+    mean_r = float(np.mean(finite_scores)) if finite_scores.size else 0.0
+    nonzero_frac = float(np.mean(finite_scores > 0.0)) if finite_scores.size else 0.0
 
     stats = {
         "best_reward": float(best_r),

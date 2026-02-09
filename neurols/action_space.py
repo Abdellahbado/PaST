@@ -273,6 +273,19 @@ AAN_SPACE = ActionSpace(
     perturbations=[],
 )
 
+# AAN_CLEAN: AAN without INTRA_INSERT to reduce operator overlap
+# Total actions = 2 × 3 operators = 6
+AAN_CLEAN_SPACE = ActionSpace(
+    name="AAN",
+    n_actions=6,
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[],
+)
+
 # AANP: Acceptance + Operator/Perturbation (14 actions = 2 × 7)
 # Full control over LS behavior
 AANP_SPACE = ActionSpace(
@@ -286,6 +299,23 @@ AANP_SPACE = ActionSpace(
     ],
     perturbations=[
         PerturbationID.NONE,
+        PerturbationID.SHAKE_SMALL,
+        PerturbationID.RESTART,
+    ],
+)
+
+# AANP_CLEAN: removes INTRA_INSERT (subset of RELOCATE_1 same-machine moves)
+# and removes NONE perturbation (accept/reject are redundant no-ops).
+# Total actions = 2 × (3 operators + 2 perturbations) = 10
+AANP_CLEAN_SPACE = ActionSpace(
+    name="AANP",
+    n_actions=10,
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[
         PerturbationID.SHAKE_SMALL,
         PerturbationID.RESTART,
     ],
@@ -335,6 +365,29 @@ AANPD_SPACE = ActionSpace(
     ],
 )
 
+# AANPD_CLEAN: AANPD without INTRA_INSERT and NONE perturbation
+# Total actions = 2 × (3 ops + 2 perts + 5 destroys) = 20
+AANPD_CLEAN_SPACE = ActionSpace(
+    name="AANPD",
+    n_actions=20,
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[
+        PerturbationID.SHAKE_SMALL,
+        PerturbationID.RESTART,
+    ],
+    destroys=[
+        DestroyID.RANDOM_3,
+        DestroyID.RANDOM_5,
+        DestroyID.WORST_MACHINE,
+        DestroyID.EXPENSIVE_3,
+        DestroyID.BLOCK_2,
+    ],
+)
+
 
 def get_action_space(name: str) -> ActionSpace:
     """Get action space by name."""
@@ -343,11 +396,17 @@ def get_action_space(name: str) -> ActionSpace:
         return AA_SPACE
     elif name == "AAN":
         return AAN_SPACE
+    elif name in ("AAN_CLEAN", "AAN-CLEAN"):
+        return AAN_CLEAN_SPACE
     elif name == "AANP":
         return AANP_SPACE
+    elif name in ("AANP_CLEAN", "AANP-CLEAN"):
+        return AANP_CLEAN_SPACE
     elif name in ("AANP_PRICE", "AANP-PRICE"):
         return AANP_PRICE_SPACE
     elif name == "AANPD":
         return AANPD_SPACE
+    elif name in ("AANPD_CLEAN", "AANPD-CLEAN"):
+        return AANPD_CLEAN_SPACE
     else:
         raise ValueError(f"Unknown action space: {name}")

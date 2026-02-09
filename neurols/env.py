@@ -92,6 +92,11 @@ class EnvConfig:
     # When "full", machine_exposure features are computed each step.
     price_mode: str = "z_price"
 
+    # Optional per-job price/exposure features appended to job_features.
+    # - "none": keep original 5 job features (backward compatible)
+    # - "basic": append 4 features (start_norm, mean_price_norm, peak_frac, energy_share)
+    job_price_features: str = "none"
+
     def __post_init__(self):
         # Ensure action_space is ActionSpace instance
         if isinstance(self.action_space, str):
@@ -287,6 +292,90 @@ class NeuroLSEnv:
         )
 
         return self.state
+
+    def _get_job_features(self) -> np.ndarray:
+        """Job feature matrix used by the policy network.
+
+        By default this matches the original 5-D job features from NeuroLSState.
+        Optionally appends per-job price/exposure information so the model can
+        distinguish timing decisions under TOU pricing.
+        """
+        base = self.state.get_job_features()  # (n, 5)
+
+        mode = str(getattr(self.config, "job_price_features", "none")).lower()
+        if mode in ("none", "off", "false", "0", "no"):
+            return base
+
+        if mode not in ("basic",):
+            raise ValueError(
+                f"Unknown job_price_features mode: {self.config.job_price_features}"
+            )
+
+        if self.instance is None or self._current_eval is None:
+            return base
+
+        n = int(self.state.solution.n_jobs)
+        K = int(self.K)
+        ct = np.asarray(self._ct[:K], dtype=np.float64)
+        if K <= 0 or ct.size == 0:
+            extra = np.zeros((n, 4), dtype=np.float32)
+            return np.concatenate([base, extra], axis=1)
+
+        p_min = float(np.min(ct))
+        p_max = float(np.max(ct))
+        p_range = float(max(1e-9, p_max - p_min))
+        p_median = float(np.median(ct))
+
+        start_norm = np.zeros(n, dtype=np.float32)
+        mean_price_norm = np.zeros(n, dtype=np.float32)
+        peak_frac = np.zeros(n, dtype=np.float32)
+        energy_share = np.zeros(n, dtype=np.float32)
+
+        total_energy = float(self._current_eval.total_energy)
+        if (not np.isfinite(total_energy)) or total_energy <= 0.0:
+            total_energy = 1.0
+
+        # Fill per-job values using DP-derived start_times per machine
+        solution = self.state.solution
+        for mi in range(int(self.instance.m)):
+            seq = solution.sequences[mi]
+            if not seq:
+                continue
+
+            me = self._current_eval.per_machine[mi]
+            if me.start_times and len(me.start_times) == len(seq):
+                starts = me.start_times
+            else:
+                # start_times missing (e.g., some incremental paths) → re-solve
+                result = self._evaluator._solvers[mi].solve_with_checkpoints(seq)
+                starts = result.start_times
+
+            e_rate = float(self._machine_energy_rates[mi])
+            for idx, job in enumerate(seq):
+                if idx >= len(starts):
+                    continue
+                start = int(starts[idx])
+                p = int(self._processing_times[job])
+                if start < 0 or p <= 0:
+                    continue
+
+                end = int(min(start + p, K))
+                if end <= start:
+                    continue
+
+                window = ct[start:end]
+                mp = float(np.mean(window))
+                mean_price_norm[job] = float((mp - p_min) / p_range)
+                peak_frac[job] = float(np.mean(window >= p_median))
+                start_norm[job] = float(start / float(max(1, K)))
+
+                job_energy = e_rate * float(np.sum(window))
+                if np.isfinite(job_energy) and job_energy >= 0.0:
+                    energy_share[job] = float(job_energy / (total_energy + 1e-9))
+
+        extra = np.stack([start_norm, mean_price_norm, peak_frac, energy_share], axis=1)
+        extra = extra.astype(np.float32, copy=False)
+        return np.concatenate([base, extra], axis=1)
 
     def step(self, action: int) -> Tuple[NeuroLSState, float, bool, Dict[str, Any]]:
         """Execute one step of local search.
@@ -899,7 +988,7 @@ class NeuroLSEnv:
         dynamic_edge_index = np.array([dyn_src, dyn_dst], dtype=np.int64)
 
         return {
-            "job_features": self.state.get_job_features(),
+            "job_features": self._get_job_features(),
             "machine_features": self.state.get_machine_features(),
             "state_features": self.state.get_scalar_features(),
             "job_to_machine": job_to_machine,

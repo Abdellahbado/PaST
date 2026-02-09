@@ -88,6 +88,9 @@ def _collect_episode_worker(args: Tuple) -> EpisodeResult:
     action_space = get_action_space(model_config["action_space"])
 
     model = NeuroLSPolicy(
+        d_job_in=model_config.get("d_job_in", 5),
+        d_machine_in=model_config.get("d_machine_in", 5),
+        d_state_in=model_config.get("d_state_in", 13),
         d_emb=model_config["d_emb"],
         n_actions=action_space.n_actions,
         n_layers_static=model_config["n_layers_static"],

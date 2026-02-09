@@ -72,6 +72,9 @@ def evaluate_at_K(
     graph_type = train_cfg.get("graph_type", "bipartite")
 
     model = NeuroLSPolicy(
+        d_job_in=train_cfg.get("d_job_in", 5),
+        d_machine_in=train_cfg.get("d_machine_in", 5),
+        d_state_in=train_cfg.get("d_state_in", 13),
         d_emb=train_cfg.get("d_emb", 128),
         n_actions=action_space.n_actions,
         n_layers_static=train_cfg.get("n_layers_static", 3),
@@ -93,6 +96,7 @@ def evaluate_at_K(
         action_space=train_cfg.get("action_space", "AANP"),
         graph_type=graph_type,
         price_mode=train_cfg.get("price_mode", "z_price"),
+        job_price_features=train_cfg.get("job_price_features", "none"),
     )
     env = NeuroLSEnv(env_config)
 

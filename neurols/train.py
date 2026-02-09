@@ -96,11 +96,19 @@ class TrainConfig:
     use_proxy: bool = True
     proxy_mode: str = "load"  # load | price_aware
 
+    # Optional: append per-job price/exposure features to job_features.
+    # Must be consistent with d_job_in.
+    job_price_features: str = "none"  # none | basic
+
     # Optional exposure-based shaping (reward_mode == dense_best_exposure)
     exposure_bonus_lambda: float = 0.0
     exposure_eps: float = 1e-8
 
     # Model — aligned with NeuroLS paper Appendix B
+    # Input feature dimensions (keep defaults for backward compatibility)
+    d_job_in: int = 5
+    d_machine_in: int = 5
+    d_state_in: int = 13
     d_emb: int = 128
     n_layers_static: int = 3  # Paper: L_stat = 3
     n_layers_dynamic: int = 2  # Paper: L_dyna = 2
@@ -418,6 +426,9 @@ class NeuroLSTrainer:
         n_actions = action_space.n_actions
 
         model_kwargs = dict(
+            d_job_in=getattr(self.config, "d_job_in", 5),
+            d_machine_in=getattr(self.config, "d_machine_in", 5),
+            d_state_in=getattr(self.config, "d_state_in", 13),
             d_emb=self.config.d_emb,
             n_actions=n_actions,
             n_layers_static=self.config.n_layers_static,
@@ -841,6 +852,7 @@ class NeuroLSTrainer:
             top_k=self.config.top_k,
             use_proxy=self.config.use_proxy,
             proxy_mode=self.config.proxy_mode,
+            job_price_features=getattr(self.config, "job_price_features", "none"),
             exposure_bonus_lambda=self.config.exposure_bonus_lambda,
             exposure_eps=self.config.exposure_eps,
             graph_type=self.config.graph_type,
@@ -1362,7 +1374,16 @@ def main():
         "--action-space",
         type=str,
         default=None,
-        choices=["AA", "AAN", "AANP", "AANP_PRICE", "AANPD"],
+        choices=[
+            "AA",
+            "AAN",
+            "AAN_CLEAN",
+            "AANP",
+            "AANP_CLEAN",
+            "AANP_PRICE",
+            "AANPD",
+            "AANPD_CLEAN",
+        ],
     )
     parser.add_argument(
         "--graph-type",

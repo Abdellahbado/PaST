@@ -30,7 +30,12 @@ from sandbox.neurols.solution import PMALNSSolution
 from sandbox.neurols.state import NeuroLSState, StateBuilder
 from sandbox.neurols.operators import OPERATORS, OPERATOR_BY_ID, OperatorID
 from sandbox.neurols.perturbations import PERTURBATION_BY_ID, PerturbationID
-from sandbox.neurols.action_space import ActionSpace, ActionType, AANP_SPACE, DecodedAction
+from sandbox.neurols.action_space import (
+    ActionSpace,
+    ActionType,
+    AANP_SPACE,
+    DecodedAction,
+)
 from sandbox.neurols.candidate_generator import CandidateGenerator, CandidateConfig
 from sandbox.neurols.move_evaluator import MoveEvaluator, FullEvaluation, MoveEvaluation
 from sandbox.neurols.price_embedding import PriceFeatureExtractor
@@ -92,6 +97,11 @@ class EnvConfig:
     # Price mode: "none", "z_price", or "full"
     # When "full", machine_exposure features are computed each step.
     price_mode: str = "z_price"
+
+    # Optional per-job price/exposure features appended to job_features.
+    # - "none": keep original 5 job features (backward compatible)
+    # - "basic": append 4 features (start_norm, mean_price_norm, peak_frac, energy_share)
+    job_price_features: str = "none"
 
     def __post_init__(self):
         # Ensure action_space is ActionSpace instance
@@ -184,7 +194,7 @@ class NeuroLSEnv:
         # Cache per-hour price features for the CNN encoder (constant per episode)
         self._price_extractor = PriceFeatureExtractor(self._ct, K)
         self._price_per_hour = self._price_extractor.get_per_hour_features()  # (20, 5)
-        
+
         # Initialize price profile analyzer for structure-aware operators
         self._price_analyzer = PriceProfileAnalyzer(list(self._ct), hours_per_day=20)
 
@@ -291,6 +301,75 @@ class NeuroLSEnv:
         )
 
         return self.state
+
+    def _get_job_features(self) -> np.ndarray:
+        base = self.state.get_job_features()
+        mode = str(getattr(self.config, "job_price_features", "none")).lower()
+        if mode in ("none", "off", "false", "0", "no"):
+            return base
+        if mode not in ("basic",):
+            raise ValueError(
+                f"Unknown job_price_features mode: {self.config.job_price_features}"
+            )
+        if self.instance is None or self._current_eval is None:
+            return base
+
+        n = int(self.state.solution.n_jobs)
+        K = int(self.K)
+        ct = np.asarray(self._ct[:K], dtype=np.float64)
+        if K <= 0 or ct.size == 0:
+            extra = np.zeros((n, 4), dtype=np.float32)
+            return np.concatenate([base, extra], axis=1)
+
+        p_min = float(np.min(ct))
+        p_max = float(np.max(ct))
+        p_range = float(max(1e-9, p_max - p_min))
+        p_median = float(np.median(ct))
+
+        start_norm = np.zeros(n, dtype=np.float32)
+        mean_price_norm = np.zeros(n, dtype=np.float32)
+        peak_frac = np.zeros(n, dtype=np.float32)
+        energy_share = np.zeros(n, dtype=np.float32)
+
+        total_energy = float(self._current_eval.total_energy)
+        if (not np.isfinite(total_energy)) or total_energy <= 0.0:
+            total_energy = 1.0
+
+        solution = self.state.solution
+        for mi in range(int(self.instance.m)):
+            seq = solution.sequences[mi]
+            if not seq:
+                continue
+            me = self._current_eval.per_machine[mi]
+            if me.start_times and len(me.start_times) == len(seq):
+                starts = me.start_times
+            else:
+                result = self._evaluator._solvers[mi].solve_with_checkpoints(seq)
+                starts = result.start_times
+
+            e_rate = float(self._machine_energy_rates[mi])
+            for idx, job in enumerate(seq):
+                if idx >= len(starts):
+                    continue
+                start = int(starts[idx])
+                p = int(self._processing_times[job])
+                if start < 0 or p <= 0:
+                    continue
+                end = int(min(start + p, K))
+                if end <= start:
+                    continue
+                window = ct[start:end]
+                mp = float(np.mean(window))
+                mean_price_norm[job] = float((mp - p_min) / p_range)
+                peak_frac[job] = float(np.mean(window >= p_median))
+                start_norm[job] = float(start / float(max(1, K)))
+                job_energy = e_rate * float(np.sum(window))
+                if np.isfinite(job_energy) and job_energy >= 0.0:
+                    energy_share[job] = float(job_energy / (total_energy + 1e-9))
+
+        extra = np.stack([start_norm, mean_price_norm, peak_frac, energy_share], axis=1)
+        extra = extra.astype(np.float32, copy=False)
+        return np.concatenate([base, extra], axis=1)
 
     def step(self, action: int) -> Tuple[NeuroLSState, float, bool, Dict[str, Any]]:
         """Execute one step of local search.
@@ -657,7 +736,7 @@ class NeuroLSEnv:
         """
         best_overall = None
         best_cost = float("inf")
-        
+
         # Context for physics-aware operators
         context = {
             "evaluation": self._current_eval,
@@ -811,28 +890,28 @@ class NeuroLSEnv:
         # TIE-BREAKING: If no significant energy improvement, add tiny reward for secondary objectives
         # This helps the agent distinguish between "0 improvement" moves.
         if abs(reward + self.config.step_penalty) < 1e-9:
-             # Check if makespan improved
-             move_res = info.get("move_result")
-             if move_res is None:
-                 move_res = (None, None, None)
-             old_makespan = move_res[2]
-             if old_makespan: # If move_result exists
-                 try:
-                     # Access previous makespan from info/state if available or infer
-                     # Better: use current vs previous state delta
-                     # Here, we don't easily have 'makespan_before' in info unless we add it
-                     pass
-                 except:
-                     pass
-             
-             # Fallback: Prefer moves that reduce makespan or exposure even if energy is same
-             # Since we don't have perfect 'before' state here easily without editing _execute_action
-             # Let's rely on exposure if available
-             if "exposure_before" in info and "exposure_after" in info:
-                 phi_before = float(info["exposure_before"])
-                 phi_after = float(info["exposure_after"])
-                 if phi_after < phi_before:
-                     reward += 1e-6 * (phi_before - phi_after)
+            # Check if makespan improved
+            move_res = info.get("move_result")
+            if move_res is None:
+                move_res = (None, None, None)
+            old_makespan = move_res[2]
+            if old_makespan:  # If move_result exists
+                try:
+                    # Access previous makespan from info/state if available or infer
+                    # Better: use current vs previous state delta
+                    # Here, we don't easily have 'makespan_before' in info unless we add it
+                    pass
+                except:
+                    pass
+
+            # Fallback: Prefer moves that reduce makespan or exposure even if energy is same
+            # Since we don't have perfect 'before' state here easily without editing _execute_action
+            # Let's rely on exposure if available
+            if "exposure_before" in info and "exposure_after" in info:
+                phi_before = float(info["exposure_before"])
+                phi_after = float(info["exposure_after"])
+                if phi_after < phi_before:
+                    reward += 1e-6 * (phi_before - phi_after)
 
         return reward
 
@@ -945,7 +1024,7 @@ class NeuroLSEnv:
         dynamic_edge_index = np.array([dyn_src, dyn_dst], dtype=np.int64)
 
         return {
-            "job_features": self.state.get_job_features(),
+            "job_features": self._get_job_features(),
             "machine_features": self.state.get_machine_features(),
             "state_features": self.state.get_scalar_features(),
             "job_to_machine": job_to_machine,
