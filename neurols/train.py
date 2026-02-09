@@ -934,7 +934,8 @@ class NeuroLSTrainer:
 
     def _train_serial(self, env, train_instances):
         """Original serial training loop (1 episode at a time)."""
-        for episode in range(self.config.n_episodes):
+        start_episode = int(self.episode) + 1 if int(self.episode) >= 0 else 0
+        for episode in range(start_episode, self.config.n_episodes):
             instance, K = random.choice(train_instances)
             metrics = self.run_episode(env, instance, K)
 
@@ -963,10 +964,19 @@ class NeuroLSTrainer:
             "reward_eps": env_config.reward_eps,
             "best_bonus_lambda": env_config.best_bonus_lambda,
             "step_penalty": env_config.step_penalty,
+            "top_k": self.config.top_k,
+            "use_proxy": self.config.use_proxy,
+            "proxy_mode": self.config.proxy_mode,
+            "job_price_features": self.config.job_price_features,
+            "exposure_bonus_lambda": self.config.exposure_bonus_lambda,
+            "exposure_eps": self.config.exposure_eps,
             "graph_type": self.config.graph_type,
             "price_mode": self.config.price_mode,
         }
         model_config = {
+            "d_job_in": self.config.d_job_in,
+            "d_machine_in": self.config.d_machine_in,
+            "d_state_in": self.config.d_state_in,
             "d_emb": self.config.d_emb,
             "n_layers_static": self.config.n_layers_static,
             "n_layers_dynamic": self.config.n_layers_dynamic,
@@ -978,7 +988,8 @@ class NeuroLSTrainer:
             "graph_type": self.config.graph_type,
         }
 
-        episodes_done = 0
+        # If resuming, continue from the next episode after the checkpoint.
+        episodes_done = int(self.episode) + 1 if int(self.episode) >= 0 else 0
         round_idx = 0
 
         try:
@@ -1358,6 +1369,12 @@ class NeuroLSTrainer:
 def main():
     parser = argparse.ArgumentParser(description="Train NeuroLS")
     parser.add_argument("--config", type=str, default=None, help="Config file path")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to a checkpoint (.pt) saved by this trainer to resume from.",
+    )
     parser.add_argument("--exp-name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
@@ -1435,6 +1452,8 @@ def main():
 
     # Train
     trainer = NeuroLSTrainer(config)
+    if args.resume is not None:
+        trainer.load_checkpoint(args.resume)
     trainer.train()
 
 

@@ -66,6 +66,9 @@ def _build_policy_from_checkpoint(ckpt: Dict[str, Any], device: str):
     action_space = get_action_space(str(cfg.get("action_space", "AANP")))
 
     model_kwargs = dict(
+        d_job_in=int(cfg.get("d_job_in", 5)),
+        d_machine_in=int(cfg.get("d_machine_in", 5)),
+        d_state_in=int(cfg.get("d_state_in", 13)),
         d_emb=int(cfg.get("d_emb", 64)),
         n_actions=int(action_space.n_actions),
         n_layers_static=int(cfg.get("n_layers_static", 2)),
@@ -98,6 +101,7 @@ def _make_env_from_cfg(cfg: Dict[str, Any]):
         top_k=int(cfg.get("top_k", 10)),
         use_proxy=bool(cfg.get("use_proxy", True)),
         proxy_mode=str(cfg.get("proxy_mode", "load")),
+        job_price_features=str(cfg.get("job_price_features", "none")),
         exposure_bonus_lambda=float(cfg.get("exposure_bonus_lambda", 0.0)),
         exposure_eps=float(cfg.get("exposure_eps", 1e-8)),
         graph_type=str(cfg.get("graph_type", "bipartite")),
