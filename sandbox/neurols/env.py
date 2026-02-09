@@ -812,7 +812,10 @@ class NeuroLSEnv:
         # This helps the agent distinguish between "0 improvement" moves.
         if abs(reward + self.config.step_penalty) < 1e-9:
              # Check if makespan improved
-             old_makespan = info.get("move_result", (None, None, None))[2]
+             move_res = info.get("move_result")
+             if move_res is None:
+                 move_res = (None, None, None)
+             old_makespan = move_res[2]
              if old_makespan: # If move_result exists
                  try:
                      # Access previous makespan from info/state if available or infer

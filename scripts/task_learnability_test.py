@@ -537,6 +537,220 @@ def _oracle_one_step(
     return best_gen, stats, best_gen_set
 
 
+def _oracle_multi_step(
+    env,
+    *,
+    rng: random.Random,
+    horizon: int,
+    tie_eps: float = 1e-12,
+    exposure_lambda: float = 0.0,
+) -> Tuple[int, Dict[str, float], List[int]]:
+    """Multi-step oracle label based on recovery after applying a generator.
+
+    Motivation: a 1-step improvement oracle collapses to "reject" and ties in
+    locally-stuck states. Here we score each generator by how much it improves
+    best_cost after:
+      1) forcing one generator step to be accepted (even if worsening)
+      2) running greedy improvement-only operator steps for the remaining horizon
+
+    Returns:
+      (best_generator_index, stats, best_generator_set)
+    """
+
+    from PaST.neurols.action_space import ActionType
+    from PaST.neurols.perturbations import PerturbationID
+
+    if horizon <= 1:
+        return _oracle_one_step(env, rng=rng, verbose=False)
+
+    if env.state is None:
+        raise RuntimeError("Env must be reset() before oracle evaluation")
+
+    n_actions = int(env.action_space_size)
+
+    gen_to_actions: Dict[Tuple[Any, Any, Any, Any], List[int]] = {}
+    for a in range(n_actions):
+        d = env.config.action_space.decode_action(a)
+        gen_key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id)
+        gen_to_actions.setdefault(gen_key, []).append(a)
+
+    def _stable_key(k: Tuple[Any, Any, Any, Any]) -> Tuple[int, int, int, int]:
+        at, op, pert, dest = k
+        return (
+            int(at),
+            int(op) if op is not None else -1,
+            int(pert) if pert is not None else -1,
+            int(dest) if dest is not None else -1,
+        )
+
+    gen_keys = sorted(gen_to_actions.keys(), key=_stable_key)
+
+    # Precompute accept-operator actions for greedy improvement steps.
+    operator_accept_actions: List[int] = []
+    for a in range(n_actions):
+        d = env.config.action_space.decode_action(a)
+        if bool(d.accept) and d.action_type == ActionType.OPERATOR:
+            operator_accept_actions.append(int(a))
+
+    best_cost_before = float(env.state.best_cost)
+    current_cost_before = float(env.state.current_cost)
+    phi_before = 0.0
+    exp_denom = 1.0
+    use_exp = float(exposure_lambda) != 0.0 and hasattr(
+        env, "_compute_peak_exposure_potential"
+    )
+    if use_exp:
+        try:
+            phi_before = float(env._compute_peak_exposure_potential(env._current_eval))
+            exp_denom = float(getattr(env, "_initial_exposure_potential", 1.0)) + float(
+                getattr(env.config, "exposure_eps", 1e-8)
+            )
+            if (not np.isfinite(exp_denom)) or exp_denom <= 0.0:
+                exp_denom = 1.0
+        except Exception:
+            use_exp = False
+    denom = float(env._initial_cost) + float(env.config.reward_eps)
+    if (not np.isfinite(denom)) or denom <= 0.0:
+        denom = 1.0
+
+    gen_scores = np.full((len(gen_keys),), -np.inf, dtype=np.float64)
+
+    for gi, gen_key in enumerate(gen_keys):
+        # Pick a representative ACCEPT action for this generator if available.
+        candidates = gen_to_actions[gen_key]
+        a_rep = None
+        for a in candidates:
+            if bool(env.config.action_space.decode_action(a).accept):
+                a_rep = int(a)
+                break
+        if a_rep is None:
+            a_rep = int(candidates[0])
+
+        snap = _snapshot_env(env)
+
+        # Force acceptance for the first step (even if worsening), so we can
+        # evaluate basin quality rather than only immediate improvements.
+        old_use_acc = bool(env.config.use_acceptance)
+        old_det = bool(env.config.deterministic)
+        try:
+            env.config.use_acceptance = False
+            env.config.deterministic = False
+            _s, _r, _done, _info = env.step(a_rep)
+
+            # Greedy improvement-only rollout using operator actions.
+            env.config.use_acceptance = True
+            env.config.deterministic = True
+
+            for _ in range(int(horizon) - 1):
+                if not operator_accept_actions:
+                    break
+
+                cur_cost = float(env.state.current_cost)
+                best_a = None
+                best_new_cost = cur_cost
+
+                for a_op in operator_accept_actions:
+                    d = env.config.action_space.decode_action(a_op)
+                    if d.operator_id is None:
+                        result = env._apply_best_operator()
+                    else:
+                        result = env._apply_operator(d.operator_id)
+                    if result is None:
+                        continue
+                    _move, new_cost, _me = result
+                    if float(new_cost) < float(best_new_cost):
+                        best_new_cost = float(new_cost)
+                        best_a = int(a_op)
+
+                if best_a is None:
+                    break
+                if float(best_new_cost) >= float(cur_cost):
+                    break
+
+                _s, _r, done, _info = env.step(best_a)
+                if done:
+                    break
+
+            # Score by dense_best-style improvement after horizon.
+            # This is much less degenerate than best_cost-only, because it
+            # distinguishes worsening vs improving trajectories.
+            after_cur = float(env.state.current_cost)
+            after_best = float(env.state.best_cost)
+
+            r_cur = (current_cost_before - after_cur) / float(denom)
+            r_best = max(best_cost_before - after_best, 0.0) / float(denom)
+            score = float(
+                r_cur + float(getattr(env.config, "best_bonus_lambda", 0.3)) * r_best
+            )
+            if use_exp:
+                try:
+                    phi_after = float(
+                        env._compute_peak_exposure_potential(env._current_eval)
+                    )
+                    r_exp = (phi_before - phi_after) / float(exp_denom)
+                    if np.isfinite(float(r_exp)):
+                        score = float(score + float(exposure_lambda) * float(r_exp))
+                except Exception:
+                    pass
+            if not np.isfinite(score):
+                score = -np.inf
+            gen_scores[gi] = float(score)
+        finally:
+            env.config.use_acceptance = old_use_acc
+            env.config.deterministic = old_det
+            _restore_env(env, snap)
+
+    best_r = float(np.max(gen_scores)) if gen_scores.size else 0.0
+    if not np.isfinite(best_r):
+        best_r = 0.0
+    best_gen_idxs = np.flatnonzero(np.abs(gen_scores - best_r) <= float(tie_eps))
+
+    if best_gen_idxs.size == 0:
+        best_gen = 0
+    elif best_gen_idxs.size == 1:
+        best_gen = int(best_gen_idxs[0])
+    else:
+        best_gen = int(rng.choice([int(x) for x in best_gen_idxs.tolist()]))
+
+    best_gen_set = [int(idx) for idx in best_gen_idxs.tolist()]
+
+    sorted_scores = np.sort(gen_scores) if gen_scores.size else np.array([0.0])
+    second_r = (
+        float(sorted_scores[-2])
+        if sorted_scores.size >= 2
+        else float(sorted_scores[-1])
+    )
+    median_r = float(np.median(gen_scores)) if gen_scores.size else 0.0
+    mean_r = float(np.mean(gen_scores)) if gen_scores.size else 0.0
+    nonzero_frac = float(np.mean(gen_scores > 0.0)) if gen_scores.size else 0.0
+
+    stats = {
+        "best_reward": float(best_r),
+        "second_best_reward": float(second_r),
+        "margin_best_second": float(best_r - second_r),
+        "margin_best_median": float(best_r - median_r),
+        "adv_best_minus_mean": float(best_r - mean_r),
+        "mean_reward": float(mean_r),
+        "median_reward": float(median_r),
+        "nonzero_reward_frac": float(nonzero_frac),
+        "nonzero_action_frac": float(0.0),
+        "n_generators": float(len(gen_keys)),
+        "tie_best_count": float(best_gen_idxs.size),
+        "tie_best": float(1.0 if best_gen_idxs.size > 1 else 0.0),
+        "tie_best_action": float(0.0),
+        "tie_best_nonzero": float(
+            1.0 if (best_gen_idxs.size > 1 and best_r > 0.0) else 0.0
+        ),
+        "best_is_zero": float(1.0 if best_r <= 0.0 else 0.0),
+        "all_zero": float(1.0 if (best_r <= 0.0 and nonzero_frac == 0.0) else 0.0),
+        "accept_better_rate": float(0.0),
+        "reject_better_rate": float(0.0),
+        "accept_tie_rate": float(0.0),
+    }
+
+    return best_gen, stats, best_gen_set
+
+
 def _train_probe(
     X: np.ndarray,
     y: np.ndarray,
@@ -650,6 +864,17 @@ def run_variant(
     reward_mode_override: Optional[str] = None,
     exposure_bonus_lambda_override: Optional[float] = None,
     step_penalty_override: Optional[float] = None,
+    n_jobs_override: Optional[int] = None,
+    n_machines_override: Optional[int] = None,
+    collect_mode: str = "random_walk",
+    disruptor_mode: str = "either",
+    disrupt_steps: int = 1,
+    oracle_horizon: int = 1,
+    tie_eps: float = 1e-12,
+    oracle_exposure_lambda: float = 0.0,
+    force_topk: bool = False,
+    n_jobs_topk_threshold_override: Optional[int] = None,
+    max_moves_full_override: Optional[int] = None,
     verbose: bool = False,
 ) -> Dict[str, Any]:
     from PaST.neurols.env import NeuroLSEnv, EnvConfig
@@ -683,11 +908,17 @@ def run_variant(
         else str(cfg.get("proxy_mode", "load"))
     )
 
-    # Use small fixed instance sizes for speed
+    # Use small fixed instance sizes for speed (override-able for medium/large)
     n_jobs_list = cfg.get("n_jobs_train", [20])
     n_machines_list = cfg.get("n_machines_train", [3])
-    fixed_n = int(n_jobs_list[0])
-    fixed_m = int(n_machines_list[0])
+    fixed_n = (
+        int(n_jobs_override) if n_jobs_override is not None else int(n_jobs_list[0])
+    )
+    fixed_m = (
+        int(n_machines_override)
+        if n_machines_override is not None
+        else int(n_machines_list[0])
+    )
 
     step_penalty = (
         float(step_penalty_override)
@@ -743,25 +974,91 @@ def run_variant(
 
         env.reset(instance, K)
 
-        # Collect a handful of states by random stepping
-        for t in range(states_per_instance):
+        # CandidateGen overrides (force top-k/proxy behavior when requested)
+        try:
+            if getattr(env, "_candidate_gen", None) is not None:
+                if bool(force_topk):
+                    env._candidate_gen.config.n_jobs_topk_threshold = 0
+                    env._candidate_gen.config.max_moves_full = 0
+                if n_jobs_topk_threshold_override is not None:
+                    env._candidate_gen.config.n_jobs_topk_threshold = int(
+                        n_jobs_topk_threshold_override
+                    )
+                if max_moves_full_override is not None:
+                    env._candidate_gen.config.max_moves_full = int(
+                        max_moves_full_override
+                    )
+        except Exception:
+            pass
+
+        # Precompute disruptor actions for perturb_then_label.
+        from PaST.neurols.action_space import ActionType
+        from PaST.neurols.perturbations import PerturbationID
+
+        disruptor_actions: List[int] = []
+        if str(collect_mode).lower() == "perturb_then_label":
+            for a in range(int(env.action_space_size)):
+                d = env.config.action_space.decode_action(int(a))
+                if not bool(d.accept):
+                    continue
+                if d.action_type == ActionType.PERTURBATION:
+                    if (
+                        d.perturbation_id is None
+                        or d.perturbation_id == PerturbationID.NONE
+                    ):
+                        continue
+                    disruptor_actions.append(int(a))
+                elif d.action_type == ActionType.DESTROY:
+                    disruptor_actions.append(int(a))
+
+        base_snap = _snapshot_env(env)
+
+        for _t in range(states_per_instance):
+            if str(collect_mode).lower() == "perturb_then_label" and disruptor_actions:
+                # Restore to a consistent baseline, then apply a random disruptor with forced acceptance.
+                _restore_env(env, base_snap)
+                old_use_acc = bool(env.config.use_acceptance)
+                old_det = bool(env.config.deterministic)
+                try:
+                    env.config.use_acceptance = False
+                    env.config.deterministic = False
+                    done = False
+                    for _ in range(max(1, int(disrupt_steps))):
+                        a_disrupt = int(inst_rng.choice(disruptor_actions))
+                        _s, _r, done, _info = env.step(a_disrupt)
+                        if done:
+                            break
+                    if done:
+                        continue
+                finally:
+                    env.config.use_acceptance = old_use_acc
+                    env.config.deterministic = old_det
+
             features = env.get_state_features()
 
-            # Oracle label from the *current* state.
-            # Oracle label from the *current* state.
-            best_action, stats, best_set = _oracle_one_step(
-                env, rng=inst_rng, verbose=verbose
-            )
+            if int(oracle_horizon) > 1:
+                best_action, stats, best_set = _oracle_multi_step(
+                    env,
+                    rng=inst_rng,
+                    horizon=int(oracle_horizon),
+                    tie_eps=float(tie_eps),
+                    exposure_lambda=float(oracle_exposure_lambda),
+                )
+            else:
+                best_action, stats, best_set = _oracle_one_step(
+                    env, rng=inst_rng, verbose=verbose
+                )
+
             X_rows.append(_vectorize_features(features))
             y_rows.append(best_action)
             oracle_stats.append(stats)
             best_sets.append(best_set)
 
-            # Step randomly to explore state space.
-            a = int(inst_rng.randrange(env.action_space_size))
-            _s, _r, done, _info = env.step(a)
-            if done:
-                break
+            if str(collect_mode).lower() == "random_walk":
+                a = int(inst_rng.randrange(env.action_space_size))
+                _s, _r, done, _info = env.step(a)
+                if done:
+                    break
 
     X = np.stack(X_rows, axis=0) if X_rows else np.zeros((0, 1), dtype=np.float32)
     y = np.asarray(y_rows, dtype=np.int64)
@@ -857,6 +1154,66 @@ def main() -> None:
         help="Max candidate moves per operator for the oracle (speed/faithfulness trade-off).",
     )
     parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Override number of jobs (lets you test medium/large without editing YAML).",
+    )
+    parser.add_argument(
+        "--n-machines",
+        type=int,
+        default=None,
+        help="Override number of machines (lets you test medium/large without editing YAML).",
+    )
+    parser.add_argument(
+        "--collect-mode",
+        type=str,
+        default="random_walk",
+        choices=["random_walk", "perturb_then_label"],
+        help="How to sample states: random SA walk vs perturb-then-label recovery states.",
+    )
+    parser.add_argument(
+        "--disrupt-steps",
+        type=int,
+        default=1,
+        help="Number of forced-accept disruptors to apply before labeling (perturb_then_label only).",
+    )
+    parser.add_argument(
+        "--oracle-horizon",
+        type=int,
+        default=1,
+        help="If >1, label by multi-step recovery (forces one generator accept + greedy improve steps).",
+    )
+    parser.add_argument(
+        "--oracle-exposure-lambda",
+        type=float,
+        default=0.0,
+        help="Optional extra exposure-based term in the multi-step oracle score (0 disables).",
+    )
+    parser.add_argument(
+        "--tie-eps",
+        type=float,
+        default=1e-12,
+        help="Epsilon for considering generator scores tied (multi-step oracle).",
+    )
+    parser.add_argument(
+        "--force-topk",
+        action="store_true",
+        help="Force top-k selection to activate (sets candidate_gen threshold/full cap aggressively).",
+    )
+    parser.add_argument(
+        "--n-jobs-topk-threshold",
+        type=int,
+        default=None,
+        help="Override candidate_gen n_jobs_topk_threshold (lower to activate proxy earlier).",
+    )
+    parser.add_argument(
+        "--max-moves-full",
+        type=int,
+        default=None,
+        help="Override candidate_gen max_moves_full (lower to activate top-k earlier).",
+    )
+    parser.add_argument(
         "--no-proxy",
         action="store_true",
         help="Disable proxy ranking in candidate generation (slower).",
@@ -934,6 +1291,16 @@ def main() -> None:
             reward_mode_override=args.reward_mode,
             exposure_bonus_lambda_override=args.exposure_bonus_lambda,
             step_penalty_override=args.step_penalty,
+            n_jobs_override=args.n_jobs,
+            n_machines_override=args.n_machines,
+            collect_mode=str(args.collect_mode),
+            disrupt_steps=int(args.disrupt_steps),
+            oracle_horizon=int(args.oracle_horizon),
+            tie_eps=float(args.tie_eps),
+            oracle_exposure_lambda=float(args.oracle_exposure_lambda),
+            force_topk=bool(args.force_topk),
+            n_jobs_topk_threshold_override=args.n_jobs_topk_threshold,
+            max_moves_full_override=args.max_moves_full,
             verbose=bool(args.verbose),
         )
         results.append(res)

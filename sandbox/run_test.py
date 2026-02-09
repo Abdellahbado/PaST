@@ -48,7 +48,12 @@ import numpy as np
 import sys
 repo_root = Path(__file__).resolve().parents[2]
 sys.path.append(str(repo_root))
+# Also add the directory containing 'sandbox' so we can do 'from sandbox.neurols...'
+sandbox_root = Path(__file__).resolve().parents[1]
+sys.path.append(str(sandbox_root))
+
 print(f"DEBUG: Added {repo_root} to sys.path")
+print(f"DEBUG: Added {sandbox_root} to sys.path")
 print(f"DEBUG: sys.path: {sys.path}")
 
 try:

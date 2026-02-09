@@ -90,6 +90,8 @@ class ActionSpace:
             expected = 2 * (self.n_operators + self.n_perturbations)
         elif self.name == "AANPD":
             expected = 2 * (self.n_operators + self.n_perturbations + self.n_destroys)
+        elif self.name == "STRUCTURE_AWARE":
+             expected = 2 * (self.n_operators + self.n_perturbations)
         else:
             expected = self.n_actions
 
@@ -121,7 +123,7 @@ class ActionSpace:
             op_idx = self.operators.index(operator_id)
             return accept_bit + 2 * op_idx
 
-        elif self.name in ("AANP", "AANPD"):
+        elif self.name in ("AANP", "AANPD", "STRUCTURE_AWARE"):
             if operator_id is not None:
                 op_idx = self.operators.index(operator_id)
                 return accept_bit + 2 * op_idx
@@ -166,7 +168,7 @@ class ActionSpace:
                 perturbation_id=None,
             )
 
-        elif self.name in ("AANP", "AANPD"):
+        elif self.name in ("AANP", "AANPD", "STRUCTURE_AWARE"):
             accept = bool(action % 2)
             item_idx = action // 2
 
@@ -337,7 +339,7 @@ AANPD_SPACE = ActionSpace(
 # Structure-Aware Space: Reduced generic moves + Physics-Aware moves
 STRUCTURE_AWARE_SPACE = ActionSpace(
     name="STRUCTURE_AWARE",
-    n_actions=14, # 4 ops * 2 + 3 perts * 2 = 14 actions (accept/reject for each)
+    n_actions=16, # 5 ops * 2 + 3 perts * 2 = 16 actions
     operators=[
         OperatorID.RELOCATE_1,
         OperatorID.SWAP_1,
