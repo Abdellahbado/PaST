@@ -1339,21 +1339,49 @@ class NeuroLSTrainer:
         }
 
         tmp_path = path.with_suffix(path.suffix + f".tmp.{os.getpid()}")
+        legacy_tmp_path = path.with_suffix(path.suffix + f".legacy.tmp.{os.getpid()}")
         try:
+            # Default: zipfile-based serialization (PyTorch default).
             torch.save(payload, tmp_path)
             os.replace(tmp_path, path)
             print(f"Saved checkpoint: {path}")
+            return
         except Exception as exc:
+            # Some network/overlay filesystems occasionally fail with
+            # "inline_container.cc: unexpected pos ...". Retry with legacy
+            # serialization which is often more robust.
             try:
                 if tmp_path.exists():
                     tmp_path.unlink()
             except Exception:
                 pass
-            print(f"[WARN] Failed to save checkpoint to {path}: {exc}")
+
+            try:
+                torch.save(
+                    payload, legacy_tmp_path, _use_new_zipfile_serialization=False
+                )
+                os.replace(legacy_tmp_path, path)
+                print(f"Saved checkpoint (legacy): {path}")
+                return
+            except Exception as exc2:
+                # Keep tmp files if they exist for post-mortem debugging.
+                print(
+                    f"[WARN] Failed to save checkpoint to {path}: {exc}\n"
+                    f"[WARN] Legacy save also failed: {exc2}\n"
+                    f"[WARN] tmp files (if any) left at: {tmp_path} and {legacy_tmp_path}"
+                )
 
     def load_checkpoint(self, path: str):
         """Load checkpoint."""
-        checkpoint = torch.load(path, map_location=self.device)
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(
+                f"Resume checkpoint not found: {path}. "
+                "If a run crashed during saving, try resuming from the latest "
+                "checkpoint_*.pt in the experiment folder instead of final.pt."
+            )
+
+        checkpoint = torch.load(str(p), map_location=self.device)
 
         self.policy_net.load_state_dict(checkpoint["policy_net"])
         self.target_net.load_state_dict(checkpoint["target_net"])
@@ -1375,12 +1403,42 @@ def main():
         default=None,
         help="Path to a checkpoint (.pt) saved by this trainer to resume from.",
     )
+    parser.add_argument(
+        "--resume-reset-epsilon",
+        type=float,
+        default=None,
+        help=(
+            "If set, overrides the loaded checkpoint epsilon with this value after resuming. "
+            "Useful to increase exploration when continuing training longer."
+        ),
+    )
     parser.add_argument("--exp-name", type=str, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--n-episodes", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument(
+        "--epsilon-start",
+        type=float,
+        default=None,
+        help="Override epsilon_start (only affects new runs and decay computation).",
+    )
+    parser.add_argument(
+        "--epsilon-end",
+        type=float,
+        default=None,
+        help="Override epsilon_end (only affects decay computation and min epsilon).",
+    )
+    parser.add_argument(
+        "--epsilon-decay",
+        type=float,
+        default=None,
+        help=(
+            "Override epsilon_decay directly. If provided, disables auto-computation. "
+            "Must be in (0, 1]."
+        ),
+    )
     parser.add_argument(
         "--use-iqn",
         default=None,
@@ -1441,6 +1499,17 @@ def main():
         config.batch_size = args.batch_size
     if args.lr is not None:
         config.learning_rate = args.lr
+    if args.epsilon_start is not None:
+        config.epsilon_start = float(args.epsilon_start)
+    if args.epsilon_end is not None:
+        config.epsilon_end = float(args.epsilon_end)
+    if args.epsilon_decay is not None:
+        config.epsilon_decay = float(args.epsilon_decay)
+        # Validate now to fail fast.
+        if not (0.0 < float(config.epsilon_decay) <= 1.0):
+            raise ValueError(
+                f"epsilon_decay must be in (0, 1], got {config.epsilon_decay}"
+            )
     if args.use_iqn is not None:
         config.use_iqn = args.use_iqn
     if args.action_space is not None:
@@ -1454,6 +1523,8 @@ def main():
     trainer = NeuroLSTrainer(config)
     if args.resume is not None:
         trainer.load_checkpoint(args.resume)
+        if args.resume_reset_epsilon is not None:
+            trainer.epsilon = float(args.resume_reset_epsilon)
     trainer.train()
 
 
