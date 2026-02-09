@@ -385,17 +385,21 @@ def solve_sparse_dp_python(
     final_state: int,
     time_limit: float = -1.0,
     tie_break: str = "early",
-) -> Tuple[float, int, Dict, bool]:
+) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
     """
     Pure Python sparse DP with time limit and early pruning.
     
     Returns:
-        (best_cost, best_finish_time, parent_dict, timed_out)
+        (best_cost, best_finish_time, parent_dict, timed_out, best_partial)
+        
+    best_partial is (time, state, cost) of the best partial state found,
+    or None if a complete solution was found.
     """
     start_time = time.perf_counter()
     
     lengths_list = [int(x) for x in lengths]
     totals_arr = totals
+    total_jobs = sum(int(t) for t in totals_arr)
     
     # Inc values for state transitions
     inc = [int(m) for m in mult]
@@ -423,6 +427,9 @@ def solve_sparse_dp_python(
             work += (int(totals_arr[i]) - used[i]) * lengths_list[i]
         return work
     
+    def count_scheduled(used: Tuple[int, ...]) -> int:
+        return sum(used)
+    
     # DP layers
     dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
     dp_layers[0][0] = (0.0, 0)
@@ -433,6 +440,12 @@ def solve_sparse_dp_python(
     best_final_time = -1
     timed_out = False
     
+    # Track best partial state: (num_scheduled, cost, time, state)
+    best_partial_jobs = 0
+    best_partial_cost = _INF
+    best_partial_time = 0
+    best_partial_state = 0
+    
     for t in range(T + 1):
         # Check timeout
         if time_limit > 0 and (time.perf_counter() - start_time) > time_limit:
@@ -442,6 +455,17 @@ def solve_sparse_dp_python(
         layer = dp_layers[t]
         if not layer:
             continue
+        
+        # Update best partial state from this layer
+        for state, (cost, pen) in layer.items():
+            used = decode_used(state)
+            n_scheduled = count_scheduled(used)
+            if n_scheduled > best_partial_jobs or \
+               (n_scheduled == best_partial_jobs and cost < best_partial_cost):
+                best_partial_jobs = n_scheduled
+                best_partial_cost = cost
+                best_partial_time = t
+                best_partial_state = state
         
         # Check for final state
         v_final = layer.get(final_state)
@@ -514,7 +538,12 @@ def solve_sparse_dp_python(
                         target_layer[new_state] = (cand_cost, cand_pen)
                         parent[(end, new_state)] = (t, state, L)
     
-    return best_final_cost, best_final_time, parent, timed_out
+    # Return best partial info if we timed out without finding complete solution
+    best_partial = None
+    if timed_out and best_final_time < 0 and best_partial_jobs > 0:
+        best_partial = (best_partial_time, best_partial_state, best_partial_cost)
+    
+    return best_final_cost, best_final_time, parent, timed_out, best_partial
 
 
 def is_numba_available() -> bool:

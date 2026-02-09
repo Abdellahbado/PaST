@@ -87,6 +87,8 @@ class DPResult:
     cost: float
     schedule: Tuple[Tuple[int, int, int], ...]  # (job_id, start, end)
     finish_time: int
+    is_optimal: bool = True  # False if solution is from greedy completion on timeout
+    timed_out: bool = False
 
 
 def _build_prefix(prices: np.ndarray) -> np.ndarray:
@@ -102,6 +104,89 @@ def _interval_cost(prefix: np.ndarray, start: int, length: int) -> float:
     return float(prefix[end] - prefix[start])
 
 
+def _greedy_complete_schedule(
+    remaining_counts: Dict[int, int],  # length -> count remaining
+    prices: np.ndarray,
+    T: int,
+    occupied_slots: Optional[List[Tuple[int, int]]] = None,  # (start, end) of already scheduled
+    ids_by_len: Optional[Dict[int, List[int]]] = None,  # length -> available job IDs
+) -> Tuple[float, List[Tuple[int, int, int]]]:
+    """Greedily schedule remaining jobs in cheapest available slots.
+    
+    Args:
+        remaining_counts: How many jobs of each length still need to be scheduled.
+        prices: Price array of length T.
+        T: Time horizon.
+        occupied_slots: Already scheduled (start, end) pairs to avoid.
+        ids_by_len: Job IDs available for each length (will pop from these).
+    
+    Returns:
+        (total_cost, schedule) where schedule is list of (job_id, start, end).
+    """
+    if not remaining_counts or all(c == 0 for c in remaining_counts.values()):
+        return 0.0, []
+    
+    # Build prefix for cost computation
+    prefix = _build_prefix(prices)
+    
+    # Find free time slots
+    occupied = set()
+    if occupied_slots:
+        for s, e in occupied_slots:
+            for t in range(s, e):
+                occupied.add(t)
+    
+    free_slots = [t for t in range(T) if t not in occupied]
+    
+    # Sort free slots by price (ascending) to greedily pick cheapest
+    free_slots.sort(key=lambda t: prices[t])
+    
+    # Create job list: expand counts to individual jobs
+    jobs_to_schedule: List[Tuple[int, int]] = []  # (length, job_id or -1)
+    for length, count in remaining_counts.items():
+        for _ in range(count):
+            if ids_by_len and length in ids_by_len and ids_by_len[length]:
+                jid = ids_by_len[length].pop()
+            else:
+                jid = -1  # placeholder
+            jobs_to_schedule.append((length, jid))
+    
+    # Sort jobs by length descending (larger jobs first - harder to place)
+    jobs_to_schedule.sort(key=lambda x: -x[0])
+    
+    total_cost = 0.0
+    schedule: List[Tuple[int, int, int]] = []
+    
+    for length, jid in jobs_to_schedule:
+        # Find first window of 'length' consecutive free slots
+        placed = False
+        best_start = -1
+        best_cost = float("inf")
+        
+        # Try each starting position in free slots
+        for start_t in range(T - length + 1):
+            # Check if all slots [start_t, start_t + length) are free
+            if all(t not in occupied for t in range(start_t, start_t + length)):
+                cost = float(prefix[start_t + length] - prefix[start_t])
+                if cost < best_cost:
+                    best_cost = cost
+                    best_start = start_t
+        
+        if best_start >= 0:
+            # Place the job
+            for t in range(best_start, best_start + length):
+                occupied.add(t)
+            total_cost += best_cost
+            schedule.append((jid, best_start, best_start + length))
+            placed = True
+        
+        if not placed:
+            # Cannot place this job - infeasible greedy completion
+            return float("inf"), []
+    
+    return total_cost, schedule
+
+
 def _solve_sparse_dp_inline(
     lengths_list: List[int],
     totals: np.ndarray,
@@ -113,13 +198,21 @@ def _solve_sparse_dp_inline(
     final_state: int,
     tie_break: str = "early",
     time_limit: float = -1.0,
-) -> Tuple[float, int, Dict, bool]:
-    """Inline sparse DP fallback with early pruning and time limit."""
+) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
+    """Inline sparse DP fallback with early pruning and time limit.
+    
+    Returns:
+        (best_final_cost, best_final_time, parent, timed_out, best_partial)
+        
+    best_partial is (time, state, cost) of the best partial state found,
+    or None if a complete solution was found.
+    """
     import time as time_module
     start_time = time_module.perf_counter()
     
     totals_arr = totals
     inc = [int(m) for m in mult]
+    total_jobs = sum(int(t) for t in totals_arr)
     
     # State decoding cache
     used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * K)}
@@ -144,6 +237,9 @@ def _solve_sparse_dp_inline(
             work += (int(totals_arr[i]) - used[i]) * lengths_list[i]
         return work
     
+    def count_scheduled(used: Tuple[int, ...]) -> int:
+        return sum(used)
+    
     # DP layers
     dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
     dp_layers[0][0] = (0.0, 0)
@@ -154,6 +250,13 @@ def _solve_sparse_dp_inline(
     best_final_time = -1
     timed_out = False
     
+    # Track best partial state: (num_scheduled, cost, time, state)
+    # We want max jobs scheduled, then min cost
+    best_partial_jobs = 0
+    best_partial_cost = float("inf")
+    best_partial_time = 0
+    best_partial_state = 0
+    
     for t in range(T + 1):
         # Check timeout
         if time_limit > 0 and (time_module.perf_counter() - start_time) > time_limit:
@@ -163,6 +266,18 @@ def _solve_sparse_dp_inline(
         layer = dp_layers[t]
         if not layer:
             continue
+        
+        # Update best partial state from this layer
+        for state, (cost, pen) in layer.items():
+            used = decode_used(state)
+            n_scheduled = count_scheduled(used)
+            # Better if: more jobs scheduled, or same jobs but lower cost
+            if n_scheduled > best_partial_jobs or \
+               (n_scheduled == best_partial_jobs and cost < best_partial_cost):
+                best_partial_jobs = n_scheduled
+                best_partial_cost = cost
+                best_partial_time = t
+                best_partial_state = state
         
         # Check for final state
         v_final = layer.get(final_state)
@@ -229,7 +344,12 @@ def _solve_sparse_dp_inline(
                         target_layer[new_state] = (cand_cost, cand_pen)
                         parent[(end, new_state)] = (t, state, L)
     
-    return best_final_cost, best_final_time, parent, timed_out
+    # Return best partial info if we timed out without finding complete solution
+    best_partial = None
+    if timed_out and best_final_time < 0 and best_partial_jobs > 0:
+        best_partial = (best_partial_time, best_partial_state, best_partial_cost)
+    
+    return best_final_cost, best_final_time, parent, timed_out, best_partial
 
 
 
@@ -331,7 +451,7 @@ def solve_optimal_benchmark_dp(
         # Fallback: use optimized sparse DP with early pruning and time limit.
         # This is much faster than the inline version due to early feasibility checks.
         if _ACCEL_AVAILABLE:
-            best_final_cost, best_final_time, parent, timed_out = solve_sparse_dp_python(
+            best_final_cost, best_final_time, parent, timed_out, best_partial = solve_sparse_dp_python(
                 lengths=lengths,
                 totals=totals,
                 prefix=prefix,
@@ -345,7 +465,7 @@ def solve_optimal_benchmark_dp(
             )
         else:
             # Inline fallback if accelerated module not available
-            best_final_cost, best_final_time, parent, timed_out = _solve_sparse_dp_inline(
+            best_final_cost, best_final_time, parent, timed_out, best_partial = _solve_sparse_dp_inline(
                 lengths_list=[int(x) for x in lengths.tolist()],
                 totals=totals,
                 prefix=prefix,
@@ -358,34 +478,105 @@ def solve_optimal_benchmark_dp(
                 time_limit=time_limit,
             )
 
-        if not np.isfinite(best_final_cost) or best_final_time < 0:
-            return DPResult(False, float("inf"), (), 0)
+        if np.isfinite(best_final_cost) and best_final_time >= 0:
+            # Backtrack segments
+            segments: List[Tuple[int, int]] = []
+            t = best_final_time
+            s = final_state
+            while not (t == 0 and s == 0):
+                par = parent.get((t, s))
+                if par is None:
+                    return DPResult(True, float(best_final_cost), (), int(t), is_optimal=True, timed_out=False)
+                prev_t, prev_s, L = par
+                if L > 0:
+                    segments.append((prev_t, int(L)))
+                t, s = int(prev_t), int(prev_s)
+            segments.reverse()
 
-        # Backtrack segments
-        segments: List[Tuple[int, int]] = []
-        t = best_final_time
-        s = final_state
-        while not (t == 0 and s == 0):
-            par = parent.get((t, s))
-            if par is None:
-                return DPResult(True, float(best_final_cost), (), int(t))
-            prev_t, prev_s, L = par
-            if L > 0:
-                segments.append((prev_t, int(L)))
-            t, s = int(prev_t), int(prev_s)
-        segments.reverse()
+            sched: List[Tuple[int, int, int]] = []
+            for start_t, L in segments:
+                jid = ids_by_len[int(L)].pop()
+                sched.append((jid, int(start_t), int(start_t + int(L))))
 
-        sched: List[Tuple[int, int, int]] = []
-        for start_t, L in segments:
-            jid = ids_by_len[int(L)].pop()
-            sched.append((jid, int(start_t), int(start_t + int(L))))
+            finish_time = 0
+            for _, _, e in sched:
+                if e > finish_time:
+                    finish_time = int(e)
 
-        finish_time = 0
-        for _, _, e in sched:
-            if e > finish_time:
-                finish_time = int(e)
-
-        return DPResult(True, float(best_final_cost), tuple(sched), finish_time)
+            return DPResult(True, float(best_final_cost), tuple(sched), finish_time, is_optimal=True, timed_out=False)
+        
+        # Handle timeout with greedy completion for sparse DP
+        if timed_out and best_partial is not None:
+            partial_time, partial_state, partial_cost = best_partial
+            
+            # Decode partial state to get used counts
+            def decode_state(state: int) -> Tuple[int, ...]:
+                u = [0] * K
+                x = state
+                for i in range(K):
+                    r = int(radices[i])
+                    u[i] = x % r
+                    x //= r
+                return tuple(u)
+            
+            used_counts = decode_state(partial_state)
+            
+            # Backtrack to get partial schedule
+            segments = []
+            t = partial_time
+            s = partial_state
+            while not (t == 0 and s == 0):
+                par = parent.get((t, s))
+                if par is None:
+                    break
+                prev_t, prev_s, L = par
+                if L > 0:
+                    segments.append((prev_t, int(L)))
+                t, s = int(prev_t), int(prev_s)
+            segments.reverse()
+            
+            # Build partial schedule
+            partial_sched: List[Tuple[int, int, int]] = []
+            for start_t, L in segments:
+                if L in ids_by_len and ids_by_len[L]:
+                    jid = ids_by_len[L].pop()
+                    partial_sched.append((jid, int(start_t), int(start_t + int(L))))
+            
+            # Compute remaining jobs
+            remaining_counts: Dict[int, int] = {}
+            for i, length in enumerate(lengths_list):
+                remaining = int(totals[i]) - int(used_counts[i])
+                if remaining > 0:
+                    remaining_counts[length] = remaining
+            
+            # Get occupied slots from partial schedule
+            occupied_slots = [(s_t, e_t) for _, s_t, e_t in partial_sched]
+            
+            # Greedy completion
+            greedy_cost, greedy_sched = _greedy_complete_schedule(
+                remaining_counts,
+                prices,
+                T,
+                occupied_slots,
+                ids_by_len,
+            )
+            
+            if np.isfinite(greedy_cost):
+                # Combine schedules
+                full_sched = partial_sched + greedy_sched
+                total_cost = partial_cost + greedy_cost
+                finish_time = max((e for _, _, e in full_sched), default=0)
+                
+                return DPResult(
+                    True, 
+                    total_cost, 
+                    tuple(full_sched), 
+                    finish_time,
+                    is_optimal=False,
+                    timed_out=True,
+                )
+        
+        return DPResult(False, float("inf"), (), 0, is_optimal=False, timed_out=timed_out)
 
 
     # used[s, i] = used count of length i in state s
@@ -409,7 +600,19 @@ def solve_optimal_benchmark_dp(
     for i in range(K):
         feasible_by_i.append(np.where(used[:, i] < int(totals[i]))[0].astype(np.int32))
 
+    # Time limit support
+    import time as time_module
+    dp_start_time = time_module.perf_counter()
+    timed_out = False
+    last_processed_t = -1
+
     for t in range(T + 1):
+        # Check time limit
+        if time_limit > 0 and (time_module.perf_counter() - dp_start_time) > time_limit:
+            timed_out = True
+            break
+        last_processed_t = t
+        
         row = dp[t]
         row_pen = dp_pen[t]
         if not np.isfinite(row).any():
@@ -466,49 +669,142 @@ def solve_optimal_benchmark_dp(
 
     # Choose best finishing time for the final state.
     col = dp[:, final_state]
-    if not np.isfinite(col).any():
-        return DPResult(False, float("inf"), (), 0)
+    
+    # Helper function to count scheduled jobs from state
+    def count_jobs_in_state(state: int) -> int:
+        return int(np.sum(used[state, :]))
+    
+    if np.isfinite(col).any() and not timed_out:
+        # Found complete solution
+        opt_cost = float(np.min(col))
+        best_t_candidates = np.where(np.isclose(col, opt_cost, rtol=0.0, atol=_EPS))[0]
+        if tie_break == "early":
+            pens = dp_pen[best_t_candidates, final_state]
+            min_pen = int(np.min(pens))
+            best_t_candidates = best_t_candidates[pens == min_pen]
+        best_t = int(np.min(best_t_candidates))
 
-    opt_cost = float(np.min(col))
-    best_t_candidates = np.where(np.isclose(col, opt_cost, rtol=0.0, atol=_EPS))[0]
-    if tie_break == "early":
-        pens = dp_pen[best_t_candidates, final_state]
-        min_pen = int(np.min(pens))
-        best_t_candidates = best_t_candidates[pens == min_pen]
-    best_t = int(np.min(best_t_candidates))
+        # Backtrack to recover segments (start, length). Ignore idle steps.
+        segments: List[Tuple[int, int]] = []
+        t = best_t
+        s = final_state
+        while not (t == 0 and s == 0):
+            L = int(parent_len[t, s])
+            prev_s = int(parent_prev_state[t, s])
+            if L < 0 or prev_s < 0:
+                return DPResult(True, opt_cost, (), int(best_t), is_optimal=True, timed_out=False)
+            if L == 0:
+                t -= 1
+                s = prev_s
+            else:
+                start = t - L
+                segments.append((start, L))
+                t -= L
+                s = prev_s
 
-    # Backtrack to recover segments (start, length). Ignore idle steps.
-    segments: List[Tuple[int, int]] = []
-    t = best_t
-    s = final_state
-    while not (t == 0 and s == 0):
-        L = int(parent_len[t, s])
-        prev_s = int(parent_prev_state[t, s])
-        if L < 0 or prev_s < 0:
-            return DPResult(True, opt_cost, (), int(best_t))
-        if L == 0:
-            t -= 1
-            s = prev_s
-        else:
-            start = t - L
-            segments.append((start, L))
-            t -= L
-            s = prev_s
+        segments.reverse()
 
-    segments.reverse()
+        # Assign job IDs to segments based on their length.
+        sched: List[Tuple[int, int, int]] = []
+        for start_t, L in segments:
+            jid = ids_by_len[L].pop()
+            sched.append((jid, int(start_t), int(start_t + L)))
 
-    # Assign job IDs to segments based on their length.
-    sched: List[Tuple[int, int, int]] = []
-    for start_t, L in segments:
-        jid = ids_by_len[L].pop()
-        sched.append((jid, int(start_t), int(start_t + L)))
+        finish_time = 0
+        for _, _, e in sched:
+            if e > finish_time:
+                finish_time = int(e)
 
-    finish_time = 0
-    for _, _, e in sched:
-        if e > finish_time:
-            finish_time = int(e)
-
-    return DPResult(True, opt_cost, tuple(sched), finish_time)
+        return DPResult(True, opt_cost, tuple(sched), finish_time, is_optimal=True, timed_out=False)
+    
+    # Timed out or no complete solution found - try greedy completion
+    if timed_out:
+        # Find best partial state: most jobs scheduled at lowest cost
+        best_partial_jobs = 0
+        best_partial_cost = float("inf")
+        best_partial_time = 0
+        best_partial_state = 0
+        
+        # Search through all explored layers up to last_processed_t
+        for t_search in range(min(last_processed_t + 1, T + 1)):
+            row_search = dp[t_search]
+            finite_mask = np.isfinite(row_search)
+            if not finite_mask.any():
+                continue
+            finite_states = np.where(finite_mask)[0]
+            for s in finite_states:
+                n_jobs = count_jobs_in_state(s)
+                cost = float(row_search[s])
+                if n_jobs > best_partial_jobs or (n_jobs == best_partial_jobs and cost < best_partial_cost):
+                    best_partial_jobs = n_jobs
+                    best_partial_cost = cost
+                    best_partial_time = t_search
+                    best_partial_state = s
+        
+        if best_partial_jobs > 0:
+            # Backtrack to get partial schedule
+            segments = []
+            t = best_partial_time
+            s = best_partial_state
+            while not (t == 0 and s == 0):
+                L = int(parent_len[t, s])
+                prev_s = int(parent_prev_state[t, s])
+                if L < 0 or prev_s < 0:
+                    break
+                if L == 0:
+                    t -= 1
+                    s = prev_s
+                else:
+                    start = t - L
+                    segments.append((start, L))
+                    t -= L
+                    s = prev_s
+            segments.reverse()
+            
+            # Build partial schedule
+            partial_sched: List[Tuple[int, int, int]] = []
+            scheduled_used = used[best_partial_state, :].copy()
+            
+            for start_t, L in segments:
+                if L in ids_by_len and ids_by_len[L]:
+                    jid = ids_by_len[L].pop()
+                    partial_sched.append((jid, int(start_t), int(start_t + L)))
+            
+            # Compute remaining jobs
+            remaining_counts: Dict[int, int] = {}
+            for i, length in enumerate(lengths_list):
+                remaining = int(totals[i]) - int(scheduled_used[i])
+                if remaining > 0:
+                    remaining_counts[length] = remaining
+            
+            # Get occupied slots from partial schedule
+            occupied_slots = [(s, e) for _, s, e in partial_sched]
+            
+            # Greedy completion
+            greedy_cost, greedy_sched = _greedy_complete_schedule(
+                remaining_counts,
+                prices,
+                T,
+                occupied_slots,
+                ids_by_len,
+            )
+            
+            if np.isfinite(greedy_cost):
+                # Combine schedules
+                full_sched = partial_sched + greedy_sched
+                total_cost = best_partial_cost + greedy_cost
+                finish_time = max((e for _, _, e in full_sched), default=0)
+                
+                return DPResult(
+                    True, 
+                    total_cost, 
+                    tuple(full_sched), 
+                    finish_time,
+                    is_optimal=False,
+                    timed_out=True,
+                )
+    
+    return DPResult(False, float("inf"), (), 0, is_optimal=False, timed_out=timed_out)
 
 
 def solve_optimal_benchmark_dp_counts(

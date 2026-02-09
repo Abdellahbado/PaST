@@ -1,6 +1,6 @@
 # Curriculum stage: medium instances (AAN_CLEAN + basic job price features)
 
-exp_name: neurols_AAN_clean_medium
+exp_name: neurols_AAN_clean
 seed: 42
 device: cuda
 log_dir: logs/neurols

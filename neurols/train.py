@@ -73,6 +73,13 @@ class TrainConfig:
     log_dir: str = "logs/neurols"
     checkpoint_dir: str = "checkpoints/neurols"
 
+    # Checkpoint retention (helpful on storage-limited HPC)
+    # Keep only the most recent periodic checkpoint_{episode}.pt files.
+    checkpoint_keep_last: int = 1
+    # Additionally keep a separate best checkpoint file (best.pt) updated on new best-ever.
+    checkpoint_keep_best: bool = True
+    checkpoint_best_name: str = "best.pt"
+
     # Data
     n_jobs_train: List[int] = field(default_factory=lambda: [10, 15, 20])
     n_machines_train: List[int] = field(default_factory=lambda: [2, 3, 4])
@@ -156,6 +163,10 @@ class TrainConfig:
     n_parallel_envs: int = 0  # 0 = auto (cpu_count // 4, capped 16); 1 = serial
 
     def __post_init__(self) -> None:
+        # Checkpoint retention validation
+        if int(self.checkpoint_keep_last) < 1:
+            self.checkpoint_keep_last = 1
+
         # Auto-compute epsilon decay if not provided.
         # We apply decay once per episode, so choose decay such that:
         #   epsilon_start * decay**n_episodes ~= epsilon_end
@@ -463,6 +474,71 @@ class NeuroLSTrainer:
             T_max=self.config.n_episodes,
             eta_min=self.config.learning_rate * 0.1,
         )
+
+    def _cleanup_periodic_checkpoints(self) -> None:
+        """Delete older periodic checkpoints to limit disk usage.
+
+        Keeps only the newest `checkpoint_keep_last` files matching `checkpoint_*.pt`.
+        Does not touch `final.pt` or the best checkpoint (e.g. best.pt).
+        """
+        keep_last = int(getattr(self.config, "checkpoint_keep_last", 1))
+        if keep_last < 1:
+            keep_last = 1
+
+        periodic = []
+        for p in self.checkpoint_dir.glob("checkpoint_*.pt"):
+            # Parse episode from filename `checkpoint_{episode}.pt`
+            stem = p.stem
+            try:
+                ep = int(stem.split("_")[-1])
+            except Exception:
+                continue
+            periodic.append((ep, p))
+
+        if len(periodic) <= keep_last:
+            return
+
+        periodic.sort(key=lambda t: t[0])
+        to_delete = periodic[:-keep_last]
+        for _, path in to_delete:
+            try:
+                path.unlink()
+            except Exception:
+                # Best-effort cleanup; ignore filesystem hiccups.
+                pass
+
+    def _prune_periodic_checkpoints_for_new(self) -> None:
+        """Pre-prune periodic checkpoints before saving a new one.
+
+        This is useful when the filesystem is near-full: we delete old periodic
+        checkpoints first to make room for the new checkpoint.
+        """
+        keep_last = int(getattr(self.config, "checkpoint_keep_last", 1))
+        if keep_last < 1:
+            keep_last = 1
+
+        # We want to keep at most (keep_last - 1) existing periodic files,
+        # since we are about to write a new one.
+        target_existing = max(0, keep_last - 1)
+
+        periodic = []
+        for p in self.checkpoint_dir.glob("checkpoint_*.pt"):
+            try:
+                ep = int(p.stem.split("_")[-1])
+            except Exception:
+                continue
+            periodic.append((ep, p))
+
+        if len(periodic) <= target_existing:
+            return
+
+        periodic.sort(key=lambda t: t[0])
+        to_delete = periodic[: len(periodic) - target_existing]
+        for _, path in to_delete:
+            try:
+                path.unlink()
+            except Exception:
+                pass
 
     def _update_target(self):
         """Update target network."""
@@ -1079,6 +1155,11 @@ class NeuroLSTrainer:
             self.best_ever_improvement = metrics["improvement"]
             self.best_ever_episode = episode
 
+            # Save best checkpoint (separate file) if enabled.
+            if getattr(self.config, "checkpoint_keep_best", True):
+                best_name = getattr(self.config, "checkpoint_best_name", "best.pt")
+                self.save_checkpoint(best_name, cleanup_old=False)
+
         # ── Logging ──────────────────────────────────────────
         if episode % self.config.log_interval == 0:
             elapsed = time.time() - self.train_start_time
@@ -1196,7 +1277,7 @@ class NeuroLSTrainer:
 
         # Save checkpoint
         if episode % self.config.save_interval == 0:
-            self.save_checkpoint(f"checkpoint_{episode}.pt")
+            self.save_checkpoint(f"checkpoint_{episode}.pt", cleanup_old=True)
 
         # Update learning rate
         self.scheduler.step()
@@ -1322,10 +1403,14 @@ class NeuroLSTrainer:
             "avg_q": float(np.mean(avg_q_values)) if avg_q_values else 0.0,
         }
 
-    def save_checkpoint(self, filename: str):
+    def save_checkpoint(self, filename: str, *, cleanup_old: bool = True):
         """Save checkpoint."""
         path = self.checkpoint_dir / filename
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        is_periodic = filename.startswith("checkpoint_") and filename.endswith(".pt")
+        if cleanup_old and is_periodic:
+            self._prune_periodic_checkpoints_for_new()
 
         payload = {
             "episode": self.episode,
@@ -1345,6 +1430,9 @@ class NeuroLSTrainer:
             torch.save(payload, tmp_path)
             os.replace(tmp_path, path)
             print(f"Saved checkpoint: {path}")
+
+            if cleanup_old and is_periodic:
+                self._cleanup_periodic_checkpoints()
             return
         except Exception as exc:
             # Some network/overlay filesystems occasionally fail with
@@ -1362,6 +1450,9 @@ class NeuroLSTrainer:
                 )
                 os.replace(legacy_tmp_path, path)
                 print(f"Saved checkpoint (legacy): {path}")
+
+                if cleanup_old and is_periodic:
+                    self._cleanup_periodic_checkpoints()
                 return
             except Exception as exc2:
                 # Keep tmp files if they exist for post-mortem debugging.
@@ -1374,6 +1465,13 @@ class NeuroLSTrainer:
     def load_checkpoint(self, path: str):
         """Load checkpoint."""
         p = Path(path)
+        if not p.exists() and not p.is_absolute():
+            # Common usage in curriculum chains: `--resume final.pt`.
+            # Resolve relative to this experiment's checkpoint directory.
+            alt = self.checkpoint_dir / p
+            if alt.exists():
+                p = alt
+
         if not p.exists():
             raise FileNotFoundError(
                 f"Resume checkpoint not found: {path}. "
@@ -1473,6 +1571,18 @@ def main():
         default=None,
         help="Parallel env workers (0=auto, 1=serial)",
     )
+    parser.add_argument(
+        "--n-workers",
+        type=int,
+        default=None,
+        help="Alias for --n-parallel (number of parallel workers)",
+    )
+    parser.add_argument(
+        "--n-cores",
+        type=int,
+        default=None,
+        help="Alias for --n-parallel (use this many CPU workers)",
+    )
 
     args = parser.parse_args()
 
@@ -1480,7 +1590,20 @@ def main():
     if args.config is not None:
         import yaml
 
-        with open(args.config) as f:
+        cfg_path = Path(args.config)
+        if not cfg_path.exists() and not cfg_path.is_absolute():
+            # Convenience: allow `--config neurols_foo.yaml` even if the file lives in PaST/configs
+            default_cfg_dir = Path(__file__).resolve().parents[1] / "configs"
+            alt = default_cfg_dir / args.config
+            if alt.exists():
+                cfg_path = alt
+        if not cfg_path.exists():
+            raise FileNotFoundError(
+                f"Config file not found: {args.config}. "
+                "Pass an explicit path, or place the YAML under PaST/configs/."
+            )
+
+        with open(cfg_path) as f:
             config_dict = yaml.safe_load(f)
         config = TrainConfig(**config_dict)
     else:
@@ -1516,8 +1639,18 @@ def main():
         config.action_space = args.action_space
     if args.graph_type is not None:
         config.graph_type = args.graph_type
-    if args.n_parallel is not None:
-        config.n_parallel_envs = args.n_parallel
+    # Worker count CLI resolution
+    n_parallel_cli = args.n_parallel
+    if args.n_workers is not None:
+        if n_parallel_cli is not None and int(n_parallel_cli) != int(args.n_workers):
+            raise ValueError("Conflicting --n-parallel and --n-workers")
+        n_parallel_cli = args.n_workers
+    if args.n_cores is not None:
+        if n_parallel_cli is not None and int(n_parallel_cli) != int(args.n_cores):
+            raise ValueError("Conflicting --n-parallel and --n-cores")
+        n_parallel_cli = args.n_cores
+    if n_parallel_cli is not None:
+        config.n_parallel_envs = int(n_parallel_cli)
 
     # Train
     trainer = NeuroLSTrainer(config)

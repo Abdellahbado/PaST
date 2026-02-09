@@ -1,6 +1,6 @@
 # Curriculum stage: small instances (AANP_CLEAN + basic job price features)
 
-exp_name: neurols_AANP_clean_small
+exp_name: neurols_AANP_clean
 seed: 42
 device: cuda
 log_dir: logs/neurols

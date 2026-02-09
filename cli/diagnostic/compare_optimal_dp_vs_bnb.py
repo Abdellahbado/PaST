@@ -242,6 +242,8 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
     else:
         bnb_sched = ()
 
+    bnb_finish_time = max((e for _, _, e in bnb_sched), default=0)
+
     dp_sched = dp_res.schedule
 
     # Save artifacts
@@ -266,12 +268,15 @@ def _run_one(seed: int, args_dict: Dict[str, Any]) -> Dict[str, Any]:
             "time_sec": float(dp_time),
             "finish_time": int(dp_res.finish_time),
             "schedule": [list(x) for x in dp_sched],
+            "is_optimal": getattr(dp_res, "is_optimal", True),
+            "timed_out": getattr(dp_res, "timed_out", False),
         },
         "bnb": {
             "timed_out": bool(getattr(solver, "timed_out", False)),
             "cost": float(bnb_cost),
             "time_sec": float(bnb_time),
             "nodes": int(getattr(solver, "nodes_explored", -1)),
+            "finish_time": int(bnb_finish_time),
             "sequence": [int(x) for x in (seq or [])],
             "schedule": [list(x) for x in bnb_sched],
         },
@@ -381,7 +386,7 @@ def main() -> None:
 
     summary_csv = os.path.join(out_dir, "summary.csv")
     lines = [
-        "seed,scale,T,m,n,machine,n_jobs_sm,sum_p_sm,unique_p_sm,dp_cost,dp_time_sec,bnb_cost,bnb_time_sec,bnb_nodes,cost_match,bnb_timed_out"
+        "seed,scale,T,m,n,machine,n_jobs_sm,sum_p_sm,unique_p_sm,dp_cost,dp_makespan,dp_time_sec,dp_is_optimal,dp_timed_out,bnb_cost,bnb_makespan,bnb_time_sec,bnb_nodes,cost_match,bnb_timed_out"
     ]
     for r in results:
         lines.append(
@@ -397,8 +402,12 @@ def main() -> None:
                     str(r["sum_p_sm"]),
                     str(r["unique_p_sm"]),
                     str(r["dp"]["cost"]),
+                    str(r["dp"]["finish_time"]),
                     str(r["dp"]["time_sec"]),
+                    str(r["dp"].get("is_optimal", True)),
+                    str(r["dp"].get("timed_out", False)),
                     str(r["bnb"]["cost"]),
+                    str(r["bnb"]["finish_time"]),
                     str(r["bnb"]["time_sec"]),
                     str(r["bnb"]["nodes"]),
                     str(r["cost_match"]),
