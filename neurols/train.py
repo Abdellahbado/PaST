@@ -969,7 +969,11 @@ class NeuroLSTrainer:
         if n_parallel <= 0:
             import multiprocessing as _mp
 
-            n_parallel = max(1, min(16, _mp.cpu_count() // 4))
+            # Maximize CPU utilisation by default for env.step() (CPU-bound).
+            # To avoid severe over-subscription, default worker thread count
+            # to 1 unless the user explicitly set it.
+            os.environ.setdefault("NEUROLS_WORKER_THREADS", "1")
+            n_parallel = max(1, int(_mp.cpu_count() or 1))
         use_parallel = n_parallel > 1
 
         # Training loop
@@ -1565,6 +1569,59 @@ def main():
         choices=["bipartite", "tripartite"],
         help="Graph representation: bipartite (default) or tripartite (adds period nodes)",
     )
+
+    # Problem size + horizon overrides (this trainer currently uses fixed shapes)
+    parser.add_argument(
+        "--n-jobs",
+        type=int,
+        default=None,
+        help="Override fixed number of jobs for this run (sets n_jobs_train=[value]).",
+    )
+    parser.add_argument(
+        "--n-machines",
+        type=int,
+        default=None,
+        help="Override fixed number of machines for this run (sets n_machines_train=[value]).",
+    )
+    parser.add_argument(
+        "--K-fixed",
+        type=int,
+        default=None,
+        help="Override fixed horizon K for this run (keeps tensors constant).",
+    )
+
+    # Env / search knobs
+    parser.add_argument(
+        "--reward-mode",
+        type=str,
+        default=None,
+        help="Override reward_mode (e.g., dense_best, dense_best_exposure).",
+    )
+    parser.add_argument(
+        "--exposure-bonus-lambda",
+        type=float,
+        default=None,
+        help="Override exposure shaping coefficient (only used for dense_best_exposure).",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="Override candidate generation top_k (max candidate moves per operator).",
+    )
+    parser.add_argument(
+        "--proxy-mode",
+        type=str,
+        default=None,
+        choices=["load", "price_aware"],
+        help="Override proxy mode for top-K move selection.",
+    )
+    parser.add_argument(
+        "--use-proxy",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Enable/disable proxy ranking in candidate generation.",
+    )
     parser.add_argument(
         "--n-parallel",
         type=int,
@@ -1639,6 +1696,26 @@ def main():
         config.action_space = args.action_space
     if args.graph_type is not None:
         config.graph_type = args.graph_type
+
+    # Fixed-shape overrides
+    if args.n_jobs is not None:
+        config.n_jobs_train = [int(args.n_jobs)]
+    if args.n_machines is not None:
+        config.n_machines_train = [int(args.n_machines)]
+    if args.K_fixed is not None:
+        config.K_fixed = int(args.K_fixed)
+
+    # Env/search overrides
+    if args.reward_mode is not None:
+        config.reward_mode = str(args.reward_mode)
+    if args.exposure_bonus_lambda is not None:
+        config.exposure_bonus_lambda = float(args.exposure_bonus_lambda)
+    if args.top_k is not None:
+        config.top_k = int(args.top_k)
+    if args.proxy_mode is not None:
+        config.proxy_mode = str(args.proxy_mode)
+    if args.use_proxy is not None:
+        config.use_proxy = bool(args.use_proxy)
     # Worker count CLI resolution
     n_parallel_cli = args.n_parallel
     if args.n_workers is not None:

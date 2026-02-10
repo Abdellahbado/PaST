@@ -1779,7 +1779,14 @@ def main() -> None:
     parser.add_argument(
         "--device",
         type=str,
-        default="cpu",
+        default=(
+            "cuda"
+            if _TORCH_AVAILABLE
+            and hasattr(torch, "cuda")
+            and callable(getattr(torch.cuda, "is_available", None))
+            and torch.cuda.is_available()
+            else "cpu"
+        ),
         help="Probe device (cpu/cuda). Training itself is env-only.",
     )
     parser.add_argument(
