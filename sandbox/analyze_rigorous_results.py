@@ -37,8 +37,8 @@ def analyze(csv_path, scale_label):
     print(f"Avg Makespan: DP={df['dp_makespan'].mean():.1f} | BnB={df['bnb_makespan'].mean():.1f}")
 
 if __name__ == "__main__":
-    small_csv = "/Users/mac/Documents/Study/PFE/PaST/analysis_out/rigorous_small_200s/summary.csv"
-    medium_csv = "/Users/mac/Documents/Study/PFE/PaST/analysis_out/rigorous_mls_200s/summary.csv"
+    small_csv = "/Users/mac/Documents/Study/PFE/PaST/analysis_out/rigorous_small_200s/summary_combined.csv"
+    medium_csv = "/Users/mac/Documents/Study/PFE/PaST/analysis_out/rigorous_mls_200s/summary_combined.csv"
     
     if os.path.exists(small_csv):
         analyze(small_csv, "Small (T=80)")

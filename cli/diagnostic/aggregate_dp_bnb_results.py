@@ -23,11 +23,11 @@ import pandas as pd
 from typing import List, Dict, Any
 
 def scan_and_aggregate(root_dir: str):
-    # Pattern to match: PaST/analysis_out/compare_dp_bnb_*
-    search_pattern = os.path.join(root_dir, "compare_dp_bnb_*", "*.json")
+    # Pattern to match: PaST/analysis_out/rigorous*
+    search_pattern = os.path.join(root_dir, "rigorous*", "*.json")
     files = glob.glob(search_pattern)
     
-    print(f"Found {len(files)} JSON files in {root_dir}/compare_dp_bnb_*")
+    print(f"Found {len(files)} JSON files in {root_dir}/rigorous*")
     
     data = []
     
@@ -150,20 +150,24 @@ def scan_and_aggregate(root_dir: str):
 
         # Cost statistics
         print(f"\n[COST]")
-        print(f"  DP Mean:  {valid['dp_cost'].mean():.2f} ± {valid['dp_cost'].std():.2f}")
-        print(f"  BnB Mean: {valid['bnb_cost'].mean():.2f} ± {valid['bnb_cost'].std():.2f}")
-        print(f"  Avg Diff: {valid['cost_diff'].mean():.2f} (DP - BnB)")
+        print(f"  DP Mean:    {group['dp_cost'].mean():.2f} ± {group['dp_cost'].std():.2f}")
+        print(f"  BnB Mean:   {group['bnb_cost'].mean():.2f} ± {group['bnb_cost'].std():.2f}")
+        print(f"  Avg Diff:   {valid['cost_diff'].mean():.2f} (DP - BnB)")
         
         # Time statistics
         print(f"\n[TIME (seconds)]")
-        print(f"  DP Mean:  {valid['dp_time'].mean():.4f} ± {valid['dp_time'].std():.4f}")
-        print(f"  BnB Mean: {valid['bnb_time'].mean():.4f} ± {valid['bnb_time'].std():.4f}")
-        print(f"  Med Ratio: {valid['time_ratio'].median():.2f}x (DP/BnB)")
+        print(f"  DP Mean:    {valid['dp_time'].mean():.4f} ± {valid['dp_time'].std():.4f}")
+        print(f"  DP Median:  {valid['dp_time'].median():.4f}")
+        print(f"  DP Mode:    {valid['dp_time'].round(4).mode().iloc[0] if not valid['dp_time'].empty else 'N/A'}")
+        print(f"  BnB Mean:   {valid['bnb_time'].mean():.4f} ± {valid['bnb_time'].std():.4f}")
+        print(f"  BnB Median: {valid['bnb_time'].median():.4f}")
+        print(f"  BnB Mode:   {valid['bnb_time'].round(4).mode().iloc[0] if not valid['bnb_time'].empty else 'N/A'}")
+        print(f"  Med Ratio:  {valid['time_ratio'].median():.2f}x (DP/BnB)")
         
         # Makespan statistics
         print(f"\n[MAKESPAN]")
-        print(f"  DP Mean:  {valid['dp_makespan'].mean():.1f} ± {valid['dp_makespan'].std():.1f}")
-        print(f"  BnB Mean: {valid['bnb_makespan'].mean():.1f} ± {valid['bnb_makespan'].std():.1f}")
+        print(f"  DP Mean:      {valid['dp_makespan'].mean():.1f} ± {valid['dp_makespan'].std():.1f}")
+        print(f"  BnB Mean:     {group['bnb_makespan'].mean():.1f} ± {group['bnb_makespan'].std():.1f}")
         
     print("\n" + "="*80)
     print("Top 5 Cases where DP Cost < BnB Cost (BnB suboptimal/timeout):")

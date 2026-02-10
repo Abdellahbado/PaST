@@ -10,18 +10,22 @@ This script is *additive* (does not modify or replace the existing
 
 Approach (per variant):
 1) Collect states by running a short random policy.
-2) For each collected state, compute an *oracle* best action via exhaustive
-   one-step lookahead under deterministic acceptance.
+2) For each collected state, compute an *oracle* best generator via exhaustive
+    one-step lookahead (expected 1-step reward under the env's acceptance semantics).
+    Note: a 1-step oracle is intentionally myopic; use --oracle-horizon > 1 to
+    evaluate delayed-payoff generators (perturb/destroy).
 3) Report action-value margin statistics (how much better the best action is
    than typical actions).
 4) Train a small supervised probe to predict the oracle action from a fixed
    vectorization of the observation (quick sanity check of predictability).
 
 Notes:
-- The oracle uses deterministic acceptance to remove SA noise; this tests
-  *task signal* (action consequences), not whether an RL variant learns.
-- Acceptance bits may be less informative under deterministic oracle; the
-  primary signal tested is operator/perturbation selection.
+- The 1-step oracle computes an *expected* immediate reward (analytical accept/reject),
+    which removes sampling noise but is still a one-step, local signal.
+- The multi-step oracle (when --oracle-horizon > 1) forces one generator step to be
+    accepted, then performs a short deterministic greedy improvement rollout.
+- Labels are over *generators* (accept/reject is collapsed by taking the best expected
+    reward among that generator's accept/reject actions).
 
 Usage:
   python -m PaST.scripts.task_learnability_test --variants AAN_zprice AAN_full
@@ -175,6 +179,134 @@ def _vectorize_features(features: Dict[str, np.ndarray]) -> np.ndarray:
         vec_parts.append(_mean_std(features["period_features"]))
 
     return np.concatenate(vec_parts, axis=0).astype(np.float32)
+
+
+def _coeff_var(x: np.ndarray) -> float:
+    x = np.asarray(x, dtype=np.float64).ravel()
+    if x.size == 0:
+        return 0.0
+    mu = float(np.mean(x))
+    sd = float(np.std(x))
+    if (not np.isfinite(mu)) or abs(mu) <= 1e-12:
+        return 0.0
+    v = sd / abs(mu)
+    return float(v) if np.isfinite(v) else 0.0
+
+
+def _compute_struct_metrics(
+    env,
+    *,
+    hours_per_day: int = 20,
+    cheap_quantile: float = 0.25,
+) -> Dict[str, float]:
+    """Compute interpretable structural metrics from the current env state.
+
+    These are *diagnostic* metrics to see if a rollout is moving in the
+    "right direction" structurally (cheap-time usage, spillover, balance),
+    not a replacement for the true objective.
+    """
+
+    if env.state is None or env._current_eval is None:
+        return {}
+
+    ct = getattr(env, "_ct", None)
+    processing_times = getattr(env, "_processing_times", None)
+    solution = getattr(env.state, "solution", None)
+
+    metrics: Dict[str, float] = {}
+    try:
+        metrics["cur_cost"] = float(env.state.current_cost)
+        metrics["best_cost"] = float(env.state.best_cost)
+    except Exception:
+        pass
+
+    try:
+        per_m_energy = np.asarray(
+            [float(me.energy) for me in env._current_eval.per_machine], dtype=np.float64
+        )
+        per_m_ms = np.asarray(
+            [float(me.makespan) for me in env._current_eval.per_machine],
+            dtype=np.float64,
+        )
+        metrics["load_cv_energy"] = _coeff_var(per_m_energy)
+        metrics["load_cv_makespan"] = _coeff_var(per_m_ms)
+    except Exception:
+        pass
+
+    try:
+        if processing_times is not None and solution is not None:
+            loads = solution.get_machine_loads(np.asarray(processing_times))
+            metrics["load_cv_pt"] = _coeff_var(loads)
+    except Exception:
+        pass
+
+    # Cross-day spillover: fraction of jobs whose execution interval crosses a day boundary.
+    try:
+        if (
+            processing_times is not None
+            and solution is not None
+            and hours_per_day is not None
+            and int(hours_per_day) > 0
+        ):
+            hpd = int(hours_per_day)
+            n_jobs_total = 0
+            n_cross = 0
+            pt = np.asarray(processing_times, dtype=np.int64)
+            for mi, seq in enumerate(solution.sequences):
+                starts = getattr(env._current_eval.per_machine[mi], "start_times", [])
+                if not seq or not starts:
+                    continue
+                n = min(len(seq), len(starts))
+                for j_idx in range(n):
+                    job = int(seq[j_idx])
+                    st = int(starts[j_idx])
+                    dur = int(pt[job])
+                    if dur <= 0:
+                        continue
+                    end = st + dur - 1
+                    n_jobs_total += 1
+                    if (st // hpd) != (end // hpd):
+                        n_cross += 1
+            metrics["cross_day_job_frac"] = float(n_cross / max(1, n_jobs_total))
+    except Exception:
+        pass
+
+    # Cheap-time usage: share of processing time executed in the cheapest quantile of slots.
+    try:
+        if ct is not None and processing_times is not None and solution is not None:
+            ct_arr = np.asarray(ct, dtype=np.float64)
+            if ct_arr.size:
+                thr = float(np.quantile(ct_arr, float(cheap_quantile)))
+                pt = np.asarray(processing_times, dtype=np.int64)
+                cheap_t = 0.0
+                total_t = 0.0
+                price_sum = 0.0
+                for mi, seq in enumerate(solution.sequences):
+                    starts = getattr(
+                        env._current_eval.per_machine[mi], "start_times", []
+                    )
+                    if not seq or not starts:
+                        continue
+                    n = min(len(seq), len(starts))
+                    for j_idx in range(n):
+                        job = int(seq[j_idx])
+                        st = int(starts[j_idx])
+                        dur = int(pt[job])
+                        if dur <= 0:
+                            continue
+                        for t in range(st, st + dur):
+                            if 0 <= t < int(ct_arr.size):
+                                price = float(ct_arr[t])
+                                total_t += 1.0
+                                price_sum += price
+                                if price <= thr:
+                                    cheap_t += 1.0
+                metrics["cheap_time_frac"] = float(cheap_t / max(1.0, total_t))
+                metrics["mean_price_used"] = float(price_sum / max(1.0, total_t))
+    except Exception:
+        pass
+
+    return metrics
 
 
 def _oracle_one_step(
@@ -544,6 +676,7 @@ def _oracle_multi_step(
     horizon: int,
     tie_eps: float = 1e-12,
     exposure_lambda: float = 0.0,
+    hours_per_day: int = 20,
 ) -> Tuple[int, Dict[str, float], List[int]]:
     """Multi-step oracle label based on recovery after applying a generator.
 
@@ -594,6 +727,7 @@ def _oracle_multi_step(
 
     best_cost_before = float(env.state.best_cost)
     current_cost_before = float(env.state.current_cost)
+    struct_before = _compute_struct_metrics(env, hours_per_day=int(hours_per_day))
     phi_before = 0.0
     exp_denom = 1.0
     use_exp = float(exposure_lambda) != 0.0 and hasattr(
@@ -614,6 +748,11 @@ def _oracle_multi_step(
         denom = 1.0
 
     gen_scores = np.full((len(gen_keys),), -np.inf, dtype=np.float64)
+
+    # Structural deltas (after rollout minus before). Not all metrics exist in all modes.
+    struct_delta_cross = np.full((len(gen_keys),), np.nan, dtype=np.float64)
+    struct_delta_cheap = np.full((len(gen_keys),), np.nan, dtype=np.float64)
+    struct_delta_loadcv = np.full((len(gen_keys),), np.nan, dtype=np.float64)
 
     for gi, gen_key in enumerate(gen_keys):
         # Pick a representative ACCEPT action for this generator if available.
@@ -676,6 +815,26 @@ def _oracle_multi_step(
             # distinguishes worsening vs improving trajectories.
             after_cur = float(env.state.current_cost)
             after_best = float(env.state.best_cost)
+
+            struct_after = _compute_struct_metrics(
+                env, hours_per_day=int(hours_per_day)
+            )
+            if (
+                "cross_day_job_frac" in struct_before
+                and "cross_day_job_frac" in struct_after
+            ):
+                struct_delta_cross[gi] = float(
+                    struct_after["cross_day_job_frac"]
+                    - struct_before["cross_day_job_frac"]
+                )
+            if "cheap_time_frac" in struct_before and "cheap_time_frac" in struct_after:
+                struct_delta_cheap[gi] = float(
+                    struct_after["cheap_time_frac"] - struct_before["cheap_time_frac"]
+                )
+            if "load_cv_pt" in struct_before and "load_cv_pt" in struct_after:
+                struct_delta_loadcv[gi] = float(
+                    struct_after["load_cv_pt"] - struct_before["load_cv_pt"]
+                )
 
             r_cur = (current_cost_before - after_cur) / float(denom)
             r_best = max(best_cost_before - after_best, 0.0) / float(denom)
@@ -759,6 +918,51 @@ def _oracle_multi_step(
         "reject_better_rate": float(0.0),
         "accept_tie_rate": float(0.0),
     }
+
+    # Add interpretable structural deltas for the best generator and for typical generators.
+    # Conventions:
+    # - cross_day_job_frac: negative delta is better (fewer cross-day jobs)
+    # - cheap_time_frac: positive delta is better (more time in cheap slots)
+    # - load_cv_pt: negative delta is better (more balanced processing-time assignment)
+    try:
+        finite_cross = np.isfinite(struct_delta_cross)
+        finite_cheap = np.isfinite(struct_delta_cheap)
+        finite_load = np.isfinite(struct_delta_loadcv)
+
+        if best_gen_idxs.size and bool(np.any(finite_cross)):
+            stats["struct_delta_cross_day_best"] = float(
+                struct_delta_cross[int(best_gen)]
+            )
+            stats["struct_delta_cross_day_mean"] = float(
+                np.mean(struct_delta_cross[finite_cross])
+            )
+            stats["struct_delta_cross_day_median"] = float(
+                np.median(struct_delta_cross[finite_cross])
+            )
+
+        if best_gen_idxs.size and bool(np.any(finite_cheap)):
+            stats["struct_delta_cheap_time_best"] = float(
+                struct_delta_cheap[int(best_gen)]
+            )
+            stats["struct_delta_cheap_time_mean"] = float(
+                np.mean(struct_delta_cheap[finite_cheap])
+            )
+            stats["struct_delta_cheap_time_median"] = float(
+                np.median(struct_delta_cheap[finite_cheap])
+            )
+
+        if best_gen_idxs.size and bool(np.any(finite_load)):
+            stats["struct_delta_load_cv_pt_best"] = float(
+                struct_delta_loadcv[int(best_gen)]
+            )
+            stats["struct_delta_load_cv_pt_mean"] = float(
+                np.mean(struct_delta_loadcv[finite_load])
+            )
+            stats["struct_delta_load_cv_pt_median"] = float(
+                np.median(struct_delta_loadcv[finite_load])
+            )
+    except Exception:
+        pass
 
     return best_gen, stats, best_gen_set
 
@@ -969,6 +1173,12 @@ def run_variant(
 
     inst_rng = random.Random(seed)
 
+    # Guardrail: 1-step oracle is known to undervalue delayed-payoff generators.
+    # If the action space includes perturb/destroy generators and horizon==1,
+    # print a concise warning so results aren't misinterpreted as "not learnable".
+    warn_myopic = bool(int(oracle_horizon) <= 1)
+    warned_myopic = False
+
     X_rows: List[np.ndarray] = []
     y_rows: List[int] = []
     oracle_stats: List[Dict[str, float]] = []
@@ -985,6 +1195,26 @@ def run_variant(
         )
 
         env.reset(instance, K)
+
+        if warn_myopic and not warned_myopic:
+            try:
+                from PaST.neurols.action_space import ActionType
+
+                has_delayed = False
+                for a in range(int(env.action_space_size)):
+                    d = env.config.action_space.decode_action(int(a))
+                    if d.action_type in (ActionType.PERTURBATION, ActionType.DESTROY):
+                        has_delayed = True
+                        break
+                if has_delayed:
+                    print(
+                        f"[{key}] Note: --oracle-horizon=1 is myopic; perturb/destroy "
+                        f"generators can look unpromising short-term. Consider "
+                        f"--oracle-horizon 5-10 (and optionally --collect-mode perturb_then_label)."
+                    )
+            except Exception:
+                pass
+            warned_myopic = True
 
         # CandidateGen overrides (force top-k/proxy behavior when requested)
         try:
@@ -1055,6 +1285,7 @@ def run_variant(
                     horizon=int(oracle_horizon),
                     tie_eps=float(tie_eps),
                     exposure_lambda=float(oracle_exposure_lambda),
+                    hours_per_day=int(hours_per_day),
                 )
             else:
                 best_action, stats, best_set = _oracle_one_step(
@@ -1194,7 +1425,11 @@ def main() -> None:
         "--oracle-horizon",
         type=int,
         default=1,
-        help="If >1, label by multi-step recovery (forces one generator accept + greedy improve steps).",
+        help=(
+            "Oracle lookahead horizon. 1 = one-step expected reward (fast, myopic). "
+            ">1 = multi-step recovery score (forces one generator accept + greedy operator rollout), "
+            "better for delayed-payoff perturb/destroy generators."
+        ),
     )
     parser.add_argument(
         "--oracle-exposure-lambda",
