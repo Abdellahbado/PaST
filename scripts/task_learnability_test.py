@@ -1877,6 +1877,21 @@ def main() -> None:
         )
         chance_tie_str = f"chance_tie={res.get('chance_acc_tie', 0.0):.3f}"
         tie_sz_str = f"tie_sz={res.get('tie_set_size_mean', 0.0):.2f}"
+
+        struct_bits: List[str] = []
+        if "struct_delta_cheap_time_best" in res:
+            struct_bits.append(
+                f"dCheap(best)={res.get('struct_delta_cheap_time_best', 0.0):+.3f}"
+            )
+        if "struct_delta_cross_day_best" in res:
+            struct_bits.append(
+                f"dCross(best)={res.get('struct_delta_cross_day_best', 0.0):+.3f}"
+            )
+        if "struct_delta_load_cv_pt_best" in res:
+            struct_bits.append(
+                f"dLoadCV(best)={res.get('struct_delta_load_cv_pt_best', 0.0):+.3f}"
+            )
+        struct_str = ("  " + "  ".join(struct_bits)) if struct_bits else ""
         print(
             f"[{key:9s}] samples={res['n_samples']:4d}  "
             f"gens={int(res.get('n_generators', 0)):3d}  "
@@ -1886,6 +1901,7 @@ def main() -> None:
             f"best-mean={res['adv_best_minus_mean']:.4g}  "
             f"margin(best,2nd)={res['margin_best_second']:.4g}  "
             f"nonzero={res['nonzero_reward_frac']:.2%}"
+            f"{struct_str}"
         )
 
     if args.out:
