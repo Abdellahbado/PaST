@@ -39,6 +39,7 @@ Defaults are chosen to be reasonably fast on CPU.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as cf
 import copy
 import json
 import math
@@ -1065,6 +1066,213 @@ def _chance_accuracy_tie(best_sets: Sequence[Sequence[int]], n_actions: int) -> 
     return float(np.mean(np.asarray(sizes, dtype=np.float64) / float(n_actions)))
 
 
+def _auto_num_workers(requested: int, *, n_tasks: int) -> int:
+    """Choose a worker count.
+
+    requested:
+      - 0 or None: use all available cores
+      - 1: disable multiprocessing
+      - >1: use that many workers
+    """
+
+    if requested is None or int(requested) <= 0:
+        requested = int(os.cpu_count() or 1)
+    requested = max(1, int(requested))
+    # Avoid spawning more workers than tasks.
+    return max(1, min(int(requested), max(1, int(n_tasks))))
+
+
+def _split_into_chunks(items: Sequence[int], n_chunks: int) -> List[List[int]]:
+    items = list(items)
+    if not items:
+        return []
+    n_chunks = max(1, int(n_chunks))
+    out: List[List[int]] = [[] for _ in range(n_chunks)]
+    for i, x in enumerate(items):
+        out[i % n_chunks].append(int(x))
+    return [c for c in out if c]
+
+
+def _collect_samples_worker(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Worker: collect (X,y,stats,best_sets) for a chunk of instance IDs."""
+
+    from PaST.neurols.env import NeuroLSEnv, EnvConfig
+    from PaST.neurols.action_space import get_action_space
+    from PaST.data.sm_benchmark_data import generate_raw_instance
+    from PaST.config import DataConfig
+
+    key = str(payload["key"])
+    seed = int(payload["seed"])
+    instance_ids = list(payload["instance_ids"])
+    states_per_instance = int(payload["states_per_instance"])
+    K = int(payload["K"])
+    D_days = int(payload["D_days"])
+    fixed_n = int(payload["fixed_n"])
+    fixed_m = int(payload["fixed_m"])
+    hours_per_day = int(payload.get("hours_per_day", 20))
+
+    action_space_name = str(payload["action_space_name"])
+    graph_type = str(payload["graph_type"])
+    price_mode = str(payload["price_mode"])
+    reward_mode = str(payload["reward_mode"])
+    exposure_bonus_lambda = float(payload["exposure_bonus_lambda"])
+    exposure_eps = float(payload["exposure_eps"])
+    step_penalty = float(payload["step_penalty"])
+    top_k = int(payload["top_k"])
+    use_proxy = bool(payload["use_proxy"])
+    proxy_mode_val = str(payload["proxy_mode_val"])
+
+    collect_mode = str(payload["collect_mode"])
+    disrupt_steps = int(payload["disrupt_steps"])
+    oracle_horizon = int(payload["oracle_horizon"])
+    tie_eps = float(payload["tie_eps"])
+    oracle_exposure_lambda = float(payload["oracle_exposure_lambda"])
+    force_topk = bool(payload["force_topk"])
+    n_jobs_topk_threshold_override = payload.get("n_jobs_topk_threshold_override", None)
+    max_moves_full_override = payload.get("max_moves_full_override", None)
+    verbose = bool(payload.get("verbose", False))
+
+    data_config = DataConfig(sampling_mode="new_benchmark_grid")
+
+    env_config = EnvConfig(
+        max_steps=int(payload["max_steps"]),
+        stagnation_limit=int(payload["stagnation_limit"]),
+        action_space=get_action_space(action_space_name),
+        reward_mode=reward_mode,
+        improvement_scale=float(payload["improvement_scale"]),
+        reward_eps=float(payload["reward_eps"]),
+        best_bonus_lambda=float(payload["best_bonus_lambda"]),
+        step_penalty=step_penalty,
+        top_k=int(top_k),
+        use_proxy=bool(use_proxy),
+        proxy_mode=proxy_mode_val,
+        exposure_bonus_lambda=float(exposure_bonus_lambda),
+        exposure_eps=float(exposure_eps),
+        graph_type=graph_type,
+        price_mode=price_mode,
+    )
+
+    env = NeuroLSEnv(env_config)
+
+    X_rows: List[np.ndarray] = []
+    y_rows: List[int] = []
+    oracle_stats: List[Dict[str, float]] = []
+    best_sets: List[List[int]] = []
+
+    # Deterministic per-instance RNG so results don't depend on parallel scheduling.
+    def _rng_for_instance(iid: int) -> random.Random:
+        return random.Random((seed * 1000003 + int(iid) * 10007 + 17) & 0xFFFFFFFF)
+
+    for instance_id in instance_ids:
+        inst_rng = _rng_for_instance(int(instance_id))
+        env.seed(seed + int(instance_id))
+        instance = generate_raw_instance(
+            config=data_config,
+            rng=inst_rng,
+            instance_id=int(instance_id),
+            n=fixed_n,
+            m=fixed_m,
+            D_days=D_days,
+        )
+
+        env.reset(instance, K)
+
+        # CandidateGen overrides (force top-k/proxy behavior when requested)
+        try:
+            if getattr(env, "_candidate_gen", None) is not None:
+                if bool(force_topk):
+                    env._candidate_gen.config.n_jobs_topk_threshold = 0
+                    env._candidate_gen.config.max_moves_full = 0
+                if n_jobs_topk_threshold_override is not None:
+                    env._candidate_gen.config.n_jobs_topk_threshold = int(
+                        n_jobs_topk_threshold_override
+                    )
+                if max_moves_full_override is not None:
+                    env._candidate_gen.config.max_moves_full = int(
+                        max_moves_full_override
+                    )
+        except Exception:
+            pass
+
+        # Precompute disruptor actions for perturb_then_label.
+        from PaST.neurols.action_space import ActionType
+        from PaST.neurols.perturbations import PerturbationID
+
+        disruptor_actions: List[int] = []
+        if str(collect_mode).lower() == "perturb_then_label":
+            for a in range(int(env.action_space_size)):
+                d = env.config.action_space.decode_action(int(a))
+                if not bool(d.accept):
+                    continue
+                if d.action_type == ActionType.PERTURBATION:
+                    if (
+                        d.perturbation_id is None
+                        or d.perturbation_id == PerturbationID.NONE
+                    ):
+                        continue
+                    disruptor_actions.append(int(a))
+                elif d.action_type == ActionType.DESTROY:
+                    disruptor_actions.append(int(a))
+
+        base_snap = _snapshot_env(env)
+
+        for _t in range(states_per_instance):
+            if str(collect_mode).lower() == "perturb_then_label" and disruptor_actions:
+                _restore_env(env, base_snap)
+                old_use_acc = bool(env.config.use_acceptance)
+                old_det = bool(env.config.deterministic)
+                try:
+                    env.config.use_acceptance = False
+                    env.config.deterministic = False
+                    done = False
+                    for _ in range(max(1, int(disrupt_steps))):
+                        a_disrupt = int(inst_rng.choice(disruptor_actions))
+                        _s, _r, done, _info = env.step(a_disrupt)
+                        if done:
+                            break
+                    if done:
+                        continue
+                finally:
+                    env.config.use_acceptance = old_use_acc
+                    env.config.deterministic = old_det
+
+            features = env.get_state_features()
+            if int(oracle_horizon) > 1:
+                best_action, stats, best_set = _oracle_multi_step(
+                    env,
+                    rng=inst_rng,
+                    horizon=int(oracle_horizon),
+                    tie_eps=float(tie_eps),
+                    exposure_lambda=float(oracle_exposure_lambda),
+                    hours_per_day=int(hours_per_day),
+                )
+            else:
+                best_action, stats, best_set = _oracle_one_step(
+                    env, rng=inst_rng, verbose=verbose
+                )
+
+            X_rows.append(_vectorize_features(features))
+            y_rows.append(int(best_action))
+            oracle_stats.append(stats)
+            best_sets.append(best_set)
+
+            if str(collect_mode).lower() == "random_walk":
+                a = int(inst_rng.randrange(env.action_space_size))
+                _s, _r, done, _info = env.step(a)
+                if done:
+                    break
+
+    X = np.stack(X_rows, axis=0) if X_rows else np.zeros((0, 1), dtype=np.float32)
+    y = np.asarray(y_rows, dtype=np.int64)
+    return {
+        "key": key,
+        "X": X,
+        "y": y,
+        "oracle_stats": oracle_stats,
+        "best_sets": best_sets,
+    }
+
+
 def run_variant(
     key: str,
     config_path: Path,
@@ -1092,6 +1300,7 @@ def run_variant(
     n_jobs_topk_threshold_override: Optional[int] = None,
     max_moves_full_override: Optional[int] = None,
     verbose: bool = False,
+    workers: int = 0,
 ) -> Dict[str, Any]:
     from PaST.neurols.env import NeuroLSEnv, EnvConfig
     from PaST.neurols.action_space import get_action_space
@@ -1171,142 +1380,204 @@ def run_variant(
         K = max(K, hours_per_day)
     D_days = int(K // hours_per_day)
 
-    inst_rng = random.Random(seed)
+    # Guardrail (main process only): 1-step oracle is myopic for delayed-payoff generators.
+    if int(oracle_horizon) <= 1:
+        try:
+            from PaST.neurols.action_space import ActionType
 
-    # Guardrail: 1-step oracle is known to undervalue delayed-payoff generators.
-    # If the action space includes perturb/destroy generators and horizon==1,
-    # print a concise warning so results aren't misinterpreted as "not learnable".
-    warn_myopic = bool(int(oracle_horizon) <= 1)
-    warned_myopic = False
+            aspace = get_action_space(action_space_name)
+            has_delayed = False
+            for a in range(int(aspace.n_actions)):
+                d = aspace.decode_action(int(a))
+                if d.action_type in (ActionType.PERTURBATION, ActionType.DESTROY):
+                    has_delayed = True
+                    break
+            if has_delayed:
+                print(
+                    f"[{key}] Note: --oracle-horizon=1 is myopic; perturb/destroy generators "
+                    f"can look unpromising short-term. Consider --oracle-horizon 5-10 "
+                    f"(and optionally --collect-mode perturb_then_label)."
+                )
+        except Exception:
+            pass
+
+    instance_ids = list(range(int(n_instances)))
+    n_workers = _auto_num_workers(int(workers), n_tasks=len(instance_ids))
 
     X_rows: List[np.ndarray] = []
     y_rows: List[int] = []
     oracle_stats: List[Dict[str, float]] = []
     best_sets: List[List[int]] = []
 
-    for instance_id in range(n_instances):
-        instance = generate_raw_instance(
-            config=data_config,
-            rng=inst_rng,
-            instance_id=instance_id,
-            n=fixed_n,
-            m=fixed_m,
-            D_days=D_days,
+    # Parallelize across instance chunks (oracle labeling is CPU-heavy).
+    if n_workers > 1 and len(instance_ids) > 1:
+        chunks = _split_into_chunks(instance_ids, n_workers)
+        payload_base: Dict[str, Any] = {
+            "key": key,
+            "seed": int(seed),
+            "states_per_instance": int(states_per_instance),
+            "K": int(K),
+            "D_days": int(D_days),
+            "fixed_n": int(fixed_n),
+            "fixed_m": int(fixed_m),
+            "hours_per_day": int(hours_per_day),
+            "action_space_name": action_space_name,
+            "graph_type": graph_type,
+            "price_mode": price_mode,
+            "reward_mode": reward_mode,
+            "exposure_bonus_lambda": float(exposure_bonus_lambda),
+            "exposure_eps": float(exposure_eps),
+            "step_penalty": float(step_penalty),
+            "top_k": int(top_k),
+            "use_proxy": bool(use_proxy),
+            "proxy_mode_val": proxy_mode_val,
+            "collect_mode": str(collect_mode),
+            "disrupt_steps": int(disrupt_steps),
+            "oracle_horizon": int(oracle_horizon),
+            "tie_eps": float(tie_eps),
+            "oracle_exposure_lambda": float(oracle_exposure_lambda),
+            "force_topk": bool(force_topk),
+            "n_jobs_topk_threshold_override": n_jobs_topk_threshold_override,
+            "max_moves_full_override": max_moves_full_override,
+            "verbose": bool(verbose),
+            "max_steps": int(cfg.get("max_steps", 200)),
+            "stagnation_limit": int(cfg.get("stagnation_limit", 100)),
+            "improvement_scale": float(cfg.get("improvement_scale", 1.0)),
+            "reward_eps": float(cfg.get("reward_eps", 1e-8)),
+            "best_bonus_lambda": float(cfg.get("best_bonus_lambda", 0.3)),
+        }
+
+        with cf.ProcessPoolExecutor(max_workers=int(n_workers)) as ex:
+            futures = []
+            for chunk in chunks:
+                p = dict(payload_base)
+                p["instance_ids"] = list(chunk)
+                futures.append(ex.submit(_collect_samples_worker, p))
+
+            for fut in cf.as_completed(futures):
+                out = fut.result()
+                Xc = out.get("X")
+                yc = out.get("y")
+                if isinstance(Xc, np.ndarray) and Xc.size:
+                    X_rows.append(Xc)
+                if isinstance(yc, np.ndarray) and yc.size:
+                    y_rows.extend([int(x) for x in yc.tolist()])
+                oracle_stats.extend(out.get("oracle_stats", []))
+                best_sets.extend(out.get("best_sets", []))
+
+        X = (
+            np.concatenate(X_rows, axis=0)
+            if X_rows
+            else np.zeros((0, 1), dtype=np.float32)
         )
+        y = np.asarray(y_rows, dtype=np.int64)
+        n_actions = int(get_action_space(action_space_name).n_actions)
+    else:
+        # Fallback: single-process collection (kept for debugging and small runs)
+        inst_rng = random.Random(seed)
+        for instance_id in instance_ids:
+            instance = generate_raw_instance(
+                config=data_config,
+                rng=inst_rng,
+                instance_id=int(instance_id),
+                n=fixed_n,
+                m=fixed_m,
+                D_days=D_days,
+            )
 
-        env.reset(instance, K)
+            env.reset(instance, K)
 
-        if warn_myopic and not warned_myopic:
+            # CandidateGen overrides (force top-k/proxy behavior when requested)
             try:
-                from PaST.neurols.action_space import ActionType
-
-                has_delayed = False
-                for a in range(int(env.action_space_size)):
-                    d = env.config.action_space.decode_action(int(a))
-                    if d.action_type in (ActionType.PERTURBATION, ActionType.DESTROY):
-                        has_delayed = True
-                        break
-                if has_delayed:
-                    print(
-                        f"[{key}] Note: --oracle-horizon=1 is myopic; perturb/destroy "
-                        f"generators can look unpromising short-term. Consider "
-                        f"--oracle-horizon 5-10 (and optionally --collect-mode perturb_then_label)."
-                    )
+                if getattr(env, "_candidate_gen", None) is not None:
+                    if bool(force_topk):
+                        env._candidate_gen.config.n_jobs_topk_threshold = 0
+                        env._candidate_gen.config.max_moves_full = 0
+                    if n_jobs_topk_threshold_override is not None:
+                        env._candidate_gen.config.n_jobs_topk_threshold = int(
+                            n_jobs_topk_threshold_override
+                        )
+                    if max_moves_full_override is not None:
+                        env._candidate_gen.config.max_moves_full = int(
+                            max_moves_full_override
+                        )
             except Exception:
                 pass
-            warned_myopic = True
 
-        # CandidateGen overrides (force top-k/proxy behavior when requested)
-        try:
-            if getattr(env, "_candidate_gen", None) is not None:
-                if bool(force_topk):
-                    env._candidate_gen.config.n_jobs_topk_threshold = 0
-                    env._candidate_gen.config.max_moves_full = 0
-                if n_jobs_topk_threshold_override is not None:
-                    env._candidate_gen.config.n_jobs_topk_threshold = int(
-                        n_jobs_topk_threshold_override
-                    )
-                if max_moves_full_override is not None:
-                    env._candidate_gen.config.max_moves_full = int(
-                        max_moves_full_override
-                    )
-        except Exception:
-            pass
+            # Precompute disruptor actions for perturb_then_label.
+            from PaST.neurols.action_space import ActionType
+            from PaST.neurols.perturbations import PerturbationID
 
-        # Precompute disruptor actions for perturb_then_label.
-        from PaST.neurols.action_space import ActionType
-        from PaST.neurols.perturbations import PerturbationID
-
-        disruptor_actions: List[int] = []
-        if str(collect_mode).lower() == "perturb_then_label":
-            for a in range(int(env.action_space_size)):
-                d = env.config.action_space.decode_action(int(a))
-                if not bool(d.accept):
-                    continue
-                if d.action_type == ActionType.PERTURBATION:
-                    if (
-                        d.perturbation_id is None
-                        or d.perturbation_id == PerturbationID.NONE
-                    ):
+            disruptor_actions: List[int] = []
+            if str(collect_mode).lower() == "perturb_then_label":
+                for a in range(int(env.action_space_size)):
+                    d = env.config.action_space.decode_action(int(a))
+                    if not bool(d.accept):
                         continue
-                    disruptor_actions.append(int(a))
-                elif d.action_type == ActionType.DESTROY:
-                    disruptor_actions.append(int(a))
+                    if d.action_type == ActionType.PERTURBATION:
+                        if (
+                            d.perturbation_id is None
+                            or d.perturbation_id == PerturbationID.NONE
+                        ):
+                            continue
+                        disruptor_actions.append(int(a))
+                    elif d.action_type == ActionType.DESTROY:
+                        disruptor_actions.append(int(a))
 
-        base_snap = _snapshot_env(env)
+            base_snap = _snapshot_env(env)
 
-        for _t in range(states_per_instance):
-            if str(collect_mode).lower() == "perturb_then_label" and disruptor_actions:
-                # Restore to a consistent baseline, then apply a random disruptor with forced acceptance.
-                _restore_env(env, base_snap)
-                old_use_acc = bool(env.config.use_acceptance)
-                old_det = bool(env.config.deterministic)
-                try:
-                    env.config.use_acceptance = False
-                    env.config.deterministic = False
-                    done = False
-                    for _ in range(max(1, int(disrupt_steps))):
-                        a_disrupt = int(inst_rng.choice(disruptor_actions))
-                        _s, _r, done, _info = env.step(a_disrupt)
+            for _t in range(states_per_instance):
+                if (
+                    str(collect_mode).lower() == "perturb_then_label"
+                    and disruptor_actions
+                ):
+                    _restore_env(env, base_snap)
+                    old_use_acc = bool(env.config.use_acceptance)
+                    old_det = bool(env.config.deterministic)
+                    try:
+                        env.config.use_acceptance = False
+                        env.config.deterministic = False
+                        done = False
+                        for _ in range(max(1, int(disrupt_steps))):
+                            a_disrupt = int(inst_rng.choice(disruptor_actions))
+                            _s, _r, done, _info = env.step(a_disrupt)
+                            if done:
+                                break
                         if done:
-                            break
+                            continue
+                    finally:
+                        env.config.use_acceptance = old_use_acc
+                        env.config.deterministic = old_det
+
+                features = env.get_state_features()
+                if int(oracle_horizon) > 1:
+                    best_action, stats, best_set = _oracle_multi_step(
+                        env,
+                        rng=inst_rng,
+                        horizon=int(oracle_horizon),
+                        tie_eps=float(tie_eps),
+                        exposure_lambda=float(oracle_exposure_lambda),
+                        hours_per_day=int(hours_per_day),
+                    )
+                else:
+                    best_action, stats, best_set = _oracle_one_step(
+                        env, rng=inst_rng, verbose=verbose
+                    )
+
+                X_rows.append(_vectorize_features(features))
+                y_rows.append(int(best_action))
+                oracle_stats.append(stats)
+                best_sets.append(best_set)
+
+                if str(collect_mode).lower() == "random_walk":
+                    a = int(inst_rng.randrange(env.action_space_size))
+                    _s, _r, done, _info = env.step(a)
                     if done:
-                        continue
-                finally:
-                    env.config.use_acceptance = old_use_acc
-                    env.config.deterministic = old_det
+                        break
 
-            features = env.get_state_features()
-
-            if int(oracle_horizon) > 1:
-                best_action, stats, best_set = _oracle_multi_step(
-                    env,
-                    rng=inst_rng,
-                    horizon=int(oracle_horizon),
-                    tie_eps=float(tie_eps),
-                    exposure_lambda=float(oracle_exposure_lambda),
-                    hours_per_day=int(hours_per_day),
-                )
-            else:
-                best_action, stats, best_set = _oracle_one_step(
-                    env, rng=inst_rng, verbose=verbose
-                )
-
-            X_rows.append(_vectorize_features(features))
-            y_rows.append(best_action)
-            oracle_stats.append(stats)
-            best_sets.append(best_set)
-
-            if str(collect_mode).lower() == "random_walk":
-                a = int(inst_rng.randrange(env.action_space_size))
-                _s, _r, done, _info = env.step(a)
-                if done:
-                    break
-
-    X = np.stack(X_rows, axis=0) if X_rows else np.zeros((0, 1), dtype=np.float32)
-    y = np.asarray(y_rows, dtype=np.int64)
-
-    n_actions = int(env.action_space_size)
+        X = np.stack(X_rows, axis=0) if X_rows else np.zeros((0, 1), dtype=np.float32)
+        y = np.asarray(y_rows, dtype=np.int64)
+        n_actions = int(env.action_space_size)
 
     # Oracle/probe are over *generator* labels (accept bit collapsed)
     if oracle_stats:
@@ -1320,29 +1591,53 @@ def run_variant(
         np.mean([len(set(bs)) for bs in best_sets]) if best_sets else 0.0
     )
 
+    def _nanmean_or_zero(vals: List[float]) -> float:
+        if not vals:
+            return 0.0
+        arr = np.asarray(vals, dtype=np.float64)
+        if not np.any(np.isfinite(arr)):
+            return 0.0
+        return float(np.nanmean(arr))
+
+    stat_keys = (
+        "best_reward",
+        "second_best_reward",
+        "margin_best_second",
+        "margin_best_median",
+        "adv_best_minus_mean",
+        "nonzero_reward_frac",
+        "nonzero_action_frac",
+        "mean_reward",
+        "median_reward",
+        "tie_best",
+        "tie_best_count",
+        "tie_best_action",
+        "tie_best_nonzero",
+        "best_is_zero",
+        "all_zero",
+        "accept_better_rate",
+        "reject_better_rate",
+        "accept_tie_rate",
+        "n_generators",
+        # Optional (multi-step only): interpretable structural deltas
+        "struct_delta_cross_day_best",
+        "struct_delta_cross_day_mean",
+        "struct_delta_cross_day_median",
+        "struct_delta_cheap_time_best",
+        "struct_delta_cheap_time_mean",
+        "struct_delta_cheap_time_median",
+        "struct_delta_load_cv_pt_best",
+        "struct_delta_load_cv_pt_mean",
+        "struct_delta_load_cv_pt_median",
+    )
+
     stats_mean = {
-        k: float(np.mean([d[k] for d in oracle_stats])) if oracle_stats else 0.0
-        for k in (
-            "best_reward",
-            "second_best_reward",
-            "margin_best_second",
-            "margin_best_median",
-            "adv_best_minus_mean",
-            "nonzero_reward_frac",
-            "nonzero_action_frac",
-            "mean_reward",
-            "median_reward",
-            "tie_best",
-            "tie_best_count",
-            "tie_best_action",
-            "tie_best_nonzero",
-            "best_is_zero",
-            "all_zero",
-            "accept_better_rate",
-            "reject_better_rate",
-            "accept_tie_rate",
-            "n_generators",
+        k: (
+            _nanmean_or_zero([float(d.get(k, float("nan"))) for d in oracle_stats])
+            if oracle_stats
+            else 0.0
         )
+        for k in stat_keys
     }
 
     probe = _train_probe(
@@ -1374,6 +1669,15 @@ def run_variant(
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Task learnability test (oracle + probe), independent of RL"
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help=(
+            "Number of worker processes for oracle labeling. 0 = use all available CPU cores. "
+            "1 = disable multiprocessing."
+        ),
     )
     parser.add_argument(
         "--variants",
@@ -1549,6 +1853,7 @@ def main() -> None:
             n_jobs_topk_threshold_override=args.n_jobs_topk_threshold,
             max_moves_full_override=args.max_moves_full,
             verbose=bool(args.verbose),
+            workers=int(args.workers),
         )
         results.append(res)
 
