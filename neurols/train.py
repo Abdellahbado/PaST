@@ -1165,7 +1165,10 @@ class NeuroLSTrainer:
                 self.save_checkpoint(best_name, cleanup_old=False)
 
         # ── Logging ──────────────────────────────────────────
-        if episode % self.config.log_interval == 0:
+        if (
+            int(self.config.log_interval) > 0
+            and episode % int(self.config.log_interval) == 0
+        ):
             elapsed = time.time() - self.train_start_time
             avg_reward = float(np.mean(self.episode_rewards))
             avg_length = float(np.mean(self.episode_lengths))
@@ -1245,7 +1248,10 @@ class NeuroLSTrainer:
             )
 
         # ── Evaluation ───────────────────────────────────────
-        if episode % self.config.eval_interval == 0:
+        if (
+            int(self.config.eval_interval) > 0
+            and episode % int(self.config.eval_interval) == 0
+        ):
             eval_start = time.time()
             eval_metrics = self.evaluate(env, train_instances)
             eval_time = time.time() - eval_start
@@ -1280,7 +1286,10 @@ class NeuroLSTrainer:
             )
 
         # Save checkpoint
-        if episode % self.config.save_interval == 0:
+        if (
+            int(self.config.save_interval) > 0
+            and episode % int(self.config.save_interval) == 0
+        ):
             self.save_checkpoint(f"checkpoint_{episode}.pt", cleanup_old=True)
 
         # Update learning rate
@@ -1520,6 +1529,32 @@ def main():
     parser.add_argument("--n-episodes", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
+
+    # Logging / evaluation cadence
+    parser.add_argument(
+        "--log-interval",
+        type=int,
+        default=None,
+        help="Override log interval in episodes (<=0 disables periodic logging).",
+    )
+    parser.add_argument(
+        "--eval-interval",
+        type=int,
+        default=None,
+        help="Override eval interval in episodes (<=0 disables evaluation).",
+    )
+    parser.add_argument(
+        "--save-interval",
+        type=int,
+        default=None,
+        help="Override save interval in episodes (<=0 disables periodic checkpoints).",
+    )
+    parser.add_argument(
+        "--n-eval-episodes",
+        type=int,
+        default=None,
+        help="Override number of eval episodes per evaluation run.",
+    )
     parser.add_argument(
         "--epsilon-start",
         type=float,
@@ -1679,6 +1714,15 @@ def main():
         config.batch_size = args.batch_size
     if args.lr is not None:
         config.learning_rate = args.lr
+
+    if args.log_interval is not None:
+        config.log_interval = int(args.log_interval)
+    if args.eval_interval is not None:
+        config.eval_interval = int(args.eval_interval)
+    if args.save_interval is not None:
+        config.save_interval = int(args.save_interval)
+    if args.n_eval_episodes is not None:
+        config.n_eval_episodes = int(args.n_eval_episodes)
     if args.epsilon_start is not None:
         config.epsilon_start = float(args.epsilon_start)
     if args.epsilon_end is not None:
