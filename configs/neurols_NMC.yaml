@@ -1,0 +1,87 @@
+# NMC: No-accept Multi-Criteria (operator × criterion, always accept)
+# Base = neurols_AAN_mc_v2.yaml but with a smaller, accept-free action space.
+
+exp_name: neurols_NMC
+seed: 42
+device: cuda
+log_dir: logs/neurols
+checkpoint_dir: checkpoints/neurols
+
+# Fixed shapes per run
+n_jobs_train: [90]
+n_machines_train: [9]
+K_fixed: 200
+n_instances_per_reset: 200
+
+# Environment
+action_space: NMC
+graph_type: bipartite
+price_mode: full
+max_steps: 500
+stagnation_limit: 100
+reward_mode: dense_best_exposure
+improvement_scale: 1.0
+reward_eps: 1e-8
+best_bonus_lambda: 0.3
+step_penalty: 0.0
+
+# Candidate generation
+top_k: 10
+use_proxy: true
+proxy_mode: price_aware
+
+# Job features
+job_price_features: basic
+
+# Exposure shaping
+exposure_bonus_lambda: 0.2
+exposure_eps: 1e-8
+
+# Model dims
+# base job features (5) + basic price/exposure (4) = 9
+d_job_in: 9
+d_machine_in: 5
+d_state_in: 13
+
+d_emb: 128
+n_layers_static: 3
+n_layers_dynamic: 2
+use_iqn: true
+use_dueling: false
+dropout: 0.1
+
+# Training
+n_episodes: 10000
+batch_size: 32
+learning_rate: 0.0005
+weight_decay: 0.00001
+gamma: 0.99
+n_step: 3
+
+# Exploration
+epsilon_start: 0.95
+epsilon_end: 0.05
+epsilon_decay: null
+
+# Replay buffer
+buffer_size: 64000
+min_buffer_size: 1000
+
+# Target network (soft updates for stability)
+target_update_freq: 500
+tau: 0.005
+use_soft_update: true
+
+# IQN
+n_quantile_samples: 32
+n_target_quantile_samples: 32
+kappa: 1.0
+
+# Logging
+log_interval: 10
+eval_interval: 100
+save_interval: 500
+n_eval_episodes: 10
+
+# Parallelism
+n_parallel_envs: 0

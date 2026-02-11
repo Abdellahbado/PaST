@@ -1374,6 +1374,17 @@ class NeuroLSTrainer:
                 eval_metrics["random_improvement"],
                 episode,
             )
+            if "random_accept_improvement" in eval_metrics:
+                self.writer.add_scalar(
+                    "eval/random_accept_improvement",
+                    eval_metrics["random_accept_improvement"],
+                    episode,
+                )
+                self.writer.add_scalar(
+                    "eval/advantage_over_random_accept",
+                    eval_metrics["advantage_over_random_accept"],
+                    episode,
+                )
             self.writer.add_scalar(
                 "eval/advantage_over_random",
                 eval_metrics["advantage_over_random"],
@@ -1384,6 +1395,12 @@ class NeuroLSTrainer:
 
             adv = eval_metrics["advantage_over_random"]
             adv_str = f"+{adv:.2f}pp" if adv >= 0 else f"{adv:.2f}pp"
+            ra_str = ""
+            if "random_accept_improvement" in eval_metrics:
+                ra = eval_metrics["random_accept_improvement"]
+                adv_ra = eval_metrics["advantage_over_random_accept"]
+                adv_ra_str = f"+{adv_ra:.2f}pp" if adv_ra >= 0 else f"{adv_ra:.2f}pp"
+                ra_str = f" | RandAcc: {ra:.2f}% (Adv: {adv_ra_str})"
             print(
                 f"  [EVAL] Greedy: {eval_metrics['improvement']:.2f}% | "
                 f"Random: {eval_metrics['random_improvement']:.2f}% | "
@@ -1391,6 +1408,7 @@ class NeuroLSTrainer:
                 f"AvgQ: {eval_metrics['avg_q']:.3f} | "
                 f"Best: {eval_metrics['best_cost']:.1f} | "
                 f"({eval_time:.1f}s)"
+                f"{ra_str}"
             )
 
         # Save checkpoint
@@ -1425,6 +1443,8 @@ class NeuroLSTrainer:
         greedy_best_costs = []
         random_improvements = []
         random_best_costs = []
+        random_accept_improvements = []
+        random_accept_best_costs = []
         avg_q_values = []
 
         n_eval = min(self.config.n_eval_episodes, len(instances))
@@ -1506,13 +1526,35 @@ class NeuroLSTrainer:
                 random_improvements.append(rand_imp)
                 random_best_costs.append(state.best_cost)
 
+                # ── Random-accept baseline (AAN_MC only) ──
+                # Motivation: in accept/reject action spaces, many actions differ
+                # only by accept bit, which can dilute exploration. This baseline
+                # samples only actions with accept=True.
+                if getattr(env.config.action_space, "name", "") == "AAN_MC":
+                    state = env.reset(instance, K)
+                    initial_cost_ra = state.current_cost
+
+                    # Accept actions are the odd indices for AAN_MC (accept bit = 1).
+                    accept_actions = list(
+                        range(1, env.config.action_space.n_actions, 2)
+                    )
+                    while True:
+                        action = accept_actions[eval_rng.randrange(len(accept_actions))]
+                        state, reward, done, _ = env.step(action)
+                        if done:
+                            break
+
+                    ra_imp = (initial_cost_ra - state.best_cost) / initial_cost_ra * 100
+                    random_accept_improvements.append(ra_imp)
+                    random_accept_best_costs.append(state.best_cost)
+
         # Restore epsilon
         self.epsilon = saved_epsilon
         # Restore env setting
         env.config.deterministic = prev_deterministic
         self.policy_net.train()
 
-        return {
+        out = {
             "reward": float(np.mean(greedy_rewards)),
             "improvement": float(np.mean(greedy_improvements)),
             "best_cost": float(np.mean(greedy_best_costs)),
@@ -1523,6 +1565,17 @@ class NeuroLSTrainer:
             ),
             "avg_q": float(np.mean(avg_q_values)) if avg_q_values else 0.0,
         }
+
+        if random_accept_improvements:
+            out["random_accept_improvement"] = float(
+                np.mean(random_accept_improvements)
+            )
+            out["random_accept_best_cost"] = float(np.mean(random_accept_best_costs))
+            out["advantage_over_random_accept"] = float(
+                np.mean(greedy_improvements) - np.mean(random_accept_improvements)
+            )
+
+        return out
 
     def save_checkpoint(self, filename: str, *, cleanup_old: bool = True):
         """Save checkpoint."""
@@ -1699,6 +1752,8 @@ def main():
             "AAN",
             "AAN_CLEAN",
             "AAN_MC",
+            "NMC",
+            "NMCP",
             "AANP",
             "AANP_CLEAN",
             "AANP_PRICE",

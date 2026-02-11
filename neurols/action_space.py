@@ -5,6 +5,8 @@ NeuroLS defines three action spaces:
 - AAN: Acceptance × Operator (which operator + accept/reject)
 - AANP: Acceptance × (Operators ∪ Perturbations) (full control)
 - AAN_MC: Acceptance × Operator × Criterion (multi-criteria control)
+ - NMC: Operator × Criterion (multi-criteria, always-accept)
+ - NMCP: (Operator × Criterion) ∪ Perturbations (always-accept)
 
 Actions are deterministic: selecting an action leads to a specific, reproducible
 outcome (operator → best move from that neighborhood, evaluated via DP).
@@ -18,6 +20,12 @@ Total actions = 2 * (4 + 3) = 14
 
 For AAN_MC with 3 operators and 3 criteria:
 Total actions = 2 * 3 * 3 = 18
+
+For NMC with 3 operators and 3 criteria:
+Total actions = 3 * 3 = 9
+
+For NMCP with 3 operators, 3 criteria, and 2 perturbations:
+Total actions = 3 * 3 + 2 = 11
 
 This project also supports an optional extended action space:
 - AANP_PRICE: AANP + an extra price-aware perturbation (Shake-Peak)
@@ -94,6 +102,10 @@ class ActionSpace:
             expected = 2 * self.n_operators
         elif self.name == "AAN_MC":
             expected = 2 * self.n_operators * N_CRITERIA
+        elif self.name == "NMC":
+            expected = self.n_operators * N_CRITERIA
+        elif self.name == "NMCP":
+            expected = self.n_operators * N_CRITERIA + self.n_perturbations
         elif self.name == "AANP":
             expected = 2 * (self.n_operators + self.n_perturbations)
         elif self.name == "AANPD":
@@ -137,6 +149,33 @@ class ActionSpace:
             op_idx = self.operators.index(operator_id)
             cr_idx = int(criterion_id)
             return accept_bit + 2 * (op_idx * N_CRITERIA + cr_idx)
+
+        elif self.name == "NMC":
+            if not accept:
+                raise ValueError("NMC does not support reject actions")
+            if operator_id is None or criterion_id is None:
+                raise ValueError("NMC requires operator_id and criterion_id")
+            op_idx = self.operators.index(operator_id)
+            cr_idx = int(criterion_id)
+            return op_idx * N_CRITERIA + cr_idx
+
+        elif self.name == "NMCP":
+            if not accept:
+                raise ValueError("NMCP does not support reject actions")
+            base = self.n_operators * N_CRITERIA
+            if operator_id is not None:
+                if criterion_id is None:
+                    raise ValueError("NMCP operator actions require criterion_id")
+                op_idx = self.operators.index(operator_id)
+                cr_idx = int(criterion_id)
+                return op_idx * N_CRITERIA + cr_idx
+            elif perturbation_id is not None:
+                pert_idx = self.perturbations.index(perturbation_id)
+                return base + pert_idx
+            else:
+                raise ValueError(
+                    "NMCP requires operator_id+criterion_id or perturbation_id"
+                )
 
         elif self.name in ("AANP", "AANPD"):
             if operator_id is not None:
@@ -196,6 +235,42 @@ class ActionSpace:
                 destroy_id=None,
                 criterion_id=CriterionID(cr_idx),
             )
+
+        elif self.name == "NMC":
+            op_idx = action // N_CRITERIA
+            cr_idx = action % N_CRITERIA
+            return DecodedAction(
+                accept=True,
+                action_type=ActionType.OPERATOR,
+                operator_id=self.operators[op_idx],
+                perturbation_id=None,
+                destroy_id=None,
+                criterion_id=CriterionID(cr_idx),
+            )
+
+        elif self.name == "NMCP":
+            base = self.n_operators * N_CRITERIA
+            if action < base:
+                op_idx = action // N_CRITERIA
+                cr_idx = action % N_CRITERIA
+                return DecodedAction(
+                    accept=True,
+                    action_type=ActionType.OPERATOR,
+                    operator_id=self.operators[op_idx],
+                    perturbation_id=None,
+                    destroy_id=None,
+                    criterion_id=CriterionID(cr_idx),
+                )
+            else:
+                pert_idx = action - base
+                return DecodedAction(
+                    accept=True,
+                    action_type=ActionType.PERTURBATION,
+                    operator_id=None,
+                    perturbation_id=self.perturbations[pert_idx],
+                    destroy_id=None,
+                    criterion_id=None,
+                )
 
         elif self.name in ("AANP", "AANPD"):
             accept = bool(action % 2)
@@ -263,6 +338,12 @@ class ActionSpace:
         if self.name == "AA":
             return [0, 1]
 
+        if self.name == "NMC":
+            return list(range(self.n_operators * N_CRITERIA))
+
+        if self.name == "NMCP":
+            return list(range(self.n_operators * N_CRITERIA))
+
         actions = []
         for i in range(self.n_operators):
             actions.append(2 * i)  # reject + operator i
@@ -273,6 +354,13 @@ class ActionSpace:
         """Get list of action indices that correspond to perturbations."""
         if self.name in ("AA", "AAN"):
             return []
+
+        if self.name == "NMC":
+            return []
+
+        if self.name == "NMCP":
+            base = self.n_operators * N_CRITERIA
+            return list(range(base, base + self.n_perturbations))
 
         actions = []
         offset = 2 * self.n_operators
@@ -439,6 +527,35 @@ AAN_MC_SPACE = ActionSpace(
 )
 
 
+# NMC: No-accept Multi-Criteria (operator × criterion, always accept)
+NMC_SPACE = ActionSpace(
+    name="NMC",
+    n_actions=3 * N_CRITERIA,  # 9
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[],
+)
+
+
+# NMCP: No-accept Multi-Criteria + Perturbations (always accept)
+NMCP_SPACE = ActionSpace(
+    name="NMCP",
+    n_actions=3 * N_CRITERIA + 2,  # 11
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[
+        PerturbationID.SHAKE_SMALL,
+        PerturbationID.RESTART,
+    ],
+)
+
+
 def get_action_space(name: str) -> ActionSpace:
     """Get action space by name."""
     name = name.upper()
@@ -450,6 +567,10 @@ def get_action_space(name: str) -> ActionSpace:
         return AAN_CLEAN_SPACE
     elif name in ("AAN_MC", "AAN-MC"):
         return AAN_MC_SPACE
+    elif name == "NMC":
+        return NMC_SPACE
+    elif name == "NMCP":
+        return NMCP_SPACE
     elif name == "AANP":
         return AANP_SPACE
     elif name in ("AANP_CLEAN", "AANP-CLEAN"):
