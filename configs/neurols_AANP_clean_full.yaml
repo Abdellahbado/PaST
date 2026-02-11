@@ -83,4 +83,4 @@ save_interval: 500
 n_eval_episodes: 10
 
 # Parallelism
-n_parallel_envs: 8
+n_parallel_envs: 0

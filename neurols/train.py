@@ -160,7 +160,9 @@ class TrainConfig:
     n_eval_episodes: int = 10
 
     # Parallelism
-    n_parallel_envs: int = 0  # 0 = auto (cpu_count // 4, capped 16); 1 = serial
+    # 0 = auto (uses all CPUs visible to the process via multiprocessing.cpu_count())
+    # 1 = serial
+    n_parallel_envs: int = 0
 
     def __post_init__(self) -> None:
         # Checkpoint retention validation
