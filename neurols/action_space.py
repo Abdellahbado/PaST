@@ -4,6 +4,7 @@ NeuroLS defines three action spaces:
 - AA: Acceptance only (binary: accept or reject proposed move)
 - AAN: Acceptance × Operator (which operator + accept/reject)
 - AANP: Acceptance × (Operators ∪ Perturbations) (full control)
+- AAN_MC: Acceptance × Operator × Criterion (multi-criteria control)
 
 Actions are deterministic: selecting an action leads to a specific, reproducible
 outcome (operator → best move from that neighborhood, evaluated via DP).
@@ -14,6 +15,9 @@ Action encoding (AANP, primary):
 
 For AANP with 4 operators and 3 perturbations:
 Total actions = 2 * (4 + 3) = 14
+
+For AAN_MC with 3 operators and 3 criteria:
+Total actions = 2 * 3 * 3 = 18
 
 This project also supports an optional extended action space:
 - AANP_PRICE: AANP + an extra price-aware perturbation (Shake-Peak)
@@ -32,6 +36,7 @@ from PaST.neurols.perturbations import (
     DestroyID,
     DESTROY_OPERATORS,
 )
+from PaST.neurols.candidate_generator import CriterionID, N_CRITERIA, CRITERIA
 
 
 class ActionType(IntEnum):
@@ -50,6 +55,7 @@ class DecodedAction(NamedTuple):
     operator_id: Optional[OperatorID]  # If operator
     perturbation_id: Optional[PerturbationID]  # If perturbation
     destroy_id: Optional[DestroyID] = None  # If destroy (Tripartite-B)
+    criterion_id: Optional[CriterionID] = None  # If multi-criteria (AAN_MC)
 
 
 @dataclass
@@ -86,6 +92,8 @@ class ActionSpace:
             expected = 2  # accept, reject
         elif self.name == "AAN":
             expected = 2 * self.n_operators
+        elif self.name == "AAN_MC":
+            expected = 2 * self.n_operators * N_CRITERIA
         elif self.name == "AANP":
             expected = 2 * (self.n_operators + self.n_perturbations)
         elif self.name == "AANPD":
@@ -102,11 +110,13 @@ class ActionSpace:
         operator_id: Optional[OperatorID] = None,
         perturbation_id: Optional[PerturbationID] = None,
         destroy_id: Optional[DestroyID] = None,
+        criterion_id: Optional[CriterionID] = None,
     ) -> int:
         """Encode action components to discrete action index.
 
         For AA: just accept (1) or reject (0)
         For AAN: accept + operator
+        For AAN_MC: accept + operator × criterion
         For AANP: accept + operator/perturbation
         For AANPD: accept + operator/perturbation/destroy
         """
@@ -120,6 +130,13 @@ class ActionSpace:
                 raise ValueError("AAN requires operator_id")
             op_idx = self.operators.index(operator_id)
             return accept_bit + 2 * op_idx
+
+        elif self.name == "AAN_MC":
+            if operator_id is None or criterion_id is None:
+                raise ValueError("AAN_MC requires operator_id and criterion_id")
+            op_idx = self.operators.index(operator_id)
+            cr_idx = int(criterion_id)
+            return accept_bit + 2 * (op_idx * N_CRITERIA + cr_idx)
 
         elif self.name in ("AANP", "AANPD"):
             if operator_id is not None:
@@ -166,6 +183,20 @@ class ActionSpace:
                 perturbation_id=None,
             )
 
+        elif self.name == "AAN_MC":
+            accept = bool(action % 2)
+            combo_idx = action // 2
+            op_idx = combo_idx // N_CRITERIA
+            cr_idx = combo_idx % N_CRITERIA
+            return DecodedAction(
+                accept=accept,
+                action_type=ActionType.OPERATOR,
+                operator_id=self.operators[op_idx],
+                perturbation_id=None,
+                destroy_id=None,
+                criterion_id=CriterionID(cr_idx),
+            )
+
         elif self.name in ("AANP", "AANPD"):
             accept = bool(action % 2)
             item_idx = action // 2
@@ -210,7 +241,10 @@ class ActionSpace:
                 from PaST.neurols.operators import OPERATOR_BY_ID
 
                 op = OPERATOR_BY_ID[decoded.operator_id]
-                return f"{accept_str}+{op.name}"
+                base = f"{accept_str}+{op.name}"
+                if decoded.criterion_id is not None:
+                    base += f"/{decoded.criterion_id.name}"
+                return base
             else:
                 return accept_str
         elif decoded.action_type == ActionType.DESTROY:
@@ -389,6 +423,22 @@ AANPD_CLEAN_SPACE = ActionSpace(
 )
 
 
+# AAN_MC: Multi-Criteria action space
+# 3 operators × 3 criteria × 2 (accept/reject) = 18 actions
+# Agent chooses (operator, criterion, accept/reject).
+# CriterionID determines which ranking criterion is used in candidate_generator.
+AAN_MC_SPACE = ActionSpace(
+    name="AAN_MC",
+    n_actions=2 * 3 * N_CRITERIA,  # 18
+    operators=[
+        OperatorID.RELOCATE_1,
+        OperatorID.SWAP_1,
+        OperatorID.BLOCK_RELOCATE,
+    ],
+    perturbations=[],
+)
+
+
 def get_action_space(name: str) -> ActionSpace:
     """Get action space by name."""
     name = name.upper()
@@ -398,6 +448,8 @@ def get_action_space(name: str) -> ActionSpace:
         return AAN_SPACE
     elif name in ("AAN_CLEAN", "AAN-CLEAN"):
         return AAN_CLEAN_SPACE
+    elif name in ("AAN_MC", "AAN-MC"):
+        return AAN_MC_SPACE
     elif name == "AANP":
         return AANP_SPACE
     elif name in ("AANP_CLEAN", "AANP-CLEAN"):

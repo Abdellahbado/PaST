@@ -147,6 +147,9 @@ class NeuroLSEnv:
         self._cache_hits: int = 0
         self._cache_queries: int = 0
 
+        # Diagnostics for AAN_MC multi-criteria variant (set by _apply_operator)
+        self._last_mc_info: Optional[Dict[str, Any]] = None
+
     def seed(self, seed: int):
         """Set random seed for reproducibility."""
         self._rng = np.random.default_rng(seed)
@@ -416,6 +419,7 @@ class NeuroLSEnv:
             "accept_action": decoded.accept,
             "operator_id": decoded.operator_id,
             "perturbation_id": decoded.perturbation_id,
+            "criterion_id": getattr(decoded, "criterion_id", None),
             "cost_before": self.state.current_cost,
             "best_cost_before": self.state.best_cost,
             "accepted": False,
@@ -431,10 +435,18 @@ class NeuroLSEnv:
         if decoded.action_type == ActionType.OPERATOR:
             # For AA space: operator_id is None → try all operators, pick best
             if decoded.operator_id is not None:
-                move_result = self._apply_operator(decoded.operator_id)
+                move_result = self._apply_operator(
+                    decoded.operator_id,
+                    criterion_id=getattr(decoded, "criterion_id", None),
+                )
             else:
                 move_result = self._apply_best_operator()
             info["move_result"] = move_result
+
+            # Attach AAN_MC diagnostics if available
+            if self._last_mc_info is not None:
+                for k, v in self._last_mc_info.items():
+                    info[f"mc_{k}"] = v
 
             if move_result is not None:
                 move, new_cost, new_eval = move_result
@@ -702,20 +714,69 @@ class NeuroLSEnv:
 
         return reward, info
 
-    def _apply_operator(self, operator_id: OperatorID):
+    def _apply_operator(self, operator_id: OperatorID, criterion_id=None):
         """Generate and select best move for operator.
+
+        Args:
+            operator_id: Which operator to use
+            criterion_id: Optional CriterionID for multi-criteria selection.
+                         If None, uses generate_best_move (legacy behavior).
 
         Returns:
             (move, new_cost, move_eval) or None if no valid move
         """
         operator = OPERATOR_BY_ID[operator_id]
 
-        # Use candidate generator to find best move
-        best_result = self._candidate_gen.generate_best_move(
-            solution=self.state.solution,
-            current_eval=self._current_eval,
-            operator=operator,
-        )
+        # Reset diagnostics by default
+        self._last_mc_info = None
+
+        if criterion_id is not None:
+            # Multi-criteria path: generate best move per criterion
+            from PaST.neurols.candidate_generator import CriterionID
+
+            multi = self._candidate_gen.generate_multi_criteria_moves(
+                solution=self.state.solution,
+                current_eval=self._current_eval,
+                operator=operator,
+            )
+            best_result = multi.get(criterion_id)
+
+            # Build diagnostics (helps detect collapse and overlap)
+            def _sig(mev):
+                if mev is None:
+                    return None
+                mv = mev.move
+                return (int(mv.operator), tuple(mv.params))
+
+            sigs = {c: _sig(mev) for c, mev in multi.items()}
+            valid = [s for s in sigs.values() if s is not None]
+            unique = len(set(valid)) if valid else 0
+
+            cost_ev = multi.get(CriterionID.COST_BEST)
+            chosen_ev = best_result
+            same_as_cost = False
+            if chosen_ev is not None and cost_ev is not None:
+                same_as_cost = _sig(chosen_ev) == _sig(cost_ev)
+
+            self._last_mc_info = {
+                "criterion": getattr(criterion_id, "name", str(criterion_id)),
+                "valid_criteria": int(sum(1 for v in sigs.values() if v is not None)),
+                "unique_moves": int(unique),
+                "same_as_cost": bool(same_as_cost),
+                "chosen_delta_cost": (
+                    float(chosen_ev.delta_cost) if chosen_ev is not None else None
+                ),
+                "cost_best_delta_cost": (
+                    float(cost_ev.delta_cost) if cost_ev is not None else None
+                ),
+            }
+        else:
+            # Legacy path: single best-improvement move
+            best_result = self._candidate_gen.generate_best_move(
+                solution=self.state.solution,
+                current_eval=self._current_eval,
+                operator=operator,
+            )
 
         if best_result is None:
             return None

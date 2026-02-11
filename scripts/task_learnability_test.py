@@ -70,6 +70,7 @@ _VARIANT_TO_CONFIG = {
     "triA_zprice": "PaST/configs/neurols_triA_AANP_zprice.yaml",
     "triA_full": "PaST/configs/neurols_triA_AANP_full.yaml",
     "triB_full": "PaST/configs/neurols_triB_AANPD_full.yaml",
+    "AAN_MC": "PaST/configs/neurols_AAN_mc.yaml",
 }
 
 
@@ -428,19 +429,21 @@ def _oracle_one_step(
 
     n_actions = int(env.action_space_size)
 
-    gen_to_actions: Dict[Tuple[Any, Any, Any, Any], List[int]] = {}
+    gen_to_actions: Dict[Tuple[Any, Any, Any, Any, Any], List[int]] = {}
     for a in range(n_actions):
         d = env.config.action_space.decode_action(a)
-        gen_key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id)
+        crit = getattr(d, "criterion_id", None)
+        gen_key = (d.action_type, d.operator_id, d.perturbation_id, d.destroy_id, crit)
         gen_to_actions.setdefault(gen_key, []).append(a)
 
-    def _stable_key(k: Tuple[Any, Any, Any, Any]) -> Tuple[int, int, int, int]:
-        at, op, pert, dest = k
+    def _stable_key(k: Tuple[Any, Any, Any, Any, Any]) -> Tuple[int, int, int, int, int]:
+        at, op, pert, dest, crit = k
         return (
             int(at),
             int(op) if op is not None else -1,
             int(pert) if pert is not None else -1,
             int(dest) if dest is not None else -1,
+            int(crit) if crit is not None else -1,
         )
 
     gen_keys = sorted(gen_to_actions.keys(), key=_stable_key)
@@ -461,7 +464,10 @@ def _oracle_one_step(
 
         if decoded.action_type == ActionType.OPERATOR:
             if decoded.operator_id is not None:
-                result = env._apply_operator(decoded.operator_id)
+                result = env._apply_operator(
+                    decoded.operator_id,
+                    criterion_id=getattr(decoded, "criterion_id", None),
+                )
             else:
                 result = env._apply_best_operator()
             if result is not None:

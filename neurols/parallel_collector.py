@@ -40,7 +40,7 @@ class EpisodeResult:
     """Result returned by a parallel episode-collection worker."""
 
     transitions: List[Tuple]  # [(state_feats, action, reward, next_feats, done), ...]
-    metrics: Dict[str, float]
+    metrics: Dict[str, Any]
 
 
 # ── Worker function (runs in a child process) ────────────────────────────
@@ -117,6 +117,14 @@ def _collect_episode_worker(args: Tuple) -> EpisodeResult:
     n_operator_steps = 0
     step_count = 0
 
+    # AAN_MC diagnostics (criterion usage + collapse/overlap indicators)
+    mc_steps = 0
+    mc_same_as_cost = 0
+    mc_unique_sum = 0.0
+    mc_valid_sum = 0.0
+    crit_pick: Dict[str, int] = {}
+    crit_accept: Dict[str, int] = {}
+
     while True:
         # epsilon-greedy on CPU
         if py_random.random() < epsilon:
@@ -153,6 +161,26 @@ def _collect_episode_worker(args: Tuple) -> EpisodeResult:
         next_state, reward, done, info = env.step(action)
         next_features = env.get_state_features()
 
+        # Multi-criteria diagnostics
+        try:
+            decoded = action_space.decode_action(action)
+        except Exception:
+            decoded = None
+
+        if decoded is not None and getattr(decoded, "criterion_id", None) is not None:
+            mc_steps += 1
+            cname = getattr(decoded.criterion_id, "name", str(decoded.criterion_id))
+            crit_pick[cname] = crit_pick.get(cname, 0) + 1
+            if info.get("accepted", False):
+                crit_accept[cname] = crit_accept.get(cname, 0) + 1
+
+            if info.get("mc_same_as_cost", False):
+                mc_same_as_cost += 1
+            if info.get("mc_unique_moves", None) is not None:
+                mc_unique_sum += float(info.get("mc_unique_moves") or 0.0)
+            if info.get("mc_valid_criteria", None) is not None:
+                mc_valid_sum += float(info.get("mc_valid_criteria") or 0.0)
+
         if info.get("accepted", False):
             n_accepted += 1
         if info.get("improved", False):
@@ -176,7 +204,18 @@ def _collect_episode_worker(args: Tuple) -> EpisodeResult:
 
     cache_stats = env.get_cache_stats()
 
-    metrics = {
+    mc_same_rate = mc_same_as_cost / max(1, mc_steps)
+    mc_unique_avg = mc_unique_sum / max(1, mc_steps)
+    mc_valid_avg = mc_valid_sum / max(1, mc_steps)
+
+    crit_total = sum(crit_pick.values())
+    crit_pick_frac = {k: (v / max(1, crit_total)) for k, v in crit_pick.items()}
+    crit_accept_rate = {
+        k: (crit_accept.get(k, 0) / max(1, crit_pick.get(k, 0)))
+        for k in crit_pick.keys()
+    }
+
+    metrics: Dict[str, Any] = {
         "reward": episode_reward,
         "length": step_count,
         "improvement": improvement,
@@ -187,6 +226,14 @@ def _collect_episode_worker(args: Tuple) -> EpisodeResult:
         "ep_time": ep_time,
         "cache_hit_rate": cache_stats.get("hit_rate", 0.0),
         "cache_size": cache_stats.get("size", 0),
+        # Multi-criteria diagnostics (present even if mc_steps=0)
+        "mc_steps": mc_steps,
+        "mc_step_frac": (mc_steps / max(1, step_count)),
+        "mc_same_as_cost_rate": mc_same_rate,
+        "mc_unique_moves_avg": mc_unique_avg,
+        "mc_valid_criteria_avg": mc_valid_avg,
+        "mc_crit_pick_frac": crit_pick_frac,
+        "mc_crit_accept_rate": crit_accept_rate,
     }
 
     return EpisodeResult(transitions=transitions, metrics=metrics)

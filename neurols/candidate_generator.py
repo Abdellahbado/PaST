@@ -8,11 +8,13 @@ Key principles:
 2. Best-improvement: evaluate all candidates, return best
 3. Top-K for large instances: use deterministic proxy ranking for N > 50
 4. No randomness: fixed tie-breaking by indices
+5. Multi-criteria: rank moves by cost, exposure, or balance (for AAN_MC)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum
 from typing import List, Tuple, Optional, Dict, Any
 import numpy as np
 
@@ -20,6 +22,23 @@ from PaST.neurols.solution import PMALNSSolution
 from PaST.neurols.operators import Move, Operator, OperatorID, OPERATORS, OPERATOR_BY_ID
 from PaST.neurols.move_evaluator import MoveEvaluator, FullEvaluation, MoveEvaluation
 from PaST.neurols.price_embedding import PriceFeatureExtractor
+
+
+class CriterionID(IntEnum):
+    """Criterion for selecting the best move.
+
+    COST_BEST: lowest delta_cost (current behavior)
+    EXPOSURE_BEST: largest reduction in peak-slot energy exposure
+    BALANCE_BEST: largest reduction in load imbalance (std of machine loads)
+    """
+
+    COST_BEST = 0
+    EXPOSURE_BEST = 1
+    BALANCE_BEST = 2
+
+
+N_CRITERIA = len(CriterionID)
+CRITERIA = list(CriterionID)
 
 
 @dataclass
@@ -144,6 +163,267 @@ class CandidateGenerator:
                 best_eval = move_eval
 
         return best_eval
+
+    def generate_multi_criteria_moves(
+        self,
+        solution: PMALNSSolution,
+        current_eval: FullEvaluation,
+        operator: Operator,
+    ) -> Dict[CriterionID, Optional[MoveEvaluation]]:
+        """Generate best move per criterion for an operator.
+
+        Returns up to 3 different moves (one per criterion).
+        Criteria:
+            COST_BEST: lowest delta_cost (same as generate_best_move)
+            EXPOSURE_BEST: largest reduction in peak-slot energy exposure
+            BALANCE_BEST: largest reduction in load std deviation
+
+        If two criteria agree on the same move, both return the same result.
+        """
+        # Enumerate all moves for this operator
+        all_moves = operator.enumerate_moves(solution)
+
+        if not all_moves:
+            return {c: None for c in CriterionID}
+
+        n_moves = len(all_moves)
+        n_jobs = solution.n_jobs
+
+        # Decide strategy based on instance size (same as generate_best_move)
+        if (
+            n_jobs > self.config.n_jobs_topk_threshold
+            and n_moves > self.config.max_moves_full
+        ):
+            if self.config.use_proxy_ranking:
+                moves_to_eval = self._select_topk_by_proxy(
+                    solution,
+                    current_eval,
+                    all_moves,
+                    operator,
+                    self.config.max_moves_topk,
+                )
+            else:
+                moves_to_eval = all_moves[: self.config.max_moves_topk]
+        else:
+            moves_to_eval = all_moves
+
+        # Precompute machine loads for balance criterion
+        p = self.evaluator.processing_times
+        loads = solution.get_machine_loads(p).astype(np.float64)
+        current_load_std = float(np.std(loads))
+
+        # Precompute per-machine exposure metric for exposure criterion.
+        # We intentionally use a *work-weighted* peak metric (not just peak fraction)
+        # so the criterion can prefer moving substantial work off peak, and also
+        # prioritize higher-rate machines.
+        m = solution.n_machines
+        current_peak_metric = np.zeros(m, dtype=np.float64)
+        for mi in range(m):
+            seq = solution.sequences[mi]
+            me = current_eval.per_machine[mi]
+            if seq and me.start_times and len(me.start_times) == len(seq):
+                proc_times = [int(p[j]) for j in seq]
+                exp = self._price_extractor.compute_machine_price_exposure(
+                    me.start_times,
+                    proc_times,
+                    float(self.evaluator.machine_energy_rates[mi]),
+                )
+                # exp = [work_norm(3), frac(3), avg_price_norm]
+                # Use peak workload norm (index 2) weighted by machine rate.
+                peak_work_norm = float(exp[2])
+                current_peak_metric[mi] = (
+                    float(self.evaluator.machine_energy_rates[mi]) * peak_work_norm
+                )
+
+        # Track best per criterion
+        best_evals: Dict[CriterionID, Optional[MoveEvaluation]] = {
+            c: None for c in CriterionID
+        }
+        best_scores = {
+            CriterionID.COST_BEST: float("inf"),  # minimize
+            CriterionID.EXPOSURE_BEST: float("inf"),  # minimize
+            CriterionID.BALANCE_BEST: float("inf"),  # minimize
+        }
+
+        for move in moves_to_eval:
+            move_eval = self.evaluator.evaluate_move(solution, current_eval, move)
+
+            if not move_eval.feasible:
+                continue
+
+            # --- COST criterion (same as current) ---
+            cost_score = move_eval.delta_cost
+            if cost_score < best_scores[CriterionID.COST_BEST]:
+                best_scores[CriterionID.COST_BEST] = cost_score
+                best_evals[CriterionID.COST_BEST] = move_eval
+
+            # --- EXPOSURE criterion ---
+            # Compute change in a peak-exposure metric on affected machines.
+            # IMPORTANT: Avoid cloning the full solution per move (too slow).
+            # We reconstruct only the affected machine sequences from move params.
+            exposure_delta = 0.0
+            new_seqs = self._get_affected_new_sequences(
+                solution, move, move_eval.affected_machines
+            )
+            for mi in move_eval.affected_machines:
+                new_seq = new_seqs.get(mi)
+                if new_seq is None:
+                    continue
+                if len(new_seq) == 0:
+                    # Machine became empty → 0 peak exposure
+                    exposure_delta += 0.0 - float(current_peak_metric[mi])
+                    continue
+
+                new_me = move_eval.affected_machine_evals.get(mi)
+                starts = (
+                    new_me.start_times
+                    if (
+                        new_me is not None
+                        and new_me.start_times
+                        and len(new_me.start_times) == len(new_seq)
+                    )
+                    else None
+                )
+                if starts is None:
+                    # If the evaluator didn't provide start_times, skip exposure signal.
+                    continue
+
+                new_proc = [int(p[j]) for j in new_seq]
+                exp = self._price_extractor.compute_machine_price_exposure(
+                    starts,
+                    new_proc,
+                    float(self.evaluator.machine_energy_rates[mi]),
+                )
+                peak_work_norm = float(exp[2])
+                new_metric = (
+                    float(self.evaluator.machine_energy_rates[mi]) * peak_work_norm
+                )
+                exposure_delta += new_metric - float(current_peak_metric[mi])
+
+            if exposure_delta < best_scores[CriterionID.EXPOSURE_BEST]:
+                best_scores[CriterionID.EXPOSURE_BEST] = float(exposure_delta)
+                best_evals[CriterionID.EXPOSURE_BEST] = move_eval
+
+            # --- BALANCE criterion ---
+            new_loads = self._compute_processing_loads_after_move(solution, loads, move)
+            new_load_std = float(np.std(new_loads))
+            balance_delta = float(new_load_std - current_load_std)
+
+            if balance_delta < best_scores[CriterionID.BALANCE_BEST]:
+                best_scores[CriterionID.BALANCE_BEST] = balance_delta
+                best_evals[CriterionID.BALANCE_BEST] = move_eval
+
+        return best_evals
+
+    def _compute_processing_loads_after_move(
+        self,
+        solution: PMALNSSolution,
+        current_loads: np.ndarray,
+        move: Move,
+    ) -> np.ndarray:
+        """Compute per-machine processing-time loads after applying a move.
+
+        This is a *structural* criterion (assignment balance), so it should be
+        based on processing-time totals, not DP makespan (which includes idling).
+        """
+        loads = np.asarray(current_loads, dtype=np.float64).copy()
+        p = self.evaluator.processing_times
+
+        op = move.operator
+        if op == OperatorID.RELOCATE_1:
+            from_m, from_pos, to_m, _to_pos = move.params
+            job = solution.sequences[from_m][from_pos]
+            pj = float(p[job])
+            loads[int(from_m)] -= pj
+            loads[int(to_m)] += pj
+            return loads
+
+        if op == OperatorID.SWAP_1:
+            m1, pos1, m2, pos2 = move.params
+            if int(m1) == int(m2):
+                return loads
+            job1 = solution.sequences[m1][pos1]
+            job2 = solution.sequences[m2][pos2]
+            p1 = float(p[job1])
+            p2 = float(p[job2])
+            loads[int(m1)] += p2 - p1
+            loads[int(m2)] += p1 - p2
+            return loads
+
+        if op == OperatorID.BLOCK_RELOCATE:
+            from_m, from_start, block_size, to_m, _to_pos = move.params
+            if int(from_m) == int(to_m):
+                return loads
+            block_jobs = solution.sequences[from_m][
+                from_start : from_start + block_size
+            ]
+            block_p = float(sum(float(p[j]) for j in block_jobs))
+            loads[int(from_m)] -= block_p
+            loads[int(to_m)] += block_p
+            return loads
+
+        # Default: no load change (or unsupported operator)
+        return loads
+
+    def _get_affected_new_sequences(
+        self,
+        solution: PMALNSSolution,
+        move: Move,
+        affected_machines: List[int],
+    ) -> Dict[int, List[int]]:
+        """Reconstruct new sequences for affected machines only.
+
+        Avoid cloning `PMALNSSolution` for every candidate move.
+        Supports the operators used by AAN_MC.
+        """
+        op = move.operator
+        new_seqs: Dict[int, List[int]] = {}
+
+        # Seed with copies of affected sequences
+        for mi in affected_machines:
+            new_seqs[int(mi)] = list(solution.sequences[int(mi)])
+
+        if op == OperatorID.RELOCATE_1:
+            from_m, from_pos, to_m, to_pos = move.params
+            from_m = int(from_m)
+            to_m = int(to_m)
+            from_pos = int(from_pos)
+            to_pos = int(to_pos)
+            job = new_seqs[from_m].pop(from_pos)
+            if from_m == to_m and to_pos > from_pos:
+                to_pos -= 1
+            new_seqs[to_m].insert(to_pos, job)
+            return new_seqs
+
+        if op == OperatorID.SWAP_1:
+            m1, pos1, m2, pos2 = move.params
+            m1 = int(m1)
+            m2 = int(m2)
+            pos1 = int(pos1)
+            pos2 = int(pos2)
+            seq1 = new_seqs[m1]
+            seq2 = new_seqs[m2]
+            seq1[pos1], seq2[pos2] = seq2[pos2], seq1[pos1]
+            return new_seqs
+
+        if op == OperatorID.BLOCK_RELOCATE:
+            from_m, from_start, block_size, to_m, to_pos = move.params
+            from_m = int(from_m)
+            to_m = int(to_m)
+            from_start = int(from_start)
+            block_size = int(block_size)
+            to_pos = int(to_pos)
+            block = new_seqs[from_m][from_start : from_start + block_size]
+            del new_seqs[from_m][from_start : from_start + block_size]
+
+            if from_m == to_m and to_pos > from_start:
+                to_pos -= block_size
+            for i, job in enumerate(block):
+                new_seqs[to_m].insert(to_pos + i, job)
+            return new_seqs
+
+        # Unsupported operator for multi-criteria: just return copies
+        return new_seqs
 
     def generate_all_operator_moves(
         self,

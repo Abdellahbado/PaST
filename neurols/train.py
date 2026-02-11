@@ -837,14 +837,46 @@ class NeuroLSTrainer:
         q_values_seen = []
         action_counts: Dict[int, int] = {}
 
+        # AAN_MC diagnostics (criterion usage + collapse indicators)
+        mc_steps = 0
+        mc_same_as_cost = 0
+        mc_unique_sum = 0.0
+        mc_valid_sum = 0.0
+        crit_pick: Dict[str, int] = {}
+        crit_accept: Dict[str, int] = {}
+
         while True:
             # Select action
             action = self._get_action(state_features)
             action_counts[action] = action_counts.get(action, 0) + 1
 
+            # Decode for variant-specific logging
+            try:
+                decoded = env.config.action_space.decode_action(action)
+            except Exception:
+                decoded = None
+
             # Step environment
             next_state, reward, done, info = env.step(action)
             next_state_features = env.get_state_features()
+
+            # AAN_MC diagnostics from decoded action + env info
+            if (
+                decoded is not None
+                and getattr(decoded, "criterion_id", None) is not None
+            ):
+                mc_steps += 1
+                cname = getattr(decoded.criterion_id, "name", str(decoded.criterion_id))
+                crit_pick[cname] = crit_pick.get(cname, 0) + 1
+                if info.get("accepted", False):
+                    crit_accept[cname] = crit_accept.get(cname, 0) + 1
+
+                if info.get("mc_same_as_cost", False):
+                    mc_same_as_cost += 1
+                if info.get("mc_unique_moves", None) is not None:
+                    mc_unique_sum += float(info.get("mc_unique_moves") or 0.0)
+                if info.get("mc_valid_criteria", None) is not None:
+                    mc_valid_sum += float(info.get("mc_valid_criteria") or 0.0)
 
             # Track acceptance / improvement
             if info.get("accepted", False):
@@ -889,6 +921,18 @@ class NeuroLSTrainer:
         # Cache stats from env
         cache_stats = getattr(env, "get_cache_stats", lambda: {})()
 
+        # Summarize AAN_MC stats
+        mc_same_rate = mc_same_as_cost / max(1, mc_steps)
+        mc_unique_avg = mc_unique_sum / max(1, mc_steps)
+        mc_valid_avg = mc_valid_sum / max(1, mc_steps)
+
+        crit_total = sum(crit_pick.values())
+        crit_pick_frac = {k: (v / max(1, crit_total)) for k, v in crit_pick.items()}
+        crit_accept_rate = {
+            k: (crit_accept.get(k, 0) / max(1, crit_pick.get(k, 0)))
+            for k in crit_pick.keys()
+        }
+
         return {
             "reward": episode_reward,
             "length": episode_length,
@@ -905,6 +949,14 @@ class NeuroLSTrainer:
             "cache_size": cache_stats.get("size", 0),
             "cache_hit_rate": cache_stats.get("hit_rate", 0.0),
             "avg_grad_norm": avg_grad_norm,
+            # Multi-criteria diagnostics (present even if mc_steps=0)
+            "mc_steps": mc_steps,
+            "mc_step_frac": (mc_steps / max(1, episode_length)),
+            "mc_same_as_cost_rate": mc_same_rate,
+            "mc_unique_moves_avg": mc_unique_avg,
+            "mc_valid_criteria_avg": mc_valid_avg,
+            "mc_crit_pick_frac": crit_pick_frac,
+            "mc_crit_accept_rate": crit_accept_rate,
         }
 
     def train(self):
@@ -1208,6 +1260,49 @@ class NeuroLSTrainer:
                 "train/grad_steps", metrics.get("n_grad_steps", 0), episode
             )
             self.writer.add_scalar("train/best_ever_cost", self.best_ever_cost, episode)
+
+            # AAN_MC / multi-criteria diagnostics (safe no-ops if not present)
+            if "mc_step_frac" in metrics:
+                self.writer.add_scalar(
+                    "train/mc_step_frac",
+                    float(metrics.get("mc_step_frac", 0.0)),
+                    episode,
+                )
+                self.writer.add_scalar(
+                    "train/mc_same_as_cost_rate",
+                    float(metrics.get("mc_same_as_cost_rate", 0.0)),
+                    episode,
+                )
+                self.writer.add_scalar(
+                    "train/mc_unique_moves_avg",
+                    float(metrics.get("mc_unique_moves_avg", 0.0)),
+                    episode,
+                )
+                self.writer.add_scalar(
+                    "train/mc_valid_criteria_avg",
+                    float(metrics.get("mc_valid_criteria_avg", 0.0)),
+                    episode,
+                )
+
+                crit_pick = metrics.get("mc_crit_pick_frac", {}) or {}
+                if isinstance(crit_pick, dict):
+                    for k, v in crit_pick.items():
+                        try:
+                            self.writer.add_scalar(
+                                f"train/mc_pick_frac/{k}", float(v), episode
+                            )
+                        except Exception:
+                            pass
+
+                crit_acc = metrics.get("mc_crit_accept_rate", {}) or {}
+                if isinstance(crit_acc, dict):
+                    for k, v in crit_acc.items():
+                        try:
+                            self.writer.add_scalar(
+                                f"train/mc_accept_rate/{k}", float(v), episode
+                            )
+                        except Exception:
+                            pass
             if metrics.get("cache_size", 0) > 0:
                 self.writer.add_scalar(
                     "train/cache_hit_rate", metrics["cache_hit_rate"], episode
@@ -1248,6 +1343,17 @@ class NeuroLSTrainer:
                 f"ETA: {eta_str}"
                 f"{gpu_str}"
             )
+
+            # Print a compact multi-criteria line if active
+            if metrics.get("mc_steps", 0) > 0:
+                same = float(metrics.get("mc_same_as_cost_rate", 0.0)) * 100.0
+                uniq = float(metrics.get("mc_unique_moves_avg", 0.0))
+                val = float(metrics.get("mc_valid_criteria_avg", 0.0))
+                print(
+                    f"  [MC] steps: {int(metrics.get('mc_steps', 0))} | "
+                    f"same_as_cost: {same:.1f}% | "
+                    f"unique_moves(avg): {uniq:.2f}/{val:.2f}"
+                )
 
         # ── Evaluation ───────────────────────────────────────
         if (
@@ -1592,6 +1698,7 @@ def main():
             "AA",
             "AAN",
             "AAN_CLEAN",
+            "AAN_MC",
             "AANP",
             "AANP_CLEAN",
             "AANP_PRICE",
