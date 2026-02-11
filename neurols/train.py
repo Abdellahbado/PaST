@@ -1743,6 +1743,38 @@ def main():
         action=argparse.BooleanOptionalAction,
         help="Enable/disable IQN (distributional RL)",
     )
+
+    # Stability / target-network / replay overrides
+    parser.add_argument(
+        "--use-soft-update",
+        default=None,
+        action=argparse.BooleanOptionalAction,
+        help="Enable/disable soft target updates (Polyak averaging).",
+    )
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=None,
+        help="Override soft update coefficient tau (used when --use-soft-update).",
+    )
+    parser.add_argument(
+        "--target-update-freq",
+        type=int,
+        default=None,
+        help="Override hard target update frequency in steps (used when not soft-updating).",
+    )
+    parser.add_argument(
+        "--buffer-size",
+        type=int,
+        default=None,
+        help="Override replay buffer capacity.",
+    )
+    parser.add_argument(
+        "--min-buffer-size",
+        type=int,
+        default=None,
+        help="Override replay warmup size before training starts.",
+    )
     parser.add_argument(
         "--action-space",
         type=str,
@@ -1900,6 +1932,18 @@ def main():
             )
     if args.use_iqn is not None:
         config.use_iqn = args.use_iqn
+
+    if args.use_soft_update is not None:
+        config.use_soft_update = bool(args.use_soft_update)
+    if args.tau is not None:
+        config.tau = float(args.tau)
+    if args.target_update_freq is not None:
+        config.target_update_freq = int(args.target_update_freq)
+    if args.buffer_size is not None:
+        config.buffer_size = int(args.buffer_size)
+    if args.min_buffer_size is not None:
+        config.min_buffer_size = int(args.min_buffer_size)
+
     if args.action_space is not None:
         config.action_space = args.action_space
     if args.graph_type is not None:
