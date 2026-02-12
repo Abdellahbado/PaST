@@ -25,6 +25,37 @@ from collections import deque
 import random
 import numpy as np
 
+
+def _infer_available_cpus() -> int:
+    """Infer the number of CPU cores available to this process.
+
+    Prefers OS CPU affinity (common on SLURM/K8s/containers) so that
+    "use all cores" means *allocated* cores, not the host machine total.
+    """
+    # 1) Linux affinity (best signal of allocation)
+    try:
+        affinity = os.sched_getaffinity(0)  # type: ignore[attr-defined]
+        n = len(affinity)
+        if n > 0:
+            return int(n)
+    except Exception:
+        pass
+
+    # 2) Common scheduler env var fallback
+    for var in ("SLURM_CPUS_PER_TASK", "SLURM_CPUS_ON_NODE", "PBS_NP"):
+        try:
+            v = os.environ.get(var)
+            if v is not None and str(v).strip() != "":
+                n = int(v)
+                if n > 0:
+                    return n
+        except Exception:
+            pass
+
+    # 3) Generic fallback
+    n = os.cpu_count() or 1
+    return int(max(1, n))
+
 try:
     import torch
     import torch.nn as nn
@@ -1021,13 +1052,11 @@ class NeuroLSTrainer:
         # ── Resolve parallelism level ─────────────────────────
         n_parallel = self.config.n_parallel_envs
         if n_parallel <= 0:
-            import multiprocessing as _mp
-
             # Maximize CPU utilisation by default for env.step() (CPU-bound).
             # To avoid severe over-subscription, default worker thread count
             # to 1 unless the user explicitly set it.
             os.environ.setdefault("NEUROLS_WORKER_THREADS", "1")
-            n_parallel = max(1, int(_mp.cpu_count() or 1))
+            n_parallel = max(1, int(_infer_available_cpus()))
         use_parallel = n_parallel > 1
 
         # Training loop
@@ -1039,7 +1068,7 @@ class NeuroLSTrainer:
             f"  Price mode: {self.config.price_mode}\n"
             f"  Buffer: {self.config.min_buffer_size}/{self.config.buffer_size}  "
             f"(training starts after {self.config.min_buffer_size} transitions)\n"
-            f"  Parallel workers: {n_parallel}\n"
+            f"  Parallel workers: {n_parallel}{' (auto)' if int(self.config.n_parallel_envs) <= 0 else ''}\n"
             f"{'='*70}"
         )
 
