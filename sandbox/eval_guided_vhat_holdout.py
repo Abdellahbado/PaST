@@ -25,6 +25,7 @@ from PaST.sandbox.train_eval_vhat_beam_dp import (
     build_instance,
     decode_state,
     encode_setup,
+    fit_ridge_with_prior,
     remaining_p_list,
 )
 
@@ -116,6 +117,23 @@ def main() -> None:
         help="Use fixed-dimension features (recommended if you want to reuse a model across varying K).",
     )
     ap.add_argument(
+        "--load-model",
+        type=str,
+        default="",
+        help="Optional .npz checkpoint to reuse. If set, evaluation uses this model (frozen) or fine-tunes with --prior-strength.",
+    )
+    ap.add_argument(
+        "--freeze-loaded",
+        action="store_true",
+        help="If set with --load-model, skips training and uses loaded weights directly.",
+    )
+    ap.add_argument(
+        "--prior-strength",
+        type=float,
+        default=0.0,
+        help="If >0 with --load-model (and not frozen), fit uses a quadratic prior around loaded weights.",
+    )
+    ap.add_argument(
         "--random-baseline-scale",
         type=float,
         default=1.0,
@@ -167,6 +185,27 @@ def main() -> None:
                 include_bins=True,
             )
 
+        loaded_w: np.ndarray | None = None
+        loaded_model_path = str(args.load_model).strip()
+        if loaded_model_path:
+            ckpt = np.load(loaded_model_path)
+            loaded_w = np.asarray(ckpt["weights"], dtype=np.float64)
+            # If checkpoint has stored spec, prefer it for compatibility.
+            if {
+                "include_per_class_counts",
+                "include_per_class_now_cost",
+                "include_bins",
+            }.issubset(set(ckpt.files)):
+                spec = FeatureSpec(
+                    include_per_class_counts=bool(
+                        int(ckpt["include_per_class_counts"])
+                    ),
+                    include_per_class_now_cost=bool(
+                        int(ckpt["include_per_class_now_cost"])
+                    ),
+                    include_bins=bool(int(ckpt["include_bins"])),
+                )
+
         states_obj, y, attempts = _collect_state_labels(
             rng=rng,
             T=T,
@@ -199,7 +238,37 @@ def main() -> None:
             test_idx = idx[-10:]
             train_idx = idx[:-10]
 
-        w = fit_ridge(X[train_idx], y[train_idx], l2=float(args.l2))
+        # Train weights (or reuse a checkpoint)
+        probe = phi_for_state(
+            t=0,
+            used=tuple([0] * len(lengths)),
+            totals=totals,
+            lengths=lengths.tolist(),
+            ctx=ctx,
+            spec=spec,
+        )
+        feat_dim = int(probe.shape[0])
+        if loaded_w is not None and int(loaded_w.shape[0]) != feat_dim:
+            raise RuntimeError(
+                f"Loaded model dim={loaded_w.shape[0]} incompatible with current feat_dim={feat_dim}. "
+                f"Use --transferable-features consistently across runs."
+            )
+
+        if bool(args.freeze_loaded):
+            if loaded_w is None:
+                raise RuntimeError("--freeze-loaded requires --load-model")
+            w = loaded_w
+        else:
+            if loaded_w is not None and float(args.prior_strength) > 0.0:
+                w = fit_ridge_with_prior(
+                    X[train_idx],
+                    y[train_idx],
+                    l2=float(args.l2),
+                    prior_w=loaded_w,
+                    prior_strength=float(args.prior_strength),
+                )
+            else:
+                w = fit_ridge(X[train_idx], y[train_idx], l2=float(args.l2))
         model = LinearRidgeValueModel(weights=w, spec=spec)
 
         y_hat_test = X[test_idx] @ w
@@ -225,7 +294,9 @@ def main() -> None:
         def vhat_random(t: int, state: int) -> float:
             # Deterministic random baseline per (t,state) so results are reproducible.
             # Mix seed with t/state into a simple hash.
-            x = (int(seed) * 1000003 + int(t) * 9176 + int(state) * 1315423911) & 0xFFFFFFFF
+            x = (
+                int(seed) * 1000003 + int(t) * 9176 + int(state) * 1315423911
+            ) & 0xFFFFFFFF
             # LCG -> float in (0,1)
             x = (1103515245 * x + 12345) & 0x7FFFFFFF
             u = (x + 1) / (0x7FFFFFFF + 2)
@@ -242,7 +313,9 @@ def main() -> None:
             if used_cached is None:
                 used_cached = decode_state(s, radices)
                 used_cache[s] = used_cached
-            remaining = totals.astype(np.int32) - np.asarray(used_cached, dtype=np.int32)
+            remaining = totals.astype(np.int32) - np.asarray(
+                used_cached, dtype=np.int32
+            )
             W = int(np.sum(remaining * lengths))
             if W <= 0:
                 return 0.0
@@ -374,8 +447,10 @@ def main() -> None:
     print("=== Summary by beam (mean/median gaps; mean speedups) ===")
     for beam in sorted(set(int(r["beam"]) for r in rows)):
         br = [r for r in rows if int(r["beam"]) == int(beam)]
+
         def _mean(xs: List[float]) -> float:
             return float(mean(xs))
+
         def _med(xs: List[float]) -> float:
             return float(median(xs))
 
