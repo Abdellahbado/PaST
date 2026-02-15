@@ -136,6 +136,11 @@ def main() -> None:
     ap.add_argument("--beam", type=int, default=2000)
     ap.add_argument("--prune-factor", type=float, default=2.0)
     ap.add_argument(
+        "--skip-exact",
+        action="store_true",
+        help="Skip solving the full exact DP for the generated instance (useful for large stages).",
+    )
+    ap.add_argument(
         "--transferable-features",
         action="store_true",
         help="Use fixed-dimension features across different K (recommended for curriculum transfer).",
@@ -172,13 +177,17 @@ def main() -> None:
     )
     T = int(len(prices))
 
-    t0 = time.perf_counter()
-    exact = solve_optimal_benchmark_dp(p, prices, tie_break="early")
-    t_exact = time.perf_counter() - t0
+    if bool(args.skip_exact):
+        exact = None
+        t_exact = float("nan")
+    else:
+        t0 = time.perf_counter()
+        exact = solve_optimal_benchmark_dp(p, prices, tie_break="early")
+        t_exact = time.perf_counter() - t0
 
-    if not exact.feasible:
-        print("Generated infeasible instance unexpectedly.")
-        return
+        if not exact.feasible:
+            print("Generated infeasible instance unexpectedly.")
+            return
 
     lengths, totals, radices, mult = encode_setup(p)
     ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
@@ -344,7 +353,14 @@ def main() -> None:
     )
     t_guided = time.perf_counter() - t1
 
-    gap = (guided.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
+    if exact is None:
+        exact_cost = float("nan")
+        exact_finish = -1
+        gap = float("nan")
+    else:
+        exact_cost = float(exact.cost)
+        exact_finish = int(exact.finish_time)
+        gap = (guided.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
 
     print(
         " ".join(
@@ -353,8 +369,8 @@ def main() -> None:
                 f"N={len(p)}",
                 f"K={len(lengths)}",
                 f"sum_p={sum(p)}",
-                f"exact_cost={exact.cost:.6f}",
-                f"exact_finish={exact.finish_time}",
+                f"exact_cost={exact_cost:.6f}",
+                f"exact_finish={exact_finish}",
                 f"exact_s={t_exact:.4f}",
                 f"guided_cost={guided.cost:.6f}",
                 f"guided_finish={guided.finish_time}",

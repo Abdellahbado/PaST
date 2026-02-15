@@ -96,9 +96,31 @@ def main() -> None:
     ap.add_argument("--pmax", type=int, default=5)
     ap.add_argument("--samples", type=int, default=4500)
     ap.add_argument("--l2", type=float, default=1e-3)
-    ap.add_argument("--beam", type=int, default=300)
+    ap.add_argument(
+        "--beam",
+        type=int,
+        default=300,
+        help="Single beam width (ignored if --beams is provided).",
+    )
+    ap.add_argument(
+        "--beams",
+        type=str,
+        default="",
+        help="Optional comma-separated beam widths to sweep, e.g. '50,100,200,400'.",
+    )
     ap.add_argument("--prune-factor", type=float, default=2.0)
     ap.add_argument("--test-ratio", type=float, default=0.25)
+    ap.add_argument(
+        "--transferable-features",
+        action="store_true",
+        help="Use fixed-dimension features (recommended if you want to reuse a model across varying K).",
+    )
+    ap.add_argument(
+        "--random-baseline-scale",
+        type=float,
+        default=1.0,
+        help="Scale of random baseline heuristic values (Normal(0, scale)).",
+    )
     ap.add_argument(
         "--out-csv", type=str, default="PaST/logs/eval_guided_vhat_holdout.csv"
     )
@@ -106,6 +128,13 @@ def main() -> None:
 
     if not (0.05 <= args.test_ratio <= 0.5):
         raise ValueError("--test-ratio should be in [0.05, 0.5]")
+
+    if str(args.beams).strip():
+        beams = [int(x) for x in str(args.beams).split(",") if x.strip()]
+        if any(b <= 0 for b in beams):
+            raise ValueError("All --beams entries must be positive")
+    else:
+        beams = [int(args.beam)]
 
     seeds = list(range(int(args.seed_start), int(args.seed_end) + 1))
     rows: List[Dict[str, float]] = []
@@ -125,11 +154,18 @@ def main() -> None:
 
         lengths, totals, radices, _mult = encode_setup(p)
         ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
-        spec = FeatureSpec(
-            include_per_class_counts=True,
-            include_per_class_now_cost=True,
-            include_bins=True,
-        )
+        if bool(args.transferable_features):
+            spec = FeatureSpec(
+                include_per_class_counts=False,
+                include_per_class_now_cost=False,
+                include_bins=True,
+            )
+        else:
+            spec = FeatureSpec(
+                include_per_class_counts=True,
+                include_per_class_now_cost=True,
+                include_bins=True,
+            )
 
         states_obj, y, attempts = _collect_state_labels(
             rng=rng,
@@ -186,65 +222,140 @@ def main() -> None:
                 ctx=ctx,
             )
 
-        t1 = time.perf_counter()
-        guided_learned = solve_optimal_benchmark_dp(
-            p,
-            prices,
-            tie_break="early",
-            guided=True,
-            beam_width=int(args.beam),
-            prune_factor=float(args.prune_factor),
-            vhat=vhat,
-        )
-        guided_learned_s = time.perf_counter() - t1
+        def vhat_random(t: int, state: int) -> float:
+            # Deterministic random baseline per (t,state) so results are reproducible.
+            # Mix seed with t/state into a simple hash.
+            x = (int(seed) * 1000003 + int(t) * 9176 + int(state) * 1315423911) & 0xFFFFFFFF
+            # LCG -> float in (0,1)
+            x = (1103515245 * x + 12345) & 0x7FFFFFFF
+            u = (x + 1) / (0x7FFFFFFF + 2)
+            # Approx Normal(0,1) from inverse error function approximation is overkill;
+            # use centered uniform as a cheap stand-in baseline.
+            return float((u - 0.5) * 2.0 * float(args.random_baseline_scale))
 
-        t2 = time.perf_counter()
-        guided_zero = solve_optimal_benchmark_dp(
-            p,
-            prices,
-            tie_break="early",
-            guided=True,
-            beam_width=int(args.beam),
-            prune_factor=float(args.prune_factor),
-            vhat=lambda _t, _s: 0.0,
-        )
-        guided_zero_s = time.perf_counter() - t2
+        prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
-        gap_learned = (
-            (guided_learned.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
-        )
-        gap_zero = (guided_zero.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
+        def vhat_work_mean_price(t: int, state: int) -> float:
+            # Cheap price-aware baseline: remaining work * mean future price.
+            s = int(state)
+            used_cached = used_cache.get(s)
+            if used_cached is None:
+                used_cached = decode_state(s, radices)
+                used_cache[s] = used_cached
+            remaining = totals.astype(np.int32) - np.asarray(used_cached, dtype=np.int32)
+            W = int(np.sum(remaining * lengths))
+            if W <= 0:
+                return 0.0
+            tt = int(t)
+            tt = 0 if tt < 0 else tt
+            tt = T if tt > T else tt
+            rem_len = max(1, T - tt)
+            mean_price = float((prefix_prices[T] - prefix_prices[tt]) / rem_len)
+            return float(W) * mean_price
 
-        row = {
-            "seed": float(seed),
-            "T": float(T),
-            "N": float(len(p)),
-            "K": float(len(lengths)),
-            "sum_p": float(sum(p)),
-            "label_attempts": float(attempts),
-            "n_states_labeled": float(len(y)),
-            "r2_test": float(r2),
-            "mae_test": float(mae),
-            "exact_cost": float(exact.cost),
-            "exact_s": float(exact_s),
-            "guided_learned_cost": float(guided_learned.cost),
-            "guided_learned_s": float(guided_learned_s),
-            "guided_zero_cost": float(guided_zero.cost),
-            "guided_zero_s": float(guided_zero_s),
-            "gap_learned_pct": float(gap_learned),
-            "gap_zero_pct": float(gap_zero),
-            "speedup_learned": float(exact_s / max(guided_learned_s, 1e-12)),
-            "speedup_zero": float(exact_s / max(guided_zero_s, 1e-12)),
-            "beam": float(args.beam),
-        }
-        rows.append(row)
+        for beam in beams:
+            t1 = time.perf_counter()
+            guided_learned = solve_optimal_benchmark_dp(
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
+                prune_factor=float(args.prune_factor),
+                vhat=vhat,
+            )
+            guided_learned_s = time.perf_counter() - t1
 
-        print(
-            f"seed={seed} K={int(row['K'])} exact={row['exact_cost']:.4f} "
-            f"learned={row['guided_learned_cost']:.4f} zero={row['guided_zero_cost']:.4f} "
-            f"gapL={row['gap_learned_pct']:.3f}% gapZ={row['gap_zero_pct']:.3f}% "
-            f"R2={row['r2_test']:.3f}"
-        )
+            t2 = time.perf_counter()
+            guided_zero = solve_optimal_benchmark_dp(
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
+                prune_factor=float(args.prune_factor),
+                vhat=lambda _t, _s: 0.0,
+            )
+            guided_zero_s = time.perf_counter() - t2
+
+            t3 = time.perf_counter()
+            guided_random = solve_optimal_benchmark_dp(
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
+                prune_factor=float(args.prune_factor),
+                vhat=vhat_random,
+            )
+            guided_random_s = time.perf_counter() - t3
+
+            t4 = time.perf_counter()
+            guided_price = solve_optimal_benchmark_dp(
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
+                prune_factor=float(args.prune_factor),
+                vhat=vhat_work_mean_price,
+            )
+            guided_price_s = time.perf_counter() - t4
+
+            gap_learned = (
+                (guided_learned.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
+            )
+            gap_zero = (
+                (guided_zero.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
+            )
+            gap_random = (
+                (guided_random.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
+            )
+            gap_price = (
+                (guided_price.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
+            )
+
+            row = {
+                "seed": float(seed),
+                "T": float(T),
+                "N": float(len(p)),
+                "K": float(len(lengths)),
+                "sum_p": float(sum(p)),
+                "label_attempts": float(attempts),
+                "n_states_labeled": float(len(y)),
+                "r2_test": float(r2),
+                "mae_test": float(mae),
+                "feat_transferable": float(int(bool(args.transferable_features))),
+                "exact_cost": float(exact.cost),
+                "exact_s": float(exact_s),
+                "guided_learned_cost": float(guided_learned.cost),
+                "guided_learned_s": float(guided_learned_s),
+                "guided_zero_cost": float(guided_zero.cost),
+                "guided_zero_s": float(guided_zero_s),
+                "guided_random_cost": float(guided_random.cost),
+                "guided_random_s": float(guided_random_s),
+                "guided_price_cost": float(guided_price.cost),
+                "guided_price_s": float(guided_price_s),
+                "gap_learned_pct": float(gap_learned),
+                "gap_zero_pct": float(gap_zero),
+                "gap_random_pct": float(gap_random),
+                "gap_price_pct": float(gap_price),
+                "speedup_learned": float(exact_s / max(guided_learned_s, 1e-12)),
+                "speedup_zero": float(exact_s / max(guided_zero_s, 1e-12)),
+                "speedup_random": float(exact_s / max(guided_random_s, 1e-12)),
+                "speedup_price": float(exact_s / max(guided_price_s, 1e-12)),
+                "beam": float(int(beam)),
+            }
+            rows.append(row)
+
+            print(
+                f"seed={seed} beam={beam} K={int(row['K'])} exact={row['exact_cost']:.4f} "
+                f"L={row['guided_learned_cost']:.4f} Z={row['guided_zero_cost']:.4f} "
+                f"P={row['guided_price_cost']:.4f} R={row['guided_random_cost']:.4f} "
+                f"gapL={row['gap_learned_pct']:.2f}% gapZ={row['gap_zero_pct']:.2f}% "
+                f"gapP={row['gap_price_pct']:.2f}% gapR={row['gap_random_pct']:.2f}% "
+                f"R2={row['r2_test']:.3f}"
+            )
 
     if not rows:
         raise RuntimeError("No successful rows were produced.")
@@ -258,6 +369,30 @@ def main() -> None:
         writer.writeheader()
         for r in rows:
             writer.writerow(r)
+
+    # Print summary grouped by beam.
+    print("=== Summary by beam (mean/median gaps; mean speedups) ===")
+    for beam in sorted(set(int(r["beam"]) for r in rows)):
+        br = [r for r in rows if int(r["beam"]) == int(beam)]
+        def _mean(xs: List[float]) -> float:
+            return float(mean(xs))
+        def _med(xs: List[float]) -> float:
+            return float(median(xs))
+
+        print(
+            " ".join(
+                [
+                    f"beam={beam}",
+                    f"n={len(br)}",
+                    f"gapL(mean/med)={_mean([r['gap_learned_pct'] for r in br]):.3f}/{_med([r['gap_learned_pct'] for r in br]):.3f}",
+                    f"gapZ(mean/med)={_mean([r['gap_zero_pct'] for r in br]):.3f}/{_med([r['gap_zero_pct'] for r in br]):.3f}",
+                    f"gapP(mean/med)={_mean([r['gap_price_pct'] for r in br]):.3f}/{_med([r['gap_price_pct'] for r in br]):.3f}",
+                    f"gapR(mean/med)={_mean([r['gap_random_pct'] for r in br]):.3f}/{_med([r['gap_random_pct'] for r in br]):.3f}",
+                    f"speedL(mean)={_mean([r['speedup_learned'] for r in br]):.3f}",
+                    f"speedZ(mean)={_mean([r['speedup_zero'] for r in br]):.3f}",
+                ]
+            )
+        )
 
     gap_learned = [r["gap_learned_pct"] for r in rows]
     gap_zero = [r["gap_zero_pct"] for r in rows]
