@@ -157,6 +157,7 @@ def biased_random_assignment(
     K: int,
     rng: np.random.Generator,
     alpha: float,
+    uniform_mix: float,
 ) -> List[List[int]]:
     """Assign jobs to machines with load imbalance.
 
@@ -170,6 +171,12 @@ def biased_random_assignment(
     u_arr = np.asarray(u, dtype=np.float64)
     logits = -float(alpha) * (u_arr - float(np.min(u_arr)))
     probs = _softmax(logits)
+
+    mix = float(uniform_mix)
+    if mix < 0.0 or mix > 1.0:
+        raise ValueError(f"uniform_mix must be in [0,1], got: {mix}")
+    if mix > 0.0:
+        probs = (1.0 - mix) * probs + mix * (1.0 / float(M))
 
     assignments: List[List[int]] = [[] for _ in range(M)]
     loads = np.zeros(M, dtype=np.int64)
@@ -484,6 +491,16 @@ def parse_args() -> argparse.Namespace:
     )
 
     ap.add_argument(
+        "--assign-uniform-mix",
+        type=float,
+        default=0.0,
+        help=(
+            "Add stochasticity by mixing assignment probs with uniform. "
+            "0.0 = pure biased-softmax, 1.0 = fully uniform."
+        ),
+    )
+
+    ap.add_argument(
         "--epsilon-step",
         type=int,
         default=0,
@@ -591,6 +608,7 @@ def main() -> None:
         "D",
         "K",
         "assign_alpha",
+        "assign_uniform_mix",
         "epsilon",
         "loads",  # semicolon separated per-machine sums
         "u",  # semicolon separated
@@ -601,6 +619,21 @@ def main() -> None:
         "beam",
         "prune_factor",
     ]
+
+    print(
+        "[epsilon] === RUN CONFIG ===\n"
+        f"[epsilon] out_csv={out_csv}\n"
+        f"[epsilon] category={args.category} replicates={args.replicates} seed={args.seed}\n"
+        f"[epsilon] N={args.N} N_range={N_range}  M={args.M}  D={args.D} D_range={D_range}\n"
+        f"[epsilon] pmax={args.pmax} target_util={args.target_util}\n"
+        f"[epsilon] price_mode={args.price_mode} low={args.price_low} high={args.price_high} "
+        f"freeze={bool(args.price_freeze)} freeze_scope={args.price_freeze_scope} price_seed={args.price_seed}\n"
+        f"[epsilon] assign_alpha={args.assign_alpha} assign_uniform_mix={args.assign_uniform_mix}\n"
+        f"[epsilon] guided={bool(args.guided)} skip_exact={bool(args.skip_exact)} beam={args.beam} prune_factor={args.prune_factor}\n"
+        f"[epsilon] load_model={str(args.load_model).strip() if bool(args.guided) else ''} "
+        f"normalize_labels={bool(model_meta.get('normalize_labels', False)) if model_meta is not None else False} "
+        f"spec={base_spec}"
+    )
 
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)
@@ -614,6 +647,7 @@ def main() -> None:
                 K=int(inst.K),
                 rng=rng,
                 alpha=float(args.assign_alpha),
+                uniform_mix=float(args.assign_uniform_mix),
             )
             loads = [int(sum(inst.p[j] for j in jobs)) for jobs in assignments]
             min_eps = max(1, int(max(loads)) if loads else 1)
@@ -754,6 +788,7 @@ def main() -> None:
                             "D": float(inst.D),
                             "K": float(inst.K),
                             "assign_alpha": float(args.assign_alpha),
+                            "assign_uniform_mix": float(args.assign_uniform_mix),
                             "epsilon": float(eps),
                             "loads": loads_str,
                             "u": u_str,
@@ -776,6 +811,7 @@ def main() -> None:
                             "D": float(inst.D),
                             "K": float(inst.K),
                             "assign_alpha": float(args.assign_alpha),
+                            "assign_uniform_mix": float(args.assign_uniform_mix),
                             "epsilon": float(eps),
                             "loads": loads_str,
                             "u": u_str,
@@ -799,6 +835,7 @@ def main() -> None:
                             "D": float(inst.D),
                             "K": float(inst.K),
                             "assign_alpha": float(args.assign_alpha),
+                            "assign_uniform_mix": float(args.assign_uniform_mix),
                             "epsilon": float(eps),
                             "loads": loads_str,
                             "u": u_str,
@@ -819,6 +856,7 @@ def main() -> None:
                             "D": float(inst.D),
                             "K": float(inst.K),
                             "assign_alpha": float(args.assign_alpha),
+                            "assign_uniform_mix": float(args.assign_uniform_mix),
                             "epsilon": float(eps),
                             "loads": loads_str,
                             "u": u_str,
