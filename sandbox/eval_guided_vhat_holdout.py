@@ -112,9 +112,25 @@ def main() -> None:
     ap.add_argument("--prune-factor", type=float, default=2.0)
     ap.add_argument("--test-ratio", type=float, default=0.25)
     ap.add_argument(
+        "--train-rounds",
+        type=int,
+        default=1,
+        help="Number of training rounds. Each round collects fresh samples, merges with previous, and refits. More rounds = more diverse training data.",
+    )
+    ap.add_argument(
+        "--verbose-train",
+        action="store_true",
+        help="Print per-round training diagnostics (R², MAE, n_samples, timing).",
+    )
+    ap.add_argument(
         "--transferable-features",
         action="store_true",
         help="Use fixed-dimension features (recommended if you want to reuse a model across varying K).",
+    )
+    ap.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize features by T for cross-size transfer. Required when using a model trained on one size to evaluate on another.",
     )
     ap.add_argument(
         "--load-model",
@@ -138,6 +154,12 @@ def main() -> None:
         type=float,
         default=1.0,
         help="Scale of random baseline heuristic values (Normal(0, scale)).",
+    )
+    ap.add_argument(
+        "--save-model",
+        type=str,
+        default="",
+        help="If set, save the trained model weights from the first seed to this .npz path for reuse.",
     )
     ap.add_argument(
         "--out-csv", type=str, default="PaST/logs/eval_guided_vhat_holdout.csv"
@@ -172,17 +194,20 @@ def main() -> None:
 
         lengths, totals, radices, _mult = encode_setup(p)
         ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
+        use_normalize = bool(args.normalize)
         if bool(args.transferable_features):
             spec = FeatureSpec(
                 include_per_class_counts=False,
                 include_per_class_now_cost=False,
                 include_bins=True,
+                normalize=use_normalize,
             )
         else:
             spec = FeatureSpec(
                 include_per_class_counts=True,
                 include_per_class_now_cost=True,
                 include_bins=True,
+                normalize=use_normalize,
             )
 
         loaded_w: np.ndarray | None = None
@@ -196,6 +221,11 @@ def main() -> None:
                 "include_per_class_now_cost",
                 "include_bins",
             }.issubset(set(ckpt.files)):
+                _norm = (
+                    bool(int(ckpt["normalize"]))
+                    if "normalize" in ckpt.files
+                    else use_normalize
+                )
                 spec = FeatureSpec(
                     include_per_class_counts=bool(
                         int(ckpt["include_per_class_counts"])
@@ -204,41 +234,25 @@ def main() -> None:
                         int(ckpt["include_per_class_now_cost"])
                     ),
                     include_bins=bool(int(ckpt["include_bins"])),
+                    normalize=_norm,
                 )
 
-        states_obj, y, attempts = _collect_state_labels(
-            rng=rng,
-            T=T,
-            totals=totals,
-            lengths=lengths,
-            prices=prices,
-            target_samples=int(args.samples),
-        )
+        # --- Iterative training: collect samples across multiple rounds ---
+        train_rounds = max(1, int(args.train_rounds))
+        samples_per_round = max(100, int(args.samples) // train_rounds)
+        verbose_train = bool(args.verbose_train)
 
-        X = np.vstack(
-            [
-                phi_for_state(
-                    t=int(t),
-                    used=used,
-                    totals=totals,
-                    lengths=lengths.tolist(),
-                    ctx=ctx,
-                    spec=spec,
-                )
-                for (t, used) in states_obj
-            ]
-        )
+        train_t0 = time.perf_counter()
 
-        idx = np.arange(len(y))
-        rng.shuffle(idx)
-        split = int((1.0 - float(args.test_ratio)) * len(idx))
-        train_idx = idx[:split]
-        test_idx = idx[split:]
-        if len(test_idx) < 10:
-            test_idx = idx[-10:]
-            train_idx = idx[:-10]
+        all_states: List[Tuple[int, Tuple[int, ...]]] = []
+        all_labels: List[float] = []
+        total_attempts = 0
 
-        # Train weights (or reuse a checkpoint)
+        if verbose_train:
+            print(
+                f"  [train] seed={seed} K={len(lengths)} T={T} feat_spec={spec} rounds={train_rounds} samples/round={samples_per_round}"
+            )
+
         probe = phi_for_state(
             t=0,
             used=tuple([0] * len(lengths)),
@@ -254,26 +268,126 @@ def main() -> None:
                 f"Use --transferable-features consistently across runs."
             )
 
-        if bool(args.freeze_loaded):
-            if loaded_w is None:
-                raise RuntimeError("--freeze-loaded requires --load-model")
-            w = loaded_w
-        else:
-            if loaded_w is not None and float(args.prior_strength) > 0.0:
-                w = fit_ridge_with_prior(
-                    X[train_idx],
-                    y[train_idx],
-                    l2=float(args.l2),
-                    prior_w=loaded_w,
-                    prior_strength=float(args.prior_strength),
-                )
+        w = loaded_w  # may be None
+
+        for rnd in range(train_rounds):
+            t_round = time.perf_counter()
+
+            states_obj, y_rnd, attempts = _collect_state_labels(
+                rng=rng,
+                T=T,
+                totals=totals,
+                lengths=lengths,
+                prices=prices,
+                target_samples=samples_per_round,
+            )
+            total_attempts += attempts
+
+            # Merge with previous rounds
+            for (t_s, used_s), lbl in zip(states_obj, y_rnd):
+                all_states.append((int(t_s), tuple(int(x) for x in used_s)))
+                all_labels.append(float(lbl))
+
+            y = np.asarray(all_labels, dtype=np.float64)
+            X = np.vstack(
+                [
+                    phi_for_state(
+                        t=int(t_v),
+                        used=used_v,
+                        totals=totals,
+                        lengths=lengths.tolist(),
+                        ctx=ctx,
+                        spec=spec,
+                    )
+                    for (t_v, used_v) in all_states
+                ]
+            )
+
+            # Train/test split
+            idx = np.arange(len(y))
+            rng.shuffle(idx)
+            split = int((1.0 - float(args.test_ratio)) * len(idx))
+            train_idx = idx[:split]
+            test_idx = idx[split:]
+            if len(test_idx) < 10:
+                test_idx = idx[-10:]
+                train_idx = idx[:-10]
+
+            if bool(args.freeze_loaded):
+                if w is None:
+                    raise RuntimeError("--freeze-loaded requires --load-model")
             else:
-                w = fit_ridge(X[train_idx], y[train_idx], l2=float(args.l2))
+                if w is not None and float(args.prior_strength) > 0.0:
+                    w = fit_ridge_with_prior(
+                        X[train_idx],
+                        y[train_idx],
+                        l2=float(args.l2),
+                        prior_w=loaded_w,
+                        prior_strength=float(args.prior_strength),
+                    )
+                else:
+                    w = fit_ridge(X[train_idx], y[train_idx], l2=float(args.l2))
+
+            # Training diagnostics
+            y_hat_train = X[train_idx] @ w
+            r2_train = _r2_score(y[train_idx], y_hat_train)
+            mae_train = float(np.mean(np.abs(y[train_idx] - y_hat_train)))
+
+            y_hat_test = X[test_idx] @ w
+            r2_test_rnd = _r2_score(y[test_idx], y_hat_test)
+            mae_test_rnd = float(np.mean(np.abs(y[test_idx] - y_hat_test)))
+
+            round_time = time.perf_counter() - t_round
+
+            if verbose_train:
+                print(
+                    f"  [train] round={rnd+1}/{train_rounds} "
+                    f"n_total={len(y)} n_train={len(train_idx)} n_test={len(test_idx)} "
+                    f"R2_train={r2_train:.4f} R2_test={r2_test_rnd:.4f} "
+                    f"MAE_train={mae_train:.2f} MAE_test={mae_test_rnd:.2f} "
+                    f"time={round_time:.2f}s"
+                )
+
+        # Final model and metrics
+        if w is None:
+            raise RuntimeError(
+                "No weights computed (freeze-loaded without --load-model?)"
+            )
         model = LinearRidgeValueModel(weights=w, spec=spec)
+        attempts = total_attempts
+
+        train_s = time.perf_counter() - train_t0
 
         y_hat_test = X[test_idx] @ w
         r2 = _r2_score(y[test_idx], y_hat_test)
         mae = float(np.mean(np.abs(y[test_idx] - y_hat_test)))
+
+        if verbose_train:
+            # Feature weight summary
+            top_k = min(10, len(w))
+            sorted_idx = np.argsort(np.abs(w))[::-1][:top_k]
+            print(
+                f"  [train] final R2={r2:.4f} MAE={mae:.2f} feat_dim={feat_dim} top-{top_k} weights:"
+            )
+            for rank, fi in enumerate(sorted_idx):
+                print(f"    #{rank+1} feat[{fi}] w={w[fi]:.6f}")
+
+        # Save model (first seed only, unless already saved)
+        save_model_path = str(args.save_model).strip()
+        if save_model_path and seed == seeds[0]:
+            save_p = Path(save_model_path)
+            save_p.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(
+                save_p,
+                weights=w,
+                include_per_class_counts=int(spec.include_per_class_counts),
+                include_per_class_now_cost=int(spec.include_per_class_now_cost),
+                include_bins=int(spec.include_bins),
+                normalize=int(spec.normalize),
+            )
+            print(
+                f"  [save] Model saved to {save_p} (dim={len(w)}, normalize={spec.normalize})"
+            )
 
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
 
@@ -399,6 +513,7 @@ def main() -> None:
                 "r2_test": float(r2),
                 "mae_test": float(mae),
                 "feat_transferable": float(int(bool(args.transferable_features))),
+                "train_s": float(train_s),
                 "exact_cost": float(exact.cost),
                 "exact_s": float(exact_s),
                 "guided_learned_cost": float(guided_learned.cost),
@@ -417,6 +532,9 @@ def main() -> None:
                 "speedup_zero": float(exact_s / max(guided_zero_s, 1e-12)),
                 "speedup_random": float(exact_s / max(guided_random_s, 1e-12)),
                 "speedup_price": float(exact_s / max(guided_price_s, 1e-12)),
+                "speedup_learned_incl_train": float(
+                    exact_s / max(train_s + guided_learned_s, 1e-12)
+                ),
                 "beam": float(int(beam)),
             }
             rows.append(row)
@@ -427,7 +545,8 @@ def main() -> None:
                 f"P={row['guided_price_cost']:.4f} R={row['guided_random_cost']:.4f} "
                 f"gapL={row['gap_learned_pct']:.2f}% gapZ={row['gap_zero_pct']:.2f}% "
                 f"gapP={row['gap_price_pct']:.2f}% gapR={row['gap_random_pct']:.2f}% "
-                f"R2={row['r2_test']:.3f}"
+                f"R2={row['r2_test']:.3f} "
+                f"t_exact={row['exact_s']:.3f}s tL={row['guided_learned_s']:.3f}s tZ={row['guided_zero_s']:.3f}s train={row['train_s']:.3f}s"
             )
 
     if not rows:

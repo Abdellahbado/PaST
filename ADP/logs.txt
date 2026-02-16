@@ -1,0 +1,666 @@
+(base) jovyan@neruo-ls-aan-0:~$ python PaST/sandbox/eval_guided_vhat_holdout.py --seed-start 30 --seed-end 59 --D 3 --N 18 --pmax 5 --samples 4500 --beams 20,30,50,80,120 --prune-factor 2.0 --out-csv PaST/logs/holdou
+t_full_features.csv
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+seed=30 beam=20 K=5 exact=74.0000 L=74.0000 Z=88.0000 P=74.0000 R=90.0000 gapL=0.00% gapZ=18.92% gapP=0.00% gapR=21.62% R2=0.981
+seed=30 beam=30 K=5 exact=74.0000 L=74.0000 Z=88.0000 P=74.0000 R=90.0000 gapL=0.00% gapZ=18.92% gapP=0.00% gapR=21.62% R2=0.981
+seed=30 beam=50 K=5 exact=74.0000 L=74.0000 Z=86.0000 P=74.0000 R=88.0000 gapL=0.00% gapZ=16.22% gapP=0.00% gapR=18.92% R2=0.981
+seed=30 beam=80 K=5 exact=74.0000 L=74.0000 Z=86.0000 P=74.0000 R=84.0000 gapL=0.00% gapZ=16.22% gapP=0.00% gapR=13.51% R2=0.981
+seed=30 beam=120 K=5 exact=74.0000 L=74.0000 Z=82.0000 P=74.0000 R=86.0000 gapL=0.00% gapZ=10.81% gapP=0.00% gapR=16.22% R2=0.981
+seed=31 beam=20 K=5 exact=96.0000 L=96.0000 Z=108.0000 P=96.0000 R=108.0000 gapL=0.00% gapZ=12.50% gapP=0.00% gapR=12.50% R2=0.979
+seed=31 beam=30 K=5 exact=96.0000 L=96.0000 Z=106.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=10.42% gapP=0.00% gapR=10.42% R2=0.979
+seed=31 beam=50 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=6.25% R2=0.979
+seed=31 beam=80 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.979
+seed=31 beam=120 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.979
+seed=32 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=33 beam=20 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=30 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=50 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=80 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=120 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=34 beam=20 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=34 beam=30 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=34 beam=50 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=34 beam=80 K=5 exact=78.0000 L=78.0000 Z=94.0000 P=78.0000 R=90.0000 gapL=0.00% gapZ=20.51% gapP=0.00% gapR=15.38% R2=0.981
+seed=34 beam=120 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=35 beam=20 K=4 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.981
+seed=35 beam=30 K=4 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.981
+seed=35 beam=50 K=4 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.981
+seed=35 beam=80 K=4 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=104.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.981
+seed=35 beam=120 K=4 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=104.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.981
+seed=36 beam=20 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=37 beam=20 K=5 exact=100.0000 L=100.0000 Z=112.0000 P=100.0000 R=112.0000 gapL=0.00% gapZ=12.00% gapP=0.00% gapR=12.00% R2=0.978
+seed=37 beam=30 K=5 exact=100.0000 L=100.0000 Z=110.0000 P=100.0000 R=110.0000 gapL=0.00% gapZ=10.00% gapP=0.00% gapR=10.00% R2=0.978
+seed=37 beam=50 K=5 exact=100.0000 L=100.0000 Z=106.0000 P=100.0000 R=108.0000 gapL=0.00% gapZ=6.00% gapP=0.00% gapR=8.00% R2=0.978
+seed=37 beam=80 K=5 exact=100.0000 L=100.0000 Z=104.0000 P=100.0000 R=104.0000 gapL=0.00% gapZ=4.00% gapP=0.00% gapR=4.00% R2=0.978
+seed=37 beam=120 K=5 exact=100.0000 L=100.0000 Z=104.0000 P=100.0000 R=104.0000 gapL=0.00% gapZ=4.00% gapP=0.00% gapR=4.00% R2=0.978
+seed=38 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.979
+seed=38 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.979
+seed=38 beam=50 K=5 exact=104.0000 L=104.0000 Z=110.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=5.77% gapP=0.00% gapR=5.77% R2=0.979
+seed=38 beam=80 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.979
+seed=38 beam=120 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.979
+seed=39 beam=20 K=5 exact=120.0000 L=120.0000 Z=124.0000 P=120.0000 R=126.0000 gapL=0.00% gapZ=3.33% gapP=0.00% gapR=5.00% R2=0.978
+seed=39 beam=30 K=5 exact=120.0000 L=120.0000 Z=124.0000 P=120.0000 R=124.0000 gapL=0.00% gapZ=3.33% gapP=0.00% gapR=3.33% R2=0.978
+seed=39 beam=50 K=5 exact=120.0000 L=120.0000 Z=120.0000 P=120.0000 R=120.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=39 beam=80 K=5 exact=120.0000 L=120.0000 Z=120.0000 P=120.0000 R=120.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=39 beam=120 K=5 exact=120.0000 L=120.0000 Z=120.0000 P=120.0000 R=120.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=40 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.979
+seed=40 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.979
+seed=40 beam=50 K=5 exact=104.0000 L=104.0000 Z=110.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=5.77% gapP=0.00% gapR=5.77% R2=0.979
+seed=40 beam=80 K=5 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=3.85% R2=0.979
+seed=40 beam=120 K=5 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=104.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=41 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=42 beam=20 K=5 exact=116.0000 L=116.0000 Z=122.0000 P=116.0000 R=122.0000 gapL=0.00% gapZ=5.17% gapP=0.00% gapR=5.17% R2=0.978
+seed=42 beam=30 K=5 exact=116.0000 L=116.0000 Z=120.0000 P=116.0000 R=122.0000 gapL=0.00% gapZ=3.45% gapP=0.00% gapR=5.17% R2=0.978
+seed=42 beam=50 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=42 beam=80 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=42 beam=120 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=43 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.978
+seed=43 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.978
+seed=43 beam=50 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=5.77% R2=0.978
+seed=43 beam=80 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=43 beam=120 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=44 beam=20 K=5 exact=96.0000 L=96.0000 Z=108.0000 P=96.0000 R=108.0000 gapL=0.00% gapZ=12.50% gapP=0.00% gapR=12.50% R2=0.983
+seed=44 beam=30 K=5 exact=96.0000 L=96.0000 Z=106.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=10.42% gapP=0.00% gapR=10.42% R2=0.983
+seed=44 beam=50 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=104.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=8.33% R2=0.983
+seed=44 beam=80 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=104.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=8.33% R2=0.983
+seed=44 beam=120 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.983
+seed=45 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=45 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=45 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=45 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=45 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=46 beam=20 K=5 exact=116.0000 L=116.0000 Z=122.0000 P=116.0000 R=124.0000 gapL=0.00% gapZ=5.17% gapP=0.00% gapR=6.90% R2=0.979
+seed=46 beam=30 K=5 exact=116.0000 L=116.0000 Z=122.0000 P=116.0000 R=122.0000 gapL=0.00% gapZ=5.17% gapP=0.00% gapR=5.17% R2=0.979
+seed=46 beam=50 K=5 exact=116.0000 L=116.0000 Z=120.0000 P=116.0000 R=120.0000 gapL=0.00% gapZ=3.45% gapP=0.00% gapR=3.45% R2=0.979
+seed=46 beam=80 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=46 beam=120 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=47 beam=20 K=5 exact=88.0000 L=88.0000 Z=100.0000 P=88.0000 R=102.0000 gapL=0.00% gapZ=13.64% gapP=0.00% gapR=15.91% R2=0.982
+seed=47 beam=30 K=5 exact=88.0000 L=88.0000 Z=100.0000 P=88.0000 R=100.0000 gapL=0.00% gapZ=13.64% gapP=0.00% gapR=13.64% R2=0.982
+seed=47 beam=50 K=5 exact=88.0000 L=88.0000 Z=98.0000 P=88.0000 R=98.0000 gapL=0.00% gapZ=11.36% gapP=0.00% gapR=11.36% R2=0.982
+seed=47 beam=80 K=5 exact=88.0000 L=88.0000 Z=100.0000 P=88.0000 R=100.0000 gapL=0.00% gapZ=13.64% gapP=0.00% gapR=13.64% R2=0.982
+seed=47 beam=120 K=5 exact=88.0000 L=88.0000 Z=98.0000 P=88.0000 R=98.0000 gapL=0.00% gapZ=11.36% gapP=0.00% gapR=11.36% R2=0.982
+seed=48 beam=20 K=5 exact=128.0000 L=128.0000 Z=130.0000 P=128.0000 R=130.0000 gapL=0.00% gapZ=1.56% gapP=0.00% gapR=1.56% R2=0.976
+seed=48 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=48 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=48 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=48 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=49 beam=20 K=5 exact=100.0000 L=100.0000 Z=112.0000 P=100.0000 R=112.0000 gapL=0.00% gapZ=12.00% gapP=0.00% gapR=12.00% R2=0.979
+seed=49 beam=30 K=5 exact=100.0000 L=100.0000 Z=110.0000 P=100.0000 R=110.0000 gapL=0.00% gapZ=10.00% gapP=0.00% gapR=10.00% R2=0.979
+seed=49 beam=50 K=5 exact=100.0000 L=100.0000 Z=106.0000 P=100.0000 R=106.0000 gapL=0.00% gapZ=6.00% gapP=0.00% gapR=6.00% R2=0.979
+seed=49 beam=80 K=5 exact=100.0000 L=100.0000 Z=106.0000 P=100.0000 R=108.0000 gapL=0.00% gapZ=6.00% gapP=0.00% gapR=8.00% R2=0.979
+seed=49 beam=120 K=5 exact=100.0000 L=100.0000 Z=104.0000 P=100.0000 R=104.0000 gapL=0.00% gapZ=4.00% gapP=0.00% gapR=4.00% R2=0.979
+seed=50 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=51 beam=20 K=5 exact=112.0000 L=112.0000 Z=118.0000 P=112.0000 R=118.0000 gapL=0.00% gapZ=5.36% gapP=0.00% gapR=5.36% R2=0.977
+seed=51 beam=30 K=5 exact=112.0000 L=112.0000 Z=114.0000 P=112.0000 R=114.0000 gapL=0.00% gapZ=1.79% gapP=0.00% gapR=1.79% R2=0.977
+seed=51 beam=50 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=51 beam=80 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=51 beam=120 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=52 beam=20 K=5 exact=92.0000 L=92.0000 Z=104.0000 P=92.0000 R=104.0000 gapL=0.00% gapZ=13.04% gapP=0.00% gapR=13.04% R2=0.977
+seed=52 beam=30 K=5 exact=92.0000 L=92.0000 Z=102.0000 P=92.0000 R=102.0000 gapL=0.00% gapZ=10.87% gapP=0.00% gapR=10.87% R2=0.977
+seed=52 beam=50 K=5 exact=92.0000 L=92.0000 Z=100.0000 P=92.0000 R=100.0000 gapL=0.00% gapZ=8.70% gapP=0.00% gapR=8.70% R2=0.977
+seed=52 beam=80 K=5 exact=92.0000 L=92.0000 Z=102.0000 P=92.0000 R=102.0000 gapL=0.00% gapZ=10.87% gapP=0.00% gapR=10.87% R2=0.977
+seed=52 beam=120 K=5 exact=92.0000 L=92.0000 Z=100.0000 P=92.0000 R=100.0000 gapL=0.00% gapZ=8.70% gapP=0.00% gapR=8.70% R2=0.977
+seed=53 beam=20 K=5 exact=128.0000 L=128.0000 Z=130.0000 P=128.0000 R=130.0000 gapL=0.00% gapZ=1.56% gapP=0.00% gapR=1.56% R2=0.977
+seed=53 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=53 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=53 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=53 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=54 beam=20 K=5 exact=96.0000 L=96.0000 Z=108.0000 P=96.0000 R=108.0000 gapL=0.00% gapZ=12.50% gapP=0.00% gapR=12.50% R2=0.982
+seed=54 beam=30 K=5 exact=96.0000 L=96.0000 Z=106.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=10.42% gapP=0.00% gapR=10.42% R2=0.982
+seed=54 beam=50 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=10.42% R2=0.982
+seed=54 beam=80 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=10.42% R2=0.982
+seed=54 beam=120 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.982
+seed=55 beam=20 K=5 exact=128.0000 L=128.0000 Z=130.0000 P=128.0000 R=130.0000 gapL=0.00% gapZ=1.56% gapP=0.00% gapR=1.56% R2=0.977
+seed=55 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=55 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=55 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=55 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=56 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.978
+seed=56 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.978
+seed=56 beam=50 K=5 exact=104.0000 L=104.0000 Z=110.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=5.77% gapP=0.00% gapR=5.77% R2=0.978
+seed=56 beam=80 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=56 beam=120 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=57 beam=20 K=5 exact=124.0000 L=124.0000 Z=126.0000 P=124.0000 R=128.0000 gapL=0.00% gapZ=1.61% gapP=0.00% gapR=3.23% R2=0.976
+seed=57 beam=30 K=5 exact=124.0000 L=124.0000 Z=128.0000 P=124.0000 R=128.0000 gapL=0.00% gapZ=3.23% gapP=0.00% gapR=3.23% R2=0.976
+seed=57 beam=50 K=5 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=57 beam=80 K=5 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=57 beam=120 K=5 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=58 beam=20 K=5 exact=112.0000 L=112.0000 Z=120.0000 P=112.0000 R=120.0000 gapL=0.00% gapZ=7.14% gapP=0.00% gapR=7.14% R2=0.977
+seed=58 beam=30 K=5 exact=112.0000 L=112.0000 Z=118.0000 P=112.0000 R=118.0000 gapL=0.00% gapZ=5.36% gapP=0.00% gapR=5.36% R2=0.977
+seed=58 beam=50 K=5 exact=112.0000 L=112.0000 Z=114.0000 P=112.0000 R=114.0000 gapL=0.00% gapZ=1.79% gapP=0.00% gapR=1.79% R2=0.977
+seed=58 beam=80 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=58 beam=120 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=59 beam=20 K=5 exact=112.0000 L=112.0000 Z=120.0000 P=112.0000 R=120.0000 gapL=0.00% gapZ=7.14% gapP=0.00% gapR=7.14% R2=0.980
+seed=59 beam=30 K=5 exact=112.0000 L=112.0000 Z=118.0000 P=112.0000 R=120.0000 gapL=0.00% gapZ=5.36% gapP=0.00% gapR=7.14% R2=0.980
+seed=59 beam=50 K=5 exact=112.0000 L=112.0000 Z=116.0000 P=112.0000 R=116.0000 gapL=0.00% gapZ=3.57% gapP=0.00% gapR=3.57% R2=0.980
+seed=59 beam=80 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.980
+seed=59 beam=120 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.980
+=== Summary by beam (mean/median gaps; mean speedups) ===
+beam=20 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=7.092/7.143 gapP(mean/med)=0.000/0.000 gapR(mean/med)=7.424/7.143 speedL(mean)=0.309 speedZ(mean)=2.811
+beam=30 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=5.959/5.357 gapP(mean/med)=0.000/0.000 gapR(mean/med)=6.166/6.250 speedL(mean)=0.294 speedZ(mean)=2.068
+beam=50 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=4.098/3.510 gapP(mean/med)=0.000/0.000 gapR(mean/med)=4.389/3.510 speedL(mean)=0.437 speedZ(mean)=1.390
+beam=80 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=3.523/0.000 gapP(mean/med)=0.000/0.000 gapR(mean/med)=3.526/0.000 speedL(mean)=0.563 speedZ(mean)=1.078
+beam=120 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=2.904/0.000 gapP(mean/med)=0.000/0.000 gapR(mean/med)=3.084/0.000 speedL(mean)=0.626 speedZ(mean)=0.891
+
+=== Holdout Summary ===
+rows=150 csv=PaST/logs/holdout_full_features.csv
+gap_learned mean/median/max = 0.0000 / 0.0000 / 0.0000
+gap_zero    mean/median/max = 4.7150 / 3.5099 / 20.5128
+r2_test mean/median = 0.9785 / 0.9781
+speedup_learned mean/median = 0.446 / 0.239
+speedup_zero    mean/median = 1.648 / 1.456
+Meaningful learning signal: gap_learned << gap_zero and positive r2_test.
+
+(base) jovyan@neruo-ls-aan-0:~$ python PaST/sandbox/eval_guided_vhat_holdout.py --transferable-features --seed-start 30 --seed-end 59 --D 3 --N 18 --pmax 5 --samples 4500 --beams 20,30,50,80,120 --prune-factor 2.0 --
+out-csv PaST/logs/holdout_transferable_features.csv
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+seed=30 beam=20 K=5 exact=74.0000 L=74.0000 Z=88.0000 P=74.0000 R=90.0000 gapL=0.00% gapZ=18.92% gapP=0.00% gapR=21.62% R2=0.981
+seed=30 beam=30 K=5 exact=74.0000 L=74.0000 Z=88.0000 P=74.0000 R=90.0000 gapL=0.00% gapZ=18.92% gapP=0.00% gapR=21.62% R2=0.981
+seed=30 beam=50 K=5 exact=74.0000 L=74.0000 Z=86.0000 P=74.0000 R=88.0000 gapL=0.00% gapZ=16.22% gapP=0.00% gapR=18.92% R2=0.981
+seed=30 beam=80 K=5 exact=74.0000 L=74.0000 Z=86.0000 P=74.0000 R=84.0000 gapL=0.00% gapZ=16.22% gapP=0.00% gapR=13.51% R2=0.981
+seed=30 beam=120 K=5 exact=74.0000 L=74.0000 Z=82.0000 P=74.0000 R=86.0000 gapL=0.00% gapZ=10.81% gapP=0.00% gapR=16.22% R2=0.981
+seed=31 beam=20 K=5 exact=96.0000 L=96.0000 Z=108.0000 P=96.0000 R=108.0000 gapL=0.00% gapZ=12.50% gapP=0.00% gapR=12.50% R2=0.978
+seed=31 beam=30 K=5 exact=96.0000 L=96.0000 Z=106.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=10.42% gapP=0.00% gapR=10.42% R2=0.978
+seed=31 beam=50 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=6.25% R2=0.978
+seed=31 beam=80 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.978
+seed=31 beam=120 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.978
+seed=32 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=32 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=33 beam=20 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=30 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=50 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=80 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=33 beam=120 K=4 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=34 beam=20 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=34 beam=30 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=34 beam=50 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=34 beam=80 K=5 exact=78.0000 L=78.0000 Z=94.0000 P=78.0000 R=90.0000 gapL=0.00% gapZ=20.51% gapP=0.00% gapR=15.38% R2=0.981
+seed=34 beam=120 K=5 exact=78.0000 L=78.0000 Z=92.0000 P=78.0000 R=92.0000 gapL=0.00% gapZ=17.95% gapP=0.00% gapR=17.95% R2=0.981
+seed=35 beam=20 K=4 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.981
+seed=35 beam=30 K=4 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.981
+seed=35 beam=50 K=4 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.981
+seed=35 beam=80 K=4 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=104.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.981
+seed=35 beam=120 K=4 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=104.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.981
+seed=36 beam=20 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=36 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=37 beam=20 K=5 exact=100.0000 L=100.0000 Z=112.0000 P=100.0000 R=112.0000 gapL=0.00% gapZ=12.00% gapP=0.00% gapR=12.00% R2=0.978
+seed=37 beam=30 K=5 exact=100.0000 L=100.0000 Z=110.0000 P=100.0000 R=110.0000 gapL=0.00% gapZ=10.00% gapP=0.00% gapR=10.00% R2=0.978
+seed=37 beam=50 K=5 exact=100.0000 L=100.0000 Z=106.0000 P=100.0000 R=108.0000 gapL=0.00% gapZ=6.00% gapP=0.00% gapR=8.00% R2=0.978
+seed=37 beam=80 K=5 exact=100.0000 L=100.0000 Z=104.0000 P=100.0000 R=104.0000 gapL=0.00% gapZ=4.00% gapP=0.00% gapR=4.00% R2=0.978
+seed=37 beam=120 K=5 exact=100.0000 L=100.0000 Z=104.0000 P=100.0000 R=104.0000 gapL=0.00% gapZ=4.00% gapP=0.00% gapR=4.00% R2=0.978
+seed=38 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.979
+seed=38 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.979
+seed=38 beam=50 K=5 exact=104.0000 L=104.0000 Z=110.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=5.77% gapP=0.00% gapR=5.77% R2=0.979
+seed=38 beam=80 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.979
+seed=38 beam=120 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.979
+seed=39 beam=20 K=5 exact=120.0000 L=120.0000 Z=124.0000 P=120.0000 R=126.0000 gapL=0.00% gapZ=3.33% gapP=0.00% gapR=5.00% R2=0.977
+seed=39 beam=30 K=5 exact=120.0000 L=120.0000 Z=124.0000 P=120.0000 R=124.0000 gapL=0.00% gapZ=3.33% gapP=0.00% gapR=3.33% R2=0.977
+seed=39 beam=50 K=5 exact=120.0000 L=120.0000 Z=120.0000 P=120.0000 R=120.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=39 beam=80 K=5 exact=120.0000 L=120.0000 Z=120.0000 P=120.0000 R=120.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=39 beam=120 K=5 exact=120.0000 L=120.0000 Z=120.0000 P=120.0000 R=120.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=40 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.979
+seed=40 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.979
+seed=40 beam=50 K=5 exact=104.0000 L=104.0000 Z=110.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=5.77% gapP=0.00% gapR=5.77% R2=0.979
+seed=40 beam=80 K=5 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=3.85% R2=0.979
+seed=40 beam=120 K=5 exact=104.0000 L=104.0000 Z=104.0000 P=104.0000 R=104.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=41 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=41 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=42 beam=20 K=5 exact=116.0000 L=116.0000 Z=122.0000 P=116.0000 R=122.0000 gapL=0.00% gapZ=5.17% gapP=0.00% gapR=5.17% R2=0.978
+seed=42 beam=30 K=5 exact=116.0000 L=116.0000 Z=120.0000 P=116.0000 R=122.0000 gapL=0.00% gapZ=3.45% gapP=0.00% gapR=5.17% R2=0.978
+seed=42 beam=50 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=42 beam=80 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=42 beam=120 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.978
+seed=43 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.978
+seed=43 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.978
+seed=43 beam=50 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=5.77% R2=0.978
+seed=43 beam=80 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=43 beam=120 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=44 beam=20 K=5 exact=96.0000 L=96.0000 Z=108.0000 P=96.0000 R=108.0000 gapL=0.00% gapZ=12.50% gapP=0.00% gapR=12.50% R2=0.983
+seed=44 beam=30 K=5 exact=96.0000 L=96.0000 Z=106.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=10.42% gapP=0.00% gapR=10.42% R2=0.983
+seed=44 beam=50 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=104.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=8.33% R2=0.983
+seed=44 beam=80 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=104.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=8.33% R2=0.983
+seed=44 beam=120 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.983
+seed=45 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=45 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=45 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=45 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=45 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=46 beam=20 K=5 exact=116.0000 L=116.0000 Z=122.0000 P=116.0000 R=124.0000 gapL=0.00% gapZ=5.17% gapP=0.00% gapR=6.90% R2=0.979
+seed=46 beam=30 K=5 exact=116.0000 L=116.0000 Z=122.0000 P=116.0000 R=122.0000 gapL=0.00% gapZ=5.17% gapP=0.00% gapR=5.17% R2=0.979
+seed=46 beam=50 K=5 exact=116.0000 L=116.0000 Z=120.0000 P=116.0000 R=120.0000 gapL=0.00% gapZ=3.45% gapP=0.00% gapR=3.45% R2=0.979
+seed=46 beam=80 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=46 beam=120 K=5 exact=116.0000 L=116.0000 Z=116.0000 P=116.0000 R=116.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.979
+seed=47 beam=20 K=5 exact=88.0000 L=88.0000 Z=100.0000 P=88.0000 R=102.0000 gapL=0.00% gapZ=13.64% gapP=0.00% gapR=15.91% R2=0.982
+seed=47 beam=30 K=5 exact=88.0000 L=88.0000 Z=100.0000 P=88.0000 R=100.0000 gapL=0.00% gapZ=13.64% gapP=0.00% gapR=13.64% R2=0.982
+seed=47 beam=50 K=5 exact=88.0000 L=88.0000 Z=98.0000 P=88.0000 R=98.0000 gapL=0.00% gapZ=11.36% gapP=0.00% gapR=11.36% R2=0.982
+seed=47 beam=80 K=5 exact=88.0000 L=88.0000 Z=100.0000 P=88.0000 R=100.0000 gapL=0.00% gapZ=13.64% gapP=0.00% gapR=13.64% R2=0.982
+seed=47 beam=120 K=5 exact=88.0000 L=88.0000 Z=98.0000 P=88.0000 R=98.0000 gapL=0.00% gapZ=11.36% gapP=0.00% gapR=11.36% R2=0.982
+seed=48 beam=20 K=5 exact=128.0000 L=128.0000 Z=130.0000 P=128.0000 R=130.0000 gapL=0.00% gapZ=1.56% gapP=0.00% gapR=1.56% R2=0.976
+seed=48 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=48 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=48 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=48 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=49 beam=20 K=5 exact=100.0000 L=100.0000 Z=112.0000 P=100.0000 R=112.0000 gapL=0.00% gapZ=12.00% gapP=0.00% gapR=12.00% R2=0.979
+seed=49 beam=30 K=5 exact=100.0000 L=100.0000 Z=110.0000 P=100.0000 R=110.0000 gapL=0.00% gapZ=10.00% gapP=0.00% gapR=10.00% R2=0.979
+seed=49 beam=50 K=5 exact=100.0000 L=100.0000 Z=106.0000 P=100.0000 R=106.0000 gapL=0.00% gapZ=6.00% gapP=0.00% gapR=6.00% R2=0.979
+seed=49 beam=80 K=5 exact=100.0000 L=100.0000 Z=106.0000 P=100.0000 R=108.0000 gapL=0.00% gapZ=6.00% gapP=0.00% gapR=8.00% R2=0.979
+seed=49 beam=120 K=5 exact=100.0000 L=100.0000 Z=104.0000 P=100.0000 R=104.0000 gapL=0.00% gapZ=4.00% gapP=0.00% gapR=4.00% R2=0.979
+seed=50 beam=20 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=30 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=50 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=80 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=50 beam=120 K=5 exact=132.0000 L=132.0000 Z=132.0000 P=132.0000 R=132.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=51 beam=20 K=5 exact=112.0000 L=112.0000 Z=118.0000 P=112.0000 R=118.0000 gapL=0.00% gapZ=5.36% gapP=0.00% gapR=5.36% R2=0.977
+seed=51 beam=30 K=5 exact=112.0000 L=112.0000 Z=114.0000 P=112.0000 R=114.0000 gapL=0.00% gapZ=1.79% gapP=0.00% gapR=1.79% R2=0.977
+seed=51 beam=50 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=51 beam=80 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=51 beam=120 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=52 beam=20 K=5 exact=92.0000 L=92.0000 Z=104.0000 P=92.0000 R=104.0000 gapL=0.00% gapZ=13.04% gapP=0.00% gapR=13.04% R2=0.977
+seed=52 beam=30 K=5 exact=92.0000 L=92.0000 Z=102.0000 P=92.0000 R=102.0000 gapL=0.00% gapZ=10.87% gapP=0.00% gapR=10.87% R2=0.977
+seed=52 beam=50 K=5 exact=92.0000 L=92.0000 Z=100.0000 P=92.0000 R=100.0000 gapL=0.00% gapZ=8.70% gapP=0.00% gapR=8.70% R2=0.977
+seed=52 beam=80 K=5 exact=92.0000 L=92.0000 Z=102.0000 P=92.0000 R=102.0000 gapL=0.00% gapZ=10.87% gapP=0.00% gapR=10.87% R2=0.977
+seed=52 beam=120 K=5 exact=92.0000 L=92.0000 Z=100.0000 P=92.0000 R=100.0000 gapL=0.00% gapZ=8.70% gapP=0.00% gapR=8.70% R2=0.977
+seed=53 beam=20 K=5 exact=128.0000 L=128.0000 Z=130.0000 P=128.0000 R=130.0000 gapL=0.00% gapZ=1.56% gapP=0.00% gapR=1.56% R2=0.977
+seed=53 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=53 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=53 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=53 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=54 beam=20 K=5 exact=96.0000 L=96.0000 Z=108.0000 P=96.0000 R=108.0000 gapL=0.00% gapZ=12.50% gapP=0.00% gapR=12.50% R2=0.982
+seed=54 beam=30 K=5 exact=96.0000 L=96.0000 Z=106.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=10.42% gapP=0.00% gapR=10.42% R2=0.982
+seed=54 beam=50 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=10.42% R2=0.982
+seed=54 beam=80 K=5 exact=96.0000 L=96.0000 Z=104.0000 P=96.0000 R=106.0000 gapL=0.00% gapZ=8.33% gapP=0.00% gapR=10.42% R2=0.982
+seed=54 beam=120 K=5 exact=96.0000 L=96.0000 Z=102.0000 P=96.0000 R=102.0000 gapL=0.00% gapZ=6.25% gapP=0.00% gapR=6.25% R2=0.982
+seed=55 beam=20 K=5 exact=128.0000 L=128.0000 Z=130.0000 P=128.0000 R=130.0000 gapL=0.00% gapZ=1.56% gapP=0.00% gapR=1.56% R2=0.977
+seed=55 beam=30 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=55 beam=50 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=55 beam=80 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=55 beam=120 K=5 exact=128.0000 L=128.0000 Z=128.0000 P=128.0000 R=128.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=56 beam=20 K=5 exact=104.0000 L=104.0000 Z=114.0000 P=104.0000 R=114.0000 gapL=0.00% gapZ=9.62% gapP=0.00% gapR=9.62% R2=0.978
+seed=56 beam=30 K=5 exact=104.0000 L=104.0000 Z=112.0000 P=104.0000 R=112.0000 gapL=0.00% gapZ=7.69% gapP=0.00% gapR=7.69% R2=0.978
+seed=56 beam=50 K=5 exact=104.0000 L=104.0000 Z=110.0000 P=104.0000 R=110.0000 gapL=0.00% gapZ=5.77% gapP=0.00% gapR=5.77% R2=0.978
+seed=56 beam=80 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=56 beam=120 K=5 exact=104.0000 L=104.0000 Z=108.0000 P=104.0000 R=108.0000 gapL=0.00% gapZ=3.85% gapP=0.00% gapR=3.85% R2=0.978
+seed=57 beam=20 K=5 exact=124.0000 L=124.0000 Z=126.0000 P=124.0000 R=128.0000 gapL=0.00% gapZ=1.61% gapP=0.00% gapR=3.23% R2=0.976
+seed=57 beam=30 K=5 exact=124.0000 L=124.0000 Z=128.0000 P=124.0000 R=128.0000 gapL=0.00% gapZ=3.23% gapP=0.00% gapR=3.23% R2=0.976
+seed=57 beam=50 K=5 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=57 beam=80 K=5 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=57 beam=120 K=5 exact=124.0000 L=124.0000 Z=124.0000 P=124.0000 R=124.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.976
+seed=58 beam=20 K=5 exact=112.0000 L=112.0000 Z=120.0000 P=112.0000 R=120.0000 gapL=0.00% gapZ=7.14% gapP=0.00% gapR=7.14% R2=0.977
+seed=58 beam=30 K=5 exact=112.0000 L=112.0000 Z=118.0000 P=112.0000 R=118.0000 gapL=0.00% gapZ=5.36% gapP=0.00% gapR=5.36% R2=0.977
+seed=58 beam=50 K=5 exact=112.0000 L=112.0000 Z=114.0000 P=112.0000 R=114.0000 gapL=0.00% gapZ=1.79% gapP=0.00% gapR=1.79% R2=0.977
+seed=58 beam=80 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=58 beam=120 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.977
+seed=59 beam=20 K=5 exact=112.0000 L=112.0000 Z=120.0000 P=112.0000 R=120.0000 gapL=0.00% gapZ=7.14% gapP=0.00% gapR=7.14% R2=0.980
+seed=59 beam=30 K=5 exact=112.0000 L=112.0000 Z=118.0000 P=112.0000 R=120.0000 gapL=0.00% gapZ=5.36% gapP=0.00% gapR=7.14% R2=0.980
+seed=59 beam=50 K=5 exact=112.0000 L=112.0000 Z=116.0000 P=112.0000 R=116.0000 gapL=0.00% gapZ=3.57% gapP=0.00% gapR=3.57% R2=0.980
+seed=59 beam=80 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.980
+seed=59 beam=120 K=5 exact=112.0000 L=112.0000 Z=112.0000 P=112.0000 R=112.0000 gapL=0.00% gapZ=0.00% gapP=0.00% gapR=0.00% R2=0.980
+=== Summary by beam (mean/median gaps; mean speedups) ===
+beam=20 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=7.092/7.143 gapP(mean/med)=0.000/0.000 gapR(mean/med)=7.424/7.143 speedL(mean)=0.342 speedZ(mean)=2.776
+beam=30 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=5.959/5.357 gapP(mean/med)=0.000/0.000 gapR(mean/med)=6.166/6.250 speedL(mean)=0.329 speedZ(mean)=2.059
+beam=50 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=4.098/3.510 gapP(mean/med)=0.000/0.000 gapR(mean/med)=4.389/3.510 speedL(mean)=0.468 speedZ(mean)=1.383
+beam=80 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=3.523/0.000 gapP(mean/med)=0.000/0.000 gapR(mean/med)=3.526/0.000 speedL(mean)=0.566 speedZ(mean)=1.043
+beam=120 n=30 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=2.904/0.000 gapP(mean/med)=0.000/0.000 gapR(mean/med)=3.084/0.000 speedL(mean)=0.633 speedZ(mean)=0.884
+
+=== Holdout Summary ===
+rows=150 csv=PaST/logs/holdout_transferable_features.csv
+gap_learned mean/median/max = 0.0000 / 0.0000 / 0.0000
+gap_zero    mean/median/max = 4.7150 / 3.5099 / 20.5128
+r2_test mean/median = 0.9784 / 0.9780
+speedup_learned mean/median = 0.468 / 0.276
+speedup_zero    mean/median = 1.629 / 1.419
+Meaningful learning signal: gap_learned << gap_zero and positive r2_test.
+
+(base) jovyan@neruo-ls-aan-0:~$ python PaST/sandbox/eval_guided_vhat_holdout.py \
+  --seed-start 100 --seed-end 149 \
+  --D 8 --N 35 --pmax 3 \
+  --samples 6000 \
+  --beams 2,3,5,8 \
+  --prune-factor 2.0 \
+  --out-csv PaST/logs/holdout_low_beam_hard.csv
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+seed=100 beam=2 K=3 exact=116.0000 L=118.0000 Z=167.0000 P=126.0000 R=167.0000 gapL=1.72% gapZ=43.97% gapP=8.62% gapR=43.97% R2=0.984
+seed=100 beam=3 K=3 exact=116.0000 L=118.0000 Z=166.0000 P=125.0000 R=166.0000 gapL=1.72% gapZ=43.10% gapP=7.76% gapR=43.10% R2=0.984
+seed=100 beam=5 K=3 exact=116.0000 L=117.0000 Z=165.0000 P=125.0000 R=164.0000 gapL=0.86% gapZ=42.24% gapP=7.76% gapR=41.38% R2=0.984
+seed=100 beam=8 K=3 exact=116.0000 L=116.0000 Z=164.0000 P=123.0000 R=165.0000 gapL=0.00% gapZ=41.38% gapP=6.03% gapR=42.24% R2=0.984
+seed=101 beam=2 K=3 exact=118.0000 L=120.0000 Z=169.0000 P=128.0000 R=169.0000 gapL=1.69% gapZ=43.22% gapP=8.47% gapR=43.22% R2=0.985
+seed=101 beam=3 K=3 exact=118.0000 L=120.0000 Z=168.0000 P=128.0000 R=169.0000 gapL=1.69% gapZ=42.37% gapP=8.47% gapR=43.22% R2=0.985
+seed=101 beam=5 K=3 exact=118.0000 L=119.0000 Z=167.0000 P=126.0000 R=168.0000 gapL=0.85% gapZ=41.53% gapP=6.78% gapR=42.37% R2=0.985
+seed=101 beam=8 K=3 exact=118.0000 L=118.0000 Z=166.0000 P=126.0000 R=167.0000 gapL=0.00% gapZ=40.68% gapP=6.78% gapR=41.53% R2=0.985
+seed=102 beam=2 K=3 exact=112.0000 L=112.0000 Z=163.0000 P=122.0000 R=163.0000 gapL=0.00% gapZ=45.54% gapP=8.93% gapR=45.54% R2=0.983
+seed=102 beam=3 K=3 exact=112.0000 L=112.0000 Z=162.0000 P=121.0000 R=162.0000 gapL=0.00% gapZ=44.64% gapP=8.04% gapR=44.64% R2=0.983
+seed=102 beam=5 K=3 exact=112.0000 L=112.0000 Z=159.0000 P=121.0000 R=159.0000 gapL=0.00% gapZ=41.96% gapP=8.04% gapR=41.96% R2=0.983
+seed=102 beam=8 K=3 exact=112.0000 L=112.0000 Z=158.0000 P=119.0000 R=159.0000 gapL=0.00% gapZ=41.07% gapP=6.25% gapR=41.96% R2=0.983
+seed=103 beam=2 K=3 exact=96.0000 L=98.0000 Z=139.0000 P=110.0000 R=139.0000 gapL=2.08% gapZ=44.79% gapP=14.58% gapR=44.79% R2=0.983
+seed=103 beam=3 K=3 exact=96.0000 L=98.0000 Z=138.0000 P=110.0000 R=138.0000 gapL=2.08% gapZ=43.75% gapP=14.58% gapR=43.75% R2=0.983
+seed=103 beam=5 K=3 exact=96.0000 L=96.0000 Z=137.0000 P=108.0000 R=138.0000 gapL=0.00% gapZ=42.71% gapP=12.50% gapR=43.75% R2=0.983
+seed=103 beam=8 K=3 exact=96.0000 L=96.0000 Z=136.0000 P=107.0000 R=137.0000 gapL=0.00% gapZ=41.67% gapP=11.46% gapR=42.71% R2=0.983
+seed=104 beam=2 K=3 exact=114.0000 L=114.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.983
+seed=104 beam=3 K=3 exact=114.0000 L=116.0000 Z=162.0000 P=124.0000 R=165.0000 gapL=1.75% gapZ=42.11% gapP=8.77% gapR=44.74% R2=0.983
+seed=104 beam=5 K=3 exact=114.0000 L=115.0000 Z=161.0000 P=123.0000 R=161.0000 gapL=0.88% gapZ=41.23% gapP=7.89% gapR=41.23% R2=0.983
+seed=104 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=121.0000 R=161.0000 gapL=0.00% gapZ=40.35% gapP=6.14% gapR=41.23% R2=0.983
+seed=105 beam=2 K=3 exact=98.0000 L=100.0000 Z=141.0000 P=112.0000 R=142.0000 gapL=2.04% gapZ=43.88% gapP=14.29% gapR=44.90% R2=0.980
+seed=105 beam=3 K=3 exact=98.0000 L=100.0000 Z=140.0000 P=111.0000 R=140.0000 gapL=2.04% gapZ=42.86% gapP=13.27% gapR=42.86% R2=0.980
+seed=105 beam=5 K=3 exact=98.0000 L=98.0000 Z=139.0000 P=111.0000 R=137.0000 gapL=0.00% gapZ=41.84% gapP=13.27% gapR=39.80% R2=0.980
+seed=105 beam=8 K=3 exact=98.0000 L=98.0000 Z=138.0000 P=109.0000 R=139.0000 gapL=0.00% gapZ=40.82% gapP=11.22% gapR=41.84% R2=0.980
+seed=106 beam=2 K=3 exact=84.0000 L=84.0000 Z=127.0000 P=98.0000 R=130.0000 gapL=0.00% gapZ=51.19% gapP=16.67% gapR=54.76% R2=0.979
+seed=106 beam=3 K=3 exact=84.0000 L=84.0000 Z=130.0000 P=97.0000 R=129.0000 gapL=0.00% gapZ=54.76% gapP=15.48% gapR=53.57% R2=0.979
+seed=106 beam=5 K=3 exact=84.0000 L=84.0000 Z=127.0000 P=97.0000 R=129.0000 gapL=0.00% gapZ=51.19% gapP=15.48% gapR=53.57% R2=0.979
+seed=106 beam=8 K=3 exact=84.0000 L=84.0000 Z=128.0000 P=95.0000 R=128.0000 gapL=0.00% gapZ=52.38% gapP=13.10% gapR=52.38% R2=0.979
+seed=107 beam=2 K=3 exact=104.0000 L=105.0000 Z=153.0000 P=115.0000 R=154.0000 gapL=0.96% gapZ=47.12% gapP=10.58% gapR=48.08% R2=0.983
+seed=107 beam=3 K=3 exact=104.0000 L=104.0000 Z=150.0000 P=115.0000 R=150.0000 gapL=0.00% gapZ=44.23% gapP=10.58% gapR=44.23% R2=0.983
+seed=107 beam=5 K=3 exact=104.0000 L=104.0000 Z=147.0000 P=115.0000 R=147.0000 gapL=0.00% gapZ=41.35% gapP=10.58% gapR=41.35% R2=0.983
+seed=107 beam=8 K=3 exact=104.0000 L=104.0000 Z=144.0000 P=114.0000 R=145.0000 gapL=0.00% gapZ=38.46% gapP=9.62% gapR=39.42% R2=0.983
+seed=108 beam=2 K=3 exact=98.0000 L=99.0000 Z=141.0000 P=112.0000 R=141.0000 gapL=1.02% gapZ=43.88% gapP=14.29% gapR=43.88% R2=0.984
+seed=108 beam=3 K=3 exact=98.0000 L=99.0000 Z=140.0000 P=111.0000 R=141.0000 gapL=1.02% gapZ=42.86% gapP=13.27% gapR=43.88% R2=0.984
+seed=108 beam=5 K=3 exact=98.0000 L=99.0000 Z=139.0000 P=111.0000 R=139.0000 gapL=1.02% gapZ=41.84% gapP=13.27% gapR=41.84% R2=0.984
+seed=108 beam=8 K=3 exact=98.0000 L=98.0000 Z=138.0000 P=109.0000 R=138.0000 gapL=0.00% gapZ=40.82% gapP=11.22% gapR=40.82% R2=0.984
+seed=109 beam=2 K=3 exact=114.0000 L=114.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.984
+seed=109 beam=3 K=3 exact=114.0000 L=114.0000 Z=164.0000 P=124.0000 R=162.0000 gapL=0.00% gapZ=43.86% gapP=8.77% gapR=42.11% R2=0.984
+seed=109 beam=5 K=3 exact=114.0000 L=115.0000 Z=161.0000 P=122.0000 R=162.0000 gapL=0.88% gapZ=41.23% gapP=7.02% gapR=42.11% R2=0.984
+seed=109 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=122.0000 R=161.0000 gapL=0.00% gapZ=40.35% gapP=7.02% gapR=41.23% R2=0.984
+seed=110 beam=2 K=3 exact=114.0000 L=114.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.985
+seed=110 beam=3 K=3 exact=114.0000 L=114.0000 Z=164.0000 P=124.0000 R=163.0000 gapL=0.00% gapZ=43.86% gapP=8.77% gapR=42.98% R2=0.985
+seed=110 beam=5 K=3 exact=114.0000 L=114.0000 Z=161.0000 P=122.0000 R=164.0000 gapL=0.00% gapZ=41.23% gapP=7.02% gapR=43.86% R2=0.985
+seed=110 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=122.0000 R=161.0000 gapL=0.00% gapZ=40.35% gapP=7.02% gapR=41.23% R2=0.985
+seed=111 beam=2 K=3 exact=112.0000 L=112.0000 Z=163.0000 P=122.0000 R=163.0000 gapL=0.00% gapZ=45.54% gapP=8.93% gapR=45.54% R2=0.984
+seed=111 beam=3 K=3 exact=112.0000 L=112.0000 Z=162.0000 P=121.0000 R=162.0000 gapL=0.00% gapZ=44.64% gapP=8.04% gapR=44.64% R2=0.984
+seed=111 beam=5 K=3 exact=112.0000 L=112.0000 Z=159.0000 P=121.0000 R=162.0000 gapL=0.00% gapZ=41.96% gapP=8.04% gapR=44.64% R2=0.984
+seed=111 beam=8 K=3 exact=112.0000 L=112.0000 Z=158.0000 P=119.0000 R=159.0000 gapL=0.00% gapZ=41.07% gapP=6.25% gapR=41.96% R2=0.984
+seed=112 beam=2 K=3 exact=116.0000 L=118.0000 Z=167.0000 P=126.0000 R=167.0000 gapL=1.72% gapZ=43.97% gapP=8.62% gapR=43.97% R2=0.986
+seed=112 beam=3 K=3 exact=116.0000 L=117.0000 Z=166.0000 P=125.0000 R=166.0000 gapL=0.86% gapZ=43.10% gapP=7.76% gapR=43.10% R2=0.986
+seed=112 beam=5 K=3 exact=116.0000 L=116.0000 Z=165.0000 P=125.0000 R=164.0000 gapL=0.00% gapZ=42.24% gapP=7.76% gapR=41.38% R2=0.986
+seed=112 beam=8 K=3 exact=116.0000 L=116.0000 Z=164.0000 P=123.0000 R=164.0000 gapL=0.00% gapZ=41.38% gapP=6.03% gapR=41.38% R2=0.986
+seed=113 beam=2 K=3 exact=94.0000 L=96.0000 Z=137.0000 P=108.0000 R=138.0000 gapL=2.13% gapZ=45.74% gapP=14.89% gapR=46.81% R2=0.982
+seed=113 beam=3 K=3 exact=94.0000 L=95.0000 Z=136.0000 P=108.0000 R=136.0000 gapL=1.06% gapZ=44.68% gapP=14.89% gapR=44.68% R2=0.982
+seed=113 beam=5 K=3 exact=94.0000 L=94.0000 Z=133.0000 P=106.0000 R=133.0000 gapL=0.00% gapZ=41.49% gapP=12.77% gapR=41.49% R2=0.982
+seed=113 beam=8 K=3 exact=94.0000 L=94.0000 Z=135.0000 P=105.0000 R=135.0000 gapL=0.00% gapZ=43.62% gapP=11.70% gapR=43.62% R2=0.982
+seed=114 beam=2 K=3 exact=102.0000 L=103.0000 Z=149.0000 P=114.0000 R=150.0000 gapL=0.98% gapZ=46.08% gapP=11.76% gapR=47.06% R2=0.983
+seed=114 beam=3 K=3 exact=102.0000 L=103.0000 Z=146.0000 P=114.0000 R=146.0000 gapL=0.98% gapZ=43.14% gapP=11.76% gapR=43.14% R2=0.983
+seed=114 beam=5 K=3 exact=102.0000 L=102.0000 Z=143.0000 P=113.0000 R=144.0000 gapL=0.00% gapZ=40.20% gapP=10.78% gapR=41.18% R2=0.983
+seed=114 beam=8 K=3 exact=102.0000 L=102.0000 Z=142.0000 P=113.0000 R=143.0000 gapL=0.00% gapZ=39.22% gapP=10.78% gapR=40.20% R2=0.983
+seed=115 beam=2 K=3 exact=96.0000 L=97.0000 Z=139.0000 P=110.0000 R=140.0000 gapL=1.04% gapZ=44.79% gapP=14.58% gapR=45.83% R2=0.981
+seed=115 beam=3 K=3 exact=96.0000 L=98.0000 Z=138.0000 P=110.0000 R=138.0000 gapL=2.08% gapZ=43.75% gapP=14.58% gapR=43.75% R2=0.981
+seed=115 beam=5 K=3 exact=96.0000 L=96.0000 Z=137.0000 P=108.0000 R=135.0000 gapL=0.00% gapZ=42.71% gapP=12.50% gapR=40.62% R2=0.981
+seed=115 beam=8 K=3 exact=96.0000 L=96.0000 Z=136.0000 P=107.0000 R=136.0000 gapL=0.00% gapZ=41.67% gapP=11.46% gapR=41.67% R2=0.981
+seed=116 beam=2 K=3 exact=108.0000 L=109.0000 Z=159.0000 P=118.0000 R=159.0000 gapL=0.93% gapZ=47.22% gapP=9.26% gapR=47.22% R2=0.985
+seed=116 beam=3 K=3 exact=108.0000 L=108.0000 Z=158.0000 P=118.0000 R=159.0000 gapL=0.00% gapZ=46.30% gapP=9.26% gapR=47.22% R2=0.985
+seed=116 beam=5 K=3 exact=108.0000 L=108.0000 Z=155.0000 P=117.0000 R=156.0000 gapL=0.00% gapZ=43.52% gapP=8.33% gapR=44.44% R2=0.985
+seed=116 beam=8 K=3 exact=108.0000 L=108.0000 Z=152.0000 P=117.0000 R=152.0000 gapL=0.00% gapZ=40.74% gapP=8.33% gapR=40.74% R2=0.985
+seed=117 beam=2 K=3 exact=100.0000 L=101.0000 Z=145.0000 P=113.0000 R=145.0000 gapL=1.00% gapZ=45.00% gapP=13.00% gapR=45.00% R2=0.982
+seed=117 beam=3 K=3 exact=100.0000 L=100.0000 Z=142.0000 P=113.0000 R=143.0000 gapL=0.00% gapZ=42.00% gapP=13.00% gapR=43.00% R2=0.982
+seed=117 beam=5 K=3 exact=100.0000 L=101.0000 Z=141.0000 P=112.0000 R=142.0000 gapL=1.00% gapZ=41.00% gapP=12.00% gapR=42.00% R2=0.982
+seed=117 beam=8 K=3 exact=100.0000 L=100.0000 Z=140.0000 P=111.0000 R=141.0000 gapL=0.00% gapZ=40.00% gapP=11.00% gapR=41.00% R2=0.982
+seed=118 beam=2 K=3 exact=112.0000 L=112.0000 Z=163.0000 P=122.0000 R=163.0000 gapL=0.00% gapZ=45.54% gapP=8.93% gapR=45.54% R2=0.984
+seed=118 beam=3 K=3 exact=112.0000 L=112.0000 Z=162.0000 P=121.0000 R=163.0000 gapL=0.00% gapZ=44.64% gapP=8.04% gapR=45.54% R2=0.984
+seed=118 beam=5 K=3 exact=112.0000 L=112.0000 Z=159.0000 P=120.0000 R=160.0000 gapL=0.00% gapZ=41.96% gapP=7.14% gapR=42.86% R2=0.984
+seed=118 beam=8 K=3 exact=112.0000 L=112.0000 Z=158.0000 P=120.0000 R=159.0000 gapL=0.00% gapZ=41.07% gapP=7.14% gapR=41.96% R2=0.984
+seed=119 beam=2 K=3 exact=106.0000 L=108.0000 Z=157.0000 P=117.0000 R=157.0000 gapL=1.89% gapZ=48.11% gapP=10.38% gapR=48.11% R2=0.984
+seed=119 beam=3 K=3 exact=106.0000 L=107.0000 Z=154.0000 P=117.0000 R=154.0000 gapL=0.94% gapZ=45.28% gapP=10.38% gapR=45.28% R2=0.984
+seed=119 beam=5 K=3 exact=106.0000 L=106.0000 Z=151.0000 P=116.0000 R=152.0000 gapL=0.00% gapZ=42.45% gapP=9.43% gapR=43.40% R2=0.984
+seed=119 beam=8 K=3 exact=106.0000 L=106.0000 Z=148.0000 P=116.0000 R=149.0000 gapL=0.00% gapZ=39.62% gapP=9.43% gapR=40.57% R2=0.984
+seed=120 beam=2 K=3 exact=98.0000 L=99.0000 Z=141.0000 P=112.0000 R=141.0000 gapL=1.02% gapZ=43.88% gapP=14.29% gapR=43.88% R2=0.983
+seed=120 beam=3 K=3 exact=98.0000 L=99.0000 Z=138.0000 P=111.0000 R=140.0000 gapL=1.02% gapZ=40.82% gapP=13.27% gapR=42.86% R2=0.983
+seed=120 beam=5 K=3 exact=98.0000 L=98.0000 Z=139.0000 P=111.0000 R=140.0000 gapL=0.00% gapZ=41.84% gapP=13.27% gapR=42.86% R2=0.983
+seed=120 beam=8 K=3 exact=98.0000 L=98.0000 Z=138.0000 P=109.0000 R=138.0000 gapL=0.00% gapZ=40.82% gapP=11.22% gapR=40.82% R2=0.983
+seed=121 beam=2 K=3 exact=106.0000 L=106.0000 Z=157.0000 P=117.0000 R=158.0000 gapL=0.00% gapZ=48.11% gapP=10.38% gapR=49.06% R2=0.984
+seed=121 beam=3 K=3 exact=106.0000 L=106.0000 Z=154.0000 P=116.0000 R=154.0000 gapL=0.00% gapZ=45.28% gapP=9.43% gapR=45.28% R2=0.984
+seed=121 beam=5 K=3 exact=106.0000 L=106.0000 Z=151.0000 P=116.0000 R=152.0000 gapL=0.00% gapZ=42.45% gapP=9.43% gapR=43.40% R2=0.984
+seed=121 beam=8 K=3 exact=106.0000 L=106.0000 Z=148.0000 P=116.0000 R=148.0000 gapL=0.00% gapZ=39.62% gapP=9.43% gapR=39.62% R2=0.984
+seed=122 beam=2 K=3 exact=94.0000 L=96.0000 Z=137.0000 P=108.0000 R=137.0000 gapL=2.13% gapZ=45.74% gapP=14.89% gapR=45.74% R2=0.982
+seed=122 beam=3 K=3 exact=94.0000 L=95.0000 Z=136.0000 P=108.0000 R=137.0000 gapL=1.06% gapZ=44.68% gapP=14.89% gapR=45.74% R2=0.982
+seed=122 beam=5 K=3 exact=94.0000 L=94.0000 Z=135.0000 P=106.0000 R=136.0000 gapL=0.00% gapZ=43.62% gapP=12.77% gapR=44.68% R2=0.982
+seed=122 beam=8 K=3 exact=94.0000 L=94.0000 Z=135.0000 P=105.0000 R=132.0000 gapL=0.00% gapZ=43.62% gapP=11.70% gapR=40.43% R2=0.982
+seed=123 beam=2 K=3 exact=108.0000 L=109.0000 Z=159.0000 P=118.0000 R=159.0000 gapL=0.93% gapZ=47.22% gapP=9.26% gapR=47.22% R2=0.985
+seed=123 beam=3 K=3 exact=108.0000 L=110.0000 Z=158.0000 P=118.0000 R=157.0000 gapL=1.85% gapZ=46.30% gapP=9.26% gapR=45.37% R2=0.985
+seed=123 beam=5 K=3 exact=108.0000 L=108.0000 Z=155.0000 P=117.0000 R=155.0000 gapL=0.00% gapZ=43.52% gapP=8.33% gapR=43.52% R2=0.985
+seed=123 beam=8 K=3 exact=108.0000 L=108.0000 Z=152.0000 P=117.0000 R=152.0000 gapL=0.00% gapZ=40.74% gapP=8.33% gapR=40.74% R2=0.985
+seed=124 beam=2 K=3 exact=128.0000 L=128.0000 Z=175.0000 P=138.0000 R=176.0000 gapL=0.00% gapZ=36.72% gapP=7.81% gapR=37.50% R2=0.986
+seed=124 beam=3 K=3 exact=128.0000 L=130.0000 Z=176.0000 P=138.0000 R=175.0000 gapL=1.56% gapZ=37.50% gapP=7.81% gapR=36.72% R2=0.986
+seed=124 beam=5 K=3 exact=128.0000 L=128.0000 Z=175.0000 P=136.0000 R=173.0000 gapL=0.00% gapZ=36.72% gapP=6.25% gapR=35.16% R2=0.986
+seed=124 beam=8 K=3 exact=128.0000 L=128.0000 Z=175.0000 P=135.0000 R=175.0000 gapL=0.00% gapZ=36.72% gapP=5.47% gapR=36.72% R2=0.986
+seed=125 beam=2 K=3 exact=102.0000 L=104.0000 Z=149.0000 P=114.0000 R=149.0000 gapL=1.96% gapZ=46.08% gapP=11.76% gapR=46.08% R2=0.984
+seed=125 beam=3 K=3 exact=102.0000 L=103.0000 Z=146.0000 P=114.0000 R=147.0000 gapL=0.98% gapZ=43.14% gapP=11.76% gapR=44.12% R2=0.984
+seed=125 beam=5 K=3 exact=102.0000 L=102.0000 Z=143.0000 P=113.0000 R=144.0000 gapL=0.00% gapZ=40.20% gapP=10.78% gapR=41.18% R2=0.984
+seed=125 beam=8 K=3 exact=102.0000 L=102.0000 Z=142.0000 P=113.0000 R=142.0000 gapL=0.00% gapZ=39.22% gapP=10.78% gapR=39.22% R2=0.984
+seed=126 beam=2 K=3 exact=98.0000 L=100.0000 Z=141.0000 P=112.0000 R=141.0000 gapL=2.04% gapZ=43.88% gapP=14.29% gapR=43.88% R2=0.982
+seed=126 beam=3 K=3 exact=98.0000 L=100.0000 Z=140.0000 P=111.0000 R=140.0000 gapL=2.04% gapZ=42.86% gapP=13.27% gapR=42.86% R2=0.982
+seed=126 beam=5 K=3 exact=98.0000 L=99.0000 Z=137.0000 P=111.0000 R=140.0000 gapL=1.02% gapZ=39.80% gapP=13.27% gapR=42.86% R2=0.982
+seed=126 beam=8 K=3 exact=98.0000 L=98.0000 Z=138.0000 P=109.0000 R=139.0000 gapL=0.00% gapZ=40.82% gapP=11.22% gapR=41.84% R2=0.982
+seed=127 beam=2 K=3 exact=104.0000 L=104.0000 Z=153.0000 P=115.0000 R=153.0000 gapL=0.00% gapZ=47.12% gapP=10.58% gapR=47.12% R2=0.983
+seed=127 beam=3 K=3 exact=104.0000 L=105.0000 Z=150.0000 P=115.0000 R=150.0000 gapL=0.96% gapZ=44.23% gapP=10.58% gapR=44.23% R2=0.983
+seed=127 beam=5 K=3 exact=104.0000 L=104.0000 Z=147.0000 P=115.0000 R=148.0000 gapL=0.00% gapZ=41.35% gapP=10.58% gapR=42.31% R2=0.983
+seed=127 beam=8 K=3 exact=104.0000 L=104.0000 Z=144.0000 P=114.0000 R=145.0000 gapL=0.00% gapZ=38.46% gapP=9.62% gapR=39.42% R2=0.983
+seed=128 beam=2 K=3 exact=118.0000 L=119.0000 Z=169.0000 P=128.0000 R=169.0000 gapL=0.85% gapZ=43.22% gapP=8.47% gapR=43.22% R2=0.984
+seed=128 beam=3 K=3 exact=118.0000 L=119.0000 Z=166.0000 P=128.0000 R=168.0000 gapL=0.85% gapZ=40.68% gapP=8.47% gapR=42.37% R2=0.984
+seed=128 beam=5 K=3 exact=118.0000 L=118.0000 Z=167.0000 P=127.0000 R=167.0000 gapL=0.00% gapZ=41.53% gapP=7.63% gapR=41.53% R2=0.984
+seed=128 beam=8 K=3 exact=118.0000 L=118.0000 Z=166.0000 P=125.0000 R=166.0000 gapL=0.00% gapZ=40.68% gapP=5.93% gapR=40.68% R2=0.984
+seed=129 beam=2 K=3 exact=136.0000 L=138.0000 Z=183.0000 P=143.0000 R=183.0000 gapL=1.47% gapZ=34.56% gapP=5.15% gapR=34.56% R2=0.987
+seed=129 beam=3 K=3 exact=136.0000 L=138.0000 Z=180.0000 P=143.0000 R=183.0000 gapL=1.47% gapZ=32.35% gapP=5.15% gapR=34.56% R2=0.987
+seed=129 beam=5 K=3 exact=136.0000 L=136.0000 Z=179.0000 P=143.0000 R=182.0000 gapL=0.00% gapZ=31.62% gapP=5.15% gapR=33.82% R2=0.987
+seed=129 beam=8 K=3 exact=136.0000 L=136.0000 Z=180.0000 P=142.0000 R=181.0000 gapL=0.00% gapZ=32.35% gapP=4.41% gapR=33.09% R2=0.987
+seed=130 beam=2 K=3 exact=114.0000 L=114.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.985
+seed=130 beam=3 K=3 exact=114.0000 L=114.0000 Z=162.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=42.11% gapP=8.77% gapR=44.74% R2=0.985
+seed=130 beam=5 K=3 exact=114.0000 L=114.0000 Z=161.0000 P=123.0000 R=161.0000 gapL=0.00% gapZ=41.23% gapP=7.89% gapR=41.23% R2=0.985
+seed=130 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=121.0000 R=163.0000 gapL=0.00% gapZ=40.35% gapP=6.14% gapR=42.98% R2=0.985
+seed=131 beam=2 K=3 exact=116.0000 L=118.0000 Z=167.0000 P=126.0000 R=167.0000 gapL=1.72% gapZ=43.97% gapP=8.62% gapR=43.97% R2=0.986
+seed=131 beam=3 K=3 exact=116.0000 L=118.0000 Z=166.0000 P=125.0000 R=166.0000 gapL=1.72% gapZ=43.10% gapP=7.76% gapR=43.10% R2=0.986
+seed=131 beam=5 K=3 exact=116.0000 L=116.0000 Z=165.0000 P=125.0000 R=164.0000 gapL=0.00% gapZ=42.24% gapP=7.76% gapR=41.38% R2=0.986
+seed=131 beam=8 K=3 exact=116.0000 L=116.0000 Z=164.0000 P=123.0000 R=165.0000 gapL=0.00% gapZ=41.38% gapP=6.03% gapR=42.24% R2=0.986
+seed=132 beam=2 K=3 exact=114.0000 L=114.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.986
+seed=132 beam=3 K=3 exact=114.0000 L=115.0000 Z=164.0000 P=124.0000 R=165.0000 gapL=0.88% gapZ=43.86% gapP=8.77% gapR=44.74% R2=0.986
+seed=132 beam=5 K=3 exact=114.0000 L=115.0000 Z=161.0000 P=122.0000 R=164.0000 gapL=0.88% gapZ=41.23% gapP=7.02% gapR=43.86% R2=0.986
+seed=132 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=122.0000 R=161.0000 gapL=0.00% gapZ=40.35% gapP=7.02% gapR=41.23% R2=0.986
+seed=133 beam=2 K=3 exact=118.0000 L=120.0000 Z=169.0000 P=128.0000 R=169.0000 gapL=1.69% gapZ=43.22% gapP=8.47% gapR=43.22% R2=0.984
+seed=133 beam=3 K=3 exact=118.0000 L=120.0000 Z=166.0000 P=128.0000 R=168.0000 gapL=1.69% gapZ=40.68% gapP=8.47% gapR=42.37% R2=0.984
+seed=133 beam=5 K=3 exact=118.0000 L=119.0000 Z=167.0000 P=127.0000 R=168.0000 gapL=0.85% gapZ=41.53% gapP=7.63% gapR=42.37% R2=0.984
+seed=133 beam=8 K=3 exact=118.0000 L=118.0000 Z=166.0000 P=125.0000 R=164.0000 gapL=0.00% gapZ=40.68% gapP=5.93% gapR=38.98% R2=0.984
+seed=134 beam=2 K=3 exact=110.0000 L=110.0000 Z=161.0000 P=120.0000 R=161.0000 gapL=0.00% gapZ=46.36% gapP=9.09% gapR=46.36% R2=0.984
+seed=134 beam=3 K=3 exact=110.0000 L=110.0000 Z=160.0000 P=120.0000 R=160.0000 gapL=0.00% gapZ=45.45% gapP=9.09% gapR=45.45% R2=0.984
+seed=134 beam=5 K=3 exact=110.0000 L=110.0000 Z=157.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=42.73% gapP=7.27% gapR=42.73% R2=0.984
+seed=134 beam=8 K=3 exact=110.0000 L=110.0000 Z=156.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=41.82% gapP=7.27% gapR=42.73% R2=0.984
+seed=135 beam=2 K=3 exact=114.0000 L=116.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=1.75% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.985
+seed=135 beam=3 K=3 exact=114.0000 L=116.0000 Z=164.0000 P=124.0000 R=164.0000 gapL=1.75% gapZ=43.86% gapP=8.77% gapR=43.86% R2=0.985
+seed=135 beam=5 K=3 exact=114.0000 L=114.0000 Z=161.0000 P=122.0000 R=161.0000 gapL=0.00% gapZ=41.23% gapP=7.02% gapR=41.23% R2=0.985
+seed=135 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=122.0000 R=160.0000 gapL=0.00% gapZ=40.35% gapP=7.02% gapR=40.35% R2=0.985
+seed=136 beam=2 K=3 exact=98.0000 L=100.0000 Z=141.0000 P=112.0000 R=142.0000 gapL=2.04% gapZ=43.88% gapP=14.29% gapR=44.90% R2=0.982
+seed=136 beam=3 K=3 exact=98.0000 L=99.0000 Z=140.0000 P=111.0000 R=140.0000 gapL=1.02% gapZ=42.86% gapP=13.27% gapR=42.86% R2=0.982
+seed=136 beam=5 K=3 exact=98.0000 L=98.0000 Z=139.0000 P=111.0000 R=140.0000 gapL=0.00% gapZ=41.84% gapP=13.27% gapR=42.86% R2=0.982
+seed=136 beam=8 K=3 exact=98.0000 L=98.0000 Z=138.0000 P=109.0000 R=139.0000 gapL=0.00% gapZ=40.82% gapP=11.22% gapR=41.84% R2=0.982
+seed=137 beam=2 K=3 exact=110.0000 L=111.0000 Z=161.0000 P=120.0000 R=161.0000 gapL=0.91% gapZ=46.36% gapP=9.09% gapR=46.36% R2=0.982
+seed=137 beam=3 K=3 exact=110.0000 L=112.0000 Z=160.0000 P=120.0000 R=161.0000 gapL=1.82% gapZ=45.45% gapP=9.09% gapR=46.36% R2=0.982
+seed=137 beam=5 K=3 exact=110.0000 L=110.0000 Z=157.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=42.73% gapP=7.27% gapR=42.73% R2=0.982
+seed=137 beam=8 K=3 exact=110.0000 L=110.0000 Z=156.0000 P=118.0000 R=155.0000 gapL=0.00% gapZ=41.82% gapP=7.27% gapR=40.91% R2=0.982
+seed=138 beam=2 K=3 exact=92.0000 L=94.0000 Z=135.0000 P=106.0000 R=135.0000 gapL=2.17% gapZ=46.74% gapP=15.22% gapR=46.74% R2=0.979
+seed=138 beam=3 K=3 exact=92.0000 L=94.0000 Z=134.0000 P=105.0000 R=134.0000 gapL=2.17% gapZ=45.65% gapP=14.13% gapR=45.65% R2=0.979
+seed=138 beam=5 K=3 exact=92.0000 L=92.0000 Z=131.0000 P=104.0000 R=134.0000 gapL=0.00% gapZ=42.39% gapP=13.04% gapR=45.65% R2=0.979
+seed=138 beam=8 K=3 exact=92.0000 L=92.0000 Z=134.0000 P=104.0000 R=133.0000 gapL=0.00% gapZ=45.65% gapP=13.04% gapR=44.57% R2=0.979
+seed=139 beam=2 K=3 exact=110.0000 L=112.0000 Z=161.0000 P=120.0000 R=161.0000 gapL=1.82% gapZ=46.36% gapP=9.09% gapR=46.36% R2=0.984
+seed=139 beam=3 K=3 exact=110.0000 L=111.0000 Z=160.0000 P=120.0000 R=161.0000 gapL=0.91% gapZ=45.45% gapP=9.09% gapR=46.36% R2=0.984
+seed=139 beam=5 K=3 exact=110.0000 L=110.0000 Z=157.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=42.73% gapP=7.27% gapR=42.73% R2=0.984
+seed=139 beam=8 K=3 exact=110.0000 L=110.0000 Z=156.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=41.82% gapP=7.27% gapR=42.73% R2=0.984
+seed=140 beam=2 K=3 exact=110.0000 L=110.0000 Z=161.0000 P=120.0000 R=161.0000 gapL=0.00% gapZ=46.36% gapP=9.09% gapR=46.36% R2=0.984
+seed=140 beam=3 K=3 exact=110.0000 L=110.0000 Z=158.0000 P=119.0000 R=161.0000 gapL=0.00% gapZ=43.64% gapP=8.18% gapR=46.36% R2=0.984
+seed=140 beam=5 K=3 exact=110.0000 L=110.0000 Z=157.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=42.73% gapP=7.27% gapR=42.73% R2=0.984
+seed=140 beam=8 K=3 exact=110.0000 L=110.0000 Z=156.0000 P=118.0000 R=154.0000 gapL=0.00% gapZ=41.82% gapP=7.27% gapR=40.00% R2=0.984
+seed=141 beam=2 K=3 exact=110.0000 L=112.0000 Z=161.0000 P=120.0000 R=159.0000 gapL=1.82% gapZ=46.36% gapP=9.09% gapR=44.55% R2=0.982
+seed=141 beam=3 K=3 exact=110.0000 L=111.0000 Z=160.0000 P=119.0000 R=160.0000 gapL=0.91% gapZ=45.45% gapP=8.18% gapR=45.45% R2=0.982
+seed=141 beam=5 K=3 exact=110.0000 L=111.0000 Z=157.0000 P=118.0000 R=158.0000 gapL=0.91% gapZ=42.73% gapP=7.27% gapR=43.64% R2=0.982
+seed=141 beam=8 K=3 exact=110.0000 L=110.0000 Z=156.0000 P=118.0000 R=157.0000 gapL=0.00% gapZ=41.82% gapP=7.27% gapR=42.73% R2=0.982
+seed=142 beam=2 K=3 exact=92.0000 L=93.0000 Z=135.0000 P=106.0000 R=135.0000 gapL=1.09% gapZ=46.74% gapP=15.22% gapR=46.74% R2=0.980
+seed=142 beam=3 K=3 exact=92.0000 L=94.0000 Z=134.0000 P=105.0000 R=134.0000 gapL=2.17% gapZ=45.65% gapP=14.13% gapR=45.65% R2=0.980
+seed=142 beam=5 K=3 exact=92.0000 L=92.0000 Z=131.0000 P=104.0000 R=134.0000 gapL=0.00% gapZ=42.39% gapP=13.04% gapR=45.65% R2=0.980
+seed=142 beam=8 K=3 exact=92.0000 L=92.0000 Z=134.0000 P=104.0000 R=134.0000 gapL=0.00% gapZ=45.65% gapP=13.04% gapR=45.65% R2=0.980
+seed=143 beam=2 K=3 exact=116.0000 L=118.0000 Z=167.0000 P=126.0000 R=167.0000 gapL=1.72% gapZ=43.97% gapP=8.62% gapR=43.97% R2=0.986
+seed=143 beam=3 K=3 exact=116.0000 L=118.0000 Z=166.0000 P=126.0000 R=166.0000 gapL=1.72% gapZ=43.10% gapP=8.62% gapR=43.10% R2=0.986
+seed=143 beam=5 K=3 exact=116.0000 L=116.0000 Z=165.0000 P=124.0000 R=166.0000 gapL=0.00% gapZ=42.24% gapP=6.90% gapR=43.10% R2=0.986
+seed=143 beam=8 K=3 exact=116.0000 L=116.0000 Z=164.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=41.38% gapP=6.90% gapR=42.24% R2=0.986
+seed=144 beam=2 K=3 exact=98.0000 L=100.0000 Z=141.0000 P=112.0000 R=142.0000 gapL=2.04% gapZ=43.88% gapP=14.29% gapR=44.90% R2=0.982
+seed=144 beam=3 K=3 exact=98.0000 L=100.0000 Z=138.0000 P=111.0000 R=140.0000 gapL=2.04% gapZ=40.82% gapP=13.27% gapR=42.86% R2=0.982
+seed=144 beam=5 K=3 exact=98.0000 L=98.0000 Z=137.0000 P=111.0000 R=139.0000 gapL=0.00% gapZ=39.80% gapP=13.27% gapR=41.84% R2=0.982
+seed=144 beam=8 K=3 exact=98.0000 L=98.0000 Z=138.0000 P=109.0000 R=138.0000 gapL=0.00% gapZ=40.82% gapP=11.22% gapR=40.82% R2=0.982
+seed=145 beam=2 K=3 exact=96.0000 L=96.0000 Z=139.0000 P=110.0000 R=139.0000 gapL=0.00% gapZ=44.79% gapP=14.58% gapR=44.79% R2=0.981
+seed=145 beam=3 K=3 exact=96.0000 L=97.0000 Z=136.0000 P=110.0000 R=139.0000 gapL=1.04% gapZ=41.67% gapP=14.58% gapR=44.79% R2=0.981
+seed=145 beam=5 K=3 exact=96.0000 L=96.0000 Z=135.0000 P=108.0000 R=137.0000 gapL=0.00% gapZ=40.62% gapP=12.50% gapR=42.71% R2=0.981
+seed=145 beam=8 K=3 exact=96.0000 L=96.0000 Z=136.0000 P=107.0000 R=137.0000 gapL=0.00% gapZ=41.67% gapP=11.46% gapR=42.71% R2=0.981
+seed=146 beam=2 K=3 exact=114.0000 L=114.0000 Z=165.0000 P=124.0000 R=165.0000 gapL=0.00% gapZ=44.74% gapP=8.77% gapR=44.74% R2=0.986
+seed=146 beam=3 K=3 exact=114.0000 L=114.0000 Z=162.0000 P=124.0000 R=163.0000 gapL=0.00% gapZ=42.11% gapP=8.77% gapR=42.98% R2=0.986
+seed=146 beam=5 K=3 exact=114.0000 L=114.0000 Z=161.0000 P=123.0000 R=164.0000 gapL=0.00% gapZ=41.23% gapP=7.89% gapR=43.86% R2=0.986
+seed=146 beam=8 K=3 exact=114.0000 L=114.0000 Z=160.0000 P=121.0000 R=160.0000 gapL=0.00% gapZ=40.35% gapP=6.14% gapR=40.35% R2=0.986
+seed=147 beam=2 K=3 exact=106.0000 L=106.0000 Z=157.0000 P=117.0000 R=157.0000 gapL=0.00% gapZ=48.11% gapP=10.38% gapR=48.11% R2=0.983
+seed=147 beam=3 K=3 exact=106.0000 L=106.0000 Z=154.0000 P=116.0000 R=154.0000 gapL=0.00% gapZ=45.28% gapP=9.43% gapR=45.28% R2=0.983
+seed=147 beam=5 K=3 exact=106.0000 L=106.0000 Z=151.0000 P=116.0000 R=152.0000 gapL=0.00% gapZ=42.45% gapP=9.43% gapR=43.40% R2=0.983
+seed=147 beam=8 K=3 exact=106.0000 L=106.0000 Z=148.0000 P=116.0000 R=149.0000 gapL=0.00% gapZ=39.62% gapP=9.43% gapR=40.57% R2=0.983
+seed=148 beam=2 K=3 exact=116.0000 L=118.0000 Z=167.0000 P=126.0000 R=167.0000 gapL=1.72% gapZ=43.97% gapP=8.62% gapR=43.97% R2=0.984
+seed=148 beam=3 K=3 exact=116.0000 L=118.0000 Z=164.0000 P=125.0000 R=167.0000 gapL=1.72% gapZ=41.38% gapP=7.76% gapR=43.97% R2=0.984
+seed=148 beam=5 K=3 exact=116.0000 L=117.0000 Z=165.0000 P=124.0000 R=166.0000 gapL=0.86% gapZ=42.24% gapP=6.90% gapR=43.10% R2=0.984
+seed=148 beam=8 K=3 exact=116.0000 L=116.0000 Z=164.0000 P=124.0000 R=163.0000 gapL=0.00% gapZ=41.38% gapP=6.90% gapR=40.52% R2=0.984
+seed=149 beam=2 K=3 exact=120.0000 L=120.0000 Z=171.0000 P=130.0000 R=171.0000 gapL=0.00% gapZ=42.50% gapP=8.33% gapR=42.50% R2=0.986
+seed=149 beam=3 K=3 exact=120.0000 L=121.0000 Z=170.0000 P=130.0000 R=170.0000 gapL=0.83% gapZ=41.67% gapP=8.33% gapR=41.67% R2=0.986
+seed=149 beam=5 K=3 exact=120.0000 L=120.0000 Z=169.0000 P=128.0000 R=170.0000 gapL=0.00% gapZ=40.83% gapP=6.67% gapR=41.67% R2=0.986
+seed=149 beam=8 K=3 exact=120.0000 L=120.0000 Z=168.0000 P=128.0000 R=169.0000 gapL=0.00% gapZ=40.00% gapP=6.67% gapR=40.83% R2=0.986
+=== Summary by beam (mean/median gaps; mean speedups) ===
+beam=2 n=50 gapL(mean/med)=1.002/1.010 gapZ(mean/med)=44.976/44.792 gapP(mean/med)=10.743/9.091 gapR(mean/med)=45.188/44.898 speedL(mean)=1.268 speedZ(mean)=17.647
+beam=3 n=50 gapL(mean/med)=1.009/1.000 gapZ(mean/med)=43.460/43.693 gapP(mean/med)=10.357/9.091 gapR(mean/med)=44.023/44.042 speedL(mean)=0.929 speedZ(mean)=12.520
+beam=5 n=50 gapL(mean/med)=0.200/0.000 gapZ(mean/med)=41.712/41.837 gapP(mean/med)=9.448/8.036 gapR(mean/med)=42.499/42.718 speedL(mean)=0.631 speedZ(mean)=7.926
+beam=8 n=50 gapL(mean/med)=0.000/0.000 gapZ(mean/med)=40.986/40.816 gapP(mean/med)=8.613/7.273 gapR(mean/med)=41.344/41.228 speedL(mean)=0.444 speedZ(mean)=5.330
+
+=== Holdout Summary ===
+rows=200 csv=PaST/logs/holdout_low_beam_hard.csv
+gap_learned mean/median/max = 0.5529 / 0.0000 / 2.1739
+gap_zero    mean/median/max = 42.7837 / 42.4764 / 54.7619
+r2_test mean/median = 0.9835 / 0.9838
+speedup_learned mean/median = 0.818 / 0.743
+speedup_zero    mean/median = 10.856 / 9.743
+Meaningful learning signal: gap_learned << gap_zero and positive r2_test.
+
+(base) jovyan@neruo-ls-aan-0:~$ python PaST/sandbox/eval_guided_vhat_holdout.py   --seed-start 100 --seed-end 129   --D 12 --N 40 --pmax 5   --samples 6000   --beams 2,3,5   --prune-factor 2.0   --out-csv PaST/logs/holdout_speedup_test.csv
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+seed=100 beam=2 K=5 exact=196.0000 L=197.0000 Z=267.0000 P=210.0000 R=267.0000 gapL=0.51% gapZ=36.22% gapP=7.14% gapR=36.22% R2=0.985
+seed=100 beam=3 K=5 exact=196.0000 L=196.0000 Z=266.0000 P=209.0000 R=266.0000 gapL=0.00% gapZ=35.71% gapP=6.63% gapR=35.71% R2=0.985
+seed=100 beam=5 K=5 exact=196.0000 L=196.0000 Z=266.0000 P=209.0000 R=266.0000 gapL=0.00% gapZ=35.71% gapP=6.63% gapR=35.71% R2=0.985
+seed=101 beam=2 K=5 exact=200.0000 L=203.0000 Z=271.0000 P=214.0000 R=271.0000 gapL=1.50% gapZ=35.50% gapP=7.00% gapR=35.50% R2=0.986
+seed=101 beam=3 K=5 exact=200.0000 L=201.0000 Z=270.0000 P=213.0000 R=270.0000 gapL=0.50% gapZ=35.00% gapP=6.50% gapR=35.00% R2=0.986
+seed=101 beam=5 K=5 exact=200.0000 L=200.0000 Z=269.0000 P=213.0000 R=270.0000 gapL=0.00% gapZ=34.50% gapP=6.50% gapR=35.00% R2=0.986
+seed=102 beam=2 K=5 exact=204.0000 L=204.0000 Z=277.0000 P=218.0000 R=277.0000 gapL=0.00% gapZ=35.78% gapP=6.86% gapR=35.78% R2=0.987
+seed=102 beam=3 K=5 exact=204.0000 L=204.0000 Z=274.0000 P=217.0000 R=275.0000 gapL=0.00% gapZ=34.31% gapP=6.37% gapR=34.80% R2=0.987
+seed=102 beam=5 K=5 exact=204.0000 L=205.0000 Z=273.0000 P=217.0000 R=274.0000 gapL=0.49% gapZ=33.82% gapP=6.37% gapR=34.31% R2=0.987
+seed=103 beam=2 K=5 exact=176.0000 L=180.0000 Z=251.0000 P=194.0000 R=252.0000 gapL=2.27% gapZ=42.61% gapP=10.23% gapR=43.18% R2=0.986
+seed=103 beam=3 K=5 exact=176.0000 L=180.0000 Z=250.0000 P=194.0000 R=250.0000 gapL=2.27% gapZ=42.05% gapP=10.23% gapR=42.05% R2=0.986
+seed=103 beam=5 K=5 exact=176.0000 L=179.0000 Z=249.0000 P=192.0000 R=250.0000 gapL=1.70% gapZ=41.48% gapP=9.09% gapR=42.05% R2=0.986
+seed=104 beam=2 K=5 exact=192.0000 L=194.0000 Z=264.0000 P=206.0000 R=264.0000 gapL=1.04% gapZ=37.50% gapP=7.29% gapR=37.50% R2=0.986
+seed=104 beam=3 K=5 exact=192.0000 L=194.0000 Z=264.0000 P=205.0000 R=264.0000 gapL=1.04% gapZ=37.50% gapP=6.77% gapR=37.50% R2=0.986
+seed=104 beam=5 K=5 exact=192.0000 L=195.0000 Z=264.0000 P=205.0000 R=264.0000 gapL=1.56% gapZ=37.50% gapP=6.77% gapR=37.50% R2=0.986
+seed=105 beam=2 K=5 exact=190.0000 L=192.0000 Z=263.0000 P=204.0000 R=262.0000 gapL=1.05% gapZ=38.42% gapP=7.37% gapR=37.89% R2=0.985
+seed=105 beam=3 K=5 exact=190.0000 L=191.0000 Z=263.0000 P=204.0000 R=262.0000 gapL=0.53% gapZ=38.42% gapP=7.37% gapR=37.89% R2=0.985
+seed=105 beam=5 K=5 exact=190.0000 L=191.0000 Z=263.0000 P=203.0000 R=262.0000 gapL=0.53% gapZ=38.42% gapP=6.84% gapR=37.89% R2=0.985
+seed=106 beam=2 K=5 exact=154.0000 L=157.0000 Z=221.0000 P=173.0000 R=221.0000 gapL=1.95% gapZ=43.51% gapP=12.34% gapR=43.51% R2=0.983
+seed=106 beam=3 K=5 exact=154.0000 L=156.0000 Z=221.0000 P=172.0000 R=221.0000 gapL=1.30% gapZ=43.51% gapP=11.69% gapR=43.51% R2=0.983
+seed=106 beam=5 K=5 exact=154.0000 L=155.0000 Z=221.0000 P=172.0000 R=221.0000 gapL=0.65% gapZ=43.51% gapP=11.69% gapR=43.51% R2=0.983
+seed=107 beam=2 K=5 exact=182.0000 L=185.0000 Z=257.0000 P=198.0000 R=257.0000 gapL=1.65% gapZ=41.21% gapP=8.79% gapR=41.21% R2=0.987
+seed=107 beam=3 K=5 exact=182.0000 L=186.0000 Z=256.0000 P=198.0000 R=257.0000 gapL=2.20% gapZ=40.66% gapP=8.79% gapR=41.21% R2=0.987
+seed=107 beam=5 K=5 exact=182.0000 L=187.0000 Z=255.0000 P=198.0000 R=256.0000 gapL=2.75% gapZ=40.11% gapP=8.79% gapR=40.66% R2=0.987
+seed=108 beam=2 K=5 exact=174.0000 L=178.0000 Z=249.0000 P=192.0000 R=249.0000 gapL=2.30% gapZ=43.10% gapP=10.34% gapR=43.10% R2=0.985
+seed=108 beam=3 K=5 exact=174.0000 L=175.0000 Z=248.0000 P=192.0000 R=248.0000 gapL=0.57% gapZ=42.53% gapP=10.34% gapR=42.53% R2=0.985
+seed=108 beam=5 K=5 exact=174.0000 L=176.0000 Z=247.0000 P=190.0000 R=246.0000 gapL=1.15% gapZ=41.95% gapP=9.20% gapR=41.38% R2=0.985
+seed=109 beam=2 K=5 exact=200.0000 L=202.0000 Z=271.0000 P=214.0000 R=271.0000 gapL=1.00% gapZ=35.50% gapP=7.00% gapR=35.50% R2=0.986
+seed=109 beam=3 K=5 exact=200.0000 L=201.0000 Z=270.0000 P=213.0000 R=271.0000 gapL=0.50% gapZ=35.00% gapP=6.50% gapR=35.50% R2=0.986
+seed=109 beam=5 K=5 exact=200.0000 L=201.0000 Z=269.0000 P=213.0000 R=269.0000 gapL=0.50% gapZ=34.50% gapP=6.50% gapR=34.50% R2=0.986
+seed=110 beam=2 K=5 exact=208.0000 L=210.0000 Z=285.0000 P=222.0000 R=285.0000 gapL=0.96% gapZ=37.02% gapP=6.73% gapR=37.02% R2=0.987
+seed=110 beam=3 K=5 exact=208.0000 L=210.0000 Z=282.0000 P=222.0000 R=282.0000 gapL=0.96% gapZ=35.58% gapP=6.73% gapR=35.58% R2=0.987
+seed=110 beam=5 K=5 exact=208.0000 L=208.0000 Z=279.0000 P=220.0000 R=280.0000 gapL=0.00% gapZ=34.13% gapP=5.77% gapR=34.62% R2=0.987
+seed=111 beam=2 K=5 exact=182.0000 L=184.0000 Z=257.0000 P=198.0000 R=258.0000 gapL=1.10% gapZ=41.21% gapP=8.79% gapR=41.76% R2=0.985
+seed=111 beam=3 K=5 exact=182.0000 L=183.0000 Z=256.0000 P=198.0000 R=256.0000 gapL=0.55% gapZ=40.66% gapP=8.79% gapR=40.66% R2=0.985
+seed=111 beam=5 K=5 exact=182.0000 L=183.0000 Z=255.0000 P=198.0000 R=255.0000 gapL=0.55% gapZ=40.11% gapP=8.79% gapR=40.11% R2=0.985
+seed=112 beam=2 K=5 exact=214.0000 L=216.0000 Z=293.0000 P=226.0000 R=293.0000 gapL=0.93% gapZ=36.92% gapP=5.61% gapR=36.92% R2=0.987
+seed=112 beam=3 K=5 exact=214.0000 L=215.0000 Z=292.0000 P=226.0000 R=292.0000 gapL=0.47% gapZ=36.45% gapP=5.61% gapR=36.45% R2=0.987
+seed=112 beam=5 K=5 exact=214.0000 L=215.0000 Z=291.0000 P=226.0000 R=290.0000 gapL=0.47% gapZ=35.98% gapP=5.61% gapR=35.51% R2=0.987
+seed=113 beam=2 K=5 exact=178.0000 L=179.0000 Z=253.0000 P=196.0000 R=253.0000 gapL=0.56% gapZ=42.13% gapP=10.11% gapR=42.13% R2=0.986
+seed=113 beam=3 K=5 exact=178.0000 L=179.0000 Z=252.0000 P=195.0000 R=252.0000 gapL=0.56% gapZ=41.57% gapP=9.55% gapR=41.57% R2=0.986
+seed=113 beam=5 K=5 exact=178.0000 L=178.0000 Z=251.0000 P=195.0000 R=252.0000 gapL=0.00% gapZ=41.01% gapP=9.55% gapR=41.57% R2=0.986
+seed=114 beam=2 K=5 exact=172.0000 L=174.0000 Z=247.0000 P=190.0000 R=247.0000 gapL=1.16% gapZ=43.60% gapP=10.47% gapR=43.60% R2=0.986
+seed=114 beam=3 K=5 exact=172.0000 L=173.0000 Z=246.0000 P=189.0000 R=247.0000 gapL=0.58% gapZ=43.02% gapP=9.88% gapR=43.60% R2=0.986
+seed=114 beam=5 K=5 exact=172.0000 L=172.0000 Z=243.0000 P=188.0000 R=244.0000 gapL=0.00% gapZ=41.28% gapP=9.30% gapR=41.86% R2=0.986
+seed=115 beam=2 K=5 exact=184.0000 L=185.0000 Z=259.0000 P=199.0000 R=259.0000 gapL=0.54% gapZ=40.76% gapP=8.15% gapR=40.76% R2=0.984
+seed=115 beam=3 K=5 exact=184.0000 L=184.0000 Z=258.0000 P=199.0000 R=258.0000 gapL=0.00% gapZ=40.22% gapP=8.15% gapR=40.22% R2=0.984
+seed=115 beam=5 K=5 exact=184.0000 L=184.0000 Z=257.0000 P=199.0000 R=257.0000 gapL=0.00% gapZ=39.67% gapP=8.15% gapR=39.67% R2=0.984
+seed=116 beam=2 K=5 exact=208.0000 L=210.0000 Z=285.0000 P=222.0000 R=286.0000 gapL=0.96% gapZ=37.02% gapP=6.73% gapR=37.50% R2=0.986
+seed=116 beam=3 K=5 exact=208.0000 L=211.0000 Z=282.0000 P=222.0000 R=282.0000 gapL=1.44% gapZ=35.58% gapP=6.73% gapR=35.58% R2=0.986
+seed=116 beam=5 K=5 exact=208.0000 L=211.0000 Z=279.0000 P=220.0000 R=279.0000 gapL=1.44% gapZ=34.13% gapP=5.77% gapR=34.13% R2=0.986
+seed=117 beam=2 K=5 exact=166.0000 L=169.0000 Z=237.0000 P=184.0000 R=237.0000 gapL=1.81% gapZ=42.77% gapP=10.84% gapR=42.77% R2=0.983
+seed=117 beam=3 K=5 exact=166.0000 L=168.0000 Z=234.0000 P=183.0000 R=234.0000 gapL=1.20% gapZ=40.96% gapP=10.24% gapR=40.96% R2=0.983
+seed=117 beam=5 K=5 exact=166.0000 L=171.0000 Z=231.0000 P=182.0000 R=232.0000 gapL=3.01% gapZ=39.16% gapP=9.64% gapR=39.76% R2=0.983
+seed=118 beam=2 K=5 exact=214.0000 L=217.0000 Z=293.0000 P=226.0000 R=293.0000 gapL=1.40% gapZ=36.92% gapP=5.61% gapR=36.92% R2=0.986
+seed=118 beam=3 K=5 exact=214.0000 L=215.0000 Z=292.0000 P=226.0000 R=293.0000 gapL=0.47% gapZ=36.45% gapP=5.61% gapR=36.92% R2=0.986
+seed=118 beam=5 K=5 exact=214.0000 L=215.0000 Z=291.0000 P=226.0000 R=290.0000 gapL=0.47% gapZ=35.98% gapP=5.61% gapR=35.51% R2=0.986
+seed=119 beam=2 K=5 exact=184.0000 L=186.0000 Z=259.0000 P=199.0000 R=260.0000 gapL=1.09% gapZ=40.76% gapP=8.15% gapR=41.30% R2=0.986
+seed=119 beam=3 K=5 exact=184.0000 L=186.0000 Z=258.0000 P=199.0000 R=258.0000 gapL=1.09% gapZ=40.22% gapP=8.15% gapR=40.22% R2=0.986
+seed=119 beam=5 K=5 exact=184.0000 L=185.0000 Z=257.0000 P=199.0000 R=257.0000 gapL=0.54% gapZ=39.67% gapP=8.15% gapR=39.67% R2=0.986
+seed=120 beam=2 K=5 exact=176.0000 L=179.0000 Z=251.0000 P=194.0000 R=251.0000 gapL=1.70% gapZ=42.61% gapP=10.23% gapR=42.61% R2=0.986
+seed=120 beam=3 K=5 exact=176.0000 L=178.0000 Z=250.0000 P=194.0000 R=251.0000 gapL=1.14% gapZ=42.05% gapP=10.23% gapR=42.61% R2=0.986
+seed=120 beam=5 K=5 exact=176.0000 L=177.0000 Z=249.0000 P=192.0000 R=249.0000 gapL=0.57% gapZ=41.48% gapP=9.09% gapR=41.48% R2=0.986
+seed=121 beam=2 K=5 exact=178.0000 L=180.0000 Z=253.0000 P=196.0000 R=253.0000 gapL=1.12% gapZ=42.13% gapP=10.11% gapR=42.13% R2=0.986
+seed=121 beam=3 K=5 exact=178.0000 L=179.0000 Z=252.0000 P=195.0000 R=252.0000 gapL=0.56% gapZ=41.57% gapP=9.55% gapR=41.57% R2=0.986
+seed=121 beam=5 K=5 exact=178.0000 L=178.0000 Z=251.0000 P=195.0000 R=252.0000 gapL=0.00% gapZ=41.01% gapP=9.55% gapR=41.57% R2=0.986
+seed=122 beam=2 K=5 exact=154.0000 L=157.0000 Z=221.0000 P=173.0000 R=221.0000 gapL=1.95% gapZ=43.51% gapP=12.34% gapR=43.51% R2=0.983
+seed=122 beam=3 K=5 exact=154.0000 L=156.0000 Z=221.0000 P=172.0000 R=221.0000 gapL=1.30% gapZ=43.51% gapP=11.69% gapR=43.51% R2=0.983
+seed=122 beam=5 K=5 exact=154.0000 L=155.0000 Z=221.0000 P=172.0000 R=221.0000 gapL=0.65% gapZ=43.51% gapP=11.69% gapR=43.51% R2=0.983
+seed=123 beam=2 K=5 exact=196.0000 L=201.0000 Z=267.0000 P=210.0000 R=267.0000 gapL=2.55% gapZ=36.22% gapP=7.14% gapR=36.22% R2=0.988
+seed=123 beam=3 K=5 exact=196.0000 L=202.0000 Z=266.0000 P=209.0000 R=266.0000 gapL=3.06% gapZ=35.71% gapP=6.63% gapR=35.71% R2=0.988
+seed=123 beam=5 K=5 exact=196.0000 L=201.0000 Z=266.0000 P=208.0000 R=266.0000 gapL=2.55% gapZ=35.71% gapP=6.12% gapR=35.71% R2=0.988
+seed=124 beam=2 K=5 exact=220.0000 L=221.0000 Z=299.0000 P=230.0000 R=300.0000 gapL=0.45% gapZ=35.91% gapP=4.55% gapR=36.36% R2=0.986
+seed=124 beam=3 K=5 exact=220.0000 L=221.0000 Z=298.0000 P=229.0000 R=298.0000 gapL=0.45% gapZ=35.45% gapP=4.09% gapR=35.45% R2=0.986
+seed=124 beam=5 K=5 exact=220.0000 L=220.0000 Z=297.0000 P=229.0000 R=297.0000 gapL=0.00% gapZ=35.00% gapP=4.09% gapR=35.00% R2=0.986
+seed=125 beam=2 K=5 exact=184.0000 L=186.0000 Z=259.0000 P=199.0000 R=259.0000 gapL=1.09% gapZ=40.76% gapP=8.15% gapR=40.76% R2=0.985
+seed=125 beam=3 K=5 exact=184.0000 L=185.0000 Z=258.0000 P=199.0000 R=258.0000 gapL=0.54% gapZ=40.22% gapP=8.15% gapR=40.22% R2=0.985
+seed=125 beam=5 K=5 exact=184.0000 L=187.0000 Z=257.0000 P=199.0000 R=257.0000 gapL=1.63% gapZ=39.67% gapP=8.15% gapR=39.67% R2=0.985
+seed=126 beam=2 K=5 exact=166.0000 L=168.0000 Z=237.0000 P=184.0000 R=237.0000 gapL=1.20% gapZ=42.77% gapP=10.84% gapR=42.77% R2=0.985
+seed=126 beam=3 K=5 exact=166.0000 L=169.0000 Z=234.0000 P=184.0000 R=234.0000 gapL=1.81% gapZ=40.96% gapP=10.84% gapR=40.96% R2=0.985
+seed=126 beam=5 K=5 exact=166.0000 L=169.0000 Z=231.0000 P=182.0000 R=231.0000 gapL=1.81% gapZ=39.16% gapP=9.64% gapR=39.16% R2=0.985
+seed=127 beam=2 K=5 exact=206.0000 L=206.0000 Z=281.0000 P=221.0000 R=281.0000 gapL=0.00% gapZ=36.41% gapP=7.28% gapR=36.41% R2=0.987
+seed=127 beam=3 K=5 exact=206.0000 L=206.0000 Z=278.0000 P=219.0000 R=279.0000 gapL=0.00% gapZ=34.95% gapP=6.31% gapR=35.44% R2=0.987
+seed=127 beam=5 K=5 exact=206.0000 L=207.0000 Z=275.0000 P=218.0000 R=276.0000 gapL=0.49% gapZ=33.50% gapP=5.83% gapR=33.98% R2=0.987
+seed=128 beam=2 K=5 exact=196.0000 L=197.0000 Z=267.0000 P=210.0000 R=267.0000 gapL=0.51% gapZ=36.22% gapP=7.14% gapR=36.22% R2=0.987
+seed=128 beam=3 K=5 exact=196.0000 L=197.0000 Z=266.0000 P=210.0000 R=267.0000 gapL=0.51% gapZ=35.71% gapP=7.14% gapR=36.22% R2=0.987
+seed=128 beam=5 K=5 exact=196.0000 L=197.0000 Z=266.0000 P=209.0000 R=266.0000 gapL=0.51% gapZ=35.71% gapP=6.63% gapR=35.71% R2=0.987
+seed=129 beam=2 K=5 exact=216.0000 L=217.0000 Z=295.0000 P=227.0000 R=295.0000 gapL=0.46% gapZ=36.57% gapP=5.09% gapR=36.57% R2=0.987
+seed=129 beam=3 K=5 exact=216.0000 L=218.0000 Z=294.0000 P=227.0000 R=294.0000 gapL=0.93% gapZ=36.11% gapP=5.09% gapR=36.11% R2=0.987
+seed=129 beam=5 K=5 exact=216.0000 L=216.0000 Z=293.0000 P=227.0000 R=294.0000 gapL=0.00% gapZ=35.65% gapP=5.09% gapR=36.11% R2=0.987
+=== Summary by beam (mean/median gaps; mean speedups) ===
+beam=2 n=30 gapL(mean/med)=1.161/1.087 gapZ(mean/med)=39.387/39.591 gapP(mean/med)=8.281/7.760 gapR(mean/med)=39.456/39.328 speedL(mean)=19.205 speedZ(mean)=260.842
+beam=3 n=30 gapL(mean/med)=0.884/0.568 gapZ(mean/med)=38.722/39.319 gapP(mean/med)=8.012/7.760 gapR(mean/med)=38.842/39.056 speedL(mean)=13.867 speedZ(mean)=183.469
+beam=5 n=30 gapL(mean/med)=0.800/0.518 gapZ(mean/med)=38.101/38.789 gapP(mean/med)=7.687/7.497 gapR(mean/med)=38.228/38.526 speedL(mean)=8.899 speedZ(mean)=119.634
+
+=== Holdout Summary ===
+rows=90 csv=PaST/logs/holdout_speedup_test.csv
+gap_learned mean/median/max = 0.9487 / 0.6494 / 3.0612
+gap_zero    mean/median/max = 38.7365 / 38.7888 / 43.6047
+r2_test mean/median = 0.9858 / 0.9861
+speedup_learned mean/median = 13.991 / 13.637
+speedup_zero    mean/median = 187.982 / 180.308
+Meaningful learning signal: gap_learned << gap_zero and positive r2_test.

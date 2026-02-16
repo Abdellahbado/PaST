@@ -19,6 +19,7 @@ class FeatureSpec:
     include_per_class_counts: bool = True
     include_per_class_now_cost: bool = True
     include_bins: bool = True
+    normalize: bool = False  # divide absolute quantities by T for cross-size transfer
 
 
 def _remaining_from_used(used: Sequence[int], totals: np.ndarray) -> np.ndarray:
@@ -42,6 +43,8 @@ def phi_for_state(
     Notes:
     - This is energy-only; tie-break ("early") should remain in the DP.
     - All features are designed to be cheap: O(K) in number of classes.
+    - When spec.normalize=True, absolute quantities are divided by T
+      so features become scale-invariant ratios suitable for cross-size transfer.
     """
     t = int(t)
     T = int(ctx.T)
@@ -49,6 +52,9 @@ def phi_for_state(
         t = 0
     if t > T:
         t = T
+
+    # Normalization denominator (T for absolute→ratio conversion)
+    norm = float(T) if spec.normalize else 1.0
 
     lengths_arr = np.asarray(lengths, dtype=np.int32)
     remaining = _remaining_from_used(used, totals)
@@ -62,7 +68,7 @@ def phi_for_state(
     h = int(t % ctx.H)
     reg = int(ctx.day_regime[h])
 
-    # Regime one-hot
+    # Regime one-hot (dimensionless, no normalization needed)
     reg_oh = [0.0, 0.0, 0.0]
     if 0 <= reg < 3:
         reg_oh[reg] = 1.0
@@ -72,11 +78,11 @@ def phi_for_state(
     c_sh = float(int(ctx.count_regime[1, t]))
     c_peak = float(int(ctx.count_regime[2, t]))
 
-    # Pressure ratios (avoid division by 0)
+    # Pressure ratios (already normalized, no change)
     pressure_off = float(W / (c_off + 1.0))
     pressure_cheap = float(W / (c_off + c_sh + 1.0))
 
-    # Distances to next off/cheap within cycle
+    # Distances to next off/cheap within cycle (bounded by H=20, no normalization)
     d_off = float(int(ctx.dist_to_next_off[h]))
     d_cheap = float(int(ctx.dist_to_next_cheap[h]))
 
@@ -85,32 +91,33 @@ def phi_for_state(
     # Bias
     feats.append(1.0)
 
-    # Time-of-day & regime
+    # Time-of-day & regime (dimensionless)
     feats.extend(reg_oh)
     feats.extend([d_off, d_cheap])
 
-    # Workload summary
-    feats.extend([N, W, R, S_pos])
+    # Workload summary (normalized by T when normalize=True)
+    feats.extend([N / norm, W / norm, R / norm, S_pos / norm])
 
-    # Slack-regime interactions
-    feats.extend([S_pos * reg_oh[0], S_pos * reg_oh[2]])
+    # Slack-regime interactions (normalized)
+    feats.extend([(S_pos / norm) * reg_oh[0], (S_pos / norm) * reg_oh[2]])
 
-    # Cheap capacity ahead
-    feats.extend([c_off, c_peak, pressure_off, pressure_cheap])
+    # Cheap capacity ahead (normalized) + pressure ratios (already scale-invariant)
+    feats.extend([c_off / norm, c_peak / norm, pressure_off, pressure_cheap])
 
-    # Simple bins by length (optional)
+    # Simple bins by length (optional, normalized)
     if spec.include_bins:
         short = float(int(np.sum(remaining[lengths_arr <= 2])))
         median_len = int(np.median(lengths_arr)) if int(lengths_arr.size) > 0 else 0
         long_thr = max(3, median_len)
         long = float(int(np.sum(remaining[lengths_arr >= long_thr])))
-        feats.extend([short, long])
+        feats.extend([short / norm, long / norm])
 
-    # Per-class counts
+    # Per-class counts (normalized)
     if spec.include_per_class_counts:
-        feats.extend([float(int(x)) for x in remaining.tolist()])
+        feats.extend([float(int(x)) / norm for x in remaining.tolist()])
 
     # Per-class cost-if-run-now (wrap within day) and aggregate
+    # Note: cost values are already price-scaled (bounded by price profile), not by T
     if spec.include_per_class_now_cost:
         agg = 0.0
         for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
@@ -122,7 +129,7 @@ def phi_for_state(
                 cost_now = float(ctx.day_window_cost[int(L)][h])
             else:
                 cost_now = float(get_day_window_cost(ctx, int(L))[h])
-            v = float(int(nk)) * cost_now
+            v = float(int(nk)) * cost_now / norm
             feats.append(v)
             agg += v
         feats.append(float(agg))
