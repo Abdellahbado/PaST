@@ -53,6 +53,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 # Local imports
 from PaST.solvers.optimal_benchmark_dp import solve_optimal_benchmark_dp
 from PaST.solvers.vhat_linear import FeatureSpec, LinearRidgeValueModel
+from PaST.solvers.vhat_models import PolyRidgeValueModel, MLPValueModel, LGBMValueModel
 from PaST.solvers.vhat_tou_features import build_tou_feature_context
 
 
@@ -95,6 +96,66 @@ class InstancePM:
     p: List[int]
     u: List[int]
     c: List[float]
+
+
+class _ValueModelLike:
+    """Minimal protocol-like base for value models used by this script."""
+
+    def predict_from_used(
+        self,
+        *,
+        t: int,
+        used: Sequence[int],
+        totals: np.ndarray,
+        lengths: Sequence[int],
+        ctx,
+    ) -> float:
+        raise NotImplementedError
+
+
+def _make_generate_data_daily_prices(
+    *,
+    seed: int,
+    T: int = 20,
+    Tk_choices: Sequence[int] = (2, 3, 5),
+    ck_low: int = 1,
+    ck_high: int = 8,
+) -> List[float]:
+    """Generate a length-T daily price vector using generate_data.py-style intervals.
+
+    This keeps the "20 hours repeating" structure (we generate a 20-slot day and
+    repeat it for D days), but changes the within-day profile distribution.
+    """
+    import random
+
+    if T <= 0:
+        raise ValueError("T must be positive")
+    if ck_low > ck_high:
+        raise ValueError("ck_low must be <= ck_high")
+
+    rng = random.Random(int(seed))
+
+    # Sample interval durations summing exactly to T (simple restart-on-stuck)
+    while True:
+        remaining = int(T)
+        Tk: List[int] = []
+        while remaining > 0:
+            feasible = [int(x) for x in Tk_choices if int(x) <= remaining]
+            if not feasible:
+                break
+            dur = int(rng.choice(feasible))
+            Tk.append(dur)
+            remaining -= dur
+        if remaining == 0 and Tk:
+            break
+
+    ck = [int(rng.randint(int(ck_low), int(ck_high))) for _ in range(len(Tk))]
+    ct: List[float] = []
+    for dur, price in zip(Tk, ck):
+        ct.extend([float(price)] * int(dur))
+    if len(ct) != int(T):
+        raise RuntimeError("Internal error: generated daily profile has wrong length")
+    return ct
 
 
 def _parse_int_range(s: str) -> Tuple[int, int]:
@@ -246,13 +307,42 @@ def _solve_machine(
     return float(res.cost), int(res.finish_time), wall
 
 
-def _load_vhat_checkpoint(
-    path: str, fallback_spec: FeatureSpec
-) -> LinearRidgeValueModel:
-    ckpt = np.load(path)
+def _load_vhat_checkpoint(path: str, fallback_spec: FeatureSpec) -> _ValueModelLike:
+    """Load a pooled Vhat checkpoint.
+
+    Supports linear (legacy), poly, mlp, and lgbm checkpoints.
+    """
+    ckpt = np.load(path, allow_pickle=True)
+
+    # Newer checkpoints include model_type.
+    model_type = None
+    if "model_type" in ckpt.files:
+        try:
+            model_type = str(ckpt["model_type"])  # numpy scalar/array -> str
+        except Exception:
+            model_type = None
+
+    if model_type is not None:
+        mt = model_type.strip().lower()
+        if mt == "poly":
+            return PolyRidgeValueModel.load(path)
+        if mt == "mlp":
+            return MLPValueModel.load(path)
+        if mt == "lgbm":
+            return LGBMValueModel.load(path)
+        if mt == "linear":
+            # Fall through to legacy linear loader
+            pass
+
+    # Heuristics for older checkpoints without model_type.
+    if "powers" in ckpt.files and "weights" in ckpt.files:
+        return PolyRidgeValueModel.load(path)
+    if {"W1", "b1", "W2", "b2", "W3", "b3"}.issubset(set(ckpt.files)):
+        return MLPValueModel.load(path)
+
+    # Default: legacy linear ridge
     w = np.asarray(ckpt["weights"], dtype=np.float64)
     spec = fallback_spec
-
     if {
         "include_per_class_counts",
         "include_per_class_now_cost",
@@ -269,19 +359,40 @@ def _load_vhat_checkpoint(
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=norm,
         )
-
     return LinearRidgeValueModel(weights=w, spec=spec)
 
 
 def _load_vhat_checkpoint_meta(path: str) -> Dict[str, bool]:
     """Load auxiliary metadata saved in pooled checkpoints (if present)."""
-    ckpt = np.load(path)
-    normalize_labels = (
-        bool(int(ckpt["normalize_labels"]))
-        if "normalize_labels" in ckpt.files
-        else False
-    )
-    return {"normalize_labels": normalize_labels}
+    def _try_load(p: str) -> Optional[Dict[str, bool]]:
+        try:
+            ck = np.load(p, allow_pickle=True)
+        except Exception:
+            return None
+        if "normalize_labels" in ck.files:
+            try:
+                return {"normalize_labels": bool(int(ck["normalize_labels"]))}
+            except Exception:
+                return {"normalize_labels": False}
+        return None
+
+    # 1) Try main checkpoint first
+    out = _try_load(path)
+    if out is not None:
+        return out
+
+    # 2) Try sidecars written by eval_pooled_vhat.py (new and legacy names)
+    candidates = [
+        str(path) + ".meta.npz",
+        str(path) + ".meta",
+        str(path) + ".meta.npz.npz",
+    ]
+    for cand in candidates:
+        out = _try_load(cand)
+        if out is not None:
+            return out
+
+    return {"normalize_labels": False}
 
 
 def generate_instances(
@@ -301,26 +412,28 @@ def generate_instances(
     price_freeze: bool,
     price_freeze_scope: str,
     price_seed: Optional[int],
+    daily_price_json: Optional[List[float]] = None,
     N_range: Optional[Tuple[int, int]] = None,
     D_range: Optional[Tuple[int, int]] = None,
+    M_range: Optional[Tuple[int, int]] = None,
 ) -> List[InstancePM]:
     """Generate instances in-memory using new benchmark helper functions."""
 
     HOURS_PER_DAY = int(getattr(module, "HOURS_PER_DAY"))
 
-    # When N/D vary per replicate, we precompute maxK for price freezing.
-    if D_range is not None:
-        maxK = HOURS_PER_DAY * int(D_range[1])
-    else:
-        maxK = HOURS_PER_DAY * int(D)
+    # When D varies per replicate, precompute maxK for optional price freezing.
+    maxK = HOURS_PER_DAY * (int(D_range[1]) if D_range is not None else int(D))
 
-    # Optional freezing of prices (only relevant for random_uniform)
-    price_vec = None
+    # Optional freezing of prices (only relevant for random_uniform AND when no explicit daily profile is provided)
     master_prices = None
     perK_cache: Dict[int, List[float]] = {}
-
     _price_seed = int(seed if price_seed is None else price_seed)
-    if price_freeze and price_mode == "random_uniform":
+    if (
+        price_freeze
+        and price_mode == "random_uniform"
+        and daily_price_json is None
+        and hasattr(module, "frozen_prices_factory")
+    ):
         master_prices, perK_cache = module.frozen_prices_factory(
             mode=price_mode,
             low=price_low,
@@ -333,8 +446,6 @@ def generate_instances(
     instances: List[InstancePM] = []
 
     for r in range(1, int(replicates) + 1):
-        # Sample N/D per replicate if requested (simulates deployment where each
-        # machine/subproblem sees different job counts and horizons).
         rng_outer = np.random.default_rng(int(seed) + 1_000_003 * int(r))
         N_r = (
             int(rng_outer.integers(int(N_range[0]), int(N_range[1]) + 1))
@@ -346,41 +457,46 @@ def generate_instances(
             if D_range is not None
             else int(D)
         )
-        K_r = HOURS_PER_DAY * int(D_r)
+        M_r = (
+            int(rng_outer.integers(int(M_range[0]), int(M_range[1]) + 1))
+            if M_range is not None
+            else int(M)
+        )
 
-        inst_seed = int(seed + (hash((category, N_r, M, D_r, r)) % 10_000_000))
-        rng = np.random.default_rng(inst_seed)
+        K_r = int(HOURS_PER_DAY * int(D_r))
+        inst_seed = (
+            int(seed)
+            + 10_000 * int(r)
+            + 97 * int(N_r)
+            + 389 * int(M_r)
+            + 7919 * int(D_r)
+        )
+        rng = np.random.default_rng(int(inst_seed))
 
         p = module.sample_processing_times(
             N=int(N_r),
-            M=int(M),
+            M=int(M_r),
             K=int(K_r),
             rng=rng,
             pmax=int(pmax),
             target_util=float(target_util),
         )
+
+        # Category-based default u_range if available.
+        if hasattr(module, "DEFAULT_BENCHMARK") and category in getattr(
+            module, "DEFAULT_BENCHMARK"
+        ):
+            u_low, u_high = module.DEFAULT_BENCHMARK[category]["u_range"]
+        else:
+            u_low, u_high = 1, 3
         u = module.sample_machine_rates(
-            M=int(M),
-            rng=rng,
-            u_low=(
-                int(module.DEFAULT_BENCHMARK[category]["u_range"][0])
-                if hasattr(module, "DEFAULT_BENCHMARK")
-                and category in module.DEFAULT_BENCHMARK
-                else 1
-            ),
-            u_high=(
-                int(module.DEFAULT_BENCHMARK[category]["u_range"][1])
-                if hasattr(module, "DEFAULT_BENCHMARK")
-                and category in module.DEFAULT_BENCHMARK
-                else 3
-            ),
+            M=int(M_r), rng=rng, u_low=int(u_low), u_high=int(u_high)
         )
 
         frozen_c_for_this_K: Optional[List[float]] = None
-        if price_freeze and price_mode == "random_uniform":
+        if price_freeze and price_mode == "random_uniform" and daily_price_json is None:
             lo = int(math.floor(price_low))
             hi = int(math.floor(price_high))
-
             if price_freeze_scope == "daily":
                 rngp = np.random.default_rng(_price_seed)
                 daily = (
@@ -411,17 +527,17 @@ def generate_instances(
                 D=int(D_r),
                 rng=rng,
                 mode=str(price_mode),
-                price_json=price_vec,
+                price_json=daily_price_json,
                 low=float(price_low),
                 high=float(price_high),
             )
 
         instances.append(
             InstancePM(
-                seed=inst_seed,
+                seed=int(inst_seed),
                 category=str(category),
                 N=int(N_r),
-                M=int(M),
+                M=int(M_r),
                 D=int(D_r),
                 K=int(K_r),
                 p=[int(x) for x in p],
@@ -453,6 +569,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional inclusive range 'a-b'. If set, sample N per replicate.",
     )
     ap.add_argument("--M", type=int, default=5)
+    ap.add_argument(
+        "--M-range",
+        type=str,
+        default="",
+        help="Optional inclusive range 'a-b'. If set, sample M per replicate.",
+    )
     ap.add_argument("--D", type=int, default=3)
     ap.add_argument(
         "--D-range",
@@ -482,6 +604,36 @@ def parse_args() -> argparse.Namespace:
         choices=["daily", "per_K", "master_prefix"],
     )
     ap.add_argument("--price-seed", type=int, default=None)
+
+    ap.add_argument(
+        "--daily-price-profile",
+        type=str,
+        default="daily_tou",
+        choices=["daily_tou", "generate_data"],
+        help=(
+            "Which 20-hour repeating daily profile to use. "
+            "daily_tou uses New Benchmark/new_data.py built-in deterministic TOU; "
+            "generate_data samples a 20-slot day using generate_data.py-style intervals and repeats it."
+        ),
+    )
+    ap.add_argument(
+        "--gd-seed",
+        type=int,
+        default=20260109,
+        help="Seed for --daily-price-profile=generate_data.",
+    )
+    ap.add_argument(
+        "--gd-ck-low",
+        type=int,
+        default=1,
+        help="Min interval price for --daily-price-profile=generate_data.",
+    )
+    ap.add_argument(
+        "--gd-ck-high",
+        type=int,
+        default=8,
+        help="Max interval price for --daily-price-profile=generate_data.",
+    )
 
     ap.add_argument(
         "--assign-alpha",
@@ -564,7 +716,7 @@ def main() -> None:
             normalize=bool(args.normalize),
         )
 
-    model: Optional[LinearRidgeValueModel] = None
+    model: Optional[_ValueModelLike] = None
     model_meta: Dict[str, bool] = {"normalize_labels": False}
     if bool(args.guided):
         if not str(args.load_model).strip():
@@ -579,6 +731,20 @@ def main() -> None:
     D_range = None
     if str(args.D_range).strip():
         D_range = _parse_int_range(str(args.D_range))
+
+    M_range = None
+    if str(args.M_range).strip():
+        M_range = _parse_int_range(str(args.M_range))
+
+    daily_price_json = None
+    if str(args.daily_price_profile).strip().lower() == "generate_data":
+        daily_price_json = _make_generate_data_daily_prices(
+            seed=int(args.gd_seed),
+            T=20,
+            Tk_choices=(2, 3, 5),
+            ck_low=int(args.gd_ck_low),
+            ck_high=int(args.gd_ck_high),
+        )
 
     instances = generate_instances(
         module=module,
@@ -596,8 +762,10 @@ def main() -> None:
         price_freeze=bool(args.price_freeze),
         price_freeze_scope=str(args.price_freeze_scope),
         price_seed=args.price_seed,
+        daily_price_json=daily_price_json,
         N_range=N_range,
         D_range=D_range,
+        M_range=M_range,
     )
 
     fieldnames = [

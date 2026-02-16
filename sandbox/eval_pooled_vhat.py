@@ -68,6 +68,50 @@ ValueModel = Union[
 ]
 
 
+def _make_generate_data_daily_prices(
+    *,
+    seed: int,
+    T: int = 20,
+    Tk_choices: Sequence[int] = (2, 3, 5),
+    ck_low: int = 1,
+    ck_high: int = 8,
+) -> List[float]:
+    """Generate a length-T daily price vector using generate_data.py-style intervals.
+
+    Keeps the overall "20 hours repeating" structure by generating a single
+    20-slot day and repeating it for D days.
+    """
+    import random
+
+    if T <= 0:
+        raise ValueError("T must be positive")
+    if ck_low > ck_high:
+        raise ValueError("ck_low must be <= ck_high")
+
+    rng = random.Random(int(seed))
+
+    while True:
+        remaining = int(T)
+        Tk: List[int] = []
+        while remaining > 0:
+            feasible = [int(x) for x in Tk_choices if int(x) <= remaining]
+            if not feasible:
+                break
+            dur = int(rng.choice(feasible))
+            Tk.append(dur)
+            remaining -= dur
+        if remaining == 0 and Tk:
+            break
+
+    ck = [int(rng.randint(int(ck_low), int(ck_high))) for _ in range(len(Tk))]
+    ct: List[float] = []
+    for dur, price in zip(Tk, ck):
+        ct.extend([float(price)] * int(dur))
+    if len(ct) != int(T):
+        raise RuntimeError("Internal error: generated daily profile has wrong length")
+    return ct
+
+
 def _collect_state_labels(
     *,
     rng: np.random.Generator,
@@ -169,6 +213,8 @@ def _collect_worker(
     samples_per_instance: int,
     spec: FeatureSpec,
     normalize_labels: bool,
+    daily_prices_20: List[float] | None,
+    target_util: float,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
@@ -180,7 +226,16 @@ def _collect_worker(
     if N_range is not None:
         N_use = int(rng.integers(int(N_range[0]), int(N_range[1]) + 1))
 
-    p, prices = build_instance(rng=rng, D=D_use, N=N_use, pmax=pmax)
+    tu = float(target_util)
+    p, prices = build_instance(
+        rng=rng,
+        D=D_use,
+        N=N_use,
+        pmax=pmax,
+        daily_prices_20=daily_prices_20,
+        target_util=(tu if tu > 0.0 else None),
+        M_for_cap=1,
+    )
     T = int(len(prices))
     lengths, totals, radices, _mult = encode_setup(p)
     ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
@@ -226,6 +281,36 @@ def main() -> None:
     ap.add_argument("--N", type=int, default=30)
     ap.add_argument("--pmax", type=int, default=3)
 
+    ap.add_argument(
+        "--daily-price-profile",
+        type=str,
+        default="daily_tou",
+        choices=["daily_tou", "generate_data"],
+        help=(
+            "Which 20-hour repeating daily profile to use. "
+            "daily_tou matches New Benchmark/new_data.py daily_tou; "
+            "generate_data samples a 20-slot day using interval prices and repeats it."
+        ),
+    )
+    ap.add_argument(
+        "--gd-seed",
+        type=int,
+        default=20260109,
+        help="Seed for --daily-price-profile=generate_data.",
+    )
+    ap.add_argument("--gd-ck-low", type=int, default=1)
+    ap.add_argument("--gd-ck-high", type=int, default=8)
+
+    ap.add_argument(
+        "--target-util",
+        type=float,
+        default=0.0,
+        help=(
+            "If >0, enforce New Benchmark/new_data.py-style utilization cap when sampling p: "
+            "sum(p) <= floor(target_util * 1 * T). If 0, only enforce feasibility sum(p)<=T."
+        ),
+    )
+
     # Training
     ap.add_argument(
         "--train-seeds",
@@ -253,6 +338,16 @@ def main() -> None:
         help="Optional inclusive range 'a-b'. If set, sample N per training seed.",
     )
     ap.add_argument("--l2", type=float, default=1e-3)
+
+    # Model training knobs (defaults match previous behavior)
+    ap.add_argument("--mlp-lr", type=float, default=1e-3)
+    ap.add_argument("--mlp-batch-size", type=int, default=2048)
+    ap.add_argument("--mlp-max-epochs", type=int, default=200)
+    ap.add_argument("--mlp-patience", type=int, default=15)
+
+    ap.add_argument("--lgbm-n-estimators", type=int, default=100)
+    ap.add_argument("--lgbm-max-depth", type=int, default=5)
+    ap.add_argument("--lgbm-learning-rate", type=float, default=0.1)
 
     # Model type
     ap.add_argument(
@@ -365,6 +460,16 @@ def main() -> None:
 
     train_seeds = parse_seed_range(args.train_seeds)
     eval_seeds = parse_seed_range(args.eval_seeds)
+
+    daily_prices_20: List[float] | None = None
+    if str(args.daily_price_profile).strip().lower() == "generate_data":
+        daily_prices_20 = _make_generate_data_daily_prices(
+            seed=int(args.gd_seed),
+            T=20,
+            Tk_choices=(2, 3, 5),
+            ck_low=int(args.gd_ck_low),
+            ck_high=int(args.gd_ck_high),
+        )
 
     if str(args.beams).strip():
         beams = [int(x) for x in str(args.beams).split(",") if x.strip()]
@@ -494,6 +599,8 @@ def main() -> None:
             samples_per_instance=int(args.samples_per_instance),
             spec=spec,
             normalize_labels=use_normalize_labels,
+            daily_prices_20=daily_prices_20,
+            target_util=float(args.target_util),
         )
 
         if n_workers > 1 and len(train_seeds) > 1:
@@ -577,10 +684,10 @@ def main() -> None:
                 y_test,
                 hidden1=64,
                 hidden2=32,
-                lr=1e-3,
-                batch_size=2048,
-                max_epochs=200,
-                patience=15,
+                lr=float(args.mlp_lr),
+                batch_size=int(args.mlp_batch_size),
+                max_epochs=int(args.mlp_max_epochs),
+                patience=int(args.mlp_patience),
             )
             mlp_model.spec = spec
             model = mlp_model
@@ -599,9 +706,9 @@ def main() -> None:
                 y_train,
                 X_test,
                 y_test,
-                n_estimators=100,
-                max_depth=5,
-                learning_rate=0.1,
+                n_estimators=int(args.lgbm_n_estimators),
+                max_depth=int(args.lgbm_max_depth),
+                learning_rate=float(args.lgbm_learning_rate),
                 n_jobs=n_workers,
             )
             model = LGBMValueModel(booster=booster, spec=spec)
@@ -650,17 +757,11 @@ def main() -> None:
                 )
             elif model_type in ("poly", "mlp"):
                 model.save(str(save_p))
-                # Also save normalize_labels in a sidecar
-                np.savez(
-                    str(save_p) + ".meta",
-                    normalize_labels=int(use_normalize_labels),
-                )
+                # Also save normalize_labels in a sidecar (stable filename)
+                np.savez(str(save_p) + ".meta.npz", normalize_labels=int(use_normalize_labels))
             elif model_type == "lgbm":
                 model.save(str(save_p))
-                np.savez(
-                    str(save_p) + ".meta",
-                    normalize_labels=int(use_normalize_labels),
-                )
+                np.savez(str(save_p) + ".meta.npz", normalize_labels=int(use_normalize_labels))
             print(f"[pool] Model saved to {save_p} (type={model_type})")
 
     # =========================================================================
@@ -695,6 +796,18 @@ def main() -> None:
     else:
         _nlabels = use_normalize_labels
 
+    # Make the compared variants explicit in the log.
+    model_desc = (
+        f"type={model_type}, spec={spec}, normalize_labels={bool(_nlabels)}"
+        + (f", ckpt={loaded_model_path}" if loaded_model_path else "")
+    )
+    print(
+        f"[pool] Comparing variants: "
+        f"Exact DP vs Guided(Learned-Vhat) vs Guided(Zero-Vhat) vs Guided(Price-Vhat)"
+        f"\n[pool] Vhat model: {model_desc}"
+        f"\n[pool] Legend per-row: exact=Exact DP cost, L=Learned-Vhat, Z=Zero-Vhat, P=Price-Vhat"
+    )
+
     for eval_seed in eval_seeds:
         rng = np.random.default_rng(eval_seed)
         D_use = int(eval_D)
@@ -703,7 +816,16 @@ def main() -> None:
             D_use = int(rng.integers(int(eval_D_range[0]), int(eval_D_range[1]) + 1))
         if eval_N_range is not None:
             N_use = int(rng.integers(int(eval_N_range[0]), int(eval_N_range[1]) + 1))
-        p, prices = build_instance(rng=rng, D=D_use, N=N_use, pmax=eval_pmax)
+        tu = float(args.target_util)
+        p, prices = build_instance(
+            rng=rng,
+            D=D_use,
+            N=N_use,
+            pmax=eval_pmax,
+            daily_prices_20=daily_prices_20,
+            target_util=(tu if tu > 0.0 else None),
+            M_for_cap=1,
+        )
         T = int(len(prices))
 
         t0 = time.perf_counter()

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 export PYTHONUNBUFFERED=1
 
 # Common parameters
@@ -25,6 +25,14 @@ echo "========================================================================"
 for MODEL in linear poly mlp lgbm; do
     echo ""
     echo ">>> Running $MODEL model..."
+
+    if [[ "$MODEL" == "lgbm" ]]; then
+      if ! conda run -n new-ml-env python -c "import lightgbm" >/dev/null 2>&1; then
+        echo "    [skip] lightgbm is not installed in conda env 'new-ml-env'"
+        echo ">>> lgbm skipped."
+        continue
+      fi
+    fi
     
     # 1. Train on N=35 pmax=5 + Eval on Same Size (N=40)
     echo "    Training & Eval (Same Size)..."

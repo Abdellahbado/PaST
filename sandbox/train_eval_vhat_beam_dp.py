@@ -51,17 +51,56 @@ def daily_tou_20() -> List[float]:
 
 
 def build_instance(
-    *, rng: np.random.Generator, D: int, N: int, pmax: int
+    *,
+    rng: np.random.Generator,
+    D: int,
+    N: int,
+    pmax: int,
+    daily_prices_20: Sequence[float] | None = None,
+    target_util: float | None = None,
+    M_for_cap: int = 1,
 ) -> Tuple[List[int], np.ndarray]:
-    prices = np.array(daily_tou_20() * int(D), dtype=np.float64)
-    p = rng.integers(1, int(pmax) + 1, size=int(N)).astype(int).tolist()
-    # Ensure feasibility: sum(p) <= T (otherwise exact DP returns infeasible)
+    day = list(daily_tou_20() if daily_prices_20 is None else daily_prices_20)
+    if len(day) != 20:
+        raise ValueError("daily_prices_20 must have length 20")
+
+    prices = np.array(day * int(D), dtype=np.float64)
     T = int(len(prices))
-    while sum(p) > T:
-        i = int(rng.integers(0, len(p)))
-        if p[i] > 1:
+
+    p = rng.integers(1, int(pmax) + 1, size=int(N)).astype(int)
+
+    # If target_util is provided, match New Benchmark/new_data.py-style load cap:
+    #   sum(p) <= floor(target_util * M_for_cap * T)
+    # else: just ensure feasibility sum(p) <= T.
+    if target_util is not None:
+        if not (0.0 < float(target_util) <= 1.0):
+            raise ValueError("target_util must be in (0, 1]")
+        cap = int(np.floor(float(target_util) * float(int(M_for_cap)) * float(T)))
+        if cap < int(N):
+            raise ValueError(f"Infeasible cap: cap={cap} < N={N}")
+        total = int(p.sum())
+        idxs = np.where(p > 1)[0]
+        guard = 0
+        while total > cap:
+            if idxs.size == 0:
+                raise ValueError(
+                    "Cannot reduce processing times enough to satisfy cap."
+                )
+            i = int(rng.choice(idxs))
             p[i] -= 1
-    return p, prices
+            total -= 1
+            if p[i] == 1:
+                idxs = np.where(p > 1)[0]
+            guard += 1
+            if guard > 10_000_000:
+                raise RuntimeError("Guard triggered while reducing processing times.")
+    else:
+        while int(p.sum()) > T:
+            i = int(rng.integers(0, len(p)))
+            if p[i] > 1:
+                p[i] -= 1
+
+    return p.astype(int).tolist(), prices
 
 
 def encode_setup(p_list: Sequence[int]):
