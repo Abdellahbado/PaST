@@ -653,7 +653,7 @@ def main() -> None:
                     # Build Vhat for this machine (scale base model by u_m)
                     vhat_fn = None
                     if model is not None and len(p_m) > 0:
-                        lengths, totals, radices, _mult = encode_setup(p_m)
+                        lengths, totals, radices = encode_setup(p_m)
                         used_cache: Dict[int, Tuple[int, ...]] = {
                             0: tuple([0] * len(lengths))
                         }
