@@ -3,31 +3,34 @@
 Unlike eval_guided_vhat_holdout.py which trains a separate model per instance,
 this script:
   1. Collects labeled DP states from multiple TRAINING instances (--train-seeds)
-  2. Fits ONE shared Ridge model on the pooled data
+  2. Fits ONE shared model on the pooled data
   3. Evaluates the shared model (frozen) on HELD-OUT instances (--eval-seeds)
 
-This is the practical workflow: train once on a size class, evaluate on unseen
-instances of the same (or different) size.
+Supports multiple model types: linear, poly, mlp, lgbm.
+Data collection is parallelized across CPU cores.
 
 Example:
     python PaST/sandbox/eval_pooled_vhat.py \
         --D 6 --N 30 --pmax 3 \
         --train-seeds 0-19  --samples-per-instance 2000 \
         --eval-seeds 100-129 --beams 2,3,5 \
-        --transferable-features --normalize \
-        --save-model PaST/models/vhat_pooled_small.npz \
-        --out-csv PaST/logs/pooled_small.csv
+        --transferable-features --normalize --normalize-labels \
+        --model-type poly \
+        --save-model PaST/models/vhat_pooled_poly.npz \
+        --out-csv PaST/logs/pooled_poly.csv
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import multiprocessing as mp
 import os
 import sys
 import time
+from functools import partial
 from pathlib import Path
 from statistics import mean, median
-from typing import Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -48,6 +51,18 @@ from PaST.sandbox.train_eval_vhat_beam_dp import (
     fit_ridge_with_prior,
     remaining_p_list,
 )
+from PaST.solvers.vhat_models import (
+    PolyRidgeValueModel,
+    MLPValueModel,
+    LGBMValueModel,
+    fit_poly_ridge,
+    fit_mlp,
+    fit_lgbm,
+    _poly_expand_batch,
+)
+
+# Union type for all model types
+ValueModel = Union[LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, LGBMValueModel]
 
 
 def _collect_state_labels(
@@ -128,6 +143,54 @@ def parse_seed_range(s: str) -> List[int]:
     return [int(x) for x in s.split(",") if x.strip()]
 
 
+def _collect_worker(
+    seed: int,
+    D: int,
+    N: int,
+    pmax: int,
+    samples_per_instance: int,
+    spec: FeatureSpec,
+    normalize_labels: bool,
+) -> Tuple[np.ndarray, np.ndarray, int]:
+    """Worker function for parallel data collection. Runs in a subprocess."""
+    rng = np.random.default_rng(seed)
+    p, prices = build_instance(rng=rng, D=D, N=N, pmax=pmax)
+    T = int(len(prices))
+    lengths, totals, radices, _mult = encode_setup(p)
+    ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
+    prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
+
+    states, labels, attempts = _collect_state_labels(
+        rng=rng,
+        T=T,
+        totals=totals,
+        lengths=lengths,
+        prices=prices,
+        target_samples=samples_per_instance,
+        normalize_labels=normalize_labels,
+        prefix_prices=prefix_prices,
+    )
+
+    if not states:
+        return np.empty((0, 0)), np.empty(0), attempts
+
+    X_inst = np.vstack(
+        [
+            phi_for_state(
+                t=int(t_v),
+                used=used_v,
+                totals=totals,
+                lengths=lengths.tolist(),
+                ctx=ctx,
+                spec=spec,
+            )
+            for (t_v, used_v) in states
+        ]
+    )
+    y_inst = np.asarray(labels, dtype=np.float64)
+    return X_inst, y_inst, attempts
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Pooled cross-instance training: train ONE model on multiple instances, evaluate on held-out instances."
@@ -151,6 +214,22 @@ def main() -> None:
         help="Number of random state samples per training instance.",
     )
     ap.add_argument("--l2", type=float, default=1e-3)
+
+    # Model type
+    ap.add_argument(
+        "--model-type",
+        type=str,
+        default="linear",
+        choices=["linear", "poly", "mlp", "lgbm"],
+        help="Model type: linear (Ridge), poly (degree-2 polynomial Ridge), "
+             "mlp (small neural net), lgbm (gradient boosted trees).",
+    )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=0,
+        help="Number of parallel workers for data collection (0 = auto = cpu_count).",
+    )
 
     # Evaluation
     ap.add_argument(
@@ -246,14 +325,19 @@ def main() -> None:
     eval_N = int(args.eval_N) if int(args.eval_N) > 0 else int(args.N)
     eval_pmax = int(args.eval_pmax) if int(args.eval_pmax) > 0 else int(args.pmax)
 
+    model_type = str(args.model_type).strip().lower()
+    n_workers = int(args.workers) if int(args.workers) > 0 else mp.cpu_count()
+
     # =========================================================================
     # PHASE 1: TRAINING — pool labeled states from multiple instances
     # =========================================================================
     loaded_model_path = str(args.load_model).strip()
     if loaded_model_path:
         print(f"[pool] Loading pre-trained model from {loaded_model_path}")
-        ckpt = np.load(loaded_model_path)
-        w = np.asarray(ckpt["weights"], dtype=np.float64)
+        ckpt = np.load(loaded_model_path, allow_pickle=True)
+        _mt = str(ckpt["model_type"]) if "model_type" in ckpt.files else "linear"
+
+        # Restore spec from checkpoint
         if {
             "include_per_class_counts",
             "include_per_class_now_cost",
@@ -272,74 +356,83 @@ def main() -> None:
                 include_bins=bool(int(ckpt["include_bins"])),
                 normalize=_norm,
             )
-        model = LinearRidgeValueModel(weights=w, spec=spec)
+
+        if _mt == "poly":
+            model = PolyRidgeValueModel.load(loaded_model_path)
+            model_type = "poly"
+        elif _mt == "mlp":
+            model = MLPValueModel.load(loaded_model_path)
+            model_type = "mlp"
+        elif _mt == "lgbm":
+            model = LGBMValueModel.load(loaded_model_path)
+            model_type = "lgbm"
+        else:
+            w = np.asarray(ckpt["weights"], dtype=np.float64)
+            model = LinearRidgeValueModel(weights=w, spec=spec)
+            model_type = "linear"
+
         train_s = 0.0
-        print(f"[pool] Loaded model: dim={len(w)}, spec={spec}")
+        print(f"[pool] Loaded model: type={model_type}, spec={spec}")
     else:
         use_normalize_labels = bool(args.normalize_labels)
         print(
             f"[pool] === TRAINING PHASE ==="
+            f"\n[pool] Model type: {model_type}"
             f"\n[pool] Instance params: D={args.D}, N={args.N}, pmax={args.pmax}"
             f"\n[pool] Train seeds: {train_seeds[0]}-{train_seeds[-1]} ({len(train_seeds)} instances)"
             f"\n[pool] Samples per instance: {args.samples_per_instance}"
             f"\n[pool] Features: spec={spec}"
             f"\n[pool] normalize_labels={use_normalize_labels}"
+            f"\n[pool] Workers: {n_workers}"
         )
 
         train_t0 = time.perf_counter()
-        all_X: List[np.ndarray] = []
-        all_y: List[float] = []
-        total_attempts = 0
 
-        for i, seed in enumerate(train_seeds):
-            t_inst = time.perf_counter()
-            rng = np.random.default_rng(seed)
-            p, prices = build_instance(
-                rng=rng, D=int(args.D), N=int(args.N), pmax=int(args.pmax)
-            )
-            T = int(len(prices))
-            lengths, totals, radices, _mult = encode_setup(p)
-            ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
-            inst_prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
+        # === Parallel data collection ===
+        worker_fn = partial(
+            _collect_worker,
+            D=int(args.D),
+            N=int(args.N),
+            pmax=int(args.pmax),
+            samples_per_instance=int(args.samples_per_instance),
+            spec=spec,
+            normalize_labels=use_normalize_labels,
+        )
 
-            states, labels, attempts = _collect_state_labels(
-                rng=rng,
-                T=T,
-                totals=totals,
-                lengths=lengths,
-                prices=prices,
-                target_samples=int(args.samples_per_instance),
-                normalize_labels=use_normalize_labels,
-                prefix_prices=inst_prefix_prices,
-            )
-            total_attempts += attempts
-
-            # Compute features for this instance's states
-            X_inst = np.vstack(
-                [
-                    phi_for_state(
-                        t=int(t_v),
-                        used=used_v,
-                        totals=totals,
-                        lengths=lengths.tolist(),
-                        ctx=ctx,
-                        spec=spec,
+        if n_workers > 1 and len(train_seeds) > 1:
+            print(f"[pool] Collecting data with {n_workers} parallel workers...")
+            with mp.Pool(n_workers) as pool:
+                results = []
+                for i, result in enumerate(pool.imap_unordered(worker_fn, train_seeds)):
+                    results.append(result)
+                    print(
+                        f"[pool] collected {i+1}/{len(train_seeds)} instances "
+                        f"({result[0].shape[0]} samples)"
                     )
-                    for (t_v, used_v) in states
-                ]
-            )
-            all_X.append(X_inst)
-            all_y.extend(labels)
+        else:
+            print(f"[pool] Collecting data sequentially...")
+            results = []
+            for i, seed in enumerate(train_seeds):
+                t_inst = time.perf_counter()
+                result = worker_fn(seed)
+                results.append(result)
+                inst_time = time.perf_counter() - t_inst
+                print(
+                    f"[pool] train seed={seed} ({i+1}/{len(train_seeds)}) "
+                    f"samples={result[0].shape[0]} "
+                    f"time={inst_time:.1f}s"
+                )
 
-            inst_time = time.perf_counter() - t_inst
-            print(
-                f"[pool] train seed={seed} ({i+1}/{len(train_seeds)}) "
-                f"K={len(lengths)} samples={len(states)} "
-                f"time={inst_time:.1f}s"
-            )
+        # Pool results
+        all_X = [r[0] for r in results if r[0].size > 0]
+        all_y = [r[1] for r in results if r[1].size > 0]
+        total_attempts = sum(r[2] for r in results)
 
         X_pool = np.vstack(all_X)
-        y_pool = np.asarray(all_y, dtype=np.float64)
+        y_pool = np.concatenate(all_y)
+
+        collect_time = time.perf_counter() - train_t0
+        print(f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s")
 
         # Train/test split on pooled data
         idx = np.arange(len(y_pool))
@@ -348,52 +441,115 @@ def main() -> None:
         train_idx = idx[:split]
         test_idx = idx[split:]
 
-        w = fit_ridge(X_pool[train_idx], y_pool[train_idx], l2=float(args.l2))
+        X_train, y_train = X_pool[train_idx], y_pool[train_idx]
+        X_test, y_test = X_pool[test_idx], y_pool[test_idx]
+
+        # ============== Model-specific training ==============
+        fit_t0 = time.perf_counter()
+
+        if model_type == "linear":
+            w = fit_ridge(X_train, y_train, l2=float(args.l2))
+            model = LinearRidgeValueModel(weights=w, spec=spec)
+            y_hat_train = X_train @ w
+            y_hat_test = X_test @ w
+            feat_dim = int(X_pool.shape[1])
+            # Print top weights
+            top_k = min(10, len(w))
+            sorted_idx = np.argsort(np.abs(w))[::-1][:top_k]
+            print(f"[pool] Top-{top_k} weights:")
+            for rank, fi in enumerate(sorted_idx):
+                print(f"    #{rank+1} feat[{fi}] w={w[fi]:.6f}")
+
+        elif model_type == "poly":
+            w, powers = fit_poly_ridge(X_train, y_train, l2=float(args.l2), degree=2)
+            model = PolyRidgeValueModel(weights=w, spec=spec, powers_=powers)
+            X_train_poly = _poly_expand_batch(X_train, powers)
+            X_test_poly = _poly_expand_batch(X_test, powers)
+            y_hat_train = X_train_poly @ w
+            y_hat_test = X_test_poly @ w
+            feat_dim = int(X_train_poly.shape[1])
+            print(f"[pool] Polynomial: {X_pool.shape[1]} raw → {feat_dim} poly features")
+
+        elif model_type == "mlp":
+            mlp_model = fit_mlp(
+                X_train, y_train, X_test, y_test,
+                hidden1=64, hidden2=32,
+                lr=1e-3, batch_size=2048, max_epochs=200, patience=15,
+            )
+            mlp_model.spec = spec
+            model = mlp_model
+            # Compute predictions with numpy inference
+            h1 = np.maximum(0, X_train @ model.W1 + model.b1)
+            h2 = np.maximum(0, h1 @ model.W2 + model.b2)
+            y_hat_train = (h2 @ model.W3 + model.b3).ravel()
+            h1 = np.maximum(0, X_test @ model.W1 + model.b1)
+            h2 = np.maximum(0, h1 @ model.W2 + model.b2)
+            y_hat_test = (h2 @ model.W3 + model.b3).ravel()
+            feat_dim = int(X_pool.shape[1])
+
+        elif model_type == "lgbm":
+            booster = fit_lgbm(
+                X_train, y_train, X_test, y_test,
+                n_estimators=100, max_depth=5, learning_rate=0.1, n_jobs=n_workers,
+            )
+            model = LGBMValueModel(booster=booster, spec=spec)
+            y_hat_train = booster.predict(X_train)
+            y_hat_test = booster.predict(X_test)
+            feat_dim = int(X_pool.shape[1])
+
+        else:
+            raise ValueError(f"Unknown model type: {model_type}")
+
+        fit_time = time.perf_counter() - fit_t0
         train_s = time.perf_counter() - train_t0
 
         # Training diagnostics
-        y_hat_train = X_pool[train_idx] @ w
-        r2_train = _r2_score(y_pool[train_idx], y_hat_train)
-        mae_train = float(np.mean(np.abs(y_pool[train_idx] - y_hat_train)))
+        r2_train = _r2_score(y_train, y_hat_train)
+        mae_train = float(np.mean(np.abs(y_train - y_hat_train)))
+        r2_test = _r2_score(y_test, y_hat_test)
+        mae_test = float(np.mean(np.abs(y_test - y_hat_test)))
 
-        y_hat_test = X_pool[test_idx] @ w
-        r2_test = _r2_score(y_pool[test_idx], y_hat_test)
-        mae_test = float(np.mean(np.abs(y_pool[test_idx] - y_hat_test)))
-
-        feat_dim = int(X_pool.shape[1])
         print(
             f"\n[pool] === TRAINING RESULTS ==="
+            f"\n[pool] Model: {model_type}"
             f"\n[pool] Pooled samples: {len(y_pool)} (from {len(train_seeds)} instances)"
             f"\n[pool] feat_dim={feat_dim}"
             f"\n[pool] R2_train={r2_train:.4f}  R2_test={r2_test:.4f}"
-            f"\n[pool] MAE_train={mae_train:.2f}  MAE_test={mae_test:.2f}"
+            f"\n[pool] MAE_train={mae_train:.4f}  MAE_test={mae_test:.4f}"
+            f"\n[pool] Data collection: {collect_time:.1f}s  Model fitting: {fit_time:.1f}s"
             f"\n[pool] Total training time: {train_s:.1f}s"
         )
-
-        # Top feature weights
-        top_k = min(10, len(w))
-        sorted_idx = np.argsort(np.abs(w))[::-1][:top_k]
-        print(f"[pool] Top-{top_k} weights:")
-        for rank, fi in enumerate(sorted_idx):
-            print(f"    #{rank+1} feat[{fi}] w={w[fi]:.6f}")
-
-        model = LinearRidgeValueModel(weights=w, spec=spec)
 
         # Save model
         save_path = str(args.save_model).strip()
         if save_path:
             save_p = Path(save_path)
             save_p.parent.mkdir(parents=True, exist_ok=True)
-            np.savez(
-                save_p,
-                weights=w,
-                include_per_class_counts=int(spec.include_per_class_counts),
-                include_per_class_now_cost=int(spec.include_per_class_now_cost),
-                include_bins=int(spec.include_bins),
-                normalize=int(spec.normalize),
-                normalize_labels=int(use_normalize_labels),
-            )
-            print(f"[pool] Model saved to {save_p}")
+            if model_type == "linear":
+                np.savez(
+                    save_p,
+                    weights=w,
+                    include_per_class_counts=int(spec.include_per_class_counts),
+                    include_per_class_now_cost=int(spec.include_per_class_now_cost),
+                    include_bins=int(spec.include_bins),
+                    normalize=int(spec.normalize),
+                    normalize_labels=int(use_normalize_labels),
+                    model_type="linear",
+                )
+            elif model_type in ("poly", "mlp"):
+                model.save(str(save_p))
+                # Also save normalize_labels in a sidecar
+                np.savez(
+                    str(save_p) + ".meta",
+                    normalize_labels=int(use_normalize_labels),
+                )
+            elif model_type == "lgbm":
+                model.save(str(save_p))
+                np.savez(
+                    str(save_p) + ".meta",
+                    normalize_labels=int(use_normalize_labels),
+                )
+            print(f"[pool] Model saved to {save_p} (type={model_type})")
 
     # =========================================================================
     # PHASE 2: EVALUATION — test shared model on held-out instances
@@ -406,7 +562,22 @@ def main() -> None:
     )
 
     rows: List[Dict[str, float]] = []
-    w = model.weights
+    w = model.weights if hasattr(model, 'weights') else None
+
+    # Determine if labels were normalized during training (once, not per-seed)
+    _nlabels = False
+    if loaded_model_path:
+        ckpt_re = np.load(loaded_model_path, allow_pickle=True)
+        if "normalize_labels" in ckpt_re.files:
+            _nlabels = bool(int(ckpt_re["normalize_labels"]))
+        else:
+            # Check sidecar meta file for poly/mlp/lgbm
+            meta_path = loaded_model_path + ".meta.npz"
+            if Path(meta_path).exists():
+                meta = np.load(meta_path)
+                _nlabels = bool(int(meta["normalize_labels"])) if "normalize_labels" in meta.files else False
+    else:
+        _nlabels = use_normalize_labels
 
     for eval_seed in eval_seeds:
         rng = np.random.default_rng(eval_seed)
@@ -427,14 +598,6 @@ def main() -> None:
 
         # Build vhat closure for this instance using the SHARED model
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
-
-        # Determine if labels were normalized during training
-        _nlabels = False
-        if loaded_model_path:
-            ckpt_re = np.load(loaded_model_path)
-            _nlabels = bool(int(ckpt_re["normalize_labels"])) if "normalize_labels" in ckpt_re.files else False
-        else:
-            _nlabels = use_normalize_labels
 
         # Precompute prefix prices for label denormalization
         prefix_prices = np.concatenate(
