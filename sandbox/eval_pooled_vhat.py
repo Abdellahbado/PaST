@@ -58,12 +58,23 @@ def _collect_state_labels(
     lengths: np.ndarray,
     prices: np.ndarray,
     target_samples: int,
+    normalize_labels: bool = False,
+    prefix_prices: np.ndarray | None = None,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
-    """Sample random (t, used) states and label them with exact DP cost-to-go."""
+    """Sample random (t, used) states and label them with exact DP cost-to-go.
+
+    If normalize_labels is True, each label y is divided by sum(prices[t:])
+    so the model predicts cost as a fraction of remaining price budget.
+    This makes labels scale-invariant across instance sizes.
+    """
     states: List[Tuple[int, Tuple[int, ...]]] = []
     labels: List[float] = []
     attempts = 0
     max_attempts = max(6 * target_samples, 300)
+
+    # Precompute suffix sums of prices for label normalization
+    if normalize_labels and prefix_prices is None:
+        prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
     while len(states) < target_samples and attempts < max_attempts:
         attempts += 1
@@ -87,6 +98,12 @@ def _collect_state_labels(
             if not sub.feasible:
                 continue
             y = float(sub.cost)
+
+        # Normalize label by remaining price budget
+        if normalize_labels and prefix_prices is not None:
+            rem_budget = float(prefix_prices[T] - prefix_prices[t])
+            if rem_budget > 1e-9:
+                y = y / rem_budget
 
         states.append((t, tuple(int(x) for x in used)))
         labels.append(y)
@@ -166,6 +183,12 @@ def main() -> None:
         "--normalize",
         action="store_true",
         help="Normalize features by T for scale-invariant ratios.",
+    )
+    ap.add_argument(
+        "--normalize-labels",
+        action="store_true",
+        help="Normalize labels by sum(prices[t:]) for scale-invariant cost predictions. "
+             "Essential for cross-size transfer: makes weights independent of instance scale.",
     )
 
     # Model I/O
@@ -253,12 +276,14 @@ def main() -> None:
         train_s = 0.0
         print(f"[pool] Loaded model: dim={len(w)}, spec={spec}")
     else:
+        use_normalize_labels = bool(args.normalize_labels)
         print(
             f"[pool] === TRAINING PHASE ==="
             f"\n[pool] Instance params: D={args.D}, N={args.N}, pmax={args.pmax}"
             f"\n[pool] Train seeds: {train_seeds[0]}-{train_seeds[-1]} ({len(train_seeds)} instances)"
             f"\n[pool] Samples per instance: {args.samples_per_instance}"
             f"\n[pool] Features: spec={spec}"
+            f"\n[pool] normalize_labels={use_normalize_labels}"
         )
 
         train_t0 = time.perf_counter()
@@ -275,6 +300,7 @@ def main() -> None:
             T = int(len(prices))
             lengths, totals, radices, _mult = encode_setup(p)
             ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
+            inst_prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
             states, labels, attempts = _collect_state_labels(
                 rng=rng,
@@ -283,6 +309,8 @@ def main() -> None:
                 lengths=lengths,
                 prices=prices,
                 target_samples=int(args.samples_per_instance),
+                normalize_labels=use_normalize_labels,
+                prefix_prices=inst_prefix_prices,
             )
             total_attempts += attempts
 
@@ -363,6 +391,7 @@ def main() -> None:
                 include_per_class_now_cost=int(spec.include_per_class_now_cost),
                 include_bins=int(spec.include_bins),
                 normalize=int(spec.normalize),
+                normalize_labels=int(use_normalize_labels),
             )
             print(f"[pool] Model saved to {save_p}")
 
@@ -399,7 +428,20 @@ def main() -> None:
         # Build vhat closure for this instance using the SHARED model
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
 
-        def _make_vhat(model_ref, totals_ref, lengths_ref, ctx_ref, radices_ref, cache_ref):
+        # Determine if labels were normalized during training
+        _nlabels = False
+        if loaded_model_path:
+            ckpt_re = np.load(loaded_model_path)
+            _nlabels = bool(int(ckpt_re["normalize_labels"])) if "normalize_labels" in ckpt_re.files else False
+        else:
+            _nlabels = use_normalize_labels
+
+        # Precompute prefix prices for label denormalization
+        prefix_prices = np.concatenate(
+            [[0.0], np.cumsum(prices, dtype=np.float64)]
+        )
+
+        def _make_vhat(model_ref, totals_ref, lengths_ref, ctx_ref, radices_ref, cache_ref, T_ref, prefix_ref, nlabels):
             """Create a vhat closure. Needed to capture loop variables correctly."""
             def vhat(t: int, state: int) -> float:
                 s = int(state)
@@ -407,22 +449,24 @@ def main() -> None:
                 if used_cached is None:
                     used_cached = decode_state(s, radices_ref)
                     cache_ref[s] = used_cached
-                return model_ref.predict_from_used(
+                val = model_ref.predict_from_used(
                     t=int(t),
                     used=used_cached,
                     totals=totals_ref,
                     lengths=lengths_ref.tolist(),
                     ctx=ctx_ref,
                 )
+                # Denormalize: model predicts cost/remaining_budget, multiply back
+                if nlabels:
+                    tt = max(0, min(int(t), T_ref))
+                    rem_budget = float(prefix_ref[T_ref] - prefix_ref[tt])
+                    val = val * rem_budget
+                return val
             return vhat
 
-        vhat = _make_vhat(model, totals, lengths, ctx, radices, used_cache)
+        vhat = _make_vhat(model, totals, lengths, ctx, radices, used_cache, T, prefix_prices, _nlabels)
 
         # Price heuristic
-        prefix_prices = np.concatenate(
-            [[0.0], np.cumsum(prices, dtype=np.float64)]
-        )
-
         def _make_vhat_price(totals_ref, lengths_ref, radices_ref, cache_ref, T_ref, prefix_ref):
             def vhat_price(t: int, state: int) -> float:
                 s = int(state)
