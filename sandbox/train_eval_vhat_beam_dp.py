@@ -67,6 +67,13 @@ def build_instance(
     prices = np.array(day * int(D), dtype=np.float64)
     T = int(len(prices))
 
+    # Single-machine feasibility requires sum(p) >= N (since p_j>=1) and sum(p) <= T.
+    # Therefore N must be <= T.
+    if int(N) > int(T):
+        raise ValueError(
+            f"Infeasible single-machine instance: N={int(N)} > T={int(T)} (H=20, D={int(D)})"
+        )
+
     p = rng.integers(1, int(pmax) + 1, size=int(N)).astype(int)
 
     # If target_util is provided, match New Benchmark/new_data.py-style load cap:

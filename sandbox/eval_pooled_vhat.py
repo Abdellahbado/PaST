@@ -203,6 +203,70 @@ def parse_int_range(s: str) -> Tuple[int, int]:
     return a, b
 
 
+def _sample_D_N_feasible(
+    *,
+    rng: np.random.Generator,
+    base_D: int,
+    base_N: int,
+    D_range: Tuple[int, int] | None,
+    N_range: Tuple[int, int] | None,
+    target_util: float,
+    H: int = 20,
+    max_tries: int = 64,
+) -> Tuple[int, int]:
+    """Sample (D,N) while ensuring single-machine feasibility.
+
+    For a single machine with 1-hour slots:
+    - Need N <= T where T=H*D (since p_j>=1).
+    - If target_util>0 and we enforce sum(p)<=floor(target_util*T), also need
+      N <= floor(target_util*T).
+
+    If constraints make the requested (D_range,N_range,target_util) impossible
+    (e.g. D in [2,4], N in [60,60], target_util=0.8), we fall back by clamping N
+    to the largest feasible value for the sampled D.
+    """
+    D0 = int(base_D)
+    N0 = int(base_N)
+    tu = float(target_util)
+    tu = tu if tu > 0.0 else 0.0
+
+    # Determine N bounds
+    if N_range is None:
+        N_lo, N_hi = N0, N0
+    else:
+        N_lo, N_hi = int(N_range[0]), int(N_range[1])
+    if N_lo > N_hi:
+        N_lo, N_hi = N_hi, N_lo
+
+    # Determine D bounds
+    if D_range is None:
+        D_lo, D_hi = D0, D0
+    else:
+        D_lo, D_hi = int(D_range[0]), int(D_range[1])
+    if D_lo > D_hi:
+        D_lo, D_hi = D_hi, D_lo
+
+    for _ in range(int(max_tries)):
+        D_use = int(rng.integers(int(D_lo), int(D_hi) + 1))
+        T = int(H) * int(D_use)
+        capN = int(T)
+        if tu > 0.0:
+            capN = min(capN, int(np.floor(tu * float(T))))
+        feasible_hi = min(int(N_hi), int(capN))
+        if feasible_hi >= int(N_lo):
+            N_use = int(rng.integers(int(N_lo), int(feasible_hi) + 1))
+            return int(D_use), int(N_use)
+
+    # Fallback: pick D deterministically and clamp N.
+    D_use = int(D0 if D_range is None else D_hi)
+    T = int(H) * int(D_use)
+    capN = int(T)
+    if tu > 0.0:
+        capN = min(capN, int(np.floor(tu * float(T))))
+    N_use = int(min(max(int(N_lo), 1), max(int(capN), 1)))
+    return int(D_use), int(N_use)
+
+
 def _collect_worker(
     seed: int,
     D: int,
@@ -219,12 +283,15 @@ def _collect_worker(
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
 
-    D_use = int(D)
-    N_use = int(N)
-    if D_range is not None:
-        D_use = int(rng.integers(int(D_range[0]), int(D_range[1]) + 1))
-    if N_range is not None:
-        N_use = int(rng.integers(int(N_range[0]), int(N_range[1]) + 1))
+    D_use, N_use = _sample_D_N_feasible(
+        rng=rng,
+        base_D=int(D),
+        base_N=int(N),
+        D_range=D_range,
+        N_range=N_range,
+        target_util=float(target_util),
+        H=20,
+    )
 
     tu = float(target_util)
     p, prices = build_instance(
@@ -758,10 +825,16 @@ def main() -> None:
             elif model_type in ("poly", "mlp"):
                 model.save(str(save_p))
                 # Also save normalize_labels in a sidecar (stable filename)
-                np.savez(str(save_p) + ".meta.npz", normalize_labels=int(use_normalize_labels))
+                np.savez(
+                    str(save_p) + ".meta.npz",
+                    normalize_labels=int(use_normalize_labels),
+                )
             elif model_type == "lgbm":
                 model.save(str(save_p))
-                np.savez(str(save_p) + ".meta.npz", normalize_labels=int(use_normalize_labels))
+                np.savez(
+                    str(save_p) + ".meta.npz",
+                    normalize_labels=int(use_normalize_labels),
+                )
             print(f"[pool] Model saved to {save_p} (type={model_type})")
 
     # =========================================================================
@@ -810,12 +883,15 @@ def main() -> None:
 
     for eval_seed in eval_seeds:
         rng = np.random.default_rng(eval_seed)
-        D_use = int(eval_D)
-        N_use = int(eval_N)
-        if eval_D_range is not None:
-            D_use = int(rng.integers(int(eval_D_range[0]), int(eval_D_range[1]) + 1))
-        if eval_N_range is not None:
-            N_use = int(rng.integers(int(eval_N_range[0]), int(eval_N_range[1]) + 1))
+        D_use, N_use = _sample_D_N_feasible(
+            rng=rng,
+            base_D=int(eval_D),
+            base_N=int(eval_N),
+            D_range=eval_D_range,
+            N_range=eval_N_range,
+            target_util=float(args.target_util),
+            H=20,
+        )
         tu = float(args.target_util)
         p, prices = build_instance(
             rng=rng,

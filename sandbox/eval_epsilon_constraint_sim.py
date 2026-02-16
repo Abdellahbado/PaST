@@ -364,6 +364,7 @@ def _load_vhat_checkpoint(path: str, fallback_spec: FeatureSpec) -> _ValueModelL
 
 def _load_vhat_checkpoint_meta(path: str) -> Dict[str, bool]:
     """Load auxiliary metadata saved in pooled checkpoints (if present)."""
+
     def _try_load(p: str) -> Optional[Dict[str, bool]]:
         try:
             ck = np.load(p, allow_pickle=True)
