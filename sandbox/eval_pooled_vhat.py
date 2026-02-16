@@ -19,6 +19,7 @@ Example:
         --save-model PaST/models/vhat_pooled_poly.npz \
         --out-csv PaST/logs/pooled_poly.csv
 """
+
 from __future__ import annotations
 
 import argparse
@@ -62,7 +63,9 @@ from PaST.solvers.vhat_models import (
 )
 
 # Union type for all model types
-ValueModel = Union[LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, LGBMValueModel]
+ValueModel = Union[
+    LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, LGBMValueModel
+]
 
 
 def _collect_state_labels(
@@ -143,18 +146,41 @@ def parse_seed_range(s: str) -> List[int]:
     return [int(x) for x in s.split(",") if x.strip()]
 
 
+def parse_int_range(s: str) -> Tuple[int, int]:
+    """Parse an inclusive integer range 'a-b'."""
+    s = str(s).strip()
+    if not s or "-" not in s:
+        raise ValueError(f"Expected range like 'a-b', got: {s!r}")
+    a_s, b_s = s.split("-", 1)
+    a = int(a_s)
+    b = int(b_s)
+    if b < a:
+        raise ValueError(f"Invalid range (b<a): {s!r}")
+    return a, b
+
+
 def _collect_worker(
     seed: int,
     D: int,
     N: int,
     pmax: int,
+    D_range: Tuple[int, int] | None,
+    N_range: Tuple[int, int] | None,
     samples_per_instance: int,
     spec: FeatureSpec,
     normalize_labels: bool,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
-    p, prices = build_instance(rng=rng, D=D, N=N, pmax=pmax)
+
+    D_use = int(D)
+    N_use = int(N)
+    if D_range is not None:
+        D_use = int(rng.integers(int(D_range[0]), int(D_range[1]) + 1))
+    if N_range is not None:
+        N_use = int(rng.integers(int(N_range[0]), int(N_range[1]) + 1))
+
+    p, prices = build_instance(rng=rng, D=D_use, N=N_use, pmax=pmax)
     T = int(len(prices))
     lengths, totals, radices, _mult = encode_setup(p)
     ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
@@ -213,6 +239,19 @@ def main() -> None:
         default=2000,
         help="Number of random state samples per training instance.",
     )
+
+    ap.add_argument(
+        "--train-D-range",
+        type=str,
+        default="",
+        help="Optional inclusive range 'a-b'. If set, sample D per training seed.",
+    )
+    ap.add_argument(
+        "--train-N-range",
+        type=str,
+        default="",
+        help="Optional inclusive range 'a-b'. If set, sample N per training seed.",
+    )
     ap.add_argument("--l2", type=float, default=1e-3)
 
     # Model type
@@ -222,7 +261,7 @@ def main() -> None:
         default="linear",
         choices=["linear", "poly", "mlp", "lgbm"],
         help="Model type: linear (Ridge), poly (degree-2 polynomial Ridge), "
-             "mlp (small neural net), lgbm (gradient boosted trees).",
+        "mlp (small neural net), lgbm (gradient boosted trees).",
     )
     ap.add_argument(
         "--workers",
@@ -267,7 +306,7 @@ def main() -> None:
         "--normalize-labels",
         action="store_true",
         help="Normalize labels by sum(prices[t:]) for scale-invariant cost predictions. "
-             "Essential for cross-size transfer: makes weights independent of instance scale.",
+        "Essential for cross-size transfer: makes weights independent of instance scale.",
     )
 
     # Model I/O
@@ -285,9 +324,37 @@ def main() -> None:
     )
 
     # Eval for different sizes (optional overrides for eval phase)
-    ap.add_argument("--eval-D", type=int, default=0, help="Override D for eval instances (0 = same as --D).")
-    ap.add_argument("--eval-N", type=int, default=0, help="Override N for eval instances (0 = same as --N).")
-    ap.add_argument("--eval-pmax", type=int, default=0, help="Override pmax for eval instances (0 = same as --pmax).")
+    ap.add_argument(
+        "--eval-D",
+        type=int,
+        default=0,
+        help="Override D for eval instances (0 = same as --D).",
+    )
+    ap.add_argument(
+        "--eval-N",
+        type=int,
+        default=0,
+        help="Override N for eval instances (0 = same as --N).",
+    )
+    ap.add_argument(
+        "--eval-pmax",
+        type=int,
+        default=0,
+        help="Override pmax for eval instances (0 = same as --pmax).",
+    )
+
+    ap.add_argument(
+        "--eval-D-range",
+        type=str,
+        default="",
+        help="Optional inclusive range 'a-b'. If set, sample D per eval seed.",
+    )
+    ap.add_argument(
+        "--eval-N-range",
+        type=str,
+        default="",
+        help="Optional inclusive range 'a-b'. If set, sample N per eval seed.",
+    )
 
     ap.add_argument(
         "--out-csv",
@@ -324,6 +391,27 @@ def main() -> None:
     eval_D = int(args.eval_D) if int(args.eval_D) > 0 else int(args.D)
     eval_N = int(args.eval_N) if int(args.eval_N) > 0 else int(args.N)
     eval_pmax = int(args.eval_pmax) if int(args.eval_pmax) > 0 else int(args.pmax)
+
+    train_D_range = (
+        parse_int_range(str(args.train_D_range))
+        if str(args.train_D_range).strip()
+        else None
+    )
+    train_N_range = (
+        parse_int_range(str(args.train_N_range))
+        if str(args.train_N_range).strip()
+        else None
+    )
+    eval_D_range = (
+        parse_int_range(str(args.eval_D_range))
+        if str(args.eval_D_range).strip()
+        else None
+    )
+    eval_N_range = (
+        parse_int_range(str(args.eval_N_range))
+        if str(args.eval_N_range).strip()
+        else None
+    )
 
     model_type = str(args.model_type).strip().lower()
     n_workers = int(args.workers) if int(args.workers) > 0 else mp.cpu_count()
@@ -375,10 +463,17 @@ def main() -> None:
         print(f"[pool] Loaded model: type={model_type}, spec={spec}")
     else:
         use_normalize_labels = bool(args.normalize_labels)
+        train_inst_desc = f"D={args.D}, N={args.N}, pmax={args.pmax}"
+        if train_D_range is not None or train_N_range is not None:
+            train_inst_desc = (
+                f"D={args.D} (range={train_D_range}), "
+                f"N={args.N} (range={train_N_range}), "
+                f"pmax={args.pmax}"
+            )
         print(
             f"[pool] === TRAINING PHASE ==="
             f"\n[pool] Model type: {model_type}"
-            f"\n[pool] Instance params: D={args.D}, N={args.N}, pmax={args.pmax}"
+            f"\n[pool] Instance params: {train_inst_desc}"
             f"\n[pool] Train seeds: {train_seeds[0]}-{train_seeds[-1]} ({len(train_seeds)} instances)"
             f"\n[pool] Samples per instance: {args.samples_per_instance}"
             f"\n[pool] Features: spec={spec}"
@@ -394,6 +489,8 @@ def main() -> None:
             D=int(args.D),
             N=int(args.N),
             pmax=int(args.pmax),
+            D_range=train_D_range,
+            N_range=train_N_range,
             samples_per_instance=int(args.samples_per_instance),
             spec=spec,
             normalize_labels=use_normalize_labels,
@@ -468,13 +565,22 @@ def main() -> None:
             y_hat_train = X_train_poly @ w
             y_hat_test = X_test_poly @ w
             feat_dim = int(X_train_poly.shape[1])
-            print(f"[pool] Polynomial: {X_pool.shape[1]} raw → {feat_dim} poly features")
+            print(
+                f"[pool] Polynomial: {X_pool.shape[1]} raw → {feat_dim} poly features"
+            )
 
         elif model_type == "mlp":
             mlp_model = fit_mlp(
-                X_train, y_train, X_test, y_test,
-                hidden1=64, hidden2=32,
-                lr=1e-3, batch_size=2048, max_epochs=200, patience=15,
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                hidden1=64,
+                hidden2=32,
+                lr=1e-3,
+                batch_size=2048,
+                max_epochs=200,
+                patience=15,
             )
             mlp_model.spec = spec
             model = mlp_model
@@ -489,8 +595,14 @@ def main() -> None:
 
         elif model_type == "lgbm":
             booster = fit_lgbm(
-                X_train, y_train, X_test, y_test,
-                n_estimators=100, max_depth=5, learning_rate=0.1, n_jobs=n_workers,
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                n_estimators=100,
+                max_depth=5,
+                learning_rate=0.1,
+                n_jobs=n_workers,
             )
             model = LGBMValueModel(booster=booster, spec=spec)
             y_hat_train = booster.predict(X_train)
@@ -556,13 +668,13 @@ def main() -> None:
     # =========================================================================
     print(
         f"\n[pool] === EVALUATION PHASE ==="
-        f"\n[pool] Eval params: D={eval_D}, N={eval_N}, pmax={eval_pmax}"
+        f"\n[pool] Eval params: D={eval_D} (range={eval_D_range}), N={eval_N} (range={eval_N_range}), pmax={eval_pmax}"
         f"\n[pool] Eval seeds: {eval_seeds[0]}-{eval_seeds[-1]} ({len(eval_seeds)} instances)"
         f"\n[pool] Beams: {beams}"
     )
 
     rows: List[Dict[str, float]] = []
-    w = model.weights if hasattr(model, 'weights') else None
+    w = model.weights if hasattr(model, "weights") else None
 
     # Determine if labels were normalized during training (once, not per-seed)
     _nlabels = False
@@ -575,15 +687,23 @@ def main() -> None:
             meta_path = loaded_model_path + ".meta.npz"
             if Path(meta_path).exists():
                 meta = np.load(meta_path)
-                _nlabels = bool(int(meta["normalize_labels"])) if "normalize_labels" in meta.files else False
+                _nlabels = (
+                    bool(int(meta["normalize_labels"]))
+                    if "normalize_labels" in meta.files
+                    else False
+                )
     else:
         _nlabels = use_normalize_labels
 
     for eval_seed in eval_seeds:
         rng = np.random.default_rng(eval_seed)
-        p, prices = build_instance(
-            rng=rng, D=eval_D, N=eval_N, pmax=eval_pmax
-        )
+        D_use = int(eval_D)
+        N_use = int(eval_N)
+        if eval_D_range is not None:
+            D_use = int(rng.integers(int(eval_D_range[0]), int(eval_D_range[1]) + 1))
+        if eval_N_range is not None:
+            N_use = int(rng.integers(int(eval_N_range[0]), int(eval_N_range[1]) + 1))
+        p, prices = build_instance(rng=rng, D=D_use, N=N_use, pmax=eval_pmax)
         T = int(len(prices))
 
         t0 = time.perf_counter()
@@ -600,12 +720,21 @@ def main() -> None:
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
 
         # Precompute prefix prices for label denormalization
-        prefix_prices = np.concatenate(
-            [[0.0], np.cumsum(prices, dtype=np.float64)]
-        )
+        prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
-        def _make_vhat(model_ref, totals_ref, lengths_ref, ctx_ref, radices_ref, cache_ref, T_ref, prefix_ref, nlabels):
+        def _make_vhat(
+            model_ref,
+            totals_ref,
+            lengths_ref,
+            ctx_ref,
+            radices_ref,
+            cache_ref,
+            T_ref,
+            prefix_ref,
+            nlabels,
+        ):
             """Create a vhat closure. Needed to capture loop variables correctly."""
+
             def vhat(t: int, state: int) -> float:
                 s = int(state)
                 used_cached = cache_ref.get(s)
@@ -625,12 +754,17 @@ def main() -> None:
                     rem_budget = float(prefix_ref[T_ref] - prefix_ref[tt])
                     val = val * rem_budget
                 return val
+
             return vhat
 
-        vhat = _make_vhat(model, totals, lengths, ctx, radices, used_cache, T, prefix_prices, _nlabels)
+        vhat = _make_vhat(
+            model, totals, lengths, ctx, radices, used_cache, T, prefix_prices, _nlabels
+        )
 
         # Price heuristic
-        def _make_vhat_price(totals_ref, lengths_ref, radices_ref, cache_ref, T_ref, prefix_ref):
+        def _make_vhat_price(
+            totals_ref, lengths_ref, radices_ref, cache_ref, T_ref, prefix_ref
+        ):
             def vhat_price(t: int, state: int) -> float:
                 s = int(state)
                 used_cached = cache_ref.get(s)
@@ -645,10 +779,9 @@ def main() -> None:
                     return 0.0
                 tt = max(0, min(int(t), T_ref))
                 rem_len = max(1, T_ref - tt)
-                mean_p = float(
-                    (prefix_ref[T_ref] - prefix_ref[tt]) / rem_len
-                )
+                mean_p = float((prefix_ref[T_ref] - prefix_ref[tt]) / rem_len)
                 return float(W) * mean_p
+
             return vhat_price
 
         vhat_price = _make_vhat_price(
@@ -658,16 +791,23 @@ def main() -> None:
         for beam in beams:
             t1 = time.perf_counter()
             guided_learned = solve_optimal_benchmark_dp(
-                p, prices, tie_break="early",
-                guided=True, beam_width=int(beam),
-                prune_factor=float(args.prune_factor), vhat=vhat,
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
+                prune_factor=float(args.prune_factor),
+                vhat=vhat,
             )
             guided_learned_s = time.perf_counter() - t1
 
             t2 = time.perf_counter()
             guided_zero = solve_optimal_benchmark_dp(
-                p, prices, tie_break="early",
-                guided=True, beam_width=int(beam),
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
                 prune_factor=float(args.prune_factor),
                 vhat=lambda _t, _s: 0.0,
             )
@@ -675,31 +815,30 @@ def main() -> None:
 
             t3 = time.perf_counter()
             guided_price = solve_optimal_benchmark_dp(
-                p, prices, tie_break="early",
-                guided=True, beam_width=int(beam),
-                prune_factor=float(args.prune_factor), vhat=vhat_price,
+                p,
+                prices,
+                tie_break="early",
+                guided=True,
+                beam_width=int(beam),
+                prune_factor=float(args.prune_factor),
+                vhat=vhat_price,
             )
             guided_price_s = time.perf_counter() - t3
 
             gap_learned = (
-                (guided_learned.cost - exact.cost)
-                / max(1e-9, abs(exact.cost))
-                * 100.0
+                (guided_learned.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
             )
             gap_zero = (
-                (guided_zero.cost - exact.cost)
-                / max(1e-9, abs(exact.cost))
-                * 100.0
+                (guided_zero.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
             )
             gap_price = (
-                (guided_price.cost - exact.cost)
-                / max(1e-9, abs(exact.cost))
-                * 100.0
+                (guided_price.cost - exact.cost) / max(1e-9, abs(exact.cost)) * 100.0
             )
 
             row = {
                 "seed": float(eval_seed),
                 "T": float(T),
+                "D": float(D_use),
                 "N": float(len(p)),
                 "K": float(len(lengths)),
                 "exact_cost": float(exact.cost),
@@ -714,9 +853,7 @@ def main() -> None:
                 "gap_learned_pct": float(gap_learned),
                 "gap_zero_pct": float(gap_zero),
                 "gap_price_pct": float(gap_price),
-                "speedup_learned": float(
-                    exact_s / max(guided_learned_s, 1e-12)
-                ),
+                "speedup_learned": float(exact_s / max(guided_learned_s, 1e-12)),
                 "speedup_zero": float(exact_s / max(guided_zero_s, 1e-12)),
                 "speedup_learned_incl_train": float(
                     exact_s / max(train_s + guided_learned_s, 1e-12)
@@ -774,7 +911,9 @@ def main() -> None:
         f"\n[pool] Overall: "
         f"gapL={mean(all_gl):.2f}%  gapZ={mean(all_gz):.2f}%  gapP={mean(all_gp):.2f}%"
     )
-    print(f"[pool] Train time: {train_s:.1f}s (amortized over {len(eval_seeds)} eval instances)")
+    print(
+        f"[pool] Train time: {train_s:.1f}s (amortized over {len(eval_seeds)} eval instances)"
+    )
     print(f"[pool] CSV: {out_csv}")
 
 
