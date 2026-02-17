@@ -156,16 +156,25 @@ for CATEGORY in "${CATEGORIES[@]}"; do
   LABEL_MODE="subproblem"
   DP_TIME_LIMIT="-1"
   OPT_PATH_N_PATHS="1"
+  OPT_PATH_TOPUP_MAX="0"
+  OPT_PATH_TOPUP_TL="0.2"
+  REQUIRE_OPTIMAL_ARGS=()
   EVAL_TIME_LIMIT="-1"
   if [[ "$CATEGORY" == "medium" ]]; then
     LABEL_MODE="optimal_path"
-    DP_TIME_LIMIT="2.0"
+    DP_TIME_LIMIT="-1"
     OPT_PATH_N_PATHS="2"
+    OPT_PATH_TOPUP_MAX="$SAMPLES"
+    OPT_PATH_TOPUP_TL="-1"
+    REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
     EVAL_TIME_LIMIT="30.0"
   elif [[ "$CATEGORY" == "large" ]]; then
     LABEL_MODE="optimal_path"
-    DP_TIME_LIMIT="5.0"
+    DP_TIME_LIMIT="-1"
     OPT_PATH_N_PATHS="2"
+    OPT_PATH_TOPUP_MAX="$SAMPLES"
+    OPT_PATH_TOPUP_TL="-1"
+    REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
     EVAL_TIME_LIMIT="60.0"
   fi
 
@@ -209,6 +218,9 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --transferable-features --normalize --normalize-labels \
           --label-mode "$LABEL_MODE" \
           --optimal-path-n-paths "$OPT_PATH_N_PATHS" \
+          --optimal-path-topup-max "$OPT_PATH_TOPUP_MAX" \
+          --optimal-path-topup-dp-time-limit "$OPT_PATH_TOPUP_TL" \
+          "${REQUIRE_OPTIMAL_ARGS[@]}" \
           --dp-time-limit "$DP_TIME_LIMIT" \
           --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \

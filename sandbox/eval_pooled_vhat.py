@@ -124,6 +124,7 @@ def _collect_state_labels(
     normalize_labels: bool = False,
     prefix_prices: np.ndarray | None = None,
     dp_time_limit: float = -1.0,
+    require_optimal_labels: bool = False,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
     """Sample random (t, used) states and label them with exact DP cost-to-go.
 
@@ -135,6 +136,7 @@ def _collect_state_labels(
     labels: List[float] = []
     attempts = 0
     max_attempts = max(6 * target_samples, 300)
+    cache: Dict[Tuple[int, Tuple[int, ...]], float] = {}
 
     # Precompute suffix sums of prices for label normalization
     if normalize_labels and prefix_prices is None:
@@ -158,15 +160,25 @@ def _collect_state_labels(
         if not rem_p:
             y = 0.0
         else:
-            sub = solve_optimal_benchmark_dp(
-                rem_p,
-                prices[t:],
-                tie_break="cost",
-                time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
-            )
-            if not sub.feasible:
-                continue
-            y = float(sub.cost)
+            key = (int(t), tuple(int(x) for x in used))
+            cached = cache.get(key)
+            if cached is not None:
+                y = float(cached)
+            else:
+                sub = solve_optimal_benchmark_dp(
+                    rem_p,
+                    prices[t:],
+                    tie_break="cost",
+                    time_limit=(
+                        float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0
+                    ),
+                )
+                if not sub.feasible:
+                    continue
+                if bool(require_optimal_labels) and not bool(sub.is_optimal):
+                    continue
+                y = float(sub.cost)
+                cache[key] = float(y)
 
         # Normalize label by remaining price budget
         if normalize_labels and prefix_prices is not None:
@@ -191,6 +203,7 @@ def _collect_state_labels_optimal_path(
     prefix_prices: np.ndarray | None = None,
     dp_time_limit: float = -1.0,
     n_paths: int = 1,
+    require_optimal_labels: bool = False,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
     """Collect exact labels using ONE exact DP solve, labeling states on an optimal path.
 
@@ -238,6 +251,8 @@ def _collect_state_labels_optimal_path(
             time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
         )
         if not exact.feasible:
+            continue
+        if bool(require_optimal_labels) and not bool(exact.is_optimal):
             continue
 
         # If we didn't get a full schedule (e.g., reconstruction failed), skip.
@@ -405,6 +420,9 @@ def _collect_worker(
     label_mode: str,
     dp_time_limit: float,
     optimal_path_n_paths: int,
+    optimal_path_topup_max: int,
+    optimal_path_topup_dp_time_limit: float,
+    require_optimal_labels: bool,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
@@ -446,7 +464,39 @@ def _collect_worker(
             prefix_prices=prefix_prices,
             dp_time_limit=float(dp_time_limit),
             n_paths=int(optimal_path_n_paths),
+            require_optimal_labels=bool(require_optimal_labels),
         )
+        # Top-up: optimal_path yields only ~O(T) labels. To reach the requested
+        # samples_per_instance, add extra random subproblem labels with a small
+        # DP time limit (feasible/approx labels on timeout).
+        need = int(samples_per_instance) - int(len(states))
+        if need > 0:
+            cap = int(optimal_path_topup_max)
+            topup_target = int(need if cap <= 0 else min(int(need), int(cap)))
+            if topup_target > 0:
+                sp_states, sp_labels, sp_attempts = _collect_state_labels(
+                    rng=rng,
+                    T=T,
+                    totals=totals,
+                    lengths=lengths,
+                    prices=prices,
+                    target_samples=topup_target,
+                    normalize_labels=normalize_labels,
+                    prefix_prices=prefix_prices,
+                    dp_time_limit=float(optimal_path_topup_dp_time_limit),
+                    require_optimal_labels=bool(require_optimal_labels),
+                )
+                attempts += int(sp_attempts)
+                if sp_states:
+                    # Deduplicate (state, label) by state.
+                    seen = set(states)
+                    for s, y in zip(sp_states, sp_labels):
+                        if s in seen:
+                            continue
+                        seen.add(s)
+                        states.append(s)
+                        labels.append(float(y))
+
         if not states:
             # Robust fallback: collect a small batch of subproblem labels.
             # (Better than returning 0 samples for the whole seed.)
@@ -460,7 +510,8 @@ def _collect_worker(
                 target_samples=sp,
                 normalize_labels=normalize_labels,
                 prefix_prices=prefix_prices,
-                dp_time_limit=float(dp_time_limit),
+                dp_time_limit=float(optimal_path_topup_dp_time_limit),
+                require_optimal_labels=bool(require_optimal_labels),
             )
     elif lm == "subproblem":
         states, labels, attempts = _collect_state_labels(
@@ -473,6 +524,7 @@ def _collect_worker(
             normalize_labels=normalize_labels,
             prefix_prices=prefix_prices,
             dp_time_limit=float(dp_time_limit),
+            require_optimal_labels=bool(require_optimal_labels),
         )
     else:
         raise ValueError(f"Unknown label_mode: {label_mode!r}")
@@ -582,6 +634,38 @@ def main() -> None:
         help=(
             "For --label-mode=optimal_path: number of optimal schedules to extract labels from. "
             "Uses different DP tie-breaks (cost vs early). 2 roughly doubles labels per instance with only one extra DP solve."
+        ),
+    )
+
+    ap.add_argument(
+        "--optimal-path-topup-max",
+        type=int,
+        default=0,
+        help=(
+            "For --label-mode=optimal_path: maximum number of additional random subproblem labels to add per instance. "
+            "This is used to top up beyond the O(T) optimal-path labels. "
+            "0 means no cap (try to fill to --samples-per-instance)."
+        ),
+    )
+
+    ap.add_argument(
+        "--optimal-path-topup-dp-time-limit",
+        type=float,
+        default=0.2,
+        help=(
+            "For --label-mode=optimal_path: per-call time limit (seconds) for DP subproblem solves used in top-up labeling. "
+            "Kept small so you can safely generate lots of extra labels without stalling."
+        ),
+    )
+
+    ap.add_argument(
+        "--require-optimal-labels",
+        action="store_true",
+        help=(
+            "If set, ONLY accept labels from DP runs proven optimal (DPResult.is_optimal=True). "
+            "This rejects any greedy-completed timeout results when --dp-time-limit>0 or "
+            "--optimal-path-topup-dp-time-limit>0. To guarantee all labels are optimal, "
+            "set the relevant time limits to <=0 (no limit)."
         ),
     )
 
@@ -979,7 +1063,11 @@ def main() -> None:
             f"\n[pool] Samples per instance: {args.samples_per_instance}"
             f"\n[pool] Features: spec={spec}"
             f"\n[pool] normalize_labels={use_normalize_labels}"
-            f"\n[pool] label_mode={str(args.label_mode).strip()}  dp_time_limit={float(args.dp_time_limit)}"
+            f"\n[pool] label_mode={str(args.label_mode).strip()}  dp_time_limit={float(args.dp_time_limit)}  "
+            f"optimal_path_n_paths={int(args.optimal_path_n_paths)}  "
+            f"optimal_path_topup_max={int(args.optimal_path_topup_max)}  "
+            f"optimal_path_topup_dp_time_limit={float(args.optimal_path_topup_dp_time_limit)}  "
+            f"require_optimal_labels={bool(args.require_optimal_labels)}"
             f"\n[pool] Workers: {n_workers}"
         )
 
@@ -1002,6 +1090,11 @@ def main() -> None:
             label_mode=str(args.label_mode),
             dp_time_limit=float(args.dp_time_limit),
             optimal_path_n_paths=int(args.optimal_path_n_paths),
+            optimal_path_topup_max=int(args.optimal_path_topup_max),
+            optimal_path_topup_dp_time_limit=float(
+                args.optimal_path_topup_dp_time_limit
+            ),
+            require_optimal_labels=bool(args.require_optimal_labels),
         )
 
         mtpc = int(args.maxtasksperchild)

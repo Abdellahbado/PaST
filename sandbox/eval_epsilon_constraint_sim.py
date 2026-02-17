@@ -176,10 +176,22 @@ def _parse_int_range(s: str) -> Tuple[int, int]:
 
 def _load_new_benchmark_module() -> object:
     """Load `New Benchmark/new_data.py` by filepath (folder contains a space)."""
-    root = Path(__file__).resolve().parents[2]
-    mod_path = root / "New Benchmark" / "new_data.py"
-    if not mod_path.exists():
-        raise FileNotFoundError(f"Cannot find new benchmark generator at: {mod_path}")
+    # Historically this repo used `<repo>/New Benchmark/new_data.py`.
+    # Some environments place it under `PaST/New Benchmark/new_data.py`.
+    # Support both to keep HPC/Colab paths working.
+    repo_parent = Path(__file__).resolve().parents[2]
+    past_root = Path(__file__).resolve().parents[1]
+
+    candidates = [
+        repo_parent / "New Benchmark" / "new_data.py",
+        past_root / "New Benchmark" / "new_data.py",
+    ]
+    mod_path = next((p for p in candidates if p.exists()), None)
+    if mod_path is None:
+        tried = "\n".join(str(p) for p in candidates)
+        raise FileNotFoundError(
+            "Cannot find new benchmark generator new_data.py. Tried:\n" + tried
+        )
 
     spec = importlib.util.spec_from_file_location(
         "new_benchmark_new_data", str(mod_path)
@@ -359,16 +371,26 @@ def _load_vhat_checkpoint(path: str, fallback_spec: FeatureSpec) -> _ValueModelL
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=norm,
-            include_len_hist=bool(int(ckpt["include_len_hist"]))
-            if "include_len_hist" in ckpt.files
-            else False,
-            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else int(getattr(fallback_spec, "pmax_for_hist", 12)),
-            include_price_shape=bool(int(ckpt["include_price_shape"]))
-            if "include_price_shape" in ckpt.files
-            else False,
-            include_meta=bool(int(ckpt["include_meta"]))
-            if "include_meta" in ckpt.files
-            else False,
+            include_len_hist=(
+                bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False
+            ),
+            pmax_for_hist=(
+                int(ckpt["pmax_for_hist"])
+                if "pmax_for_hist" in ckpt.files
+                else int(getattr(fallback_spec, "pmax_for_hist", 12))
+            ),
+            include_price_shape=(
+                bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False
+            ),
+            include_meta=(
+                bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False
+            ),
         )
     return LinearRidgeValueModel(weights=w, spec=spec)
 
@@ -819,7 +841,13 @@ def main() -> None:
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
 
-        for inst in instances:
+        total_insts = int(len(instances))
+        for inst_i, inst in enumerate(instances, start=1):
+            inst_t0 = time.perf_counter()
+            print(
+                f"[epsilon] START instance {inst_i}/{total_insts} "
+                f"seed={inst.seed} cat={inst.category} N={inst.N} M={inst.M} D={inst.D} K={inst.K}"
+            )
             rng = np.random.default_rng(int(inst.seed) + 999)
             assignments = biased_random_assignment(
                 p=inst.p,
@@ -836,7 +864,10 @@ def main() -> None:
             eps = int(inst.K)
             step = int(args.epsilon_step)
 
+            eps_iter = 0
             while eps >= min_eps:
+                eps_iter += 1
+                eps_t0 = time.perf_counter()
                 prices_base = np.asarray(inst.c[:eps], dtype=np.float64)
                 ctx = build_tou_feature_context(
                     prices_base,
@@ -863,6 +894,8 @@ def main() -> None:
                     p_m = _machine_job_p(inst.p, job_indices)
                     u_m = float(inst.u[m])
                     prices_scaled = (prices_base * u_m).astype(np.float64)
+
+                    n_jobs_m = int(len(p_m))
 
                     # Build Vhat for this machine (scale base model by u_m)
                     vhat_fn = None
@@ -905,6 +938,7 @@ def main() -> None:
 
                     if not bool(args.guided):
                         # Exact only
+                        m_t0 = time.perf_counter()
                         cost, ft, wall = _solve_machine(
                             p_m=p_m,
                             prices_scaled=prices_scaled,
@@ -913,11 +947,18 @@ def main() -> None:
                             prune_factor=float(args.prune_factor),
                             vhat_fn=None,
                         )
+                        m_wall = float(time.perf_counter() - m_t0)
                         total_energy_exact += float(cost)
                         makespan_exact = max(makespan_exact, int(ft))
                         exact_solve_s += float(wall)
+                        if m_wall >= 2.0:
+                            print(
+                                f"[epsilon] slow exact: inst_seed={inst.seed} eps={eps} "
+                                f"m={m} jobs={n_jobs_m} wall={m_wall:.2f}s"
+                            )
                     elif bool(args.skip_exact):
                         # Guided only
+                        m_t0 = time.perf_counter()
                         cost_g, ft_g, wall_g = _solve_machine(
                             p_m=p_m,
                             prices_scaled=prices_scaled,
@@ -926,11 +967,18 @@ def main() -> None:
                             prune_factor=float(args.prune_factor),
                             vhat_fn=vhat_fn,
                         )
+                        m_wall = float(time.perf_counter() - m_t0)
                         total_energy_guided += float(cost_g)
                         makespan_guided = max(makespan_guided, int(ft_g))
                         guided_solve_s += float(wall_g)
+                        if m_wall >= 2.0:
+                            print(
+                                f"[epsilon] slow guided: inst_seed={inst.seed} eps={eps} "
+                                f"m={m} jobs={n_jobs_m} wall={m_wall:.2f}s"
+                            )
                     else:
                         # Both methods: exact baseline and guided
+                        m_t0 = time.perf_counter()
                         cost_e, ft_e, wall_e = _solve_machine(
                             p_m=p_m,
                             prices_scaled=prices_scaled,
@@ -939,10 +987,18 @@ def main() -> None:
                             prune_factor=float(args.prune_factor),
                             vhat_fn=None,
                         )
+                        m_wall_e = float(time.perf_counter() - m_t0)
                         total_energy_exact += float(cost_e)
                         makespan_exact = max(makespan_exact, int(ft_e))
                         exact_solve_s += float(wall_e)
 
+                        if m_wall_e >= 2.0:
+                            print(
+                                f"[epsilon] slow exact: inst_seed={inst.seed} eps={eps} "
+                                f"m={m} jobs={n_jobs_m} wall={m_wall_e:.2f}s"
+                            )
+
+                        m_t0 = time.perf_counter()
                         cost_g, ft_g, wall_g = _solve_machine(
                             p_m=p_m,
                             prices_scaled=prices_scaled,
@@ -951,9 +1007,16 @@ def main() -> None:
                             prune_factor=float(args.prune_factor),
                             vhat_fn=vhat_fn,
                         )
+                        m_wall_g = float(time.perf_counter() - m_t0)
                         total_energy_guided += float(cost_g)
                         makespan_guided = max(makespan_guided, int(ft_g))
                         guided_solve_s += float(wall_g)
+
+                        if m_wall_g >= 2.0:
+                            print(
+                                f"[epsilon] slow guided: inst_seed={inst.seed} eps={eps} "
+                                f"m={m} jobs={n_jobs_m} wall={m_wall_g:.2f}s"
+                            )
 
                 loads_str = ";".join(str(x) for x in loads)
                 u_str = ";".join(str(x) for x in inst.u)
@@ -1051,7 +1114,7 @@ def main() -> None:
                     cur_mk = int(makespan_exact)
 
                 print(
-                    f"inst_seed={inst.seed} eps={eps} min_eps={min_eps} "
+                    f"inst_seed={inst.seed} eps_iter={eps_iter} eps={eps} min_eps={min_eps} "
                     f"loads=[{loads_str}] u=[{u_str}] "
                     + (
                         f"exact(E={total_energy_exact:.2f},mk={makespan_exact},t={exact_solve_s:.2f}s) "
@@ -1063,6 +1126,7 @@ def main() -> None:
                         if bool(args.guided)
                         else ""
                     )
+                    + f" wall={float(time.perf_counter() - eps_t0):.2f}s"
                 )
 
                 if step > 0:
@@ -1073,6 +1137,11 @@ def main() -> None:
 
                 if eps <= 0:
                     break
+
+            print(
+                f"[epsilon] DONE instance {inst_i}/{total_insts} seed={inst.seed} "
+                f"wall={float(time.perf_counter() - inst_t0):.2f}s"
+            )
 
     print(f"Wrote {out_csv}")
 
