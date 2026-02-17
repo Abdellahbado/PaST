@@ -1,0 +1,41 @@
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+[pool] === TRAINING PHASE ===
+[pool] Model type: mlp
+[pool] Instance params: D=3 (range=(5, 15)), N=40 (range=(100, 200)), pmax=12
+[pool] Train seeds: 0-79 (80 instances)
+[pool] Samples per instance: 2000
+[pool] Features: spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True, include_len_hist=True, pmax_for_hist=12, include_price_shape=False, include_meta=False)
+[pool] normalize_labels=True
+[pool] Workers: 128
+[pool] Collecting data with 128 parallel workers...
+[pool] collected 1/80 instances (2000 samples)
+[pool] collected 2/80 instances (2000 samples)
+[pool] collected 3/80 instances (2000 samples)
+[pool] collected 4/80 instances (2000 samples)
+[pool] collected 5/80 instances (2000 samples)
+[pool] collected 6/80 instances (2000 samples)
+[pool] collected 7/80 instances (2000 samples)
+[pool] collected 8/80 instances (2000 samples)
+[pool] collected 9/80 instances (2000 samples)
+[pool] collected 10/80 instances (2000 samples)
+[pool] collected 11/80 instances (2000 samples)
+[pool] collected 12/80 instances (2000 samples)
+[pool] collected 13/80 instances (2000 samples)
+[pool] collected 14/80 instances (2000 samples)
+[pool] collected 15/80 instances (2000 samples)
+[pool] collected 16/80 instances (2000 samples)
+[pool] collected 17/80 instances (2000 samples)
+[pool] collected 18/80 instances (2000 samples)
+[pool] collected 19/80 instances (2000 samples)
+[pool] collected 20/80 instances (2000 samples)
+[pool] collected 21/80 instances (2000 samples)
+[pool] collected 22/80 instances (2000 samples)
+[pool] collected 23/80 instances (2000 samples)
+[pool] collected 24/80 instances (2000 samples)
+[pool] collected 25/80 instances (2000 samples)
+[pool] collected 26/80 instances (2000 samples)
+[pool] collected 27/80 instances (2000 samples)
+[pool] collected 28/80 instances (2000 samples)
+[pool] collected 29/80 instances (2000 samples)
+[pool] collected 30/80 instances (2000 samples)
+[pool] collected 31/80 instances (2000 samples)

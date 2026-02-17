@@ -664,3 +664,407 @@ r2_test mean/median = 0.9858 / 0.9861
 speedup_learned mean/median = 13.991 / 13.637
 speedup_zero    mean/median = 187.982 / 180.308
 Meaningful learning signal: gap_learned << gap_zero and positive r2_test.
+
+
+
+
+
+(base) jovyan@neruo-ls-aan-0:~$ # === Progressive Transfer Pipeline ===
+# Step 1: Train on SMALL (D=6, N=30, K≈3, T=120)
+python PaST/sandbox/eval_guided_vhat_holdout.py \
+  --seed-start 500 --seed-end 509 \
+  --D 6 --N 30 --pmax 3 \
+  --samples 20000 --train-rounds 4 \
+  --transferable-features --normalize \
+  --verbose-train \
+  --beams 2,3 \
+  --save-model PaST/models/vhat_small.npz \
+  --out-csv PaST/logs/transfer_1_train_small.csv \
+&& echo "=== STEP 2: Evaluate FROZEN small model on MEDIUM ===" \
+&& python PaST/sandbox/eval_guided_vhat_holdout.py \
+  --seed-start 600 --seed-end 619 \
+  --D 8 --N 35 --pmax 4 \
+  --samples 1 \
+  --transferable-features --normalize \
+  --load-model PaST/models/vhat_small.npz --freeze-loaded \
+  --beams 2,3 \
+  --out-csv PaST/logs/transfer_2_frozen_on_medium.csv \
+&& echo "=== DONE ==="transfer_6_frozen_on_xlarge.csv \ed \===" \
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+  [train] seed=500 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9861 R2_test=0.9836 MAE_train=1.64 MAE_test=1.70 time=14.71s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9855 R2_test=0.9844 MAE_train=1.65 MAE_test=1.71 time=14.76s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9851 R2_test=0.9846 MAE_train=1.65 MAE_test=1.72 time=15.01s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9853 R2_test=0.9841 MAE_train=1.65 MAE_test=1.71 time=15.15s
+  [train] final R2=0.9841 MAE=1.71 feat_dim=18 top-10 weights:
+    #1 feat[7] w=140.311698
+    #2 feat[12] w=-115.478680
+    #3 feat[8] w=80.491279
+    #4 feat[9] w=-59.820421
+    #5 feat[15] w=23.396779
+    #6 feat[13] w=-23.168555
+    #7 feat[6] w=-8.057406
+    #8 feat[0] w=-7.318007
+    #9 feat[17] w=-6.816321
+    #10 feat[3] w=-2.951700
+  [save] Model saved to PaST/models/vhat_small.npz (dim=18, normalize=True)
+seed=500 beam=2 K=3 exact=94.0000 L=94.0000 Z=130.0000 P=100.0000 R=131.0000 gapL=0.00% gapZ=38.30% gapP=6.38% gapR=39.36% R2=0.984 t_exact=0.022s tL=0.020s tZ=0.001s train=59.633s
+seed=500 beam=3 K=3 exact=94.0000 L=94.0000 Z=131.0000 P=100.0000 R=131.0000 gapL=0.00% gapZ=39.36% gapP=6.38% gapR=39.36% R2=0.984 t_exact=0.022s tL=0.025s tZ=0.002s train=59.633s
+  [train] seed=501 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9861 R2_test=0.9838 MAE_train=1.73 MAE_test=1.85 time=14.73s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9847 R2_test=0.9849 MAE_train=1.85 MAE_test=1.79 time=14.72s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9847 R2_test=0.9849 MAE_train=1.86 MAE_test=1.82 time=15.03s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9847 R2_test=0.9853 MAE_train=1.84 MAE_test=1.77 time=15.29s
+  [train] final R2=0.9853 MAE=1.77 feat_dim=18 top-10 weights:
+    #1 feat[7] w=139.117801
+    #2 feat[12] w=-129.304708
+    #3 feat[8] w=80.576007
+    #4 feat[9] w=-58.541794
+    #5 feat[15] w=24.385088
+    #6 feat[13] w=-15.325753
+    #7 feat[0] w=-7.826642
+    #8 feat[16] w=-3.854678
+    #9 feat[17] w=3.240121
+    #10 feat[1] w=-2.777467
+seed=501 beam=2 K=3 exact=102.0000 L=102.0000 Z=137.0000 P=108.0000 R=137.0000 gapL=0.00% gapZ=34.31% gapP=5.88% gapR=34.31% R2=0.985 t_exact=0.021s tL=0.020s tZ=0.002s train=59.766s
+seed=501 beam=3 K=3 exact=102.0000 L=102.0000 Z=136.0000 P=108.0000 R=136.0000 gapL=0.00% gapZ=33.33% gapP=5.88% gapR=33.33% R2=0.985 t_exact=0.021s tL=0.026s tZ=0.002s train=59.766s
+  [train] seed=502 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9854 R2_test=0.9827 MAE_train=1.68 MAE_test=1.77 time=14.69s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9846 R2_test=0.9850 MAE_train=1.71 MAE_test=1.70 time=15.04s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9849 R2_test=0.9855 MAE_train=1.69 MAE_test=1.71 time=15.29s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9853 R2_test=0.9844 MAE_train=1.66 MAE_test=1.74 time=15.21s
+  [train] final R2=0.9844 MAE=1.74 feat_dim=18 top-10 weights:
+    #1 feat[7] w=138.071991
+    #2 feat[12] w=-120.850744
+    #3 feat[8] w=79.231336
+    #4 feat[9] w=-58.840654
+    #5 feat[15] w=23.189896
+    #6 feat[13] w=-15.488727
+    #7 feat[0] w=-7.522412
+    #8 feat[3] w=-2.824640
+    #9 feat[1] w=-2.460199
+    #10 feat[2] w=-2.237574
+seed=502 beam=2 K=3 exact=96.0000 L=96.0000 Z=131.0000 P=102.0000 R=132.0000 gapL=0.00% gapZ=36.46% gapP=6.25% gapR=37.50% R2=0.984 t_exact=0.022s tL=0.018s tZ=0.001s train=60.236s
+seed=502 beam=3 K=3 exact=96.0000 L=96.0000 Z=132.0000 P=101.0000 R=129.0000 gapL=0.00% gapZ=37.50% gapP=5.21% gapR=34.38% R2=0.984 t_exact=0.022s tL=0.025s tZ=0.002s train=60.236s
+  [train] seed=503 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9852 R2_test=0.9842 MAE_train=1.81 MAE_test=1.86 time=14.71s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9850 R2_test=0.9849 MAE_train=1.85 MAE_test=1.86 time=14.81s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9846 R2_test=0.9859 MAE_train=1.86 MAE_test=1.82 time=14.96s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9853 R2_test=0.9848 MAE_train=1.82 MAE_test=1.82 time=15.09s
+  [train] final R2=0.9848 MAE=1.82 feat_dim=18 top-10 weights:
+    #1 feat[7] w=135.890121
+    #2 feat[12] w=-128.429126
+    #3 feat[8] w=78.636446
+    #4 feat[9] w=-57.253675
+    #5 feat[15] w=24.594554
+    #6 feat[13] w=-10.049541
+    #7 feat[17] w=8.515663
+    #8 feat[0] w=-7.839405
+    #9 feat[16] w=-5.923777
+    #10 feat[1] w=-2.841052
+seed=503 beam=2 K=3 exact=100.0000 L=101.0000 Z=135.0000 P=106.0000 R=136.0000 gapL=1.00% gapZ=35.00% gapP=6.00% gapR=36.00% R2=0.985 t_exact=0.021s tL=0.019s tZ=0.002s train=59.583s
+seed=503 beam=3 K=3 exact=100.0000 L=100.0000 Z=134.0000 P=105.0000 R=134.0000 gapL=0.00% gapZ=34.00% gapP=5.00% gapR=34.00% R2=0.985 t_exact=0.021s tL=0.025s tZ=0.002s train=59.583s
+  [train] seed=504 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9863 R2_test=0.9866 MAE_train=2.09 MAE_test=2.09 time=14.47s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9863 R2_test=0.9860 MAE_train=2.08 MAE_test=2.11 time=14.61s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9859 R2_test=0.9866 MAE_train=2.12 MAE_test=2.07 time=14.67s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9859 R2_test=0.9870 MAE_train=2.09 MAE_test=2.04 time=14.75s
+  [train] final R2=0.9870 MAE=2.04 feat_dim=18 top-10 weights:
+    #1 feat[7] w=136.167313
+    #2 feat[12] w=-127.600782
+    #3 feat[8] w=79.360365
+    #4 feat[9] w=-56.806949
+    #5 feat[15] w=26.917699
+    #6 feat[13] w=-12.716397
+    #7 feat[17] w=9.846601
+    #8 feat[0] w=-8.672688
+    #9 feat[16] w=-7.021344
+    #10 feat[3] w=-3.102815
+seed=504 beam=2 K=3 exact=112.0000 L=112.0000 Z=153.0000 P=116.0000 R=153.0000 gapL=0.00% gapZ=36.61% gapP=3.57% gapR=36.61% R2=0.987 t_exact=0.022s tL=0.018s tZ=0.001s train=58.504s
+seed=504 beam=3 K=3 exact=112.0000 L=112.0000 Z=150.0000 P=115.0000 R=151.0000 gapL=0.00% gapZ=33.93% gapP=2.68% gapR=34.82% R2=0.987 t_exact=0.022s tL=0.023s tZ=0.002s train=58.504s
+  [train] seed=505 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9859 R2_test=0.9843 MAE_train=1.91 MAE_test=1.97 time=14.09s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9860 R2_test=0.9849 MAE_train=1.90 MAE_test=1.94 time=14.00s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9856 R2_test=0.9866 MAE_train=1.91 MAE_test=1.84 time=14.19s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9858 R2_test=0.9853 MAE_train=1.88 MAE_test=1.89 time=14.46s
+  [train] final R2=0.9853 MAE=1.89 feat_dim=18 top-10 weights:
+    #1 feat[7] w=132.277265
+    #2 feat[12] w=-129.383216
+    #3 feat[8] w=77.051586
+    #4 feat[9] w=-55.225678
+    #5 feat[15] w=25.212550
+    #6 feat[17] w=16.334623
+    #7 feat[13] w=-10.553845
+    #8 feat[16] w=-8.426703
+    #9 feat[6] w=7.907920
+    #10 feat[0] w=-7.735890
+seed=505 beam=2 K=3 exact=98.0000 L=99.0000 Z=133.0000 P=104.0000 R=133.0000 gapL=1.02% gapZ=35.71% gapP=6.12% gapR=35.71% R2=0.985 t_exact=0.019s tL=0.017s tZ=0.001s train=56.749s
+seed=505 beam=3 K=3 exact=98.0000 L=99.0000 Z=130.0000 P=104.0000 R=133.0000 gapL=1.02% gapZ=32.65% gapP=6.12% gapR=35.71% R2=0.985 t_exact=0.019s tL=0.022s tZ=0.002s train=56.749s
+  [train] seed=506 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9838 R2_test=0.9851 MAE_train=1.85 MAE_test=1.78 time=13.96s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9852 R2_test=0.9835 MAE_train=1.70 MAE_test=1.80 time=14.28s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9844 R2_test=0.9849 MAE_train=1.76 MAE_test=1.76 time=14.17s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9846 R2_test=0.9852 MAE_train=1.77 MAE_test=1.75 time=14.12s
+  [train] final R2=0.9852 MAE=1.75 feat_dim=18 top-10 weights:
+    #1 feat[7] w=140.092483
+    #2 feat[12] w=-120.049424
+    #3 feat[8] w=80.119048
+    #4 feat[9] w=-59.973436
+    #5 feat[15] w=24.138792
+    #6 feat[13] w=-12.913386
+    #7 feat[17] w=-10.391848
+    #8 feat[6] w=-10.008940
+    #9 feat[0] w=-7.528087
+    #10 feat[3] w=-2.784913
+seed=506 beam=2 K=3 exact=96.0000 L=96.0000 Z=129.0000 P=102.0000 R=131.0000 gapL=0.00% gapZ=34.38% gapP=6.25% gapR=36.46% R2=0.985 t_exact=0.019s tL=0.019s tZ=0.002s train=56.529s
+seed=506 beam=3 K=3 exact=96.0000 L=96.0000 Z=132.0000 P=101.0000 R=131.0000 gapL=0.00% gapZ=37.50% gapP=5.21% gapR=36.46% R2=0.985 t_exact=0.019s tL=0.025s tZ=0.002s train=56.529s
+  [train] seed=507 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9859 R2_test=0.9834 MAE_train=1.71 MAE_test=1.86 time=13.60s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9849 R2_test=0.9860 MAE_train=1.79 MAE_test=1.75 time=13.60s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9852 R2_test=0.9853 MAE_train=1.81 MAE_test=1.83 time=13.68s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9853 R2_test=0.9851 MAE_train=1.81 MAE_test=1.78 time=13.76s
+  [train] final R2=0.9851 MAE=1.78 feat_dim=18 top-10 weights:
+    #1 feat[7] w=129.320023
+    #2 feat[12] w=-119.009518
+    #3 feat[8] w=74.446274
+    #4 feat[9] w=-54.873750
+    #5 feat[15] w=24.379459
+    #6 feat[17] w=19.297951
+    #7 feat[6] w=11.424235
+    #8 feat[13] w=-9.751270
+    #9 feat[16] w=-7.873716
+    #10 feat[0] w=-7.318836
+seed=507 beam=2 K=3 exact=92.0000 L=94.0000 Z=127.0000 P=98.0000 R=127.0000 gapL=2.17% gapZ=38.04% gapP=6.52% gapR=38.04% R2=0.985 t_exact=0.018s tL=0.017s tZ=0.001s train=54.640s
+seed=507 beam=3 K=3 exact=92.0000 L=94.0000 Z=130.0000 P=97.0000 R=129.0000 gapL=2.17% gapZ=41.30% gapP=5.43% gapR=40.22% R2=0.985 t_exact=0.018s tL=0.023s tZ=0.002s train=54.640s
+  [train] seed=508 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9841 R2_test=0.9840 MAE_train=1.65 MAE_test=1.61 time=14.11s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9846 R2_test=0.9834 MAE_train=1.62 MAE_test=1.69 time=14.22s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9837 R2_test=0.9838 MAE_train=1.66 MAE_test=1.66 time=14.16s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9839 R2_test=0.9833 MAE_train=1.66 MAE_test=1.66 time=14.39s
+  [train] final R2=0.9833 MAE=1.66 feat_dim=18 top-10 weights:
+    #1 feat[7] w=142.294764
+    #2 feat[12] w=-127.486040
+    #3 feat[8] w=82.311100
+    #4 feat[9] w=-59.983665
+    #5 feat[15] w=22.981403
+    #6 feat[13] w=-21.258171
+    #7 feat[17] w=-14.087828
+    #8 feat[6] w=-13.812376
+    #9 feat[0] w=-6.838783
+    #10 feat[3] w=-2.477207
+seed=508 beam=2 K=3 exact=88.0000 L=88.0000 Z=127.0000 P=94.0000 R=127.0000 gapL=0.00% gapZ=44.32% gapP=6.82% gapR=44.32% R2=0.983 t_exact=0.020s tL=0.018s tZ=0.001s train=56.882s
+seed=508 beam=3 K=3 exact=88.0000 L=88.0000 Z=124.0000 P=93.0000 R=125.0000 gapL=0.00% gapZ=40.91% gapP=5.68% gapR=42.05% R2=0.983 t_exact=0.020s tL=0.024s tZ=0.002s train=56.882s
+  [train] seed=509 K=3 T=120 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9836 R2_test=0.9857 MAE_train=1.64 MAE_test=1.71 time=14.66s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9849 R2_test=0.9836 MAE_train=1.62 MAE_test=1.69 time=14.91s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9850 R2_test=0.9838 MAE_train=1.63 MAE_test=1.67 time=14.80s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9850 R2_test=0.9846 MAE_train=1.64 MAE_test=1.65 time=15.16s
+  [train] final R2=0.9846 MAE=1.65 feat_dim=18 top-10 weights:
+    #1 feat[7] w=138.833650
+    #2 feat[12] w=-118.797071
+    #3 feat[8] w=79.226634
+    #4 feat[9] w=-59.607016
+    #5 feat[15] w=23.231412
+    #6 feat[13] w=-15.271484
+    #7 feat[0] w=-7.366139
+    #8 feat[6] w=-3.819878
+    #9 feat[16] w=-3.122033
+    #10 feat[3] w=-2.808830
+seed=509 beam=2 K=3 exact=94.0000 L=95.0000 Z=130.0000 P=100.0000 R=130.0000 gapL=1.06% gapZ=38.30% gapP=6.38% gapR=38.30% R2=0.985 t_exact=0.021s tL=0.018s tZ=0.001s train=59.533s
+seed=509 beam=3 K=3 exact=94.0000 L=94.0000 Z=131.0000 P=100.0000 R=130.0000 gapL=0.00% gapZ=39.36% gapP=6.38% gapR=38.30% R2=0.985 t_exact=0.021s tL=0.024s tZ=0.002s train=59.533s
+=== Summary by beam (mean/median gaps; mean speedups) ===
+beam=2 n=10 gapL(mean/med)=0.526/0.000 gapZ(mean/med)=37.143/36.533 gapP(mean/med)=6.018/6.250 gapR(mean/med)=37.661/37.054 speedL(mean)=1.115 speedZ(mean)=13.842
+beam=3 n=10 gapL(mean/med)=0.319/0.000 gapZ(mean/med)=36.985/37.500 gapP(mean/med)=5.398/5.558 gapR(mean/med)=36.862/36.086 speedL(mean)=0.851 speedZ(mean)=9.960
+
+=== Holdout Summary ===
+rows=20 csv=PaST/logs/transfer_1_train_small.csv
+gap_learned mean/median/max = 0.4226 / 0.0000 / 2.1739
+gap_zero    mean/median/max = 37.0639 / 37.0536 / 44.3182
+r2_test mean/median = 0.9849 / 0.9849
+speedup_learned mean/median = 0.983 / 0.989
+speedup_zero    mean/median = 11.901 / 11.534
+Meaningful learning signal: gap_learned << gap_zero and positive r2_test.
+=== STEP 2: Evaluate FROZEN small model on MEDIUM ===
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+seed=600 beam=2 K=4 exact=140.0000 L=168.0000 Z=189.0000 P=146.0000 R=190.0000 gapL=20.00% gapZ=35.00% gapP=4.29% gapR=35.71% R2=0.676 t_exact=0.117s tL=0.030s tZ=0.002s train=0.887s
+seed=600 beam=3 K=4 exact=140.0000 L=168.0000 Z=186.0000 P=146.0000 R=186.0000 gapL=20.00% gapZ=32.86% gapP=4.29% gapR=32.86% R2=0.676 t_exact=0.117s tL=0.044s tZ=0.003s train=0.887s
+seed=601 beam=2 K=4 exact=162.0000 L=194.0000 Z=217.0000 P=168.0000 R=217.0000 gapL=19.75% gapZ=33.95% gapP=3.70% gapR=33.95% R2=0.518 t_exact=0.113s tL=0.030s tZ=0.002s train=0.848s
+seed=601 beam=3 K=4 exact=162.0000 L=194.0000 Z=216.0000 P=167.0000 R=216.0000 gapL=19.75% gapZ=33.33% gapP=3.09% gapR=33.33% R2=0.518 t_exact=0.113s tL=0.043s tZ=0.003s train=0.848s
+seed=602 beam=2 K=4 exact=144.0000 L=176.0000 Z=197.0000 P=150.0000 R=197.0000 gapL=22.22% gapZ=36.81% gapP=4.17% gapR=36.81% R2=0.666 t_exact=0.121s tL=0.031s tZ=0.002s train=0.791s
+seed=602 beam=3 K=4 exact=144.0000 L=176.0000 Z=194.0000 P=150.0000 R=195.0000 gapL=22.22% gapZ=34.72% gapP=4.17% gapR=35.42% R2=0.666 t_exact=0.121s tL=0.044s tZ=0.003s train=0.791s
+seed=603 beam=2 K=4 exact=112.0000 L=136.0000 Z=163.0000 P=122.0000 R=164.0000 gapL=21.43% gapZ=45.54% gapP=8.93% gapR=46.43% R2=0.639 t_exact=0.104s tL=0.031s tZ=0.002s train=0.681s
+seed=603 beam=3 K=4 exact=112.0000 L=136.0000 Z=162.0000 P=122.0000 R=162.0000 gapL=21.43% gapZ=44.64% gapP=8.93% gapR=44.64% R2=0.639 t_exact=0.104s tL=0.045s tZ=0.003s train=0.681s
+seed=604 beam=2 K=4 exact=144.0000 L=176.0000 Z=197.0000 P=150.0000 R=197.0000 gapL=22.22% gapZ=36.81% gapP=4.17% gapR=36.81% R2=0.555 t_exact=0.127s tL=0.030s tZ=0.002s train=0.801s
+seed=604 beam=3 K=4 exact=144.0000 L=176.0000 Z=194.0000 P=149.0000 R=195.0000 gapL=22.22% gapZ=34.72% gapP=3.47% gapR=35.42% R2=0.555 t_exact=0.127s tL=0.044s tZ=0.003s train=0.801s
+seed=605 beam=2 K=4 exact=168.0000 L=200.0000 Z=220.0000 P=170.0000 R=220.0000 gapL=19.05% gapZ=30.95% gapP=1.19% gapR=30.95% R2=0.552 t_exact=0.099s tL=0.029s tZ=0.002s train=0.725s
+seed=605 beam=3 K=4 exact=168.0000 L=200.0000 Z=220.0000 P=171.0000 R=219.0000 gapL=19.05% gapZ=30.95% gapP=1.79% gapR=30.36% R2=0.552 t_exact=0.099s tL=0.080s tZ=0.003s train=0.725s
+seed=606 beam=2 K=4 exact=134.0000 L=158.0000 Z=181.0000 P=142.0000 R=181.0000 gapL=17.91% gapZ=35.07% gapP=5.97% gapR=35.07% R2=0.516 t_exact=0.114s tL=0.029s tZ=0.002s train=0.686s
+seed=606 beam=3 K=4 exact=134.0000 L=158.0000 Z=180.0000 P=142.0000 R=180.0000 gapL=17.91% gapZ=34.33% gapP=5.97% gapR=34.33% R2=0.516 t_exact=0.114s tL=0.043s tZ=0.003s train=0.686s
+seed=607 beam=2 K=4 exact=142.0000 L=172.0000 Z=193.0000 P=148.0000 R=194.0000 gapL=21.13% gapZ=35.92% gapP=4.23% gapR=36.62% R2=0.606 t_exact=0.127s tL=0.032s tZ=0.002s train=0.885s
+seed=607 beam=3 K=4 exact=142.0000 L=172.0000 Z=190.0000 P=148.0000 R=190.0000 gapL=21.13% gapZ=33.80% gapP=4.23% gapR=33.80% R2=0.606 t_exact=0.127s tL=0.045s tZ=0.003s train=0.885s
+seed=608 beam=2 K=4 exact=160.0000 L=192.0000 Z=215.0000 P=166.0000 R=215.0000 gapL=20.00% gapZ=34.38% gapP=3.75% gapR=34.38% R2=0.608 t_exact=0.112s tL=0.031s tZ=0.002s train=0.824s
+seed=608 beam=3 K=4 exact=160.0000 L=192.0000 Z=214.0000 P=166.0000 R=215.0000 gapL=20.00% gapZ=33.75% gapP=3.75% gapR=34.38% R2=0.608 t_exact=0.112s tL=0.044s tZ=0.003s train=0.824s
+seed=609 beam=2 K=4 exact=148.0000 L=180.0000 Z=203.0000 P=154.0000 R=203.0000 gapL=21.62% gapZ=37.16% gapP=4.05% gapR=37.16% R2=0.628 t_exact=0.121s tL=0.030s tZ=0.002s train=0.784s
+seed=609 beam=3 K=4 exact=148.0000 L=180.0000 Z=202.0000 P=153.0000 R=203.0000 gapL=21.62% gapZ=36.49% gapP=3.38% gapR=37.16% R2=0.628 t_exact=0.121s tL=0.044s tZ=0.003s train=0.784s
+seed=610 beam=2 K=4 exact=138.0000 L=164.0000 Z=185.0000 P=145.0000 R=185.0000 gapL=18.84% gapZ=34.06% gapP=5.07% gapR=34.06% R2=0.510 t_exact=0.120s tL=0.030s tZ=0.002s train=0.822s
+seed=610 beam=3 K=4 exact=138.0000 L=164.0000 Z=184.0000 P=145.0000 R=184.0000 gapL=18.84% gapZ=33.33% gapP=5.07% gapR=33.33% R2=0.510 t_exact=0.120s tL=0.042s tZ=0.003s train=0.822s
+seed=611 beam=2 K=4 exact=146.0000 L=178.0000 Z=201.0000 P=152.0000 R=201.0000 gapL=21.92% gapZ=37.67% gapP=4.11% gapR=37.67% R2=0.318 t_exact=0.113s tL=0.032s tZ=0.002s train=0.779s
+seed=611 beam=3 K=4 exact=146.0000 L=178.0000 Z=198.0000 P=152.0000 R=199.0000 gapL=21.92% gapZ=35.62% gapP=4.11% gapR=36.30% R2=0.318 t_exact=0.113s tL=0.046s tZ=0.003s train=0.779s
+seed=612 beam=2 K=4 exact=132.0000 L=156.0000 Z=179.0000 P=141.0000 R=179.0000 gapL=18.18% gapZ=35.61% gapP=6.82% gapR=35.61% R2=0.569 t_exact=0.122s tL=0.031s tZ=0.002s train=0.816s
+seed=612 beam=3 K=4 exact=132.0000 L=156.0000 Z=178.0000 P=141.0000 R=178.0000 gapL=18.18% gapZ=34.85% gapP=6.82% gapR=34.85% R2=0.569 t_exact=0.122s tL=0.046s tZ=0.003s train=0.816s
+seed=613 beam=2 K=4 exact=168.0000 L=200.0000 Z=220.0000 P=172.0000 R=220.0000 gapL=19.05% gapZ=30.95% gapP=2.38% gapR=30.95% R2=0.679 t_exact=0.103s tL=0.031s tZ=0.002s train=0.703s
+seed=613 beam=3 K=4 exact=168.0000 L=200.0000 Z=220.0000 P=171.0000 R=220.0000 gapL=19.05% gapZ=30.95% gapP=1.79% gapR=30.95% R2=0.679 t_exact=0.103s tL=0.044s tZ=0.003s train=0.703s
+seed=614 beam=2 K=4 exact=138.0000 L=164.0000 Z=185.0000 P=145.0000 R=185.0000 gapL=18.84% gapZ=34.06% gapP=5.07% gapR=34.06% R2=0.658 t_exact=0.102s tL=0.031s tZ=0.002s train=0.858s
+seed=614 beam=3 K=4 exact=138.0000 L=164.0000 Z=184.0000 P=144.0000 R=184.0000 gapL=18.84% gapZ=33.33% gapP=4.35% gapR=33.33% R2=0.658 t_exact=0.102s tL=0.046s tZ=0.003s train=0.858s
+seed=615 beam=2 K=4 exact=128.0000 L=152.0000 Z=176.0000 P=138.0000 R=176.0000 gapL=18.75% gapZ=37.50% gapP=7.81% gapR=37.50% R2=0.690 t_exact=0.092s tL=0.033s tZ=0.002s train=0.822s
+seed=615 beam=3 K=4 exact=128.0000 L=152.0000 Z=176.0000 P=138.0000 R=175.0000 gapL=18.75% gapZ=37.50% gapP=7.81% gapR=36.72% R2=0.690 t_exact=0.092s tL=0.047s tZ=0.003s train=0.822s
+seed=616 beam=2 K=4 exact=128.0000 L=152.0000 Z=176.0000 P=138.0000 R=176.0000 gapL=18.75% gapZ=37.50% gapP=7.81% gapR=37.50% R2=0.694 t_exact=0.113s tL=0.032s tZ=0.002s train=0.702s
+seed=616 beam=3 K=4 exact=128.0000 L=152.0000 Z=176.0000 P=138.0000 R=176.0000 gapL=18.75% gapZ=37.50% gapP=7.81% gapR=37.50% R2=0.694 t_exact=0.113s tL=0.046s tZ=0.003s train=0.702s
+seed=617 beam=2 K=4 exact=140.0000 L=168.0000 Z=189.0000 P=146.0000 R=189.0000 gapL=20.00% gapZ=35.00% gapP=4.29% gapR=35.00% R2=0.738 t_exact=0.126s tL=0.030s tZ=0.002s train=0.848s
+seed=617 beam=3 K=4 exact=140.0000 L=168.0000 Z=186.0000 P=145.0000 R=187.0000 gapL=20.00% gapZ=32.86% gapP=3.57% gapR=33.57% R2=0.738 t_exact=0.126s tL=0.045s tZ=0.003s train=0.848s
+seed=618 beam=2 K=4 exact=154.0000 L=186.0000 Z=209.0000 P=160.0000 R=209.0000 gapL=20.78% gapZ=35.71% gapP=3.90% gapR=35.71% R2=0.618 t_exact=0.111s tL=0.029s tZ=0.002s train=0.858s
+seed=618 beam=3 K=4 exact=154.0000 L=186.0000 Z=208.0000 P=160.0000 R=209.0000 gapL=20.78% gapZ=35.06% gapP=3.90% gapR=35.71% R2=0.618 t_exact=0.111s tL=0.041s tZ=0.003s train=0.858s
+seed=619 beam=2 K=4 exact=156.0000 L=188.0000 Z=211.0000 P=162.0000 R=211.0000 gapL=20.51% gapZ=35.26% gapP=3.85% gapR=35.26% R2=0.633 t_exact=0.112s tL=0.030s tZ=0.002s train=0.817s
+seed=619 beam=3 K=4 exact=156.0000 L=188.0000 Z=210.0000 P=161.0000 R=211.0000 gapL=20.51% gapZ=34.62% gapP=3.21% gapR=35.26% R2=0.633 t_exact=0.112s tL=0.044s tZ=0.003s train=0.817s
+=== Summary by beam (mean/median gaps; mean speedups) ===
+beam=2 n=20 gapL(mean/med)=20.048/20.000 gapZ(mean/med)=35.745/35.431 gapP(mean/med)=4.777/4.196 gapR(mean/med)=35.860/35.660 speedL(mean)=3.696 speedZ(mean)=48.714
+beam=3 n=20 gapL(mean/med)=20.048/20.000 gapZ(mean/med)=34.761/34.472 gapP(mean/med)=4.574/4.138 gapR(mean/med)=34.961/34.612 speedL(mean)=2.500 speedZ(mean)=34.128
+
+=== Holdout Summary ===
+rows=40 csv=PaST/logs/transfer_2_frozen_on_medium.csv
+gap_learned mean/median/max = 20.0476 / 20.0000 / 22.2222
+gap_zero    mean/median/max = 35.2528 / 34.9242 / 45.5357
+r2_test mean/median = 0.6036 / 0.6230
+speedup_learned mean/median = 3.098 / 2.849
+speedup_zero    mean/median = 41.421 / 38.201
+Meaningful learning signal: gap_learned << gap_zero and positive r2_test.
+=== STEP 3: Fine-tune on MEDIUM, save ===
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+  [train] seed=600 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9862 R2_test=0.9878 MAE_train=2.08 MAE_test=1.99 time=40.70s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9868 R2_test=0.9869 MAE_train=2.03 MAE_test=2.06 time=38.64s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9867 R2_test=0.9872 MAE_train=2.06 MAE_test=2.01 time=39.79s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9868 R2_test=0.9867 MAE_train=2.04 MAE_test=2.09 time=40.69s
+  [train] final R2=0.9867 MAE=2.09 feat_dim=18 top-10 weights:
+    #1 feat[7] w=183.558922
+    #2 feat[12] w=-116.890514
+    #3 feat[8] w=100.770466
+    #4 feat[9] w=-82.788457
+    #5 feat[15] w=31.638204
+    #6 feat[13] w=-17.585993
+    #7 feat[0] w=-11.149036
+    #8 feat[3] w=-3.988098
+    #9 feat[1] w=-3.610323
+    #10 feat[2] w=-3.550615
+  [save] Model saved to PaST/models/vhat_medium.npz (dim=18, normalize=True)
+seed=600 beam=2 K=4 exact=140.0000 L=140.0000 Z=189.0000 P=146.0000 R=190.0000 gapL=0.00% gapZ=35.00% gapP=4.29% gapR=35.71% R2=0.987 t_exact=0.118s tL=0.031s tZ=0.002s train=159.826s
+seed=600 beam=3 K=4 exact=140.0000 L=140.0000 Z=186.0000 P=146.0000 R=186.0000 gapL=0.00% gapZ=32.86% gapP=4.29% gapR=32.86% R2=0.987 t_exact=0.118s tL=0.041s tZ=0.003s train=159.826s
+  [train] seed=601 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9870 R2_test=0.9867 MAE_train=2.26 MAE_test=2.32 time=40.18s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9863 R2_test=0.9870 MAE_train=2.33 MAE_test=2.27 time=40.50s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9865 R2_test=0.9865 MAE_train=2.32 MAE_test=2.30 time=40.14s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9868 R2_test=0.9857 MAE_train=2.27 MAE_test=2.39 time=40.24s
+  [train] final R2=0.9857 MAE=2.39 feat_dim=18 top-10 weights:
+    #1 feat[7] w=185.510974
+    #2 feat[12] w=-117.659445
+    #3 feat[8] w=101.959210
+    #4 feat[9] w=-83.551764
+    #5 feat[15] w=35.384138
+    #6 feat[13] w=-15.696985
+    #7 feat[0] w=-12.760505
+    #8 feat[16] w=-4.485696
+    #9 feat[1] w=-4.293201
+    #10 feat[2] w=-4.276822
+seed=601 beam=2 K=4 exact=162.0000 L=162.0000 Z=217.0000 P=168.0000 R=217.0000 gapL=0.00% gapZ=33.95% gapP=3.70% gapR=33.95% R2=0.986 t_exact=0.114s tL=0.031s tZ=0.002s train=161.061s
+seed=601 beam=3 K=4 exact=162.0000 L=162.0000 Z=216.0000 P=167.0000 R=216.0000 gapL=0.00% gapZ=33.33% gapP=3.09% gapR=33.33% R2=0.986 t_exact=0.114s tL=0.042s tZ=0.003s train=161.061s
+  [train] seed=602 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9861 R2_test=0.9868 MAE_train=2.03 MAE_test=2.03 time=41.68s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9865 R2_test=0.9868 MAE_train=2.00 MAE_test=2.00 time=41.60s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9864 R2_test=0.9864 MAE_train=2.03 MAE_test=2.05 time=41.00s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9863 R2_test=0.9865 MAE_train=2.05 MAE_test=2.05 time=41.35s
+  [train] final R2=0.9865 MAE=2.05 feat_dim=18 top-10 weights:
+    #1 feat[7] w=181.075157
+    #2 feat[12] w=-117.117848
+    #3 feat[8] w=99.995813
+    #4 feat[9] w=-81.079346
+    #5 feat[15] w=34.385442
+    #6 feat[13] w=-18.468431
+    #7 feat[0] w=-12.037096
+    #8 feat[17] w=5.912507
+    #9 feat[3] w=-4.375751
+    #10 feat[2] w=-3.895019
+seed=602 beam=2 K=4 exact=144.0000 L=144.0000 Z=197.0000 P=150.0000 R=197.0000 gapL=0.00% gapZ=36.81% gapP=4.17% gapR=36.81% R2=0.987 t_exact=0.123s tL=0.030s tZ=0.002s train=165.635s
+seed=602 beam=3 K=4 exact=144.0000 L=144.0000 Z=194.0000 P=150.0000 R=195.0000 gapL=0.00% gapZ=34.72% gapP=4.17% gapR=35.42% R2=0.987 t_exact=0.123s tL=0.042s tZ=0.003s train=165.635s
+  [train] seed=603 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9845 R2_test=0.9831 MAE_train=1.80 MAE_test=1.89 time=36.03s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9842 R2_test=0.9850 MAE_train=1.81 MAE_test=1.78 time=36.27s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9843 R2_test=0.9845 MAE_train=1.80 MAE_test=1.77 time=37.79s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9842 R2_test=0.9846 MAE_train=1.81 MAE_test=1.76 time=37.18s
+  [train] final R2=0.9846 MAE=1.76 feat_dim=18 top-10 weights:
+    #1 feat[7] w=180.236643
+    #2 feat[12] w=-116.658524
+    #3 feat[8] w=98.493055
+    #4 feat[9] w=-81.743589
+    #5 feat[15] w=27.872869
+    #6 feat[13] w=-19.272344
+    #7 feat[0] w=-8.745878
+    #8 feat[3] w=-3.086092
+    #9 feat[2] w=-3.027567
+    #10 feat[1] w=-2.632219
+seed=603 beam=2 K=4 exact=112.0000 L=112.0000 Z=163.0000 P=122.0000 R=164.0000 gapL=0.00% gapZ=45.54% gapP=8.93% gapR=46.43% R2=0.985 t_exact=0.104s tL=0.031s tZ=0.002s train=147.277s
+seed=603 beam=3 K=4 exact=112.0000 L=112.0000 Z=162.0000 P=122.0000 R=162.0000 gapL=0.00% gapZ=44.64% gapP=8.93% gapR=44.64% R2=0.985 t_exact=0.104s tL=0.044s tZ=0.003s train=147.277s
+  [train] seed=604 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9875 R2_test=0.9862 MAE_train=1.99 MAE_test=2.06 time=43.24s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9870 R2_test=0.9875 MAE_train=2.00 MAE_test=2.07 time=42.73s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9868 R2_test=0.9870 MAE_train=2.00 MAE_test=2.04 time=41.97s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9869 R2_test=0.9871 MAE_train=2.00 MAE_test=2.04 time=42.05s
+  [train] final R2=0.9871 MAE=2.04 feat_dim=18 top-10 weights:
+    #1 feat[7] w=183.239936
+    #2 feat[12] w=-118.455717
+    #3 feat[8] w=101.006635
+    #4 feat[9] w=-82.233301
+    #5 feat[15] w=33.631773
+    #6 feat[13] w=-17.374066
+    #7 feat[0] w=-12.067363
+    #8 feat[3] w=-4.261257
+    #9 feat[1] w=-3.912141
+    #10 feat[2] w=-3.893966
+seed=604 beam=2 K=4 exact=144.0000 L=145.0000 Z=197.0000 P=150.0000 R=197.0000 gapL=0.69% gapZ=36.81% gapP=4.17% gapR=36.81% R2=0.987 t_exact=0.128s tL=0.030s tZ=0.002s train=169.996s
+seed=604 beam=3 K=4 exact=144.0000 L=144.0000 Z=194.0000 P=149.0000 R=195.0000 gapL=0.00% gapZ=34.72% gapP=3.47% gapR=35.42% R2=0.987 t_exact=0.128s tL=0.041s tZ=0.003s train=169.996s
+  [train] seed=605 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9863 R2_test=0.9844 MAE_train=2.46 MAE_test=2.64 time=37.42s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9859 R2_test=0.9861 MAE_train=2.54 MAE_test=2.57 time=37.01s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9858 R2_test=0.9856 MAE_train=2.58 MAE_test=2.56 time=37.74s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9856 R2_test=0.9855 MAE_train=2.57 MAE_test=2.60 time=36.95s
+  [train] final R2=0.9855 MAE=2.60 feat_dim=18 top-10 weights:
+    #1 feat[7] w=183.348938
+    #2 feat[12] w=-116.512789
+    #3 feat[8] w=101.717458
+    #4 feat[9] w=-81.631482
+    #5 feat[15] w=36.713084
+    #6 feat[13] w=-19.670432
+    #7 feat[0] w=-13.748732
+    #8 feat[17] w=4.882407
+    #9 feat[3] w=-4.670281
+    #10 feat[2] w=-4.572976
+seed=605 beam=2 K=4 exact=168.0000 L=168.0000 Z=220.0000 P=170.0000 R=220.0000 gapL=0.00% gapZ=30.95% gapP=1.19% gapR=30.95% R2=0.985 t_exact=0.097s tL=0.032s tZ=0.002s train=149.124s
+seed=605 beam=3 K=4 exact=168.0000 L=168.0000 Z=220.0000 P=171.0000 R=219.0000 gapL=0.00% gapZ=30.95% gapP=1.79% gapR=30.36% R2=0.985 t_exact=0.097s tL=0.043s tZ=0.003s train=149.124s
+  [train] seed=606 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000
+  [train] round=1/4 n_total=5000 n_train=3750 n_test=1250 R2_train=0.9853 R2_test=0.9869 MAE_train=2.03 MAE_test=1.90 time=39.17s
+  [train] round=2/4 n_total=10000 n_train=7500 n_test=2500 R2_train=0.9858 R2_test=0.9860 MAE_train=1.96 MAE_test=1.95 time=39.33s
+  [train] round=3/4 n_total=15000 n_train=11250 n_test=3750 R2_train=0.9859 R2_test=0.9866 MAE_train=1.97 MAE_test=1.89 time=39.47s
+  [train] round=4/4 n_total=20000 n_train=15000 n_test=5000 R2_train=0.9860 R2_test=0.9867 MAE_train=1.94 MAE_test=1.89 time=39.73s
+  [train] final R2=0.9867 MAE=1.89 feat_dim=18 top-10 weights:
+    #1 feat[7] w=181.408128
+    #2 feat[12] w=-116.969215
+    #3 feat[8] w=99.909900
+    #4 feat[9] w=-81.498229
+    #5 feat[15] w=31.638267
+    #6 feat[13] w=-20.409646
+    #7 feat[0] w=-10.839475
+    #8 feat[17] w=5.456596
+    #9 feat[3] w=-3.836922
+    #10 feat[2] w=-3.604559
+seed=606 beam=2 K=4 exact=134.0000 L=134.0000 Z=181.0000 P=142.0000 R=181.0000 gapL=0.00% gapZ=35.07% gapP=5.97% gapR=35.07% R2=0.987 t_exact=0.115s tL=0.030s tZ=0.002s train=157.704s
+seed=606 beam=3 K=4 exact=134.0000 L=134.0000 Z=180.0000 P=142.0000 R=180.0000 gapL=0.00% gapZ=34.33% gapP=5.97% gapR=34.33% R2=0.987 t_exact=0.115s tL=0.041s tZ=0.003s train=157.704s
+  [train] seed=607 K=4 T=160 feat_spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True) rounds=4 samples/round=5000

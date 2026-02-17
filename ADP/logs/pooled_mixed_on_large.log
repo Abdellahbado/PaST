@@ -1,0 +1,212 @@
+(base) jovyan@price-family-q-seq-cwe-0:~$ export PYTHONUNBUFFERED=1
+# Train on pmax=5 instances — 100 instances × 4000 samples = 400k pooled
+python PaST/sandbox/eval_pooled_vhat.py \
+  --D 8 --N 35 --pmax 5 \
+  --train-seeds 0-99 --samples-per-instance 4000 \
+  --eval-seeds 300-329 \
+  --eval-D 12 --eval-N 40 --eval-pmax 5 \
+  --transferable-features --normalize --normalize-labels \
+  --beams 2,3 \
+  --save-model PaST/models/vhat_pooled_mixed.npz \
+  --out-csv PaST/logs/pooled_mixed_on_large.csv \
+  2>&1 | tee PaST/logs/pooled_mixed_on_large.log
+tee: PaST/logs/pooled_mixed_on_large.log: No such file or directory
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+[pool] === TRAINING PHASE ===
+[pool] Instance params: D=8, N=35, pmax=5
+[pool] Train seeds: 0-99 (100 instances)
+[pool] Samples per instance: 4000
+[pool] Features: spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True)
+[pool] normalize_labels=True
+[pool] train seed=0 (1/100) K=5 samples=4000 time=59.9s
+[pool] train seed=1 (2/100) K=5 samples=4000 time=63.5s
+[pool] train seed=2 (3/100) K=5 samples=4000 time=64.0s
+[pool] train seed=3 (4/100) K=5 samples=4000 time=64.5s
+[pool] train seed=4 (5/100) K=5 samples=4000 time=54.0s
+[pool] train seed=5 (6/100) K=5 samples=4000 time=61.9s
+[pool] train seed=6 (7/100) K=5 samples=4000 time=62.0s
+[pool] train seed=7 (8/100) K=5 samples=4000 time=57.5s
+[pool] train seed=8 (9/100) K=5 samples=4000 time=57.9s
+[pool] train seed=9 (10/100) K=5 samples=4000 time=48.1s
+[pool] train seed=10 (11/100) K=5 samples=4000 time=56.6s
+[pool] train seed=11 (12/100) K=5 samples=4000 time=59.1s
+[pool] train seed=12 (13/100) K=5 samples=4000 time=64.3s
+[pool] train seed=13 (14/100) K=5 samples=4000 time=45.5s
+[pool] train seed=14 (15/100) K=5 samples=4000 time=56.5s
+[pool] train seed=15 (16/100) K=5 samples=4000 time=61.1s
+[pool] train seed=16 (17/100) K=5 samples=4000 time=60.0s
+[pool] train seed=17 (18/100) K=5 samples=4000 time=58.4s
+[pool] train seed=18 (19/100) K=5 samples=4000 time=55.3s
+[pool] train seed=19 (20/100) K=5 samples=4000 time=58.1s
+[pool] train seed=20 (21/100) K=5 samples=4000 time=63.4s
+[pool] train seed=21 (22/100) K=5 samples=4000 time=48.7s
+[pool] train seed=22 (23/100) K=5 samples=4000 time=61.1s
+[pool] train seed=23 (24/100) K=5 samples=4000 time=45.1s
+[pool] train seed=24 (25/100) K=5 samples=4000 time=55.1s
+[pool] train seed=25 (26/100) K=5 samples=4000 time=56.2s
+[pool] train seed=26 (27/100) K=5 samples=4000 time=63.9s
+[pool] train seed=27 (28/100) K=5 samples=4000 time=60.4s
+[pool] train seed=28 (29/100) K=5 samples=4000 time=53.7s
+[pool] train seed=29 (30/100) K=5 samples=4000 time=60.7s
+[pool] train seed=30 (31/100) K=5 samples=4000 time=48.4s
+[pool] train seed=31 (32/100) K=5 samples=4000 time=61.7s
+[pool] train seed=32 (33/100) K=5 samples=4000 time=51.4s
+[pool] train seed=33 (34/100) K=5 samples=4000 time=58.0s
+[pool] train seed=34 (35/100) K=5 samples=4000 time=53.3s
+[pool] train seed=35 (36/100) K=5 samples=4000 time=59.6s
+[pool] train seed=36 (37/100) K=5 samples=4000 time=57.9s
+[pool] train seed=37 (38/100) K=5 samples=4000 time=61.1s
+[pool] train seed=38 (39/100) K=5 samples=4000 time=62.2s
+[pool] train seed=39 (40/100) K=5 samples=4000 time=53.7s
+[pool] train seed=40 (41/100) K=5 samples=4000 time=51.5s
+[pool] train seed=41 (42/100) K=5 samples=4000 time=60.5s
+[pool] train seed=42 (43/100) K=5 samples=4000 time=54.2s
+[pool] train seed=43 (44/100) K=5 samples=4000 time=56.1s
+[pool] train seed=44 (45/100) K=5 samples=4000 time=58.5s
+[pool] train seed=45 (46/100) K=5 samples=4000 time=29.4s
+[pool] train seed=46 (47/100) K=5 samples=4000 time=57.1s
+[pool] train seed=47 (48/100) K=5 samples=4000 time=59.9s
+[pool] train seed=48 (49/100) K=5 samples=4000 time=65.7s
+[pool] train seed=49 (50/100) K=5 samples=4000 time=63.9s
+[pool] train seed=50 (51/100) K=5 samples=4000 time=62.3s
+[pool] train seed=51 (52/100) K=5 samples=4000 time=60.5s
+[pool] train seed=52 (53/100) K=5 samples=4000 time=58.1s
+[pool] train seed=53 (54/100) K=5 samples=4000 time=55.9s
+[pool] train seed=54 (55/100) K=5 samples=4000 time=66.9s
+[pool] train seed=55 (56/100) K=5 samples=4000 time=63.0s
+[pool] train seed=56 (57/100) K=5 samples=4000 time=63.8s
+[pool] train seed=57 (58/100) K=5 samples=4000 time=59.8s
+[pool] train seed=58 (59/100) K=5 samples=4000 time=52.8s
+[pool] train seed=59 (60/100) K=5 samples=4000 time=53.9s
+[pool] train seed=60 (61/100) K=5 samples=4000 time=62.1s
+[pool] train seed=61 (62/100) K=5 samples=4000 time=54.9s
+[pool] train seed=62 (63/100) K=5 samples=4000 time=54.8s
+[pool] train seed=63 (64/100) K=5 samples=4000 time=54.2s
+[pool] train seed=64 (65/100) K=5 samples=4000 time=62.6s
+[pool] train seed=65 (66/100) K=5 samples=4000 time=64.2s
+[pool] train seed=66 (67/100) K=5 samples=4000 time=54.0s
+[pool] train seed=67 (68/100) K=5 samples=4000 time=60.7s
+[pool] train seed=68 (69/100) K=5 samples=4000 time=62.5s
+[pool] train seed=69 (70/100) K=4 samples=4000 time=32.0s
+[pool] train seed=70 (71/100) K=5 samples=4000 time=54.8s
+[pool] train seed=71 (72/100) K=5 samples=4000 time=56.9s
+[pool] train seed=72 (73/100) K=5 samples=4000 time=63.4s
+[pool] train seed=73 (74/100) K=5 samples=4000 time=59.9s
+[pool] train seed=74 (75/100) K=5 samples=4000 time=54.0s
+[pool] train seed=75 (76/100) K=5 samples=4000 time=51.7s
+[pool] train seed=76 (77/100) K=5 samples=4000 time=57.5s
+[pool] train seed=77 (78/100) K=5 samples=4000 time=49.2s
+[pool] train seed=78 (79/100) K=5 samples=4000 time=63.4s
+[pool] train seed=79 (80/100) K=5 samples=4000 time=39.5s
+[pool] train seed=80 (81/100) K=5 samples=4000 time=60.3s
+[pool] train seed=81 (82/100) K=5 samples=4000 time=62.3s
+[pool] train seed=82 (83/100) K=5 samples=4000 time=62.5s
+[pool] train seed=83 (84/100) K=5 samples=4000 time=55.1s
+[pool] train seed=84 (85/100) K=5 samples=4000 time=57.6s
+[pool] train seed=85 (86/100) K=5 samples=4000 time=60.8s
+[pool] train seed=86 (87/100) K=5 samples=4000 time=54.3s
+[pool] train seed=87 (88/100) K=5 samples=4000 time=54.5s
+[pool] train seed=88 (89/100) K=5 samples=4000 time=52.6s
+[pool] train seed=89 (90/100) K=5 samples=4000 time=61.2s
+[pool] train seed=90 (91/100) K=5 samples=4000 time=62.0s
+[pool] train seed=91 (92/100) K=5 samples=4000 time=55.9s
+[pool] train seed=92 (93/100) K=5 samples=4000 time=61.4s
+[pool] train seed=93 (94/100) K=5 samples=4000 time=58.0s
+[pool] train seed=94 (95/100) K=5 samples=4000 time=63.5s
+[pool] train seed=95 (96/100) K=5 samples=4000 time=50.7s
+[pool] train seed=96 (97/100) K=5 samples=4000 time=61.4s
+[pool] train seed=97 (98/100) K=5 samples=4000 time=58.8s
+[pool] train seed=98 (99/100) K=5 samples=4000 time=54.7s
+[pool] train seed=99 (100/100) K=5 samples=4000 time=49.2s
+
+[pool] === TRAINING RESULTS ===
+[pool] Pooled samples: 400000 (from 100 instances)
+[pool] feat_dim=18
+[pool] R2_train=0.9857  R2_test=0.9858
+[pool] MAE_train=0.02  MAE_test=0.02
+[pool] Total training time: 5726.4s
+[pool] Top-10 weights:
+    #1 feat[13] w=-2.014501
+    #2 feat[15] w=1.029181
+    #3 feat[12] w=-0.692191
+    #4 feat[9] w=0.371399
+    #5 feat[8] w=0.362105
+    #6 feat[0] w=-0.176226
+    #7 feat[6] w=-0.076368
+    #8 feat[3] w=-0.064375
+    #9 feat[2] w=-0.058481
+    #10 feat[1] w=-0.053372
+[pool] Model saved to PaST/models/vhat_pooled_mixed.npz
+
+[pool] === EVALUATION PHASE ===
+[pool] Eval params: D=12, N=40, pmax=5
+[pool] Eval seeds: 300-329 (30 instances)
+[pool] Beams: [2, 3]
+seed=300 beam=2 exact=212.0 L=219.0 Z=291.0 P=224.0 gapL=3.30% gapZ=37.26% gapP=5.66% t_exact=1.158s tL=0.045s
+seed=300 beam=3 exact=212.0 L=221.0 Z=290.0 P=225.0 gapL=4.25% gapZ=36.79% gapP=6.13% t_exact=1.158s tL=0.067s
+seed=301 beam=2 exact=196.0 L=206.0 Z=267.0 P=210.0 gapL=5.10% gapZ=36.22% gapP=7.14% t_exact=1.242s tL=0.041s
+seed=301 beam=3 exact=196.0 L=206.0 Z=266.0 P=210.0 gapL=5.10% gapZ=35.71% gapP=7.14% t_exact=1.242s tL=0.056s
+seed=302 beam=2 exact=196.0 L=206.0 Z=267.0 P=210.0 gapL=5.10% gapZ=36.22% gapP=7.14% t_exact=1.314s tL=0.042s
+seed=302 beam=3 exact=196.0 L=205.0 Z=266.0 P=209.0 gapL=4.59% gapZ=35.71% gapP=6.63% t_exact=1.314s tL=0.057s
+seed=303 beam=2 exact=212.0 L=219.0 Z=291.0 P=224.0 gapL=3.30% gapZ=37.26% gapP=5.66% t_exact=1.089s tL=0.045s
+seed=303 beam=3 exact=212.0 L=221.0 Z=290.0 P=223.0 gapL=4.25% gapZ=36.79% gapP=5.19% t_exact=1.089s tL=0.071s
+seed=304 beam=2 exact=180.0 L=191.0 Z=255.0 P=197.0 gapL=6.11% gapZ=41.67% gapP=9.44% t_exact=0.848s tL=0.038s
+seed=304 beam=3 exact=180.0 L=193.0 Z=254.0 P=196.0 gapL=7.22% gapZ=41.11% gapP=8.89% t_exact=0.848s tL=0.051s
+seed=305 beam=2 exact=158.0 L=172.0 Z=225.0 P=176.0 gapL=8.86% gapZ=42.41% gapP=11.39% t_exact=0.979s tL=0.033s
+seed=305 beam=3 exact=158.0 L=172.0 Z=224.0 P=175.0 gapL=8.86% gapZ=41.77% gapP=10.76% t_exact=0.979s tL=0.045s
+seed=306 beam=2 exact=168.0 L=182.0 Z=241.0 P=186.0 gapL=8.33% gapZ=43.45% gapP=10.71% t_exact=1.117s tL=0.037s
+seed=306 beam=3 exact=168.0 L=181.0 Z=238.0 P=185.0 gapL=7.74% gapZ=41.67% gapP=10.12% t_exact=1.117s tL=0.050s
+seed=307 beam=2 exact=228.0 L=233.0 Z=306.0 P=238.0 gapL=2.19% gapZ=34.21% gapP=4.39% t_exact=0.965s tL=0.046s
+seed=307 beam=3 exact=228.0 L=233.0 Z=306.0 P=238.0 gapL=2.19% gapZ=34.21% gapP=4.39% t_exact=0.965s tL=0.063s
+seed=308 beam=2 exact=198.0 L=208.0 Z=269.0 P=212.0 gapL=5.05% gapZ=35.86% gapP=7.07% t_exact=1.063s tL=0.041s
+seed=308 beam=3 exact=198.0 L=207.0 Z=268.0 P=211.0 gapL=4.55% gapZ=35.35% gapP=6.57% t_exact=1.063s tL=0.055s
+seed=309 beam=2 exact=184.0 L=194.0 Z=259.0 P=199.0 gapL=5.43% gapZ=40.76% gapP=8.15% t_exact=1.196s tL=0.041s
+seed=309 beam=3 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.196s tL=0.055s
+seed=310 beam=2 exact=178.0 L=189.0 Z=253.0 P=196.0 gapL=6.18% gapZ=42.13% gapP=10.11% t_exact=1.087s tL=0.038s
+seed=310 beam=3 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=1.087s tL=0.051s
+seed=311 beam=2 exact=156.0 L=170.0 Z=223.0 P=174.0 gapL=8.97% gapZ=42.95% gapP=11.54% t_exact=0.829s tL=0.046s
+seed=311 beam=3 exact=156.0 L=170.0 Z=222.0 P=174.0 gapL=8.97% gapZ=42.31% gapP=11.54% t_exact=0.829s tL=0.047s
+seed=312 beam=2 exact=184.0 L=194.0 Z=259.0 P=199.0 gapL=5.43% gapZ=40.76% gapP=8.15% t_exact=1.312s tL=0.040s
+seed=312 beam=3 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.312s tL=0.055s
+seed=313 beam=2 exact=216.0 L=222.0 Z=295.0 P=226.0 gapL=2.78% gapZ=36.57% gapP=4.63% t_exact=1.199s tL=0.045s
+seed=313 beam=3 exact=216.0 L=223.0 Z=294.0 P=227.0 gapL=3.24% gapZ=36.11% gapP=5.09% t_exact=1.199s tL=0.062s
+seed=314 beam=2 exact=224.0 L=230.0 Z=303.0 P=234.0 gapL=2.68% gapZ=35.27% gapP=4.46% t_exact=0.959s tL=0.047s
+seed=314 beam=3 exact=224.0 L=230.0 Z=302.0 P=234.0 gapL=2.68% gapZ=34.82% gapP=4.46% t_exact=0.959s tL=0.063s
+seed=315 beam=2 exact=218.0 L=224.0 Z=297.0 P=228.0 gapL=2.75% gapZ=36.24% gapP=4.59% t_exact=0.890s tL=0.048s
+seed=315 beam=3 exact=218.0 L=225.0 Z=296.0 P=228.0 gapL=3.21% gapZ=35.78% gapP=4.59% t_exact=0.890s tL=0.064s
+seed=316 beam=2 exact=202.0 L=212.0 Z=273.0 P=216.0 gapL=4.95% gapZ=35.15% gapP=6.93% t_exact=1.297s tL=0.051s
+seed=316 beam=3 exact=202.0 L=212.0 Z=272.0 P=216.0 gapL=4.95% gapZ=34.65% gapP=6.93% t_exact=1.297s tL=0.058s
+seed=317 beam=2 exact=168.0 L=182.0 Z=241.0 P=186.0 gapL=8.33% gapZ=43.45% gapP=10.71% t_exact=0.984s tL=0.037s
+seed=317 beam=3 exact=168.0 L=182.0 Z=238.0 P=185.0 gapL=8.33% gapZ=41.67% gapP=10.12% t_exact=0.984s tL=0.048s
+seed=318 beam=2 exact=220.0 L=226.0 Z=299.0 P=230.0 gapL=2.73% gapZ=35.91% gapP=4.55% t_exact=1.092s tL=0.046s
+seed=318 beam=3 exact=220.0 L=226.0 Z=298.0 P=230.0 gapL=2.73% gapZ=35.45% gapP=4.55% t_exact=1.092s tL=0.063s
+seed=319 beam=2 exact=198.0 L=208.0 Z=269.0 P=212.0 gapL=5.05% gapZ=35.86% gapP=7.07% t_exact=0.539s tL=0.042s
+seed=319 beam=3 exact=198.0 L=208.0 Z=268.0 P=211.0 gapL=5.05% gapZ=35.35% gapP=6.57% t_exact=0.539s tL=0.057s
+seed=320 beam=2 exact=190.0 L=200.0 Z=263.0 P=204.0 gapL=5.26% gapZ=38.42% gapP=7.37% t_exact=1.146s tL=0.041s
+seed=320 beam=3 exact=190.0 L=200.0 Z=263.0 P=204.0 gapL=5.26% gapZ=38.42% gapP=7.37% t_exact=1.146s tL=0.055s
+seed=321 beam=2 exact=200.0 L=210.0 Z=271.0 P=214.0 gapL=5.00% gapZ=35.50% gapP=7.00% t_exact=1.133s tL=0.041s
+seed=321 beam=3 exact=200.0 L=209.0 Z=270.0 P=214.0 gapL=4.50% gapZ=35.00% gapP=7.00% t_exact=1.133s tL=0.056s
+seed=322 beam=2 exact=182.0 L=192.0 Z=257.0 P=198.0 gapL=5.49% gapZ=41.21% gapP=8.79% t_exact=1.309s tL=0.042s
+seed=322 beam=3 exact=182.0 L=194.0 Z=256.0 P=198.0 gapL=6.59% gapZ=40.66% gapP=8.79% t_exact=1.309s tL=0.053s
+seed=323 beam=2 exact=200.0 L=210.0 Z=271.0 P=214.0 gapL=5.00% gapZ=35.50% gapP=7.00% t_exact=1.176s tL=0.043s
+seed=323 beam=3 exact=200.0 L=209.0 Z=270.0 P=213.0 gapL=4.50% gapZ=35.00% gapP=6.50% t_exact=1.176s tL=0.057s
+seed=324 beam=2 exact=198.0 L=208.0 Z=269.0 P=212.0 gapL=5.05% gapZ=35.86% gapP=7.07% t_exact=1.021s tL=0.041s
+seed=324 beam=3 exact=198.0 L=207.0 Z=268.0 P=212.0 gapL=4.55% gapZ=35.35% gapP=7.07% t_exact=1.021s tL=0.056s
+seed=325 beam=2 exact=156.0 L=170.0 Z=223.0 P=174.0 gapL=8.97% gapZ=42.95% gapP=11.54% t_exact=0.784s tL=0.033s
+seed=325 beam=3 exact=156.0 L=169.0 Z=222.0 P=174.0 gapL=8.33% gapZ=42.31% gapP=11.54% t_exact=0.784s tL=0.044s
+seed=326 beam=2 exact=188.0 L=198.0 Z=262.0 P=202.0 gapL=5.32% gapZ=39.36% gapP=7.45% t_exact=1.269s tL=0.040s
+seed=326 beam=3 exact=188.0 L=198.0 Z=262.0 P=201.0 gapL=5.32% gapZ=39.36% gapP=6.91% t_exact=1.269s tL=0.054s
+seed=327 beam=2 exact=214.0 L=220.0 Z=293.0 P=226.0 gapL=2.80% gapZ=36.92% gapP=5.61% t_exact=1.089s tL=0.045s
+seed=327 beam=3 exact=214.0 L=222.0 Z=292.0 P=226.0 gapL=3.74% gapZ=36.45% gapP=5.61% t_exact=1.089s tL=0.067s
+seed=328 beam=2 exact=218.0 L=224.0 Z=297.0 P=228.0 gapL=2.75% gapZ=36.24% gapP=4.59% t_exact=1.126s tL=0.046s
+seed=328 beam=3 exact=218.0 L=224.0 Z=296.0 P=228.0 gapL=2.75% gapZ=35.78% gapP=4.59% t_exact=1.126s tL=0.062s
+seed=329 beam=2 exact=184.0 L=194.0 Z=259.0 P=199.0 gapL=5.43% gapZ=40.76% gapP=8.15% t_exact=1.216s tL=0.040s
+seed=329 beam=3 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.216s tL=0.054s
+
+[pool] === SUMMARY ===
+beam=  2  n= 30  gapL=  5.12%/  5.08%  gapZ= 38.41%/ 37.09%  gapP=  7.47%/  7.11%  speedL=25.89x
+beam=  3  n= 30  gapL=  5.29%/  5.00%  gapZ= 37.86%/ 36.62%  gapP=  7.30%/  6.97%  speedL=19.30x
+
+[pool] Overall: gapL=5.21%  gapZ=38.14%  gapP=7.39%
+[pool] Train time: 5726.4s (amortized over 30 eval instances)
+[pool] CSV: PaST/logs/pooled_mixed_on_large.csv

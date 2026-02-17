@@ -1,0 +1,14 @@
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+Traceback (most recent call last):
+  File "/Users/mac/Documents/Study/PFE/PaST/sandbox/eval_epsilon_constraint_sim.py", line 863, in <module>
+    main()
+  File "/Users/mac/Documents/Study/PFE/PaST/sandbox/eval_epsilon_constraint_sim.py", line 555, in main
+    model = _load_vhat_checkpoint(str(args.load_model).strip(), base_spec)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/mac/Documents/Study/PFE/PaST/sandbox/eval_epsilon_constraint_sim.py", line 245, in _load_vhat_checkpoint
+    ckpt = np.load(path)
+           ^^^^^^^^^^^^^
+  File "/opt/miniconda3/envs/new-ml-env/lib/python3.12/site-packages/numpy/lib/npyio.py", line 427, in load
+    fid = stack.enter_context(open(os_fspath(file), "rb"))
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'checkpoints/vhat_pooled_mixed_long.npz'

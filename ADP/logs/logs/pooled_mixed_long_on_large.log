@@ -1,0 +1,754 @@
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+[pool] === TRAINING PHASE ===
+[pool] Model type: linear
+[pool] Instance params: D=8, N=35, pmax=5
+[pool] Train seeds: 0-149 (150 instances)
+[pool] Samples per instance: 6000
+[pool] Features: spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True)
+[pool] normalize_labels=True
+[pool] Workers: 128
+[pool] Collecting data with 128 parallel workers...
+[pool] collected 1/150 instances (6000 samples)
+[pool] collected 2/150 instances (6000 samples)
+[pool] collected 3/150 instances (6000 samples)
+[pool] collected 4/150 instances (6000 samples)
+[pool] collected 5/150 instances (6000 samples)
+[pool] collected 6/150 instances (6000 samples)
+[pool] collected 7/150 instances (6000 samples)
+[pool] collected 8/150 instances (6000 samples)
+[pool] collected 9/150 instances (6000 samples)
+[pool] collected 10/150 instances (6000 samples)
+[pool] collected 11/150 instances (6000 samples)
+[pool] collected 12/150 instances (6000 samples)
+[pool] collected 13/150 instances (6000 samples)
+[pool] collected 14/150 instances (6000 samples)
+[pool] collected 15/150 instances (6000 samples)
+[pool] collected 16/150 instances (6000 samples)
+[pool] collected 17/150 instances (6000 samples)
+[pool] collected 18/150 instances (6000 samples)
+[pool] collected 19/150 instances (6000 samples)
+[pool] collected 20/150 instances (6000 samples)
+[pool] collected 21/150 instances (6000 samples)
+[pool] collected 22/150 instances (6000 samples)
+[pool] collected 23/150 instances (6000 samples)
+[pool] collected 24/150 instances (6000 samples)
+[pool] collected 25/150 instances (6000 samples)
+[pool] collected 26/150 instances (6000 samples)
+[pool] collected 27/150 instances (6000 samples)
+[pool] collected 28/150 instances (6000 samples)
+[pool] collected 29/150 instances (6000 samples)
+[pool] collected 30/150 instances (6000 samples)
+[pool] collected 31/150 instances (6000 samples)
+[pool] collected 32/150 instances (6000 samples)
+[pool] collected 33/150 instances (6000 samples)
+[pool] collected 34/150 instances (6000 samples)
+[pool] collected 35/150 instances (6000 samples)
+[pool] collected 36/150 instances (6000 samples)
+[pool] collected 37/150 instances (6000 samples)
+[pool] collected 38/150 instances (6000 samples)
+[pool] collected 39/150 instances (6000 samples)
+[pool] collected 40/150 instances (6000 samples)
+[pool] collected 41/150 instances (6000 samples)
+[pool] collected 42/150 instances (6000 samples)
+[pool] collected 43/150 instances (6000 samples)
+[pool] collected 44/150 instances (6000 samples)
+[pool] collected 45/150 instances (6000 samples)
+[pool] collected 46/150 instances (6000 samples)
+[pool] collected 47/150 instances (6000 samples)
+[pool] collected 48/150 instances (6000 samples)
+[pool] collected 49/150 instances (6000 samples)
+[pool] collected 50/150 instances (6000 samples)
+[pool] collected 51/150 instances (6000 samples)
+[pool] collected 52/150 instances (6000 samples)
+[pool] collected 53/150 instances (6000 samples)
+[pool] collected 54/150 instances (6000 samples)
+[pool] collected 55/150 instances (6000 samples)
+[pool] collected 56/150 instances (6000 samples)
+[pool] collected 57/150 instances (6000 samples)
+[pool] collected 58/150 instances (6000 samples)
+[pool] collected 59/150 instances (6000 samples)
+[pool] collected 60/150 instances (6000 samples)
+[pool] collected 61/150 instances (6000 samples)
+[pool] collected 62/150 instances (6000 samples)
+[pool] collected 63/150 instances (6000 samples)
+[pool] collected 64/150 instances (6000 samples)
+[pool] collected 65/150 instances (6000 samples)
+[pool] collected 66/150 instances (6000 samples)
+[pool] collected 67/150 instances (6000 samples)
+[pool] collected 68/150 instances (6000 samples)
+[pool] collected 69/150 instances (6000 samples)
+[pool] collected 70/150 instances (6000 samples)
+[pool] collected 71/150 instances (6000 samples)
+[pool] collected 72/150 instances (6000 samples)
+[pool] collected 73/150 instances (6000 samples)
+[pool] collected 74/150 instances (6000 samples)
+[pool] collected 75/150 instances (6000 samples)
+[pool] collected 76/150 instances (6000 samples)
+[pool] collected 77/150 instances (6000 samples)
+[pool] collected 78/150 instances (6000 samples)
+[pool] collected 79/150 instances (6000 samples)
+[pool] collected 80/150 instances (6000 samples)
+[pool] collected 81/150 instances (6000 samples)
+[pool] collected 82/150 instances (6000 samples)
+[pool] collected 83/150 instances (6000 samples)
+[pool] collected 84/150 instances (6000 samples)
+[pool] collected 85/150 instances (6000 samples)
+[pool] collected 86/150 instances (6000 samples)
+[pool] collected 87/150 instances (6000 samples)
+[pool] collected 88/150 instances (6000 samples)
+[pool] collected 89/150 instances (6000 samples)
+[pool] collected 90/150 instances (6000 samples)
+[pool] collected 91/150 instances (6000 samples)
+[pool] collected 92/150 instances (6000 samples)
+[pool] collected 93/150 instances (6000 samples)
+[pool] collected 94/150 instances (6000 samples)
+[pool] collected 95/150 instances (6000 samples)
+[pool] collected 96/150 instances (6000 samples)
+[pool] collected 97/150 instances (6000 samples)
+[pool] collected 98/150 instances (6000 samples)
+[pool] collected 99/150 instances (6000 samples)
+[pool] collected 100/150 instances (6000 samples)
+[pool] collected 101/150 instances (6000 samples)
+[pool] collected 102/150 instances (6000 samples)
+[pool] collected 103/150 instances (6000 samples)
+[pool] collected 104/150 instances (6000 samples)
+[pool] collected 105/150 instances (6000 samples)
+[pool] collected 106/150 instances (6000 samples)
+[pool] collected 107/150 instances (6000 samples)
+[pool] collected 108/150 instances (6000 samples)
+[pool] collected 109/150 instances (6000 samples)
+[pool] collected 110/150 instances (6000 samples)
+[pool] collected 111/150 instances (6000 samples)
+[pool] collected 112/150 instances (6000 samples)
+[pool] collected 113/150 instances (6000 samples)
+[pool] collected 114/150 instances (6000 samples)
+[pool] collected 115/150 instances (6000 samples)
+[pool] collected 116/150 instances (6000 samples)
+[pool] collected 117/150 instances (6000 samples)
+[pool] collected 118/150 instances (6000 samples)
+[pool] collected 119/150 instances (6000 samples)
+[pool] collected 120/150 instances (6000 samples)
+[pool] collected 121/150 instances (6000 samples)
+[pool] collected 122/150 instances (6000 samples)
+[pool] collected 123/150 instances (6000 samples)
+[pool] collected 124/150 instances (6000 samples)
+[pool] collected 125/150 instances (6000 samples)
+[pool] collected 126/150 instances (6000 samples)
+[pool] collected 127/150 instances (6000 samples)
+[pool] collected 128/150 instances (6000 samples)
+[pool] collected 129/150 instances (6000 samples)
+[pool] collected 130/150 instances (6000 samples)
+[pool] collected 131/150 instances (6000 samples)
+[pool] collected 132/150 instances (6000 samples)
+[pool] collected 133/150 instances (6000 samples)
+[pool] collected 134/150 instances (6000 samples)
+[pool] collected 135/150 instances (6000 samples)
+[pool] collected 136/150 instances (6000 samples)
+[pool] collected 137/150 instances (6000 samples)
+[pool] collected 138/150 instances (6000 samples)
+[pool] collected 139/150 instances (6000 samples)
+[pool] collected 140/150 instances (6000 samples)
+[pool] collected 141/150 instances (6000 samples)
+[pool] collected 142/150 instances (6000 samples)
+[pool] collected 143/150 instances (6000 samples)
+[pool] collected 144/150 instances (6000 samples)
+[pool] collected 145/150 instances (6000 samples)
+[pool] collected 146/150 instances (6000 samples)
+[pool] collected 147/150 instances (6000 samples)
+[pool] collected 148/150 instances (6000 samples)
+[pool] collected 149/150 instances (6000 samples)
+[pool] collected 150/150 instances (6000 samples)
+[pool] Data collection: 900000 samples in 877.9s
+[pool] Top-10 weights:
+    #1 feat[13] w=-2.039823
+    #2 feat[15] w=1.032542
+    #3 feat[12] w=-0.722713
+    #4 feat[9] w=0.375231
+    #5 feat[8] w=0.369185
+    #6 feat[0] w=-0.176049
+    #7 feat[6] w=-0.075739
+    #8 feat[3] w=-0.064773
+    #9 feat[2] w=-0.058212
+    #10 feat[17] w=-0.053075
+
+[pool] === TRAINING RESULTS ===
+[pool] Model: linear
+[pool] Pooled samples: 900000 (from 150 instances)
+[pool] feat_dim=18
+[pool] R2_train=0.9858  R2_test=0.9859
+[pool] MAE_train=0.0161  MAE_test=0.0161
+[pool] Data collection: 877.9s  Model fitting: 0.0s
+[pool] Total training time: 878.0s
+[pool] Model saved to checkpoints/vhat_pooled_mixed_long.npz (type=linear)
+
+[pool] === EVALUATION PHASE ===
+[pool] Eval params: D=12, N=40, pmax=5
+[pool] Eval seeds: 1000-1049 (50 instances)
+[pool] Beams: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20]
+seed=1000 beam=1 exact=200.0 L=211.0 Z=272.0 P=216.0 gapL=5.50% gapZ=36.00% gapP=8.00% t_exact=1.362s tL=0.029s
+seed=1000 beam=2 exact=200.0 L=210.0 Z=271.0 P=214.0 gapL=5.00% gapZ=35.50% gapP=7.00% t_exact=1.362s tL=0.042s
+seed=1000 beam=3 exact=200.0 L=209.0 Z=270.0 P=213.0 gapL=4.50% gapZ=35.00% gapP=6.50% t_exact=1.362s tL=0.059s
+seed=1000 beam=4 exact=200.0 L=209.0 Z=270.0 P=212.0 gapL=4.50% gapZ=35.00% gapP=6.00% t_exact=1.362s tL=0.075s
+seed=1000 beam=5 exact=200.0 L=209.0 Z=269.0 P=212.0 gapL=4.50% gapZ=34.50% gapP=6.00% t_exact=1.362s tL=0.101s
+seed=1000 beam=6 exact=200.0 L=209.0 Z=269.0 P=212.0 gapL=4.50% gapZ=34.50% gapP=6.00% t_exact=1.362s tL=0.103s
+seed=1000 beam=8 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.362s tL=0.131s
+seed=1000 beam=10 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.362s tL=0.157s
+seed=1000 beam=12 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.362s tL=0.198s
+seed=1000 beam=15 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.362s tL=0.218s
+seed=1000 beam=20 exact=200.0 L=206.0 Z=268.0 P=209.0 gapL=3.00% gapZ=34.00% gapP=4.50% t_exact=1.362s tL=0.277s
+seed=1001 beam=1 exact=170.0 L=184.0 Z=246.0 P=189.0 gapL=8.24% gapZ=44.71% gapP=11.18% t_exact=1.124s tL=0.021s
+seed=1001 beam=2 exact=170.0 L=184.0 Z=245.0 P=188.0 gapL=8.24% gapZ=44.12% gapP=10.59% t_exact=1.124s tL=0.037s
+seed=1001 beam=3 exact=170.0 L=183.0 Z=242.0 P=187.0 gapL=7.65% gapZ=42.35% gapP=10.00% t_exact=1.124s tL=0.054s
+seed=1001 beam=4 exact=170.0 L=183.0 Z=242.0 P=186.0 gapL=7.65% gapZ=42.35% gapP=9.41% t_exact=1.124s tL=0.065s
+seed=1001 beam=5 exact=170.0 L=183.0 Z=239.0 P=186.0 gapL=7.65% gapZ=40.59% gapP=9.41% t_exact=1.124s tL=0.078s
+seed=1001 beam=6 exact=170.0 L=183.0 Z=239.0 P=186.0 gapL=7.65% gapZ=40.59% gapP=9.41% t_exact=1.124s tL=0.090s
+seed=1001 beam=8 exact=170.0 L=181.0 Z=236.0 P=185.0 gapL=6.47% gapZ=38.82% gapP=8.82% t_exact=1.124s tL=0.115s
+seed=1001 beam=10 exact=170.0 L=182.0 Z=236.0 P=185.0 gapL=7.06% gapZ=38.82% gapP=8.82% t_exact=1.124s tL=0.132s
+seed=1001 beam=12 exact=170.0 L=180.0 Z=236.0 P=185.0 gapL=5.88% gapZ=38.82% gapP=8.82% t_exact=1.124s tL=0.157s
+seed=1001 beam=15 exact=170.0 L=180.0 Z=233.0 P=185.0 gapL=5.88% gapZ=37.06% gapP=8.82% t_exact=1.124s tL=0.186s
+seed=1001 beam=20 exact=170.0 L=180.0 Z=232.0 P=183.0 gapL=5.88% gapZ=36.47% gapP=7.65% t_exact=1.124s tL=0.232s
+seed=1002 beam=1 exact=188.0 L=199.0 Z=262.0 P=204.0 gapL=5.85% gapZ=39.36% gapP=8.51% t_exact=1.231s tL=0.023s
+seed=1002 beam=2 exact=188.0 L=198.0 Z=262.0 P=202.0 gapL=5.32% gapZ=39.36% gapP=7.45% t_exact=1.231s tL=0.040s
+seed=1002 beam=3 exact=188.0 L=198.0 Z=262.0 P=202.0 gapL=5.32% gapZ=39.36% gapP=7.45% t_exact=1.231s tL=0.056s
+seed=1002 beam=4 exact=188.0 L=197.0 Z=261.0 P=201.0 gapL=4.79% gapZ=38.83% gapP=6.91% t_exact=1.231s tL=0.072s
+seed=1002 beam=5 exact=188.0 L=197.0 Z=261.0 P=201.0 gapL=4.79% gapZ=38.83% gapP=6.91% t_exact=1.231s tL=0.086s
+seed=1002 beam=6 exact=188.0 L=197.0 Z=261.0 P=201.0 gapL=4.79% gapZ=38.83% gapP=6.91% t_exact=1.231s tL=0.099s
+seed=1002 beam=8 exact=188.0 L=197.0 Z=260.0 P=201.0 gapL=4.79% gapZ=38.30% gapP=6.91% t_exact=1.231s tL=0.125s
+seed=1002 beam=10 exact=188.0 L=198.0 Z=260.0 P=201.0 gapL=5.32% gapZ=38.30% gapP=6.91% t_exact=1.231s tL=0.147s
+seed=1002 beam=12 exact=188.0 L=198.0 Z=259.0 P=201.0 gapL=5.32% gapZ=37.77% gapP=6.91% t_exact=1.231s tL=0.172s
+seed=1002 beam=15 exact=188.0 L=198.0 Z=259.0 P=200.0 gapL=5.32% gapZ=37.77% gapP=6.38% t_exact=1.231s tL=0.206s
+seed=1002 beam=20 exact=188.0 L=197.0 Z=258.0 P=200.0 gapL=4.79% gapZ=37.23% gapP=6.38% t_exact=1.231s tL=0.260s
+seed=1003 beam=1 exact=192.0 L=203.0 Z=264.0 P=208.0 gapL=5.73% gapZ=37.50% gapP=8.33% t_exact=1.211s tL=0.022s
+seed=1003 beam=2 exact=192.0 L=202.0 Z=264.0 P=206.0 gapL=5.21% gapZ=37.50% gapP=7.29% t_exact=1.211s tL=0.040s
+seed=1003 beam=3 exact=192.0 L=201.0 Z=264.0 P=205.0 gapL=4.69% gapZ=37.50% gapP=6.77% t_exact=1.211s tL=0.055s
+seed=1003 beam=4 exact=192.0 L=201.0 Z=264.0 P=204.0 gapL=4.69% gapZ=37.50% gapP=6.25% t_exact=1.211s tL=0.072s
+seed=1003 beam=5 exact=192.0 L=201.0 Z=264.0 P=204.0 gapL=4.69% gapZ=37.50% gapP=6.25% t_exact=1.211s tL=0.086s
+seed=1003 beam=6 exact=192.0 L=201.0 Z=264.0 P=204.0 gapL=4.69% gapZ=37.50% gapP=6.25% t_exact=1.211s tL=0.100s
+seed=1003 beam=8 exact=192.0 L=200.0 Z=264.0 P=204.0 gapL=4.17% gapZ=37.50% gapP=6.25% t_exact=1.211s tL=0.126s
+seed=1003 beam=10 exact=192.0 L=202.0 Z=263.0 P=204.0 gapL=5.21% gapZ=36.98% gapP=6.25% t_exact=1.211s tL=0.150s
+seed=1003 beam=12 exact=192.0 L=201.0 Z=263.0 P=203.0 gapL=4.69% gapZ=36.98% gapP=5.73% t_exact=1.211s tL=0.181s
+seed=1003 beam=15 exact=192.0 L=201.0 Z=263.0 P=202.0 gapL=4.69% gapZ=36.98% gapP=5.21% t_exact=1.211s tL=0.216s
+seed=1003 beam=20 exact=192.0 L=201.0 Z=262.0 P=202.0 gapL=4.69% gapZ=36.46% gapP=5.21% t_exact=1.211s tL=0.278s
+seed=1004 beam=1 exact=186.0 L=197.0 Z=261.0 P=201.0 gapL=5.91% gapZ=40.32% gapP=8.06% t_exact=1.248s tL=0.022s
+seed=1004 beam=2 exact=186.0 L=196.0 Z=261.0 P=201.0 gapL=5.38% gapZ=40.32% gapP=8.06% t_exact=1.248s tL=0.039s
+seed=1004 beam=3 exact=186.0 L=197.0 Z=260.0 P=200.0 gapL=5.91% gapZ=39.78% gapP=7.53% t_exact=1.248s tL=0.056s
+seed=1004 beam=4 exact=186.0 L=196.0 Z=260.0 P=200.0 gapL=5.38% gapZ=39.78% gapP=7.53% t_exact=1.248s tL=0.071s
+seed=1004 beam=5 exact=186.0 L=196.0 Z=259.0 P=200.0 gapL=5.38% gapZ=39.25% gapP=7.53% t_exact=1.248s tL=0.085s
+seed=1004 beam=6 exact=186.0 L=196.0 Z=259.0 P=200.0 gapL=5.38% gapZ=39.25% gapP=7.53% t_exact=1.248s tL=0.097s
+seed=1004 beam=8 exact=186.0 L=196.0 Z=258.0 P=200.0 gapL=5.38% gapZ=38.71% gapP=7.53% t_exact=1.248s tL=0.122s
+seed=1004 beam=10 exact=186.0 L=197.0 Z=258.0 P=200.0 gapL=5.91% gapZ=38.71% gapP=7.53% t_exact=1.248s tL=0.144s
+seed=1004 beam=12 exact=186.0 L=196.0 Z=258.0 P=199.0 gapL=5.38% gapZ=38.71% gapP=6.99% t_exact=1.248s tL=0.169s
+seed=1004 beam=15 exact=186.0 L=196.0 Z=257.0 P=199.0 gapL=5.38% gapZ=38.17% gapP=6.99% t_exact=1.248s tL=0.204s
+seed=1004 beam=20 exact=186.0 L=195.0 Z=256.0 P=199.0 gapL=4.84% gapZ=37.63% gapP=6.99% t_exact=1.248s tL=0.255s
+seed=1005 beam=1 exact=220.0 L=228.0 Z=300.0 P=231.0 gapL=3.64% gapZ=36.36% gapP=5.00% t_exact=1.051s tL=0.025s
+seed=1005 beam=2 exact=220.0 L=227.0 Z=299.0 P=230.0 gapL=3.18% gapZ=35.91% gapP=4.55% t_exact=1.051s tL=0.044s
+seed=1005 beam=3 exact=220.0 L=225.0 Z=298.0 P=229.0 gapL=2.27% gapZ=35.45% gapP=4.09% t_exact=1.051s tL=0.061s
+seed=1005 beam=4 exact=220.0 L=226.0 Z=298.0 P=230.0 gapL=2.73% gapZ=35.45% gapP=4.55% t_exact=1.051s tL=0.078s
+seed=1005 beam=5 exact=220.0 L=226.0 Z=297.0 P=230.0 gapL=2.73% gapZ=35.00% gapP=4.55% t_exact=1.051s tL=0.094s
+seed=1005 beam=6 exact=220.0 L=226.0 Z=297.0 P=229.0 gapL=2.73% gapZ=35.00% gapP=4.09% t_exact=1.051s tL=0.113s
+seed=1005 beam=8 exact=220.0 L=226.0 Z=296.0 P=229.0 gapL=2.73% gapZ=34.55% gapP=4.09% t_exact=1.051s tL=0.142s
+seed=1005 beam=10 exact=220.0 L=226.0 Z=296.0 P=228.0 gapL=2.73% gapZ=34.55% gapP=3.64% t_exact=1.051s tL=0.172s
+seed=1005 beam=12 exact=220.0 L=226.0 Z=296.0 P=228.0 gapL=2.73% gapZ=34.55% gapP=3.64% t_exact=1.051s tL=0.201s
+seed=1005 beam=15 exact=220.0 L=226.0 Z=295.0 P=228.0 gapL=2.73% gapZ=34.09% gapP=3.64% t_exact=1.051s tL=0.240s
+seed=1005 beam=20 exact=220.0 L=225.0 Z=292.0 P=228.0 gapL=2.27% gapZ=32.73% gapP=3.64% t_exact=1.051s tL=0.316s
+seed=1006 beam=1 exact=202.0 L=212.0 Z=276.0 P=217.0 gapL=4.95% gapZ=36.63% gapP=7.43% t_exact=1.182s tL=0.024s
+seed=1006 beam=2 exact=202.0 L=212.0 Z=273.0 P=216.0 gapL=4.95% gapZ=35.15% gapP=6.93% t_exact=1.182s tL=0.043s
+seed=1006 beam=3 exact=202.0 L=212.0 Z=272.0 P=216.0 gapL=4.95% gapZ=34.65% gapP=6.93% t_exact=1.182s tL=0.059s
+seed=1006 beam=4 exact=202.0 L=210.0 Z=272.0 P=215.0 gapL=3.96% gapZ=34.65% gapP=6.44% t_exact=1.182s tL=0.076s
+seed=1006 beam=5 exact=202.0 L=210.0 Z=271.0 P=215.0 gapL=3.96% gapZ=34.16% gapP=6.44% t_exact=1.182s tL=0.090s
+seed=1006 beam=6 exact=202.0 L=210.0 Z=271.0 P=214.0 gapL=3.96% gapZ=34.16% gapP=5.94% t_exact=1.182s tL=0.104s
+seed=1006 beam=8 exact=202.0 L=210.0 Z=270.0 P=213.0 gapL=3.96% gapZ=33.66% gapP=5.45% t_exact=1.182s tL=0.133s
+seed=1006 beam=10 exact=202.0 L=209.0 Z=270.0 P=214.0 gapL=3.47% gapZ=33.66% gapP=5.94% t_exact=1.182s tL=0.158s
+seed=1006 beam=12 exact=202.0 L=208.0 Z=270.0 P=212.0 gapL=2.97% gapZ=33.66% gapP=4.95% t_exact=1.182s tL=0.181s
+seed=1006 beam=15 exact=202.0 L=209.0 Z=269.0 P=212.0 gapL=3.47% gapZ=33.17% gapP=4.95% t_exact=1.182s tL=0.221s
+seed=1006 beam=20 exact=202.0 L=208.0 Z=269.0 P=211.0 gapL=2.97% gapZ=33.17% gapP=4.46% t_exact=1.182s tL=0.290s
+seed=1007 beam=1 exact=200.0 L=211.0 Z=272.0 P=215.0 gapL=5.50% gapZ=36.00% gapP=7.50% t_exact=0.976s tL=0.024s
+seed=1007 beam=2 exact=200.0 L=209.0 Z=271.0 P=214.0 gapL=4.50% gapZ=35.50% gapP=7.00% t_exact=0.976s tL=0.042s
+seed=1007 beam=3 exact=200.0 L=208.0 Z=270.0 P=213.0 gapL=4.00% gapZ=35.00% gapP=6.50% t_exact=0.976s tL=0.058s
+seed=1007 beam=4 exact=200.0 L=209.0 Z=270.0 P=213.0 gapL=4.50% gapZ=35.00% gapP=6.50% t_exact=0.976s tL=0.074s
+seed=1007 beam=5 exact=200.0 L=208.0 Z=269.0 P=213.0 gapL=4.00% gapZ=34.50% gapP=6.50% t_exact=0.976s tL=0.091s
+seed=1007 beam=6 exact=200.0 L=208.0 Z=269.0 P=212.0 gapL=4.00% gapZ=34.50% gapP=6.00% t_exact=0.976s tL=0.105s
+seed=1007 beam=8 exact=200.0 L=208.0 Z=268.0 P=211.0 gapL=4.00% gapZ=34.00% gapP=5.50% t_exact=0.976s tL=0.131s
+seed=1007 beam=10 exact=200.0 L=208.0 Z=268.0 P=211.0 gapL=4.00% gapZ=34.00% gapP=5.50% t_exact=0.976s tL=0.157s
+seed=1007 beam=12 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=0.976s tL=0.182s
+seed=1007 beam=15 exact=200.0 L=206.0 Z=268.0 P=211.0 gapL=3.00% gapZ=34.00% gapP=5.50% t_exact=0.976s tL=0.237s
+seed=1007 beam=20 exact=200.0 L=206.0 Z=268.0 P=209.0 gapL=3.00% gapZ=34.00% gapP=4.50% t_exact=0.976s tL=0.279s
+seed=1008 beam=1 exact=188.0 L=199.0 Z=262.0 P=204.0 gapL=5.85% gapZ=39.36% gapP=8.51% t_exact=0.752s tL=0.021s
+seed=1008 beam=2 exact=188.0 L=198.0 Z=262.0 P=202.0 gapL=5.32% gapZ=39.36% gapP=7.45% t_exact=0.752s tL=0.039s
+seed=1008 beam=3 exact=188.0 L=198.0 Z=262.0 P=201.0 gapL=5.32% gapZ=39.36% gapP=6.91% t_exact=0.752s tL=0.055s
+seed=1008 beam=4 exact=188.0 L=197.0 Z=261.0 P=201.0 gapL=4.79% gapZ=38.83% gapP=6.91% t_exact=0.752s tL=0.071s
+seed=1008 beam=5 exact=188.0 L=197.0 Z=261.0 P=201.0 gapL=4.79% gapZ=38.83% gapP=6.91% t_exact=0.752s tL=0.084s
+seed=1008 beam=6 exact=188.0 L=197.0 Z=261.0 P=201.0 gapL=4.79% gapZ=38.83% gapP=6.91% t_exact=0.752s tL=0.097s
+seed=1008 beam=8 exact=188.0 L=197.0 Z=260.0 P=201.0 gapL=4.79% gapZ=38.30% gapP=6.91% t_exact=0.752s tL=0.121s
+seed=1008 beam=10 exact=188.0 L=198.0 Z=260.0 P=200.0 gapL=5.32% gapZ=38.30% gapP=6.38% t_exact=0.752s tL=0.142s
+seed=1008 beam=12 exact=188.0 L=198.0 Z=259.0 P=200.0 gapL=5.32% gapZ=37.77% gapP=6.38% t_exact=0.752s tL=0.166s
+seed=1008 beam=15 exact=188.0 L=198.0 Z=259.0 P=200.0 gapL=5.32% gapZ=37.77% gapP=6.38% t_exact=0.752s tL=0.199s
+seed=1008 beam=20 exact=188.0 L=197.0 Z=258.0 P=200.0 gapL=4.79% gapZ=37.23% gapP=6.38% t_exact=0.752s tL=0.257s
+seed=1009 beam=1 exact=190.0 L=202.0 Z=263.0 P=205.0 gapL=6.32% gapZ=38.42% gapP=7.89% t_exact=1.195s tL=0.022s
+seed=1009 beam=2 exact=190.0 L=200.0 Z=263.0 P=204.0 gapL=5.26% gapZ=38.42% gapP=7.37% t_exact=1.195s tL=0.041s
+seed=1009 beam=3 exact=190.0 L=199.0 Z=263.0 P=203.0 gapL=4.74% gapZ=38.42% gapP=6.84% t_exact=1.195s tL=0.057s
+seed=1009 beam=4 exact=190.0 L=199.0 Z=263.0 P=202.0 gapL=4.74% gapZ=38.42% gapP=6.32% t_exact=1.195s tL=0.072s
+seed=1009 beam=5 exact=190.0 L=199.0 Z=263.0 P=202.0 gapL=4.74% gapZ=38.42% gapP=6.32% t_exact=1.195s tL=0.086s
+seed=1009 beam=6 exact=190.0 L=199.0 Z=262.0 P=203.0 gapL=4.74% gapZ=37.89% gapP=6.84% t_exact=1.195s tL=0.099s
+seed=1009 beam=8 exact=190.0 L=198.0 Z=262.0 P=202.0 gapL=4.21% gapZ=37.89% gapP=6.32% t_exact=1.195s tL=0.126s
+seed=1009 beam=10 exact=190.0 L=201.0 Z=262.0 P=202.0 gapL=5.79% gapZ=37.89% gapP=6.32% t_exact=1.195s tL=0.149s
+seed=1009 beam=12 exact=190.0 L=200.0 Z=261.0 P=202.0 gapL=5.26% gapZ=37.37% gapP=6.32% t_exact=1.195s tL=0.171s
+seed=1009 beam=15 exact=190.0 L=200.0 Z=261.0 P=202.0 gapL=5.26% gapZ=37.37% gapP=6.32% t_exact=1.195s tL=0.208s
+seed=1009 beam=20 exact=190.0 L=199.0 Z=260.0 P=201.0 gapL=4.74% gapZ=36.84% gapP=5.79% t_exact=1.195s tL=0.262s
+seed=1010 beam=1 exact=184.0 L=196.0 Z=260.0 P=200.0 gapL=6.52% gapZ=41.30% gapP=8.70% t_exact=0.705s tL=0.022s
+seed=1010 beam=2 exact=184.0 L=195.0 Z=259.0 P=199.0 gapL=5.98% gapZ=40.76% gapP=8.15% t_exact=0.705s tL=0.036s
+seed=1010 beam=3 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=0.705s tL=0.050s
+seed=1010 beam=4 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=0.705s tL=0.064s
+seed=1010 beam=5 exact=184.0 L=195.0 Z=257.0 P=199.0 gapL=5.98% gapZ=39.67% gapP=8.15% t_exact=0.705s tL=0.076s
+seed=1010 beam=6 exact=184.0 L=195.0 Z=257.0 P=199.0 gapL=5.98% gapZ=39.67% gapP=8.15% t_exact=0.705s tL=0.090s
+seed=1010 beam=8 exact=184.0 L=194.0 Z=256.0 P=199.0 gapL=5.43% gapZ=39.13% gapP=8.15% t_exact=0.705s tL=0.115s
+seed=1010 beam=10 exact=184.0 L=195.0 Z=256.0 P=198.0 gapL=5.98% gapZ=39.13% gapP=7.61% t_exact=0.705s tL=0.136s
+seed=1010 beam=12 exact=184.0 L=194.0 Z=256.0 P=198.0 gapL=5.43% gapZ=39.13% gapP=7.61% t_exact=0.705s tL=0.161s
+seed=1010 beam=15 exact=184.0 L=194.0 Z=255.0 P=198.0 gapL=5.43% gapZ=38.59% gapP=7.61% t_exact=0.705s tL=0.195s
+seed=1010 beam=20 exact=184.0 L=193.0 Z=254.0 P=197.0 gapL=4.89% gapZ=38.04% gapP=7.07% t_exact=0.705s tL=0.245s
+seed=1011 beam=1 exact=184.0 L=195.0 Z=260.0 P=200.0 gapL=5.98% gapZ=41.30% gapP=8.70% t_exact=1.230s tL=0.022s
+seed=1011 beam=2 exact=184.0 L=194.0 Z=259.0 P=199.0 gapL=5.43% gapZ=40.76% gapP=8.15% t_exact=1.230s tL=0.039s
+seed=1011 beam=3 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.230s tL=0.054s
+seed=1011 beam=4 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.230s tL=0.069s
+seed=1011 beam=5 exact=184.0 L=195.0 Z=257.0 P=199.0 gapL=5.98% gapZ=39.67% gapP=8.15% t_exact=1.230s tL=0.083s
+seed=1011 beam=6 exact=184.0 L=195.0 Z=257.0 P=199.0 gapL=5.98% gapZ=39.67% gapP=8.15% t_exact=1.230s tL=0.097s
+seed=1011 beam=8 exact=184.0 L=195.0 Z=256.0 P=198.0 gapL=5.98% gapZ=39.13% gapP=7.61% t_exact=1.230s tL=0.138s
+seed=1011 beam=10 exact=184.0 L=195.0 Z=256.0 P=198.0 gapL=5.98% gapZ=39.13% gapP=7.61% t_exact=1.230s tL=0.140s
+seed=1011 beam=12 exact=184.0 L=194.0 Z=256.0 P=198.0 gapL=5.43% gapZ=39.13% gapP=7.61% t_exact=1.230s tL=0.162s
+seed=1011 beam=15 exact=184.0 L=194.0 Z=255.0 P=198.0 gapL=5.43% gapZ=38.59% gapP=7.61% t_exact=1.230s tL=0.193s
+seed=1011 beam=20 exact=184.0 L=193.0 Z=254.0 P=197.0 gapL=4.89% gapZ=38.04% gapP=7.07% t_exact=1.230s tL=0.251s
+seed=1012 beam=1 exact=202.0 L=212.0 Z=276.0 P=217.0 gapL=4.95% gapZ=36.63% gapP=7.43% t_exact=1.162s tL=0.024s
+seed=1012 beam=2 exact=202.0 L=212.0 Z=273.0 P=216.0 gapL=4.95% gapZ=35.15% gapP=6.93% t_exact=1.162s tL=0.043s
+seed=1012 beam=3 exact=202.0 L=212.0 Z=272.0 P=216.0 gapL=4.95% gapZ=34.65% gapP=6.93% t_exact=1.162s tL=0.060s
+seed=1012 beam=4 exact=202.0 L=210.0 Z=272.0 P=215.0 gapL=3.96% gapZ=34.65% gapP=6.44% t_exact=1.162s tL=0.076s
+seed=1012 beam=5 exact=202.0 L=210.0 Z=271.0 P=215.0 gapL=3.96% gapZ=34.16% gapP=6.44% t_exact=1.162s tL=0.090s
+seed=1012 beam=6 exact=202.0 L=210.0 Z=271.0 P=215.0 gapL=3.96% gapZ=34.16% gapP=6.44% t_exact=1.162s tL=0.106s
+seed=1012 beam=8 exact=202.0 L=210.0 Z=270.0 P=213.0 gapL=3.96% gapZ=33.66% gapP=5.45% t_exact=1.162s tL=0.132s
+seed=1012 beam=10 exact=202.0 L=209.0 Z=270.0 P=214.0 gapL=3.47% gapZ=33.66% gapP=5.94% t_exact=1.162s tL=0.175s
+seed=1012 beam=12 exact=202.0 L=208.0 Z=270.0 P=212.0 gapL=2.97% gapZ=33.66% gapP=4.95% t_exact=1.162s tL=0.194s
+seed=1012 beam=15 exact=202.0 L=209.0 Z=269.0 P=212.0 gapL=3.47% gapZ=33.17% gapP=4.95% t_exact=1.162s tL=0.217s
+seed=1012 beam=20 exact=202.0 L=208.0 Z=269.0 P=212.0 gapL=2.97% gapZ=33.17% gapP=4.95% t_exact=1.162s tL=0.279s
+seed=1013 beam=1 exact=222.0 L=230.0 Z=302.0 P=234.0 gapL=3.60% gapZ=36.04% gapP=5.41% t_exact=0.948s tL=0.024s
+seed=1013 beam=2 exact=222.0 L=228.0 Z=301.0 P=232.0 gapL=2.70% gapZ=35.59% gapP=4.50% t_exact=0.948s tL=0.044s
+seed=1013 beam=3 exact=222.0 L=228.0 Z=300.0 P=232.0 gapL=2.70% gapZ=35.14% gapP=4.50% t_exact=0.948s tL=0.060s
+seed=1013 beam=4 exact=222.0 L=227.0 Z=300.0 P=231.0 gapL=2.25% gapZ=35.14% gapP=4.05% t_exact=0.948s tL=0.079s
+seed=1013 beam=5 exact=222.0 L=227.0 Z=299.0 P=231.0 gapL=2.25% gapZ=34.68% gapP=4.05% t_exact=0.948s tL=0.094s
+seed=1013 beam=6 exact=222.0 L=227.0 Z=299.0 P=231.0 gapL=2.25% gapZ=34.68% gapP=4.05% t_exact=0.948s tL=0.110s
+seed=1013 beam=8 exact=222.0 L=227.0 Z=298.0 P=230.0 gapL=2.25% gapZ=34.23% gapP=3.60% t_exact=0.948s tL=0.139s
+seed=1013 beam=10 exact=222.0 L=228.0 Z=298.0 P=230.0 gapL=2.70% gapZ=34.23% gapP=3.60% t_exact=0.948s tL=0.168s
+seed=1013 beam=12 exact=222.0 L=228.0 Z=298.0 P=230.0 gapL=2.70% gapZ=34.23% gapP=3.60% t_exact=0.948s tL=0.195s
+seed=1013 beam=15 exact=222.0 L=228.0 Z=297.0 P=229.0 gapL=2.70% gapZ=33.78% gapP=3.15% t_exact=0.948s tL=0.235s
+seed=1013 beam=20 exact=222.0 L=227.0 Z=296.0 P=229.0 gapL=2.25% gapZ=33.33% gapP=3.15% t_exact=0.948s tL=0.309s
+seed=1014 beam=1 exact=202.0 L=212.0 Z=276.0 P=217.0 gapL=4.95% gapZ=36.63% gapP=7.43% t_exact=0.882s tL=0.023s
+seed=1014 beam=2 exact=202.0 L=212.0 Z=273.0 P=216.0 gapL=4.95% gapZ=35.15% gapP=6.93% t_exact=0.882s tL=0.041s
+seed=1014 beam=3 exact=202.0 L=212.0 Z=272.0 P=216.0 gapL=4.95% gapZ=34.65% gapP=6.93% t_exact=0.882s tL=0.060s
+seed=1014 beam=4 exact=202.0 L=210.0 Z=272.0 P=215.0 gapL=3.96% gapZ=34.65% gapP=6.44% t_exact=0.882s tL=0.076s
+seed=1014 beam=5 exact=202.0 L=210.0 Z=271.0 P=215.0 gapL=3.96% gapZ=34.16% gapP=6.44% t_exact=0.882s tL=0.095s
+seed=1014 beam=6 exact=202.0 L=211.0 Z=271.0 P=214.0 gapL=4.46% gapZ=34.16% gapP=5.94% t_exact=0.882s tL=0.101s
+seed=1014 beam=8 exact=202.0 L=210.0 Z=270.0 P=213.0 gapL=3.96% gapZ=33.66% gapP=5.45% t_exact=0.882s tL=0.129s
+seed=1014 beam=10 exact=202.0 L=209.0 Z=270.0 P=213.0 gapL=3.47% gapZ=33.66% gapP=5.45% t_exact=0.882s tL=0.152s
+seed=1014 beam=12 exact=202.0 L=208.0 Z=270.0 P=213.0 gapL=2.97% gapZ=33.66% gapP=5.45% t_exact=0.882s tL=0.177s
+seed=1014 beam=15 exact=202.0 L=209.0 Z=269.0 P=213.0 gapL=3.47% gapZ=33.17% gapP=5.45% t_exact=0.882s tL=0.211s
+seed=1014 beam=20 exact=202.0 L=208.0 Z=269.0 P=211.0 gapL=2.97% gapZ=33.17% gapP=4.46% t_exact=0.882s tL=0.272s
+seed=1015 beam=1 exact=184.0 L=195.0 Z=260.0 P=200.0 gapL=5.98% gapZ=41.30% gapP=8.70% t_exact=1.271s tL=0.022s
+seed=1015 beam=2 exact=184.0 L=194.0 Z=259.0 P=200.0 gapL=5.43% gapZ=40.76% gapP=8.70% t_exact=1.271s tL=0.039s
+seed=1015 beam=3 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.271s tL=0.055s
+seed=1015 beam=4 exact=184.0 L=195.0 Z=258.0 P=199.0 gapL=5.98% gapZ=40.22% gapP=8.15% t_exact=1.271s tL=0.070s
+seed=1015 beam=5 exact=184.0 L=195.0 Z=257.0 P=199.0 gapL=5.98% gapZ=39.67% gapP=8.15% t_exact=1.271s tL=0.084s
+seed=1015 beam=6 exact=184.0 L=195.0 Z=257.0 P=199.0 gapL=5.98% gapZ=39.67% gapP=8.15% t_exact=1.271s tL=0.098s
+seed=1015 beam=8 exact=184.0 L=195.0 Z=256.0 P=199.0 gapL=5.98% gapZ=39.13% gapP=8.15% t_exact=1.271s tL=0.123s
+seed=1015 beam=10 exact=184.0 L=195.0 Z=256.0 P=198.0 gapL=5.98% gapZ=39.13% gapP=7.61% t_exact=1.271s tL=0.142s
+seed=1015 beam=12 exact=184.0 L=194.0 Z=256.0 P=198.0 gapL=5.43% gapZ=39.13% gapP=7.61% t_exact=1.271s tL=0.165s
+seed=1015 beam=15 exact=184.0 L=194.0 Z=255.0 P=197.0 gapL=5.43% gapZ=38.59% gapP=7.07% t_exact=1.271s tL=0.202s
+seed=1015 beam=20 exact=184.0 L=193.0 Z=254.0 P=197.0 gapL=4.89% gapZ=38.04% gapP=7.07% t_exact=1.271s tL=0.256s
+seed=1016 beam=1 exact=192.0 L=203.0 Z=264.0 P=208.0 gapL=5.73% gapZ=37.50% gapP=8.33% t_exact=1.121s tL=0.022s
+seed=1016 beam=2 exact=192.0 L=202.0 Z=264.0 P=206.0 gapL=5.21% gapZ=37.50% gapP=7.29% t_exact=1.121s tL=0.039s
+seed=1016 beam=3 exact=192.0 L=202.0 Z=264.0 P=205.0 gapL=5.21% gapZ=37.50% gapP=6.77% t_exact=1.121s tL=0.055s
+seed=1016 beam=4 exact=192.0 L=200.0 Z=264.0 P=205.0 gapL=4.17% gapZ=37.50% gapP=6.77% t_exact=1.121s tL=0.071s
+seed=1016 beam=5 exact=192.0 L=200.0 Z=264.0 P=205.0 gapL=4.17% gapZ=37.50% gapP=6.77% t_exact=1.121s tL=0.094s
+seed=1016 beam=6 exact=192.0 L=200.0 Z=264.0 P=204.0 gapL=4.17% gapZ=37.50% gapP=6.25% t_exact=1.121s tL=0.099s
+seed=1016 beam=8 exact=192.0 L=200.0 Z=264.0 P=204.0 gapL=4.17% gapZ=37.50% gapP=6.25% t_exact=1.121s tL=0.123s
+seed=1016 beam=10 exact=192.0 L=201.0 Z=263.0 P=204.0 gapL=4.69% gapZ=36.98% gapP=6.25% t_exact=1.121s tL=0.146s
+seed=1016 beam=12 exact=192.0 L=201.0 Z=263.0 P=203.0 gapL=4.69% gapZ=36.98% gapP=5.73% t_exact=1.121s tL=0.169s
+seed=1016 beam=15 exact=192.0 L=201.0 Z=263.0 P=202.0 gapL=4.69% gapZ=36.98% gapP=5.21% t_exact=1.121s tL=0.206s
+seed=1016 beam=20 exact=192.0 L=201.0 Z=262.0 P=202.0 gapL=4.69% gapZ=36.46% gapP=5.21% t_exact=1.121s tL=0.256s
+seed=1017 beam=1 exact=198.0 L=209.0 Z=270.0 P=214.0 gapL=5.56% gapZ=36.36% gapP=8.08% t_exact=1.121s tL=0.023s
+seed=1017 beam=2 exact=198.0 L=208.0 Z=269.0 P=212.0 gapL=5.05% gapZ=35.86% gapP=7.07% t_exact=1.121s tL=0.041s
+seed=1017 beam=3 exact=198.0 L=207.0 Z=268.0 P=212.0 gapL=4.55% gapZ=35.35% gapP=7.07% t_exact=1.121s tL=0.057s
+seed=1017 beam=4 exact=198.0 L=207.0 Z=268.0 P=211.0 gapL=4.55% gapZ=35.35% gapP=6.57% t_exact=1.121s tL=0.074s
+seed=1017 beam=5 exact=198.0 L=207.0 Z=267.0 P=210.0 gapL=4.55% gapZ=34.85% gapP=6.06% t_exact=1.121s tL=0.089s
+seed=1017 beam=6 exact=198.0 L=207.0 Z=267.0 P=210.0 gapL=4.55% gapZ=34.85% gapP=6.06% t_exact=1.121s tL=0.109s
+seed=1017 beam=8 exact=198.0 L=205.0 Z=267.0 P=210.0 gapL=3.54% gapZ=34.85% gapP=6.06% t_exact=1.121s tL=0.131s
+seed=1017 beam=10 exact=198.0 L=206.0 Z=267.0 P=209.0 gapL=4.04% gapZ=34.85% gapP=5.56% t_exact=1.121s tL=0.154s
+seed=1017 beam=12 exact=198.0 L=206.0 Z=267.0 P=208.0 gapL=4.04% gapZ=34.85% gapP=5.05% t_exact=1.121s tL=0.188s
+seed=1017 beam=15 exact=198.0 L=206.0 Z=267.0 P=208.0 gapL=4.04% gapZ=34.85% gapP=5.05% t_exact=1.121s tL=0.225s
+seed=1017 beam=20 exact=198.0 L=204.0 Z=266.0 P=208.0 gapL=3.03% gapZ=34.34% gapP=5.05% t_exact=1.121s tL=0.275s
+seed=1018 beam=1 exact=220.0 L=228.0 Z=300.0 P=231.0 gapL=3.64% gapZ=36.36% gapP=5.00% t_exact=0.946s tL=0.025s
+seed=1018 beam=2 exact=220.0 L=226.0 Z=299.0 P=230.0 gapL=2.73% gapZ=35.91% gapP=4.55% t_exact=0.946s tL=0.044s
+seed=1018 beam=3 exact=220.0 L=226.0 Z=298.0 P=230.0 gapL=2.73% gapZ=35.45% gapP=4.55% t_exact=0.946s tL=0.063s
+seed=1018 beam=4 exact=220.0 L=226.0 Z=298.0 P=230.0 gapL=2.73% gapZ=35.45% gapP=4.55% t_exact=0.946s tL=0.080s
+seed=1018 beam=5 exact=220.0 L=226.0 Z=297.0 P=229.0 gapL=2.73% gapZ=35.00% gapP=4.09% t_exact=0.946s tL=0.098s
+seed=1018 beam=6 exact=220.0 L=226.0 Z=297.0 P=229.0 gapL=2.73% gapZ=35.00% gapP=4.09% t_exact=0.946s tL=0.112s
+seed=1018 beam=8 exact=220.0 L=226.0 Z=296.0 P=229.0 gapL=2.73% gapZ=34.55% gapP=4.09% t_exact=0.946s tL=0.162s
+seed=1018 beam=10 exact=220.0 L=227.0 Z=296.0 P=228.0 gapL=3.18% gapZ=34.55% gapP=3.64% t_exact=0.946s tL=0.169s
+seed=1018 beam=12 exact=220.0 L=226.0 Z=296.0 P=228.0 gapL=2.73% gapZ=34.55% gapP=3.64% t_exact=0.946s tL=0.198s
+seed=1018 beam=15 exact=220.0 L=226.0 Z=295.0 P=228.0 gapL=2.73% gapZ=34.09% gapP=3.64% t_exact=0.946s tL=0.240s
+seed=1018 beam=20 exact=220.0 L=225.0 Z=292.0 P=228.0 gapL=2.27% gapZ=32.73% gapP=3.64% t_exact=0.946s tL=0.304s
+seed=1019 beam=1 exact=170.0 L=184.0 Z=246.0 P=189.0 gapL=8.24% gapZ=44.71% gapP=11.18% t_exact=0.956s tL=0.020s
+seed=1019 beam=2 exact=170.0 L=184.0 Z=245.0 P=188.0 gapL=8.24% gapZ=44.12% gapP=10.59% t_exact=0.956s tL=0.036s
+seed=1019 beam=3 exact=170.0 L=184.0 Z=242.0 P=188.0 gapL=8.24% gapZ=42.35% gapP=10.59% t_exact=0.956s tL=0.049s
+seed=1019 beam=4 exact=170.0 L=182.0 Z=242.0 P=187.0 gapL=7.06% gapZ=42.35% gapP=10.00% t_exact=0.956s tL=0.065s
+seed=1019 beam=5 exact=170.0 L=182.0 Z=239.0 P=187.0 gapL=7.06% gapZ=40.59% gapP=10.00% t_exact=0.956s tL=0.076s
+seed=1019 beam=6 exact=170.0 L=182.0 Z=239.0 P=187.0 gapL=7.06% gapZ=40.59% gapP=10.00% t_exact=0.956s tL=0.089s
+seed=1019 beam=8 exact=170.0 L=182.0 Z=236.0 P=186.0 gapL=7.06% gapZ=38.82% gapP=9.41% t_exact=0.956s tL=0.111s
+seed=1019 beam=10 exact=170.0 L=182.0 Z=236.0 P=186.0 gapL=7.06% gapZ=38.82% gapP=9.41% t_exact=0.956s tL=0.134s
+seed=1019 beam=12 exact=170.0 L=180.0 Z=236.0 P=184.0 gapL=5.88% gapZ=38.82% gapP=8.24% t_exact=0.956s tL=0.155s
+seed=1019 beam=15 exact=170.0 L=180.0 Z=233.0 P=184.0 gapL=5.88% gapZ=37.06% gapP=8.24% t_exact=0.956s tL=0.183s
+seed=1019 beam=20 exact=170.0 L=180.0 Z=232.0 P=184.0 gapL=5.88% gapZ=36.47% gapP=8.24% t_exact=0.956s tL=0.228s
+seed=1020 beam=1 exact=220.0 L=227.0 Z=300.0 P=231.0 gapL=3.18% gapZ=36.36% gapP=5.00% t_exact=0.930s tL=0.025s
+seed=1020 beam=2 exact=220.0 L=226.0 Z=299.0 P=230.0 gapL=2.73% gapZ=35.91% gapP=4.55% t_exact=0.930s tL=0.045s
+seed=1020 beam=3 exact=220.0 L=226.0 Z=298.0 P=229.0 gapL=2.73% gapZ=35.45% gapP=4.09% t_exact=0.930s tL=0.063s
+seed=1020 beam=4 exact=220.0 L=226.0 Z=298.0 P=229.0 gapL=2.73% gapZ=35.45% gapP=4.09% t_exact=0.930s tL=0.082s
+seed=1020 beam=5 exact=220.0 L=226.0 Z=297.0 P=230.0 gapL=2.73% gapZ=35.00% gapP=4.55% t_exact=0.930s tL=0.096s
+seed=1020 beam=6 exact=220.0 L=225.0 Z=297.0 P=230.0 gapL=2.27% gapZ=35.00% gapP=4.55% t_exact=0.930s tL=0.112s
+seed=1020 beam=8 exact=220.0 L=225.0 Z=296.0 P=228.0 gapL=2.27% gapZ=34.55% gapP=3.64% t_exact=0.930s tL=0.140s
+seed=1020 beam=10 exact=220.0 L=226.0 Z=296.0 P=228.0 gapL=2.73% gapZ=34.55% gapP=3.64% t_exact=0.930s tL=0.166s
+seed=1020 beam=12 exact=220.0 L=226.0 Z=295.0 P=228.0 gapL=2.73% gapZ=34.09% gapP=3.64% t_exact=0.930s tL=0.193s
+seed=1020 beam=15 exact=220.0 L=225.0 Z=293.0 P=228.0 gapL=2.27% gapZ=33.18% gapP=3.64% t_exact=0.930s tL=0.233s
+seed=1020 beam=20 exact=220.0 L=224.0 Z=292.0 P=228.0 gapL=1.82% gapZ=32.73% gapP=3.64% t_exact=0.930s tL=0.294s
+seed=1021 beam=1 exact=186.0 L=197.0 Z=261.0 P=202.0 gapL=5.91% gapZ=40.32% gapP=8.60% t_exact=1.017s tL=0.024s
+seed=1021 beam=2 exact=186.0 L=196.0 Z=261.0 P=201.0 gapL=5.38% gapZ=40.32% gapP=8.06% t_exact=1.017s tL=0.040s
+seed=1021 beam=3 exact=186.0 L=197.0 Z=260.0 P=201.0 gapL=5.91% gapZ=39.78% gapP=8.06% t_exact=1.017s tL=0.055s
+seed=1021 beam=4 exact=186.0 L=196.0 Z=260.0 P=200.0 gapL=5.38% gapZ=39.78% gapP=7.53% t_exact=1.017s tL=0.070s
+seed=1021 beam=5 exact=186.0 L=196.0 Z=259.0 P=200.0 gapL=5.38% gapZ=39.25% gapP=7.53% t_exact=1.017s tL=0.083s
+seed=1021 beam=6 exact=186.0 L=196.0 Z=259.0 P=200.0 gapL=5.38% gapZ=39.25% gapP=7.53% t_exact=1.017s tL=0.099s
+seed=1021 beam=8 exact=186.0 L=196.0 Z=258.0 P=200.0 gapL=5.38% gapZ=38.71% gapP=7.53% t_exact=1.017s tL=0.121s
+seed=1021 beam=10 exact=186.0 L=197.0 Z=258.0 P=200.0 gapL=5.91% gapZ=38.71% gapP=7.53% t_exact=1.017s tL=0.145s
+seed=1021 beam=12 exact=186.0 L=196.0 Z=258.0 P=199.0 gapL=5.38% gapZ=38.71% gapP=6.99% t_exact=1.017s tL=0.166s
+seed=1021 beam=15 exact=186.0 L=196.0 Z=257.0 P=199.0 gapL=5.38% gapZ=38.17% gapP=6.99% t_exact=1.017s tL=0.198s
+seed=1021 beam=20 exact=186.0 L=195.0 Z=256.0 P=199.0 gapL=4.84% gapZ=37.63% gapP=6.99% t_exact=1.017s tL=0.251s
+seed=1022 beam=1 exact=206.0 L=214.0 Z=284.0 P=222.0 gapL=3.88% gapZ=37.86% gapP=7.77% t_exact=1.178s tL=0.024s
+seed=1022 beam=2 exact=206.0 L=215.0 Z=281.0 P=220.0 gapL=4.37% gapZ=36.41% gapP=6.80% t_exact=1.178s tL=0.046s
+seed=1022 beam=3 exact=206.0 L=215.0 Z=278.0 P=220.0 gapL=4.37% gapZ=34.95% gapP=6.80% t_exact=1.178s tL=0.062s
+seed=1022 beam=4 exact=206.0 L=214.0 Z=278.0 P=218.0 gapL=3.88% gapZ=34.95% gapP=5.83% t_exact=1.178s tL=0.078s
+seed=1022 beam=5 exact=206.0 L=214.0 Z=275.0 P=218.0 gapL=3.88% gapZ=33.50% gapP=5.83% t_exact=1.178s tL=0.104s
+seed=1022 beam=6 exact=206.0 L=214.0 Z=275.0 P=218.0 gapL=3.88% gapZ=33.50% gapP=5.83% t_exact=1.178s tL=0.108s
+seed=1022 beam=8 exact=206.0 L=213.0 Z=274.0 P=218.0 gapL=3.40% gapZ=33.01% gapP=5.83% t_exact=1.178s tL=0.139s
+seed=1022 beam=10 exact=206.0 L=213.0 Z=274.0 P=217.0 gapL=3.40% gapZ=33.01% gapP=5.34% t_exact=1.178s tL=0.164s
+seed=1022 beam=12 exact=206.0 L=213.0 Z=274.0 P=216.0 gapL=3.40% gapZ=33.01% gapP=4.85% t_exact=1.178s tL=0.188s
+seed=1022 beam=15 exact=206.0 L=213.0 Z=273.0 P=217.0 gapL=3.40% gapZ=32.52% gapP=5.34% t_exact=1.178s tL=0.226s
+seed=1022 beam=20 exact=206.0 L=211.0 Z=272.0 P=215.0 gapL=2.43% gapZ=32.04% gapP=4.37% t_exact=1.178s tL=0.289s
+seed=1023 beam=1 exact=174.0 L=186.0 Z=250.0 P=193.0 gapL=6.90% gapZ=43.68% gapP=10.92% t_exact=0.843s tL=0.021s
+seed=1023 beam=2 exact=174.0 L=187.0 Z=249.0 P=192.0 gapL=7.47% gapZ=43.10% gapP=10.34% t_exact=0.843s tL=0.037s
+seed=1023 beam=3 exact=174.0 L=187.0 Z=248.0 P=192.0 gapL=7.47% gapZ=42.53% gapP=10.34% t_exact=0.843s tL=0.052s
+seed=1023 beam=4 exact=174.0 L=186.0 Z=248.0 P=190.0 gapL=6.90% gapZ=42.53% gapP=9.20% t_exact=0.843s tL=0.065s
+seed=1023 beam=5 exact=174.0 L=186.0 Z=247.0 P=190.0 gapL=6.90% gapZ=41.95% gapP=9.20% t_exact=0.843s tL=0.078s
+seed=1023 beam=6 exact=174.0 L=186.0 Z=245.0 P=190.0 gapL=6.90% gapZ=40.80% gapP=9.20% t_exact=0.843s tL=0.090s
+seed=1023 beam=8 exact=174.0 L=186.0 Z=244.0 P=190.0 gapL=6.90% gapZ=40.23% gapP=9.20% t_exact=0.843s tL=0.113s
+seed=1023 beam=10 exact=174.0 L=186.0 Z=244.0 P=189.0 gapL=6.90% gapZ=40.23% gapP=8.62% t_exact=0.843s tL=0.135s
+seed=1023 beam=12 exact=174.0 L=184.0 Z=242.0 P=188.0 gapL=5.75% gapZ=39.08% gapP=8.05% t_exact=0.843s tL=0.157s
+seed=1023 beam=15 exact=174.0 L=184.0 Z=241.0 P=188.0 gapL=5.75% gapZ=38.51% gapP=8.05% t_exact=0.843s tL=0.184s
+seed=1023 beam=20 exact=174.0 L=183.0 Z=238.0 P=187.0 gapL=5.17% gapZ=36.78% gapP=7.47% t_exact=0.843s tL=0.235s
+seed=1024 beam=1 exact=206.0 L=214.0 Z=284.0 P=219.0 gapL=3.88% gapZ=37.86% gapP=6.31% t_exact=1.081s tL=0.024s
+seed=1024 beam=2 exact=206.0 L=215.0 Z=281.0 P=219.0 gapL=4.37% gapZ=36.41% gapP=6.31% t_exact=1.081s tL=0.043s
+seed=1024 beam=3 exact=206.0 L=215.0 Z=278.0 P=219.0 gapL=4.37% gapZ=34.95% gapP=6.31% t_exact=1.081s tL=0.060s
+seed=1024 beam=4 exact=206.0 L=214.0 Z=278.0 P=218.0 gapL=3.88% gapZ=34.95% gapP=5.83% t_exact=1.081s tL=0.076s
+seed=1024 beam=5 exact=206.0 L=214.0 Z=275.0 P=218.0 gapL=3.88% gapZ=33.50% gapP=5.83% t_exact=1.081s tL=0.091s
+seed=1024 beam=6 exact=206.0 L=214.0 Z=275.0 P=218.0 gapL=3.88% gapZ=33.50% gapP=5.83% t_exact=1.081s tL=0.105s
+seed=1024 beam=8 exact=206.0 L=213.0 Z=274.0 P=217.0 gapL=3.40% gapZ=33.01% gapP=5.34% t_exact=1.081s tL=0.132s
+seed=1024 beam=10 exact=206.0 L=213.0 Z=274.0 P=217.0 gapL=3.40% gapZ=33.01% gapP=5.34% t_exact=1.081s tL=0.155s
+seed=1024 beam=12 exact=206.0 L=213.0 Z=274.0 P=217.0 gapL=3.40% gapZ=33.01% gapP=5.34% t_exact=1.081s tL=0.180s
+seed=1024 beam=15 exact=206.0 L=213.0 Z=273.0 P=216.0 gapL=3.40% gapZ=32.52% gapP=4.85% t_exact=1.081s tL=0.218s
+seed=1024 beam=20 exact=206.0 L=212.0 Z=272.0 P=216.0 gapL=2.91% gapZ=32.04% gapP=4.85% t_exact=1.081s tL=0.278s
+seed=1025 beam=1 exact=206.0 L=214.0 Z=284.0 P=221.0 gapL=3.88% gapZ=37.86% gapP=7.28% t_exact=0.791s tL=0.024s
+seed=1025 beam=2 exact=206.0 L=215.0 Z=281.0 P=220.0 gapL=4.37% gapZ=36.41% gapP=6.80% t_exact=0.791s tL=0.044s
+seed=1025 beam=3 exact=206.0 L=215.0 Z=278.0 P=220.0 gapL=4.37% gapZ=34.95% gapP=6.80% t_exact=0.791s tL=0.062s
+seed=1025 beam=4 exact=206.0 L=214.0 Z=278.0 P=218.0 gapL=3.88% gapZ=34.95% gapP=5.83% t_exact=0.791s tL=0.079s
+seed=1025 beam=5 exact=206.0 L=214.0 Z=275.0 P=218.0 gapL=3.88% gapZ=33.50% gapP=5.83% t_exact=0.791s tL=0.093s
+seed=1025 beam=6 exact=206.0 L=214.0 Z=275.0 P=218.0 gapL=3.88% gapZ=33.50% gapP=5.83% t_exact=0.791s tL=0.108s
+seed=1025 beam=8 exact=206.0 L=213.0 Z=274.0 P=218.0 gapL=3.40% gapZ=33.01% gapP=5.83% t_exact=0.791s tL=0.136s
+seed=1025 beam=10 exact=206.0 L=213.0 Z=274.0 P=217.0 gapL=3.40% gapZ=33.01% gapP=5.34% t_exact=0.791s tL=0.161s
+seed=1025 beam=12 exact=206.0 L=213.0 Z=274.0 P=217.0 gapL=3.40% gapZ=33.01% gapP=5.34% t_exact=0.791s tL=0.189s
+seed=1025 beam=15 exact=206.0 L=213.0 Z=273.0 P=217.0 gapL=3.40% gapZ=32.52% gapP=5.34% t_exact=0.791s tL=0.241s
+seed=1025 beam=20 exact=206.0 L=211.0 Z=272.0 P=215.0 gapL=2.43% gapZ=32.04% gapP=4.37% t_exact=0.791s tL=0.286s
+seed=1026 beam=1 exact=204.0 L=213.0 Z=280.0 P=219.0 gapL=4.41% gapZ=37.25% gapP=7.35% t_exact=1.162s tL=0.024s
+seed=1026 beam=2 exact=204.0 L=214.0 Z=277.0 P=218.0 gapL=4.90% gapZ=35.78% gapP=6.86% t_exact=1.162s tL=0.042s
+seed=1026 beam=3 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.162s tL=0.058s
+seed=1026 beam=4 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.162s tL=0.075s
+seed=1026 beam=5 exact=204.0 L=213.0 Z=273.0 P=217.0 gapL=4.41% gapZ=33.82% gapP=6.37% t_exact=1.162s tL=0.090s
+seed=1026 beam=6 exact=204.0 L=212.0 Z=273.0 P=216.0 gapL=3.92% gapZ=33.82% gapP=5.88% t_exact=1.162s tL=0.104s
+seed=1026 beam=8 exact=204.0 L=211.0 Z=272.0 P=216.0 gapL=3.43% gapZ=33.33% gapP=5.88% t_exact=1.162s tL=0.132s
+seed=1026 beam=10 exact=204.0 L=211.0 Z=272.0 P=216.0 gapL=3.43% gapZ=33.33% gapP=5.88% t_exact=1.162s tL=0.158s
+seed=1026 beam=12 exact=204.0 L=211.0 Z=272.0 P=214.0 gapL=3.43% gapZ=33.33% gapP=4.90% t_exact=1.162s tL=0.184s
+seed=1026 beam=15 exact=204.0 L=211.0 Z=271.0 P=214.0 gapL=3.43% gapZ=32.84% gapP=4.90% t_exact=1.162s tL=0.220s
+seed=1026 beam=20 exact=204.0 L=209.0 Z=270.0 P=214.0 gapL=2.45% gapZ=32.35% gapP=4.90% t_exact=1.162s tL=0.282s
+seed=1027 beam=1 exact=204.0 L=213.0 Z=280.0 P=219.0 gapL=4.41% gapZ=37.25% gapP=7.35% t_exact=1.012s tL=0.024s
+seed=1027 beam=2 exact=204.0 L=214.0 Z=277.0 P=218.0 gapL=4.90% gapZ=35.78% gapP=6.86% t_exact=1.012s tL=0.042s
+seed=1027 beam=3 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.012s tL=0.057s
+seed=1027 beam=4 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.012s tL=0.073s
+seed=1027 beam=5 exact=204.0 L=213.0 Z=273.0 P=216.0 gapL=4.41% gapZ=33.82% gapP=5.88% t_exact=1.012s tL=0.089s
+seed=1027 beam=6 exact=204.0 L=212.0 Z=273.0 P=216.0 gapL=3.92% gapZ=33.82% gapP=5.88% t_exact=1.012s tL=0.102s
+seed=1027 beam=8 exact=204.0 L=211.0 Z=272.0 P=216.0 gapL=3.43% gapZ=33.33% gapP=5.88% t_exact=1.012s tL=0.133s
+seed=1027 beam=10 exact=204.0 L=211.0 Z=272.0 P=216.0 gapL=3.43% gapZ=33.33% gapP=5.88% t_exact=1.012s tL=0.155s
+seed=1027 beam=12 exact=204.0 L=211.0 Z=272.0 P=214.0 gapL=3.43% gapZ=33.33% gapP=4.90% t_exact=1.012s tL=0.182s
+seed=1027 beam=15 exact=204.0 L=211.0 Z=271.0 P=214.0 gapL=3.43% gapZ=32.84% gapP=4.90% t_exact=1.012s tL=0.220s
+seed=1027 beam=20 exact=204.0 L=209.0 Z=270.0 P=214.0 gapL=2.45% gapZ=32.35% gapP=4.90% t_exact=1.012s tL=0.279s
+seed=1028 beam=1 exact=170.0 L=184.0 Z=246.0 P=189.0 gapL=8.24% gapZ=44.71% gapP=11.18% t_exact=0.760s tL=0.019s
+seed=1028 beam=2 exact=170.0 L=184.0 Z=245.0 P=188.0 gapL=8.24% gapZ=44.12% gapP=10.59% t_exact=0.760s tL=0.034s
+seed=1028 beam=3 exact=170.0 L=183.0 Z=242.0 P=187.0 gapL=7.65% gapZ=42.35% gapP=10.00% t_exact=0.760s tL=0.049s
+seed=1028 beam=4 exact=170.0 L=183.0 Z=242.0 P=186.0 gapL=7.65% gapZ=42.35% gapP=9.41% t_exact=0.760s tL=0.063s
+seed=1028 beam=5 exact=170.0 L=183.0 Z=239.0 P=186.0 gapL=7.65% gapZ=40.59% gapP=9.41% t_exact=0.760s tL=0.079s
+seed=1028 beam=6 exact=170.0 L=183.0 Z=239.0 P=187.0 gapL=7.65% gapZ=40.59% gapP=10.00% t_exact=0.760s tL=0.087s
+seed=1028 beam=8 exact=170.0 L=181.0 Z=236.0 P=185.0 gapL=6.47% gapZ=38.82% gapP=8.82% t_exact=0.760s tL=0.109s
+seed=1028 beam=10 exact=170.0 L=181.0 Z=236.0 P=185.0 gapL=6.47% gapZ=38.82% gapP=8.82% t_exact=0.760s tL=0.129s
+seed=1028 beam=12 exact=170.0 L=181.0 Z=236.0 P=185.0 gapL=6.47% gapZ=38.82% gapP=8.82% t_exact=0.760s tL=0.149s
+seed=1028 beam=15 exact=170.0 L=181.0 Z=233.0 P=184.0 gapL=6.47% gapZ=37.06% gapP=8.24% t_exact=0.760s tL=0.195s
+seed=1028 beam=20 exact=170.0 L=179.0 Z=232.0 P=183.0 gapL=5.29% gapZ=36.47% gapP=7.65% t_exact=0.760s tL=0.223s
+seed=1029 beam=1 exact=198.0 L=210.0 Z=270.0 P=214.0 gapL=6.06% gapZ=36.36% gapP=8.08% t_exact=1.251s tL=0.023s
+seed=1029 beam=2 exact=198.0 L=208.0 Z=269.0 P=212.0 gapL=5.05% gapZ=35.86% gapP=7.07% t_exact=1.251s tL=0.042s
+seed=1029 beam=3 exact=198.0 L=208.0 Z=268.0 P=212.0 gapL=5.05% gapZ=35.35% gapP=7.07% t_exact=1.251s tL=0.057s
+seed=1029 beam=4 exact=198.0 L=206.0 Z=268.0 P=210.0 gapL=4.04% gapZ=35.35% gapP=6.06% t_exact=1.251s tL=0.075s
+seed=1029 beam=5 exact=198.0 L=206.0 Z=267.0 P=210.0 gapL=4.04% gapZ=34.85% gapP=6.06% t_exact=1.251s tL=0.089s
+seed=1029 beam=6 exact=198.0 L=206.0 Z=267.0 P=210.0 gapL=4.04% gapZ=34.85% gapP=6.06% t_exact=1.251s tL=0.105s
+seed=1029 beam=8 exact=198.0 L=206.0 Z=267.0 P=209.0 gapL=4.04% gapZ=34.85% gapP=5.56% t_exact=1.251s tL=0.131s
+seed=1029 beam=10 exact=198.0 L=206.0 Z=267.0 P=209.0 gapL=4.04% gapZ=34.85% gapP=5.56% t_exact=1.251s tL=0.156s
+seed=1029 beam=12 exact=198.0 L=206.0 Z=267.0 P=209.0 gapL=4.04% gapZ=34.85% gapP=5.56% t_exact=1.251s tL=0.181s
+seed=1029 beam=15 exact=198.0 L=206.0 Z=267.0 P=208.0 gapL=4.04% gapZ=34.85% gapP=5.05% t_exact=1.251s tL=0.217s
+seed=1029 beam=20 exact=198.0 L=204.0 Z=266.0 P=208.0 gapL=3.03% gapZ=34.34% gapP=5.05% t_exact=1.251s tL=0.278s
+seed=1030 beam=1 exact=164.0 L=179.0 Z=236.0 P=184.0 gapL=9.15% gapZ=43.90% gapP=12.20% t_exact=1.060s tL=0.020s
+seed=1030 beam=2 exact=164.0 L=178.0 Z=233.0 P=182.0 gapL=8.54% gapZ=42.07% gapP=10.98% t_exact=1.060s tL=0.036s
+seed=1030 beam=3 exact=164.0 L=177.0 Z=230.0 P=181.0 gapL=7.93% gapZ=40.24% gapP=10.37% t_exact=1.060s tL=0.050s
+seed=1030 beam=4 exact=164.0 L=177.0 Z=230.0 P=181.0 gapL=7.93% gapZ=40.24% gapP=10.37% t_exact=1.060s tL=0.064s
+seed=1030 beam=5 exact=164.0 L=176.0 Z=229.0 P=181.0 gapL=7.32% gapZ=39.63% gapP=10.37% t_exact=1.060s tL=0.078s
+seed=1030 beam=6 exact=164.0 L=176.0 Z=229.0 P=180.0 gapL=7.32% gapZ=39.63% gapP=9.76% t_exact=1.060s tL=0.088s
+seed=1030 beam=8 exact=164.0 L=176.0 Z=228.0 P=180.0 gapL=7.32% gapZ=39.02% gapP=9.76% t_exact=1.060s tL=0.110s
+seed=1030 beam=10 exact=164.0 L=176.0 Z=228.0 P=180.0 gapL=7.32% gapZ=39.02% gapP=9.76% t_exact=1.060s tL=0.126s
+seed=1030 beam=12 exact=164.0 L=175.0 Z=228.0 P=178.0 gapL=6.71% gapZ=39.02% gapP=8.54% t_exact=1.060s tL=0.148s
+seed=1030 beam=15 exact=164.0 L=175.0 Z=227.0 P=178.0 gapL=6.71% gapZ=38.41% gapP=8.54% t_exact=1.060s tL=0.177s
+seed=1030 beam=20 exact=164.0 L=175.0 Z=226.0 P=178.0 gapL=6.71% gapZ=37.80% gapP=8.54% t_exact=1.060s tL=0.223s
+seed=1031 beam=1 exact=194.0 L=206.0 Z=266.0 P=209.0 gapL=6.19% gapZ=37.11% gapP=7.73% t_exact=1.269s tL=0.023s
+seed=1031 beam=2 exact=194.0 L=204.0 Z=265.0 P=208.0 gapL=5.15% gapZ=36.60% gapP=7.22% t_exact=1.269s tL=0.041s
+seed=1031 beam=3 exact=194.0 L=203.0 Z=265.0 P=207.0 gapL=4.64% gapZ=36.60% gapP=6.70% t_exact=1.269s tL=0.058s
+seed=1031 beam=4 exact=194.0 L=203.0 Z=265.0 P=206.0 gapL=4.64% gapZ=36.60% gapP=6.19% t_exact=1.269s tL=0.074s
+seed=1031 beam=5 exact=194.0 L=203.0 Z=265.0 P=206.0 gapL=4.64% gapZ=36.60% gapP=6.19% t_exact=1.269s tL=0.088s
+seed=1031 beam=6 exact=194.0 L=203.0 Z=265.0 P=206.0 gapL=4.64% gapZ=36.60% gapP=6.19% t_exact=1.269s tL=0.102s
+seed=1031 beam=8 exact=194.0 L=201.0 Z=265.0 P=205.0 gapL=3.61% gapZ=36.60% gapP=5.67% t_exact=1.269s tL=0.130s
+seed=1031 beam=10 exact=194.0 L=203.0 Z=265.0 P=205.0 gapL=4.64% gapZ=36.60% gapP=5.67% t_exact=1.269s tL=0.151s
+seed=1031 beam=12 exact=194.0 L=203.0 Z=265.0 P=205.0 gapL=4.64% gapZ=36.60% gapP=5.67% t_exact=1.269s tL=0.177s
+seed=1031 beam=15 exact=194.0 L=202.0 Z=264.0 P=205.0 gapL=4.12% gapZ=36.08% gapP=5.67% t_exact=1.269s tL=0.212s
+seed=1031 beam=20 exact=194.0 L=202.0 Z=264.0 P=204.0 gapL=4.12% gapZ=36.08% gapP=5.15% t_exact=1.269s tL=0.272s
+seed=1032 beam=1 exact=198.0 L=210.0 Z=270.0 P=214.0 gapL=6.06% gapZ=36.36% gapP=8.08% t_exact=1.071s tL=0.023s
+seed=1032 beam=2 exact=198.0 L=208.0 Z=269.0 P=212.0 gapL=5.05% gapZ=35.86% gapP=7.07% t_exact=1.071s tL=0.041s
+seed=1032 beam=3 exact=198.0 L=207.0 Z=268.0 P=211.0 gapL=4.55% gapZ=35.35% gapP=6.57% t_exact=1.071s tL=0.056s
+seed=1032 beam=4 exact=198.0 L=207.0 Z=268.0 P=210.0 gapL=4.55% gapZ=35.35% gapP=6.06% t_exact=1.071s tL=0.072s
+seed=1032 beam=5 exact=198.0 L=207.0 Z=267.0 P=210.0 gapL=4.55% gapZ=34.85% gapP=6.06% t_exact=1.071s tL=0.086s
+seed=1032 beam=6 exact=198.0 L=207.0 Z=267.0 P=210.0 gapL=4.55% gapZ=34.85% gapP=6.06% t_exact=1.071s tL=0.100s
+seed=1032 beam=8 exact=198.0 L=205.0 Z=267.0 P=209.0 gapL=3.54% gapZ=34.85% gapP=5.56% t_exact=1.071s tL=0.129s
+seed=1032 beam=10 exact=198.0 L=206.0 Z=267.0 P=209.0 gapL=4.04% gapZ=34.85% gapP=5.56% t_exact=1.071s tL=0.156s
+seed=1032 beam=12 exact=198.0 L=206.0 Z=267.0 P=209.0 gapL=4.04% gapZ=34.85% gapP=5.56% t_exact=1.071s tL=0.178s
+seed=1032 beam=15 exact=198.0 L=205.0 Z=267.0 P=209.0 gapL=3.54% gapZ=34.85% gapP=5.56% t_exact=1.071s tL=0.228s
+seed=1032 beam=20 exact=198.0 L=204.0 Z=267.0 P=207.0 gapL=3.03% gapZ=34.85% gapP=4.55% t_exact=1.071s tL=0.272s
+seed=1033 beam=1 exact=210.0 L=218.0 Z=290.0 P=225.0 gapL=3.81% gapZ=38.10% gapP=7.14% t_exact=1.171s tL=0.024s
+seed=1033 beam=2 exact=210.0 L=217.0 Z=289.0 P=224.0 gapL=3.33% gapZ=37.62% gapP=6.67% t_exact=1.171s tL=0.043s
+seed=1033 beam=3 exact=210.0 L=219.0 Z=286.0 P=223.0 gapL=4.29% gapZ=36.19% gapP=6.19% t_exact=1.171s tL=0.059s
+seed=1033 beam=4 exact=210.0 L=219.0 Z=286.0 P=222.0 gapL=4.29% gapZ=36.19% gapP=5.71% t_exact=1.171s tL=0.079s
+seed=1033 beam=5 exact=210.0 L=219.0 Z=283.0 P=222.0 gapL=4.29% gapZ=34.76% gapP=5.71% t_exact=1.171s tL=0.093s
+seed=1033 beam=6 exact=210.0 L=218.0 Z=283.0 P=222.0 gapL=3.81% gapZ=34.76% gapP=5.71% t_exact=1.171s tL=0.108s
+seed=1033 beam=8 exact=210.0 L=217.0 Z=280.0 P=221.0 gapL=3.33% gapZ=33.33% gapP=5.24% t_exact=1.171s tL=0.137s
+seed=1033 beam=10 exact=210.0 L=217.0 Z=280.0 P=221.0 gapL=3.33% gapZ=33.33% gapP=5.24% t_exact=1.171s tL=0.161s
+seed=1033 beam=12 exact=210.0 L=217.0 Z=280.0 P=220.0 gapL=3.33% gapZ=33.33% gapP=4.76% t_exact=1.171s tL=0.188s
+seed=1033 beam=15 exact=210.0 L=217.0 Z=277.0 P=220.0 gapL=3.33% gapZ=31.90% gapP=4.76% t_exact=1.171s tL=0.224s
+seed=1033 beam=20 exact=210.0 L=215.0 Z=276.0 P=219.0 gapL=2.38% gapZ=31.43% gapP=4.29% t_exact=1.171s tL=0.289s
+seed=1034 beam=1 exact=212.0 L=220.0 Z=292.0 P=226.0 gapL=3.77% gapZ=37.74% gapP=6.60% t_exact=0.807s tL=0.025s
+seed=1034 beam=2 exact=212.0 L=219.0 Z=291.0 P=225.0 gapL=3.30% gapZ=37.26% gapP=6.13% t_exact=0.807s tL=0.046s
+seed=1034 beam=3 exact=212.0 L=221.0 Z=290.0 P=224.0 gapL=4.25% gapZ=36.79% gapP=5.66% t_exact=0.807s tL=0.063s
+seed=1034 beam=4 exact=212.0 L=221.0 Z=288.0 P=225.0 gapL=4.25% gapZ=35.85% gapP=6.13% t_exact=0.807s tL=0.081s
+seed=1034 beam=5 exact=212.0 L=221.0 Z=287.0 P=224.0 gapL=4.25% gapZ=35.38% gapP=5.66% t_exact=0.807s tL=0.096s
+seed=1034 beam=6 exact=212.0 L=220.0 Z=287.0 P=224.0 gapL=3.77% gapZ=35.38% gapP=5.66% t_exact=0.807s tL=0.122s
+seed=1034 beam=8 exact=212.0 L=219.0 Z=284.0 P=224.0 gapL=3.30% gapZ=33.96% gapP=5.66% t_exact=0.807s tL=0.143s
+seed=1034 beam=10 exact=212.0 L=219.0 Z=284.0 P=223.0 gapL=3.30% gapZ=33.96% gapP=5.19% t_exact=0.807s tL=0.167s
+seed=1034 beam=12 exact=212.0 L=219.0 Z=282.0 P=222.0 gapL=3.30% gapZ=33.02% gapP=4.72% t_exact=0.807s tL=0.193s
+seed=1034 beam=15 exact=212.0 L=219.0 Z=281.0 P=222.0 gapL=3.30% gapZ=32.55% gapP=4.72% t_exact=0.807s tL=0.232s
+seed=1034 beam=20 exact=212.0 L=217.0 Z=278.0 P=221.0 gapL=2.36% gapZ=31.13% gapP=4.25% t_exact=0.807s tL=0.298s
+seed=1035 beam=1 exact=192.0 L=203.0 Z=264.0 P=208.0 gapL=5.73% gapZ=37.50% gapP=8.33% t_exact=1.298s tL=0.031s
+seed=1035 beam=2 exact=192.0 L=202.0 Z=264.0 P=206.0 gapL=5.21% gapZ=37.50% gapP=7.29% t_exact=1.298s tL=0.041s
+seed=1035 beam=3 exact=192.0 L=202.0 Z=264.0 P=206.0 gapL=5.21% gapZ=37.50% gapP=7.29% t_exact=1.298s tL=0.056s
+seed=1035 beam=4 exact=192.0 L=200.0 Z=264.0 P=205.0 gapL=4.17% gapZ=37.50% gapP=6.77% t_exact=1.298s tL=0.078s
+seed=1035 beam=5 exact=192.0 L=200.0 Z=264.0 P=205.0 gapL=4.17% gapZ=37.50% gapP=6.77% t_exact=1.298s tL=0.087s
+seed=1035 beam=6 exact=192.0 L=200.0 Z=264.0 P=205.0 gapL=4.17% gapZ=37.50% gapP=6.77% t_exact=1.298s tL=0.106s
+seed=1035 beam=8 exact=192.0 L=200.0 Z=264.0 P=204.0 gapL=4.17% gapZ=37.50% gapP=6.25% t_exact=1.298s tL=0.134s
+seed=1035 beam=10 exact=192.0 L=202.0 Z=263.0 P=204.0 gapL=5.21% gapZ=36.98% gapP=6.25% t_exact=1.298s tL=0.149s
+seed=1035 beam=12 exact=192.0 L=201.0 Z=263.0 P=203.0 gapL=4.69% gapZ=36.98% gapP=5.73% t_exact=1.298s tL=0.173s
+seed=1035 beam=15 exact=192.0 L=201.0 Z=263.0 P=202.0 gapL=4.69% gapZ=36.98% gapP=5.21% t_exact=1.298s tL=0.208s
+seed=1035 beam=20 exact=192.0 L=201.0 Z=262.0 P=202.0 gapL=4.69% gapZ=36.46% gapP=5.21% t_exact=1.298s tL=0.265s
+seed=1036 beam=1 exact=178.0 L=190.0 Z=254.0 P=197.0 gapL=6.74% gapZ=42.70% gapP=10.67% t_exact=1.284s tL=0.021s
+seed=1036 beam=2 exact=178.0 L=189.0 Z=253.0 P=196.0 gapL=6.18% gapZ=42.13% gapP=10.11% t_exact=1.284s tL=0.038s
+seed=1036 beam=3 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=1.284s tL=0.053s
+seed=1036 beam=4 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=1.284s tL=0.068s
+seed=1036 beam=5 exact=178.0 L=191.0 Z=251.0 P=195.0 gapL=7.30% gapZ=41.01% gapP=9.55% t_exact=1.284s tL=0.081s
+seed=1036 beam=6 exact=178.0 L=190.0 Z=251.0 P=194.0 gapL=6.74% gapZ=41.01% gapP=8.99% t_exact=1.284s tL=0.094s
+seed=1036 beam=8 exact=178.0 L=189.0 Z=250.0 P=193.0 gapL=6.18% gapZ=40.45% gapP=8.43% t_exact=1.284s tL=0.140s
+seed=1036 beam=10 exact=178.0 L=189.0 Z=250.0 P=193.0 gapL=6.18% gapZ=40.45% gapP=8.43% t_exact=1.284s tL=0.137s
+seed=1036 beam=12 exact=178.0 L=189.0 Z=248.0 P=192.0 gapL=6.18% gapZ=39.33% gapP=7.87% t_exact=1.284s tL=0.158s
+seed=1036 beam=15 exact=178.0 L=189.0 Z=247.0 P=192.0 gapL=6.18% gapZ=38.76% gapP=7.87% t_exact=1.284s tL=0.189s
+seed=1036 beam=20 exact=178.0 L=188.0 Z=246.0 P=191.0 gapL=5.62% gapZ=38.20% gapP=7.30% t_exact=1.284s tL=0.238s
+seed=1037 beam=1 exact=208.0 L=215.0 Z=288.0 P=222.0 gapL=3.37% gapZ=38.46% gapP=6.73% t_exact=0.950s tL=0.024s
+seed=1037 beam=2 exact=208.0 L=216.0 Z=285.0 P=222.0 gapL=3.85% gapZ=37.02% gapP=6.73% t_exact=0.950s tL=0.044s
+seed=1037 beam=3 exact=208.0 L=218.0 Z=282.0 P=222.0 gapL=4.81% gapZ=35.58% gapP=6.73% t_exact=0.950s tL=0.060s
+seed=1037 beam=4 exact=208.0 L=217.0 Z=282.0 P=220.0 gapL=4.33% gapZ=35.58% gapP=5.77% t_exact=0.950s tL=0.078s
+seed=1037 beam=5 exact=208.0 L=216.0 Z=279.0 P=220.0 gapL=3.85% gapZ=34.13% gapP=5.77% t_exact=0.950s tL=0.092s
+seed=1037 beam=6 exact=208.0 L=216.0 Z=279.0 P=220.0 gapL=3.85% gapZ=34.13% gapP=5.77% t_exact=0.950s tL=0.107s
+seed=1037 beam=8 exact=208.0 L=215.0 Z=276.0 P=219.0 gapL=3.37% gapZ=32.69% gapP=5.29% t_exact=0.950s tL=0.134s
+seed=1037 beam=10 exact=208.0 L=216.0 Z=276.0 P=218.0 gapL=3.85% gapZ=32.69% gapP=4.81% t_exact=0.950s tL=0.156s
+seed=1037 beam=12 exact=208.0 L=214.0 Z=275.0 P=218.0 gapL=2.88% gapZ=32.21% gapP=4.81% t_exact=0.950s tL=0.182s
+seed=1037 beam=15 exact=208.0 L=215.0 Z=275.0 P=218.0 gapL=3.37% gapZ=32.21% gapP=4.81% t_exact=0.950s tL=0.228s
+seed=1037 beam=20 exact=208.0 L=213.0 Z=274.0 P=217.0 gapL=2.40% gapZ=31.73% gapP=4.33% t_exact=0.950s tL=0.276s
+seed=1038 beam=1 exact=168.0 L=183.0 Z=244.0 P=188.0 gapL=8.93% gapZ=45.24% gapP=11.90% t_exact=1.088s tL=0.020s
+seed=1038 beam=2 exact=168.0 L=182.0 Z=241.0 P=186.0 gapL=8.33% gapZ=43.45% gapP=10.71% t_exact=1.088s tL=0.036s
+seed=1038 beam=3 exact=168.0 L=181.0 Z=238.0 P=186.0 gapL=7.74% gapZ=41.67% gapP=10.71% t_exact=1.088s tL=0.049s
+seed=1038 beam=4 exact=168.0 L=181.0 Z=238.0 P=185.0 gapL=7.74% gapZ=41.67% gapP=10.12% t_exact=1.088s tL=0.063s
+seed=1038 beam=5 exact=168.0 L=181.0 Z=235.0 P=185.0 gapL=7.74% gapZ=39.88% gapP=10.12% t_exact=1.088s tL=0.075s
+seed=1038 beam=6 exact=168.0 L=181.0 Z=235.0 P=185.0 gapL=7.74% gapZ=39.88% gapP=10.12% t_exact=1.088s tL=0.087s
+seed=1038 beam=8 exact=168.0 L=179.0 Z=232.0 P=183.0 gapL=6.55% gapZ=38.10% gapP=8.93% t_exact=1.088s tL=0.113s
+seed=1038 beam=10 exact=168.0 L=179.0 Z=232.0 P=183.0 gapL=6.55% gapZ=38.10% gapP=8.93% t_exact=1.088s tL=0.129s
+seed=1038 beam=12 exact=168.0 L=178.0 Z=232.0 P=183.0 gapL=5.95% gapZ=38.10% gapP=8.93% t_exact=1.088s tL=0.150s
+seed=1038 beam=15 exact=168.0 L=179.0 Z=231.0 P=183.0 gapL=6.55% gapZ=37.50% gapP=8.93% t_exact=1.088s tL=0.175s
+seed=1038 beam=20 exact=168.0 L=177.0 Z=230.0 P=181.0 gapL=5.36% gapZ=36.90% gapP=7.74% t_exact=1.088s tL=0.234s
+seed=1039 beam=1 exact=202.0 L=212.0 Z=276.0 P=217.0 gapL=4.95% gapZ=36.63% gapP=7.43% t_exact=1.187s tL=0.024s
+seed=1039 beam=2 exact=202.0 L=212.0 Z=273.0 P=216.0 gapL=4.95% gapZ=35.15% gapP=6.93% t_exact=1.187s tL=0.043s
+seed=1039 beam=3 exact=202.0 L=212.0 Z=272.0 P=215.0 gapL=4.95% gapZ=34.65% gapP=6.44% t_exact=1.187s tL=0.060s
+seed=1039 beam=4 exact=202.0 L=210.0 Z=272.0 P=215.0 gapL=3.96% gapZ=34.65% gapP=6.44% t_exact=1.187s tL=0.077s
+seed=1039 beam=5 exact=202.0 L=210.0 Z=271.0 P=214.0 gapL=3.96% gapZ=34.16% gapP=5.94% t_exact=1.187s tL=0.089s
+seed=1039 beam=6 exact=202.0 L=210.0 Z=271.0 P=215.0 gapL=3.96% gapZ=34.16% gapP=6.44% t_exact=1.187s tL=0.104s
+seed=1039 beam=8 exact=202.0 L=210.0 Z=270.0 P=213.0 gapL=3.96% gapZ=33.66% gapP=5.45% t_exact=1.187s tL=0.131s
+seed=1039 beam=10 exact=202.0 L=209.0 Z=270.0 P=214.0 gapL=3.47% gapZ=33.66% gapP=5.94% t_exact=1.187s tL=0.155s
+seed=1039 beam=12 exact=202.0 L=208.0 Z=270.0 P=212.0 gapL=2.97% gapZ=33.66% gapP=4.95% t_exact=1.187s tL=0.190s
+seed=1039 beam=15 exact=202.0 L=209.0 Z=269.0 P=212.0 gapL=3.47% gapZ=33.17% gapP=4.95% t_exact=1.187s tL=0.216s
+seed=1039 beam=20 exact=202.0 L=208.0 Z=269.0 P=212.0 gapL=2.97% gapZ=33.17% gapP=4.95% t_exact=1.187s tL=0.273s
+seed=1040 beam=1 exact=204.0 L=213.0 Z=280.0 P=219.0 gapL=4.41% gapZ=37.25% gapP=7.35% t_exact=1.210s tL=0.024s
+seed=1040 beam=2 exact=204.0 L=214.0 Z=277.0 P=218.0 gapL=4.90% gapZ=35.78% gapP=6.86% t_exact=1.210s tL=0.043s
+seed=1040 beam=3 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.210s tL=0.059s
+seed=1040 beam=4 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.210s tL=0.076s
+seed=1040 beam=5 exact=204.0 L=213.0 Z=273.0 P=216.0 gapL=4.41% gapZ=33.82% gapP=5.88% t_exact=1.210s tL=0.091s
+seed=1040 beam=6 exact=204.0 L=212.0 Z=273.0 P=216.0 gapL=3.92% gapZ=33.82% gapP=5.88% t_exact=1.210s tL=0.106s
+seed=1040 beam=8 exact=204.0 L=211.0 Z=272.0 P=215.0 gapL=3.43% gapZ=33.33% gapP=5.39% t_exact=1.210s tL=0.133s
+seed=1040 beam=10 exact=204.0 L=211.0 Z=272.0 P=216.0 gapL=3.43% gapZ=33.33% gapP=5.88% t_exact=1.210s tL=0.156s
+seed=1040 beam=12 exact=204.0 L=211.0 Z=272.0 P=215.0 gapL=3.43% gapZ=33.33% gapP=5.39% t_exact=1.210s tL=0.180s
+seed=1040 beam=15 exact=204.0 L=211.0 Z=271.0 P=215.0 gapL=3.43% gapZ=32.84% gapP=5.39% t_exact=1.210s tL=0.215s
+seed=1040 beam=20 exact=204.0 L=209.0 Z=270.0 P=213.0 gapL=2.45% gapZ=32.35% gapP=4.41% t_exact=1.210s tL=0.278s
+seed=1041 beam=1 exact=204.0 L=213.0 Z=280.0 P=219.0 gapL=4.41% gapZ=37.25% gapP=7.35% t_exact=1.249s tL=0.024s
+seed=1041 beam=2 exact=204.0 L=214.0 Z=277.0 P=218.0 gapL=4.90% gapZ=35.78% gapP=6.86% t_exact=1.249s tL=0.043s
+seed=1041 beam=3 exact=204.0 L=213.0 Z=274.0 P=217.0 gapL=4.41% gapZ=34.31% gapP=6.37% t_exact=1.249s tL=0.059s
+seed=1041 beam=4 exact=204.0 L=213.0 Z=274.0 P=216.0 gapL=4.41% gapZ=34.31% gapP=5.88% t_exact=1.249s tL=0.076s
+seed=1041 beam=5 exact=204.0 L=213.0 Z=273.0 P=216.0 gapL=4.41% gapZ=33.82% gapP=5.88% t_exact=1.249s tL=0.090s
+seed=1041 beam=6 exact=204.0 L=212.0 Z=273.0 P=216.0 gapL=3.92% gapZ=33.82% gapP=5.88% t_exact=1.249s tL=0.104s
+seed=1041 beam=8 exact=204.0 L=211.0 Z=272.0 P=215.0 gapL=3.43% gapZ=33.33% gapP=5.39% t_exact=1.249s tL=0.132s
+seed=1041 beam=10 exact=204.0 L=211.0 Z=272.0 P=215.0 gapL=3.43% gapZ=33.33% gapP=5.39% t_exact=1.249s tL=0.156s
+seed=1041 beam=12 exact=204.0 L=211.0 Z=272.0 P=215.0 gapL=3.43% gapZ=33.33% gapP=5.39% t_exact=1.249s tL=0.179s
+seed=1041 beam=15 exact=204.0 L=211.0 Z=271.0 P=215.0 gapL=3.43% gapZ=32.84% gapP=5.39% t_exact=1.249s tL=0.217s
+seed=1041 beam=20 exact=204.0 L=209.0 Z=270.0 P=213.0 gapL=2.45% gapZ=32.35% gapP=4.41% t_exact=1.249s tL=0.284s
+seed=1042 beam=1 exact=178.0 L=190.0 Z=254.0 P=197.0 gapL=6.74% gapZ=42.70% gapP=10.67% t_exact=1.032s tL=0.021s
+seed=1042 beam=2 exact=178.0 L=189.0 Z=253.0 P=196.0 gapL=6.18% gapZ=42.13% gapP=10.11% t_exact=1.032s tL=0.037s
+seed=1042 beam=3 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=1.032s tL=0.049s
+seed=1042 beam=4 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=1.032s tL=0.065s
+seed=1042 beam=5 exact=178.0 L=191.0 Z=251.0 P=195.0 gapL=7.30% gapZ=41.01% gapP=9.55% t_exact=1.032s tL=0.078s
+seed=1042 beam=6 exact=178.0 L=190.0 Z=251.0 P=194.0 gapL=6.74% gapZ=41.01% gapP=8.99% t_exact=1.032s tL=0.091s
+seed=1042 beam=8 exact=178.0 L=189.0 Z=250.0 P=193.0 gapL=6.18% gapZ=40.45% gapP=8.43% t_exact=1.032s tL=0.115s
+seed=1042 beam=10 exact=178.0 L=190.0 Z=250.0 P=193.0 gapL=6.74% gapZ=40.45% gapP=8.43% t_exact=1.032s tL=0.133s
+seed=1042 beam=12 exact=178.0 L=188.0 Z=248.0 P=192.0 gapL=5.62% gapZ=39.33% gapP=7.87% t_exact=1.032s tL=0.154s
+seed=1042 beam=15 exact=178.0 L=188.0 Z=247.0 P=192.0 gapL=5.62% gapZ=38.76% gapP=7.87% t_exact=1.032s tL=0.184s
+seed=1042 beam=20 exact=178.0 L=188.0 Z=246.0 P=191.0 gapL=5.62% gapZ=38.20% gapP=7.30% t_exact=1.032s tL=0.231s
+seed=1043 beam=1 exact=174.0 L=186.0 Z=250.0 P=193.0 gapL=6.90% gapZ=43.68% gapP=10.92% t_exact=0.785s tL=0.019s
+seed=1043 beam=2 exact=174.0 L=187.0 Z=249.0 P=192.0 gapL=7.47% gapZ=43.10% gapP=10.34% t_exact=0.785s tL=0.035s
+seed=1043 beam=3 exact=174.0 L=187.0 Z=248.0 P=192.0 gapL=7.47% gapZ=42.53% gapP=10.34% t_exact=0.785s tL=0.051s
+seed=1043 beam=4 exact=174.0 L=186.0 Z=248.0 P=190.0 gapL=6.90% gapZ=42.53% gapP=9.20% t_exact=0.785s tL=0.065s
+seed=1043 beam=5 exact=174.0 L=186.0 Z=247.0 P=190.0 gapL=6.90% gapZ=41.95% gapP=9.20% t_exact=0.785s tL=0.078s
+seed=1043 beam=6 exact=174.0 L=186.0 Z=245.0 P=190.0 gapL=6.90% gapZ=40.80% gapP=9.20% t_exact=0.785s tL=0.091s
+seed=1043 beam=8 exact=174.0 L=185.0 Z=244.0 P=189.0 gapL=6.32% gapZ=40.23% gapP=8.62% t_exact=0.785s tL=0.114s
+seed=1043 beam=10 exact=174.0 L=185.0 Z=244.0 P=189.0 gapL=6.32% gapZ=40.23% gapP=8.62% t_exact=0.785s tL=0.133s
+seed=1043 beam=12 exact=174.0 L=185.0 Z=242.0 P=188.0 gapL=6.32% gapZ=39.08% gapP=8.05% t_exact=0.785s tL=0.152s
+seed=1043 beam=15 exact=174.0 L=185.0 Z=241.0 P=188.0 gapL=6.32% gapZ=38.51% gapP=8.05% t_exact=0.785s tL=0.185s
+seed=1043 beam=20 exact=174.0 L=183.0 Z=238.0 P=187.0 gapL=5.17% gapZ=36.78% gapP=7.47% t_exact=0.785s tL=0.233s
+seed=1044 beam=1 exact=190.0 L=202.0 Z=263.0 P=205.0 gapL=6.32% gapZ=38.42% gapP=7.89% t_exact=1.102s tL=0.022s
+seed=1044 beam=2 exact=190.0 L=200.0 Z=263.0 P=204.0 gapL=5.26% gapZ=38.42% gapP=7.37% t_exact=1.102s tL=0.039s
+seed=1044 beam=3 exact=190.0 L=199.0 Z=263.0 P=204.0 gapL=4.74% gapZ=38.42% gapP=7.37% t_exact=1.102s tL=0.055s
+seed=1044 beam=4 exact=190.0 L=199.0 Z=263.0 P=203.0 gapL=4.74% gapZ=38.42% gapP=6.84% t_exact=1.102s tL=0.071s
+seed=1044 beam=5 exact=190.0 L=199.0 Z=263.0 P=203.0 gapL=4.74% gapZ=38.42% gapP=6.84% t_exact=1.102s tL=0.083s
+seed=1044 beam=6 exact=190.0 L=199.0 Z=262.0 P=203.0 gapL=4.74% gapZ=37.89% gapP=6.84% t_exact=1.102s tL=0.096s
+seed=1044 beam=8 exact=190.0 L=198.0 Z=262.0 P=202.0 gapL=4.21% gapZ=37.89% gapP=6.32% t_exact=1.102s tL=0.124s
+seed=1044 beam=10 exact=190.0 L=201.0 Z=262.0 P=202.0 gapL=5.79% gapZ=37.89% gapP=6.32% t_exact=1.102s tL=0.146s
+seed=1044 beam=12 exact=190.0 L=200.0 Z=261.0 P=202.0 gapL=5.26% gapZ=37.37% gapP=6.32% t_exact=1.102s tL=0.169s
+seed=1044 beam=15 exact=190.0 L=200.0 Z=261.0 P=201.0 gapL=5.26% gapZ=37.37% gapP=5.79% t_exact=1.102s tL=0.210s
+seed=1044 beam=20 exact=190.0 L=199.0 Z=260.0 P=201.0 gapL=4.74% gapZ=36.84% gapP=5.79% t_exact=1.102s tL=0.263s
+seed=1045 beam=1 exact=176.0 L=187.0 Z=252.0 P=195.0 gapL=6.25% gapZ=43.18% gapP=10.80% t_exact=1.248s tL=0.021s
+seed=1045 beam=2 exact=176.0 L=188.0 Z=251.0 P=194.0 gapL=6.82% gapZ=42.61% gapP=10.23% t_exact=1.248s tL=0.038s
+seed=1045 beam=3 exact=176.0 L=190.0 Z=250.0 P=194.0 gapL=7.95% gapZ=42.05% gapP=10.23% t_exact=1.248s tL=0.052s
+seed=1045 beam=4 exact=176.0 L=188.0 Z=250.0 P=192.0 gapL=6.82% gapZ=42.05% gapP=9.09% t_exact=1.248s tL=0.068s
+seed=1045 beam=5 exact=176.0 L=188.0 Z=249.0 P=192.0 gapL=6.82% gapZ=41.48% gapP=9.09% t_exact=1.248s tL=0.081s
+seed=1045 beam=6 exact=176.0 L=188.0 Z=249.0 P=192.0 gapL=6.82% gapZ=41.48% gapP=9.09% t_exact=1.248s tL=0.094s
+seed=1045 beam=8 exact=176.0 L=187.0 Z=248.0 P=191.0 gapL=6.25% gapZ=40.91% gapP=8.52% t_exact=1.248s tL=0.118s
+seed=1045 beam=10 exact=176.0 L=188.0 Z=246.0 P=191.0 gapL=6.82% gapZ=39.77% gapP=8.52% t_exact=1.248s tL=0.136s
+seed=1045 beam=12 exact=176.0 L=186.0 Z=246.0 P=190.0 gapL=5.68% gapZ=39.77% gapP=7.95% t_exact=1.248s tL=0.160s
+seed=1045 beam=15 exact=176.0 L=186.0 Z=243.0 P=190.0 gapL=5.68% gapZ=38.07% gapP=7.95% t_exact=1.248s tL=0.196s
+seed=1045 beam=20 exact=176.0 L=186.0 Z=242.0 P=190.0 gapL=5.68% gapZ=37.50% gapP=7.95% t_exact=1.248s tL=0.247s
+seed=1046 beam=1 exact=178.0 L=189.0 Z=254.0 P=197.0 gapL=6.18% gapZ=42.70% gapP=10.67% t_exact=0.994s tL=0.021s
+seed=1046 beam=2 exact=178.0 L=189.0 Z=253.0 P=196.0 gapL=6.18% gapZ=42.13% gapP=10.11% t_exact=0.994s tL=0.037s
+seed=1046 beam=3 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=0.994s tL=0.052s
+seed=1046 beam=4 exact=178.0 L=191.0 Z=252.0 P=195.0 gapL=7.30% gapZ=41.57% gapP=9.55% t_exact=0.994s tL=0.068s
+seed=1046 beam=5 exact=178.0 L=191.0 Z=251.0 P=195.0 gapL=7.30% gapZ=41.01% gapP=9.55% t_exact=0.994s tL=0.080s
+seed=1046 beam=6 exact=178.0 L=190.0 Z=251.0 P=194.0 gapL=6.74% gapZ=41.01% gapP=8.99% t_exact=0.994s tL=0.093s
+seed=1046 beam=8 exact=178.0 L=189.0 Z=250.0 P=193.0 gapL=6.18% gapZ=40.45% gapP=8.43% t_exact=0.994s tL=0.117s
+seed=1046 beam=10 exact=178.0 L=189.0 Z=250.0 P=193.0 gapL=6.18% gapZ=40.45% gapP=8.43% t_exact=0.994s tL=0.138s
+seed=1046 beam=12 exact=178.0 L=189.0 Z=248.0 P=192.0 gapL=6.18% gapZ=39.33% gapP=7.87% t_exact=0.994s tL=0.157s
+seed=1046 beam=15 exact=178.0 L=189.0 Z=247.0 P=192.0 gapL=6.18% gapZ=38.76% gapP=7.87% t_exact=0.994s tL=0.187s
+seed=1046 beam=20 exact=178.0 L=187.0 Z=246.0 P=191.0 gapL=5.06% gapZ=38.20% gapP=7.30% t_exact=0.994s tL=0.255s
+seed=1047 beam=1 exact=200.0 L=211.0 Z=272.0 P=216.0 gapL=5.50% gapZ=36.00% gapP=8.00% t_exact=1.205s tL=0.023s
+seed=1047 beam=2 exact=200.0 L=210.0 Z=271.0 P=214.0 gapL=5.00% gapZ=35.50% gapP=7.00% t_exact=1.205s tL=0.042s
+seed=1047 beam=3 exact=200.0 L=209.0 Z=270.0 P=214.0 gapL=4.50% gapZ=35.00% gapP=7.00% t_exact=1.205s tL=0.058s
+seed=1047 beam=4 exact=200.0 L=209.0 Z=270.0 P=212.0 gapL=4.50% gapZ=35.00% gapP=6.00% t_exact=1.205s tL=0.074s
+seed=1047 beam=5 exact=200.0 L=209.0 Z=269.0 P=212.0 gapL=4.50% gapZ=34.50% gapP=6.00% t_exact=1.205s tL=0.089s
+seed=1047 beam=6 exact=200.0 L=209.0 Z=269.0 P=212.0 gapL=4.50% gapZ=34.50% gapP=6.00% t_exact=1.205s tL=0.103s
+seed=1047 beam=8 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.205s tL=0.140s
+seed=1047 beam=10 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.205s tL=0.155s
+seed=1047 beam=12 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.205s tL=0.180s
+seed=1047 beam=15 exact=200.0 L=207.0 Z=268.0 P=211.0 gapL=3.50% gapZ=34.00% gapP=5.50% t_exact=1.205s tL=0.217s
+seed=1047 beam=20 exact=200.0 L=206.0 Z=268.0 P=209.0 gapL=3.00% gapZ=34.00% gapP=4.50% t_exact=1.205s tL=0.273s
+seed=1048 beam=1 exact=190.0 L=202.0 Z=263.0 P=205.0 gapL=6.32% gapZ=38.42% gapP=7.89% t_exact=0.815s tL=0.022s
+seed=1048 beam=2 exact=190.0 L=200.0 Z=263.0 P=204.0 gapL=5.26% gapZ=38.42% gapP=7.37% t_exact=0.815s tL=0.041s
+seed=1048 beam=3 exact=190.0 L=200.0 Z=263.0 P=204.0 gapL=5.26% gapZ=38.42% gapP=7.37% t_exact=0.815s tL=0.068s
+seed=1048 beam=4 exact=190.0 L=198.0 Z=263.0 P=202.0 gapL=4.21% gapZ=38.42% gapP=6.32% t_exact=0.815s tL=0.073s
+seed=1048 beam=5 exact=190.0 L=199.0 Z=263.0 P=202.0 gapL=4.74% gapZ=38.42% gapP=6.32% t_exact=0.815s tL=0.086s
+seed=1048 beam=6 exact=190.0 L=199.0 Z=262.0 P=203.0 gapL=4.74% gapZ=37.89% gapP=6.84% t_exact=0.815s tL=0.101s
+seed=1048 beam=8 exact=190.0 L=198.0 Z=262.0 P=202.0 gapL=4.21% gapZ=37.89% gapP=6.32% t_exact=0.815s tL=0.125s
+seed=1048 beam=10 exact=190.0 L=201.0 Z=262.0 P=202.0 gapL=5.79% gapZ=37.89% gapP=6.32% t_exact=0.815s tL=0.148s
+seed=1048 beam=12 exact=190.0 L=200.0 Z=261.0 P=202.0 gapL=5.26% gapZ=37.37% gapP=6.32% t_exact=0.815s tL=0.174s
+seed=1048 beam=15 exact=190.0 L=200.0 Z=261.0 P=202.0 gapL=5.26% gapZ=37.37% gapP=6.32% t_exact=0.815s tL=0.204s
+seed=1048 beam=20 exact=190.0 L=199.0 Z=260.0 P=201.0 gapL=4.74% gapZ=36.84% gapP=5.79% t_exact=0.815s tL=0.258s
+seed=1049 beam=1 exact=214.0 L=222.0 Z=294.0 P=226.0 gapL=3.74% gapZ=37.38% gapP=5.61% t_exact=0.787s tL=0.026s
+seed=1049 beam=2 exact=214.0 L=220.0 Z=293.0 P=226.0 gapL=2.80% gapZ=36.92% gapP=5.61% t_exact=0.787s tL=0.045s
+seed=1049 beam=3 exact=214.0 L=222.0 Z=292.0 P=225.0 gapL=3.74% gapZ=36.45% gapP=5.14% t_exact=0.787s tL=0.062s
+seed=1049 beam=4 exact=214.0 L=221.0 Z=292.0 P=225.0 gapL=3.27% gapZ=36.45% gapP=5.14% t_exact=0.787s tL=0.078s
+seed=1049 beam=5 exact=214.0 L=221.0 Z=289.0 P=225.0 gapL=3.27% gapZ=35.05% gapP=5.14% t_exact=0.787s tL=0.095s
+seed=1049 beam=6 exact=214.0 L=221.0 Z=289.0 P=225.0 gapL=3.27% gapZ=35.05% gapP=5.14% t_exact=0.787s tL=0.119s
+seed=1049 beam=8 exact=214.0 L=220.0 Z=288.0 P=224.0 gapL=2.80% gapZ=34.58% gapP=4.67% t_exact=0.787s tL=0.136s
+seed=1049 beam=10 exact=214.0 L=220.0 Z=286.0 P=223.0 gapL=2.80% gapZ=33.64% gapP=4.21% t_exact=0.787s tL=0.158s
+seed=1049 beam=12 exact=214.0 L=219.0 Z=285.0 P=224.0 gapL=2.34% gapZ=33.18% gapP=4.67% t_exact=0.787s tL=0.196s
+seed=1049 beam=15 exact=214.0 L=219.0 Z=283.0 P=223.0 gapL=2.34% gapZ=32.24% gapP=4.21% t_exact=0.787s tL=0.226s
+seed=1049 beam=20 exact=214.0 L=219.0 Z=282.0 P=223.0 gapL=2.34% gapZ=31.78% gapP=4.21% t_exact=0.787s tL=0.287s
+
+[pool] === SUMMARY ===
+beam=  1  n= 50  gapL=  5.58%/  5.73%  gapZ= 39.06%/ 37.86%  gapP=  8.26%/  8.00%  speedL=46.49x
+beam=  2  n= 50  gapL=  5.27%/  5.10%  gapZ= 38.37%/ 37.38%  gapP=  7.65%/  7.14%  speedL=26.32x
+beam=  3  n= 50  gapL=  5.28%/  4.95%  gapZ= 37.65%/ 36.70%  gapP=  7.38%/  6.93%  speedL=18.89x
+beam=  4  n= 50  gapL=  4.97%/  4.50%  gapZ= 37.61%/ 36.52%  gapP=  6.99%/  6.44%  speedL=14.73x
+beam=  5  n= 50  gapL=  4.95%/  4.52%  gapZ= 36.97%/ 35.99%  gapP=  6.94%/  6.40%  speedL=12.25x
+beam=  6  n= 50  gapL=  4.86%/  4.52%  gapZ= 36.90%/ 35.99%  gapP=  6.88%/  6.25%  speedL=10.61x
+beam=  8  n= 50  gapL=  4.46%/  4.02%  gapZ= 36.33%/ 35.72%  gapP=  6.50%/  5.97%  speedL=8.34x
+beam= 10  n= 50  gapL=  4.73%/  4.34%  gapZ= 36.26%/ 35.72%  gapP=  6.42%/  5.94%  speedL=7.15x
+beam= 12  n= 50  gapL=  4.40%/  4.34%  gapZ= 36.04%/ 35.72%  gapP=  6.11%/  5.61%  speedL=6.13x
+beam= 15  n= 50  gapL=  4.42%/  4.08%  gapZ= 35.55%/ 35.47%  gapP=  6.01%/  5.50%  speedL=5.10x
+beam= 20  n= 50  gapL=  3.87%/  3.58%  gapZ= 35.02%/ 35.47%  gapP=  5.62%/  5.10%  speedL=4.02x
+
+[pool] Overall: gapL=4.80%  gapZ=36.89%  gapP=6.80%
+[pool] Train time: 878.0s (amortized over 50 eval instances)
+[pool] CSV: PaST/ADP/logs/eval_pooled_mixed_long_on_large.csv

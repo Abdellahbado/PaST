@@ -1,0 +1,1 @@
+{"include_per_class_counts": 0, "include_per_class_now_cost": 0, "include_bins": 1, "normalize": 1, "model_type": "lgbm", "booster_path": "ADP/models/deploy_epsilon_profiles_all_sizes/vhat_small_generate_data_lgbm.npz.lgbm"}
