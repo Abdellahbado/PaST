@@ -813,13 +813,31 @@ def main() -> None:
             expected_per_inst = int(args.samples_per_instance)
             expected_total = int(len(train_seeds)) * expected_per_inst
 
-            # Probe one seed to get feature dimension.
+            # Probe a single seed with a tiny sample count to determine feature dimension.
+            # Important: do NOT probe with full samples_per_instance (can take hours for big instances).
+            print(f"[pool] memmap: dir={tmp_dir}")
+            print("[pool] memmap: probing feature dimension (1 sample)...")
             probe_seed = int(train_seeds[0])
-            probe_X, probe_y, probe_attempts = worker_fn(probe_seed)
+            probe_fn = partial(
+                _collect_worker,
+                D=int(args.D),
+                N=int(args.N),
+                pmax=int(args.pmax),
+                D_range=train_D_range,
+                N_range=train_N_range,
+                samples_per_instance=1,
+                spec=spec,
+                normalize_labels=use_normalize_labels,
+                daily_prices_20=daily_prices_20,
+                target_util=float(args.target_util),
+                x_dtype=str(args.pool_dtype),
+            )
+            probe_X, _probe_y, _probe_attempts = probe_fn(probe_seed)
             if probe_X.size == 0:
                 raise RuntimeError(
-                    "Probe seed produced no samples; cannot determine feature dimension"
+                    "Probe produced no samples; cannot determine feature dimension"
                 )
+            print(f"[pool] memmap: probe feature_dim={int(probe_X.shape[1])}")
 
             feat_dim = int(probe_X.shape[1])
             x_dtype = np.dtype(str(args.pool_dtype))
@@ -834,23 +852,16 @@ def main() -> None:
             )
 
             cursor = 0
-            total_attempts = int(probe_attempts)
-            n0 = int(probe_X.shape[0])
-            X_mm[cursor : cursor + n0, :] = probe_X
-            y_mm[cursor : cursor + n0] = probe_y
-            cursor += n0
-            print(
-                f"[pool] collected 1/{len(train_seeds)} instances ({n0} samples) [probe]"
-            )
+            total_attempts = 0
 
-            remaining_seeds = train_seeds[1:]
+            remaining_seeds = train_seeds
             if n_workers > 1 and len(remaining_seeds) > 0:
                 print(
                     f"[pool] Collecting remaining data with {n_workers} parallel workers (memmap)..."
                 )
                 with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
                     for i, (X_i, y_i, attempts_i) in enumerate(
-                        pool.imap_unordered(worker_fn, remaining_seeds), start=2
+                        pool.imap_unordered(worker_fn, remaining_seeds), start=1
                     ):
                         if X_i.size == 0:
                             total_attempts += int(attempts_i)
@@ -873,7 +884,7 @@ def main() -> None:
                         )
             else:
                 print("[pool] Collecting remaining data sequentially (memmap)...")
-                for i, seed in enumerate(remaining_seeds, start=2):
+                for i, seed in enumerate(remaining_seeds, start=1):
                     t_inst = time.perf_counter()
                     X_i, y_i, attempts_i = worker_fn(int(seed))
                     inst_time = time.perf_counter() - t_inst
@@ -894,7 +905,7 @@ def main() -> None:
 
             X_pool = X_mm[:cursor]
             y_pool = y_mm[:cursor]
-            print(f"[pool] memmap dir: {tmp_dir}")
+            print(f"[pool] memmap: finished collection; dir={tmp_dir}")
         else:
             if n_workers > 1 and len(train_seeds) > 1:
                 print(f"[pool] Collecting data with {n_workers} parallel workers...")
