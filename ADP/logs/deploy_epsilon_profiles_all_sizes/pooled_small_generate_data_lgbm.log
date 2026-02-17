@@ -1,0 +1,420 @@
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+[pool] === TRAINING PHASE ===
+[pool] Model type: lgbm
+[pool] Instance params: D=3 (range=(2, 4)), N=40 (range=(20, 60)), pmax=12
+[pool] Train seeds: 0-99 (100 instances)
+[pool] Samples per instance: 4000
+[pool] Features: spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True)
+[pool] normalize_labels=True
+[pool] Workers: 128
+[pool] Collecting data with 128 parallel workers...
+[pool] collected 1/100 instances (4000 samples)
+[pool] collected 2/100 instances (4000 samples)
+[pool] collected 3/100 instances (4000 samples)
+[pool] collected 4/100 instances (4000 samples)
+[pool] collected 5/100 instances (4000 samples)
+[pool] collected 6/100 instances (4000 samples)
+[pool] collected 7/100 instances (4000 samples)
+[pool] collected 8/100 instances (4000 samples)
+[pool] collected 9/100 instances (4000 samples)
+[pool] collected 10/100 instances (4000 samples)
+[pool] collected 11/100 instances (4000 samples)
+[pool] collected 12/100 instances (4000 samples)
+[pool] collected 13/100 instances (4000 samples)
+[pool] collected 14/100 instances (4000 samples)
+[pool] collected 15/100 instances (4000 samples)
+[pool] collected 16/100 instances (4000 samples)
+[pool] collected 17/100 instances (4000 samples)
+[pool] collected 18/100 instances (4000 samples)
+[pool] collected 19/100 instances (4000 samples)
+[pool] collected 20/100 instances (4000 samples)
+[pool] collected 21/100 instances (4000 samples)
+[pool] collected 22/100 instances (4000 samples)
+[pool] collected 23/100 instances (4000 samples)
+[pool] collected 24/100 instances (4000 samples)
+[pool] collected 25/100 instances (4000 samples)
+[pool] collected 26/100 instances (4000 samples)
+[pool] collected 27/100 instances (4000 samples)
+[pool] collected 28/100 instances (4000 samples)
+[pool] collected 29/100 instances (4000 samples)
+[pool] collected 30/100 instances (4000 samples)
+[pool] collected 31/100 instances (4000 samples)
+[pool] collected 32/100 instances (4000 samples)
+[pool] collected 33/100 instances (4000 samples)
+[pool] collected 34/100 instances (4000 samples)
+[pool] collected 35/100 instances (4000 samples)
+[pool] collected 36/100 instances (4000 samples)
+[pool] collected 37/100 instances (4000 samples)
+[pool] collected 38/100 instances (4000 samples)
+[pool] collected 39/100 instances (4000 samples)
+[pool] collected 40/100 instances (4000 samples)
+[pool] collected 41/100 instances (4000 samples)
+[pool] collected 42/100 instances (4000 samples)
+[pool] collected 43/100 instances (4000 samples)
+[pool] collected 44/100 instances (4000 samples)
+[pool] collected 45/100 instances (4000 samples)
+[pool] collected 46/100 instances (4000 samples)
+[pool] collected 47/100 instances (4000 samples)
+[pool] collected 48/100 instances (4000 samples)
+[pool] collected 49/100 instances (4000 samples)
+[pool] collected 50/100 instances (4000 samples)
+[pool] collected 51/100 instances (4000 samples)
+[pool] collected 52/100 instances (4000 samples)
+[pool] collected 53/100 instances (4000 samples)
+[pool] collected 54/100 instances (4000 samples)
+[pool] collected 55/100 instances (4000 samples)
+[pool] collected 56/100 instances (4000 samples)
+[pool] collected 57/100 instances (4000 samples)
+[pool] collected 58/100 instances (4000 samples)
+[pool] collected 59/100 instances (4000 samples)
+[pool] collected 60/100 instances (4000 samples)
+[pool] collected 61/100 instances (4000 samples)
+[pool] collected 62/100 instances (4000 samples)
+[pool] collected 63/100 instances (4000 samples)
+[pool] collected 64/100 instances (4000 samples)
+[pool] collected 65/100 instances (4000 samples)
+[pool] collected 66/100 instances (4000 samples)
+[pool] collected 67/100 instances (4000 samples)
+[pool] collected 68/100 instances (4000 samples)
+[pool] collected 69/100 instances (4000 samples)
+[pool] collected 70/100 instances (4000 samples)
+[pool] collected 71/100 instances (4000 samples)
+[pool] collected 72/100 instances (4000 samples)
+[pool] collected 73/100 instances (4000 samples)
+[pool] collected 74/100 instances (4000 samples)
+[pool] collected 75/100 instances (4000 samples)
+[pool] collected 76/100 instances (4000 samples)
+[pool] collected 77/100 instances (4000 samples)
+[pool] collected 78/100 instances (4000 samples)
+[pool] collected 79/100 instances (4000 samples)
+[pool] collected 80/100 instances (4000 samples)
+[pool] collected 81/100 instances (4000 samples)
+[pool] collected 82/100 instances (4000 samples)
+[pool] collected 83/100 instances (4000 samples)
+[pool] collected 84/100 instances (4000 samples)
+[pool] collected 85/100 instances (4000 samples)
+[pool] collected 86/100 instances (4000 samples)
+[pool] collected 87/100 instances (4000 samples)
+[pool] collected 88/100 instances (4000 samples)
+[pool] collected 89/100 instances (4000 samples)
+[pool] collected 90/100 instances (4000 samples)
+[pool] collected 91/100 instances (4000 samples)
+[pool] collected 92/100 instances (4000 samples)
+[pool] collected 93/100 instances (4000 samples)
+[pool] collected 94/100 instances (4000 samples)
+[pool] collected 95/100 instances (4000 samples)
+[pool] collected 96/100 instances (4000 samples)
+[pool] collected 97/100 instances (4000 samples)
+[pool] collected 98/100 instances (4000 samples)
+[pool] collected 99/100 instances (4000 samples)
+[pool] collected 100/100 instances (4000 samples)
+[pool] Data collection: 400000 samples in 49.9s
+Training until validation scores don't improve for 20 rounds
+[10]	valid_0's l2: 0.0268578
+[20]	valid_0's l2: 0.00991468
+[30]	valid_0's l2: 0.00377491
+[40]	valid_0's l2: 0.00152714
+[50]	valid_0's l2: 0.00069343
+[60]	valid_0's l2: 0.000374028
+[70]	valid_0's l2: 0.000243823
+[80]	valid_0's l2: 0.000186405
+[90]	valid_0's l2: 0.000155556
+[100]	valid_0's l2: 0.000136394
+[110]	valid_0's l2: 0.000122836
+[120]	valid_0's l2: 0.000110957
+[130]	valid_0's l2: 0.000102289
+[140]	valid_0's l2: 9.60401e-05
+[150]	valid_0's l2: 9.09823e-05
+[160]	valid_0's l2: 8.73647e-05
+[170]	valid_0's l2: 8.38961e-05
+[180]	valid_0's l2: 8.04496e-05
+[190]	valid_0's l2: 7.77328e-05
+[200]	valid_0's l2: 7.49696e-05
+[210]	valid_0's l2: 7.23283e-05
+[220]	valid_0's l2: 6.98106e-05
+[230]	valid_0's l2: 6.76605e-05
+[240]	valid_0's l2: 6.57162e-05
+[250]	valid_0's l2: 6.39195e-05
+[260]	valid_0's l2: 6.23482e-05
+[270]	valid_0's l2: 6.0681e-05
+[280]	valid_0's l2: 5.93202e-05
+[290]	valid_0's l2: 5.80987e-05
+[300]	valid_0's l2: 5.67902e-05
+[310]	valid_0's l2: 5.55506e-05
+[320]	valid_0's l2: 5.46794e-05
+[330]	valid_0's l2: 5.36884e-05
+[340]	valid_0's l2: 5.27067e-05
+[350]	valid_0's l2: 5.17337e-05
+[360]	valid_0's l2: 5.0865e-05
+[370]	valid_0's l2: 4.99389e-05
+[380]	valid_0's l2: 4.91964e-05
+[390]	valid_0's l2: 4.83627e-05
+[400]	valid_0's l2: 4.77725e-05
+[410]	valid_0's l2: 4.71135e-05
+[420]	valid_0's l2: 4.64739e-05
+[430]	valid_0's l2: 4.58709e-05
+[440]	valid_0's l2: 4.53134e-05
+[450]	valid_0's l2: 4.48035e-05
+[460]	valid_0's l2: 4.43053e-05
+[470]	valid_0's l2: 4.38124e-05
+[480]	valid_0's l2: 4.33208e-05
+[490]	valid_0's l2: 4.28866e-05
+[500]	valid_0's l2: 4.23832e-05
+[510]	valid_0's l2: 4.1976e-05
+[520]	valid_0's l2: 4.15308e-05
+[530]	valid_0's l2: 4.10824e-05
+[540]	valid_0's l2: 4.07082e-05
+[550]	valid_0's l2: 4.0266e-05
+[560]	valid_0's l2: 3.99266e-05
+[570]	valid_0's l2: 3.95025e-05
+[580]	valid_0's l2: 3.91847e-05
+[590]	valid_0's l2: 3.88631e-05
+[600]	valid_0's l2: 3.85619e-05
+[610]	valid_0's l2: 3.82484e-05
+[620]	valid_0's l2: 3.79613e-05
+[630]	valid_0's l2: 3.76204e-05
+[640]	valid_0's l2: 3.73035e-05
+[650]	valid_0's l2: 3.70062e-05
+[660]	valid_0's l2: 3.67392e-05
+[670]	valid_0's l2: 3.65126e-05
+[680]	valid_0's l2: 3.6292e-05
+[690]	valid_0's l2: 3.60275e-05
+[700]	valid_0's l2: 3.58083e-05
+[710]	valid_0's l2: 3.55188e-05
+[720]	valid_0's l2: 3.52325e-05
+[730]	valid_0's l2: 3.5028e-05
+[740]	valid_0's l2: 3.4767e-05
+[750]	valid_0's l2: 3.45148e-05
+[760]	valid_0's l2: 3.43087e-05
+[770]	valid_0's l2: 3.41027e-05
+[780]	valid_0's l2: 3.38624e-05
+[790]	valid_0's l2: 3.3665e-05
+[800]	valid_0's l2: 3.34918e-05
+[810]	valid_0's l2: 3.33055e-05
+[820]	valid_0's l2: 3.31384e-05
+[830]	valid_0's l2: 3.29182e-05
+[840]	valid_0's l2: 3.27428e-05
+[850]	valid_0's l2: 3.2556e-05
+[860]	valid_0's l2: 3.23748e-05
+[870]	valid_0's l2: 3.22058e-05
+[880]	valid_0's l2: 3.20353e-05
+[890]	valid_0's l2: 3.18849e-05
+[900]	valid_0's l2: 3.17053e-05
+[910]	valid_0's l2: 3.15641e-05
+[920]	valid_0's l2: 3.14035e-05
+[930]	valid_0's l2: 3.12557e-05
+[940]	valid_0's l2: 3.11189e-05
+[950]	valid_0's l2: 3.0993e-05
+[960]	valid_0's l2: 3.08841e-05
+[970]	valid_0's l2: 3.0762e-05
+[980]	valid_0's l2: 3.06613e-05
+[990]	valid_0's l2: 3.05381e-05
+[1000]	valid_0's l2: 3.04283e-05
+[1010]	valid_0's l2: 3.03326e-05
+[1020]	valid_0's l2: 3.02451e-05
+[1030]	valid_0's l2: 3.01504e-05
+[1040]	valid_0's l2: 3.0044e-05
+[1050]	valid_0's l2: 2.99336e-05
+[1060]	valid_0's l2: 2.98421e-05
+[1070]	valid_0's l2: 2.97232e-05
+[1080]	valid_0's l2: 2.96316e-05
+[1090]	valid_0's l2: 2.95341e-05
+[1100]	valid_0's l2: 2.94674e-05
+[1110]	valid_0's l2: 2.938e-05
+[1120]	valid_0's l2: 2.93045e-05
+[1130]	valid_0's l2: 2.92187e-05
+[1140]	valid_0's l2: 2.91454e-05
+[1150]	valid_0's l2: 2.90816e-05
+[1160]	valid_0's l2: 2.89952e-05
+[1170]	valid_0's l2: 2.88942e-05
+[1180]	valid_0's l2: 2.87971e-05
+[1190]	valid_0's l2: 2.87273e-05
+[1200]	valid_0's l2: 2.86461e-05
+[1210]	valid_0's l2: 2.85635e-05
+[1220]	valid_0's l2: 2.8487e-05
+[1230]	valid_0's l2: 2.84218e-05
+[1240]	valid_0's l2: 2.83516e-05
+[1250]	valid_0's l2: 2.82774e-05
+[1260]	valid_0's l2: 2.82052e-05
+[1270]	valid_0's l2: 2.81451e-05
+[1280]	valid_0's l2: 2.80876e-05
+[1290]	valid_0's l2: 2.79927e-05
+[1300]	valid_0's l2: 2.79336e-05
+[1310]	valid_0's l2: 2.78756e-05
+[1320]	valid_0's l2: 2.78033e-05
+[1330]	valid_0's l2: 2.77368e-05
+[1340]	valid_0's l2: 2.76715e-05
+[1350]	valid_0's l2: 2.76116e-05
+[1360]	valid_0's l2: 2.75492e-05
+[1370]	valid_0's l2: 2.74915e-05
+[1380]	valid_0's l2: 2.74338e-05
+[1390]	valid_0's l2: 2.73735e-05
+[1400]	valid_0's l2: 2.73238e-05
+[1410]	valid_0's l2: 2.72597e-05
+[1420]	valid_0's l2: 2.7202e-05
+[1430]	valid_0's l2: 2.71535e-05
+[1440]	valid_0's l2: 2.71033e-05
+[1450]	valid_0's l2: 2.70482e-05
+[1460]	valid_0's l2: 2.69947e-05
+[1470]	valid_0's l2: 2.6928e-05
+[1480]	valid_0's l2: 2.68669e-05
+[1490]	valid_0's l2: 2.68114e-05
+[1500]	valid_0's l2: 2.67537e-05
+[1510]	valid_0's l2: 2.6706e-05
+[1520]	valid_0's l2: 2.66508e-05
+[1530]	valid_0's l2: 2.66168e-05
+[1540]	valid_0's l2: 2.65704e-05
+[1550]	valid_0's l2: 2.65229e-05
+[1560]	valid_0's l2: 2.64788e-05
+[1570]	valid_0's l2: 2.64298e-05
+[1580]	valid_0's l2: 2.63835e-05
+[1590]	valid_0's l2: 2.63349e-05
+[1600]	valid_0's l2: 2.62923e-05
+[1610]	valid_0's l2: 2.62396e-05
+[1620]	valid_0's l2: 2.61994e-05
+[1630]	valid_0's l2: 2.61655e-05
+[1640]	valid_0's l2: 2.61327e-05
+[1650]	valid_0's l2: 2.61009e-05
+[1660]	valid_0's l2: 2.6066e-05
+[1670]	valid_0's l2: 2.60387e-05
+[1680]	valid_0's l2: 2.59932e-05
+[1690]	valid_0's l2: 2.5958e-05
+[1700]	valid_0's l2: 2.59286e-05
+[1710]	valid_0's l2: 2.58884e-05
+[1720]	valid_0's l2: 2.58532e-05
+[1730]	valid_0's l2: 2.58028e-05
+[1740]	valid_0's l2: 2.57714e-05
+[1750]	valid_0's l2: 2.57328e-05
+[1760]	valid_0's l2: 2.56972e-05
+[1770]	valid_0's l2: 2.56614e-05
+[1780]	valid_0's l2: 2.56329e-05
+[1790]	valid_0's l2: 2.55885e-05
+[1800]	valid_0's l2: 2.554e-05
+[1810]	valid_0's l2: 2.55053e-05
+[1820]	valid_0's l2: 2.54759e-05
+[1830]	valid_0's l2: 2.54503e-05
+[1840]	valid_0's l2: 2.54203e-05
+[1850]	valid_0's l2: 2.5387e-05
+[1860]	valid_0's l2: 2.53398e-05
+[1870]	valid_0's l2: 2.53083e-05
+[1880]	valid_0's l2: 2.52669e-05
+[1890]	valid_0's l2: 2.52163e-05
+[1900]	valid_0's l2: 2.51836e-05
+[1910]	valid_0's l2: 2.51541e-05
+[1920]	valid_0's l2: 2.51236e-05
+[1930]	valid_0's l2: 2.5097e-05
+[1940]	valid_0's l2: 2.50707e-05
+[1950]	valid_0's l2: 2.50478e-05
+[1960]	valid_0's l2: 2.50161e-05
+[1970]	valid_0's l2: 2.49888e-05
+[1980]	valid_0's l2: 2.49592e-05
+[1990]	valid_0's l2: 2.4929e-05
+[2000]	valid_0's l2: 2.48916e-05
+Did not meet early stopping. Best iteration is:
+[2000]	valid_0's l2: 2.48916e-05
+
+[pool] === TRAINING RESULTS ===
+[pool] Model: lgbm
+[pool] Pooled samples: 400000 (from 100 instances)
+[pool] feat_dim=18
+[pool] R2_train=0.9997  R2_test=0.9997
+[pool] MAE_train=0.0025  MAE_test=0.0026
+[pool] Data collection: 49.9s  Model fitting: 6043.0s
+[pool] Total training time: 6092.9s
+[pool] Model saved to ADP/models/deploy_epsilon_profiles_all_sizes/vhat_small_generate_data_lgbm.npz (type=lgbm)
+
+[pool] === EVALUATION PHASE ===
+[pool] Eval params: D=3 (range=(2, 4)), N=40 (range=(20, 60)), pmax=12
+[pool] Eval seeds: 300-339 (40 instances)
+[pool] Beams: [2, 5]
+[pool] Comparing variants: Exact DP vs Guided(Learned-Vhat) vs Guided(Zero-Vhat) vs Guided(Price-Vhat)
+[pool] Vhat model: type=lgbm, spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True), normalize_labels=True
+[pool] Legend per-row: exact=Exact DP cost, L=Learned-Vhat, Z=Zero-Vhat, P=Price-Vhat
+seed=300 beam=2 exact=162.0 L=162.0 Z=177.0 P=167.0 gapL=0.00% gapZ=9.26% gapP=3.09% t_exact=0.004s tL=0.048s
+seed=300 beam=5 exact=162.0 L=162.0 Z=165.0 P=165.0 gapL=0.00% gapZ=1.85% gapP=1.85% t_exact=0.004s tL=0.101s
+seed=301 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.004s tL=0.086s
+seed=301 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.004s tL=0.121s
+seed=302 beam=2 exact=324.0 L=324.0 Z=357.0 P=333.0 gapL=0.00% gapZ=10.19% gapP=2.78% t_exact=0.021s tL=0.158s
+seed=302 beam=5 exact=324.0 L=324.0 Z=349.0 P=333.0 gapL=0.00% gapZ=7.72% gapP=2.78% t_exact=0.021s tL=0.414s
+seed=303 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.026s tL=0.171s
+seed=303 beam=5 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.026s tL=0.446s
+seed=304 beam=2 exact=324.0 L=324.0 Z=357.0 P=333.0 gapL=0.00% gapZ=10.19% gapP=2.78% t_exact=0.034s tL=0.216s
+seed=304 beam=5 exact=324.0 L=324.0 Z=349.0 P=333.0 gapL=0.00% gapZ=7.72% gapP=2.78% t_exact=0.034s tL=0.639s
+seed=305 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.004s tL=0.018s
+seed=305 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.004s tL=0.084s
+seed=306 beam=2 exact=324.0 L=324.0 Z=357.0 P=333.0 gapL=0.00% gapZ=10.19% gapP=2.78% t_exact=0.037s tL=0.267s
+seed=306 beam=5 exact=324.0 L=324.0 Z=349.0 P=333.0 gapL=0.00% gapZ=7.72% gapP=2.78% t_exact=0.037s tL=0.805s
+seed=307 beam=2 exact=324.0 L=324.0 Z=357.0 P=333.0 gapL=0.00% gapZ=10.19% gapP=2.78% t_exact=0.037s tL=0.223s
+seed=307 beam=5 exact=324.0 L=324.0 Z=349.0 P=333.0 gapL=0.00% gapZ=7.72% gapP=2.78% t_exact=0.037s tL=0.495s
+seed=308 beam=2 exact=243.0 L=243.0 Z=259.0 P=248.0 gapL=0.00% gapZ=6.58% gapP=2.06% t_exact=0.009s tL=0.081s
+seed=308 beam=5 exact=243.0 L=243.0 Z=253.0 P=248.0 gapL=0.00% gapZ=4.12% gapP=2.06% t_exact=0.009s tL=0.217s
+seed=309 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.023s tL=0.186s
+seed=309 beam=5 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.023s tL=0.431s
+seed=310 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.005s tL=0.080s
+seed=310 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.005s tL=0.181s
+seed=311 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.013s tL=0.192s
+seed=311 beam=5 exact=243.0 L=243.0 Z=259.0 P=248.0 gapL=0.00% gapZ=6.58% gapP=2.06% t_exact=0.013s tL=0.414s
+seed=312 beam=2 exact=162.0 L=162.0 Z=178.0 P=166.0 gapL=0.00% gapZ=9.88% gapP=2.47% t_exact=0.003s tL=0.063s
+seed=312 beam=5 exact=162.0 L=162.0 Z=165.0 P=164.0 gapL=0.00% gapZ=1.85% gapP=1.23% t_exact=0.003s tL=0.032s
+seed=313 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.004s tL=0.079s
+seed=313 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.004s tL=0.100s
+seed=314 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.005s tL=0.078s
+seed=314 beam=5 exact=243.0 L=243.0 Z=253.0 P=247.0 gapL=0.00% gapZ=4.12% gapP=1.65% t_exact=0.005s tL=0.185s
+seed=315 beam=2 exact=243.0 L=243.0 Z=259.0 P=248.0 gapL=0.00% gapZ=6.58% gapP=2.06% t_exact=0.008s tL=0.099s
+seed=315 beam=5 exact=243.0 L=243.0 Z=253.0 P=247.0 gapL=0.00% gapZ=4.12% gapP=1.65% t_exact=0.008s tL=0.201s
+seed=316 beam=2 exact=162.0 L=162.0 Z=171.0 P=166.0 gapL=0.00% gapZ=5.56% gapP=2.47% t_exact=0.002s tL=0.014s
+seed=316 beam=5 exact=162.0 L=162.0 Z=162.0 P=162.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=317 beam=2 exact=162.0 L=162.0 Z=171.0 P=166.0 gapL=0.00% gapZ=5.56% gapP=2.47% t_exact=0.002s tL=0.060s
+seed=317 beam=5 exact=162.0 L=162.0 Z=162.0 P=162.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=318 beam=2 exact=162.0 L=162.0 Z=171.0 P=166.0 gapL=0.00% gapZ=5.56% gapP=2.47% t_exact=0.002s tL=0.014s
+seed=318 beam=5 exact=162.0 L=162.0 Z=162.0 P=162.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=319 beam=2 exact=324.0 L=324.0 Z=357.0 P=332.0 gapL=0.00% gapZ=10.19% gapP=2.47% t_exact=0.037s tL=0.346s
+seed=319 beam=5 exact=324.0 L=324.0 Z=349.0 P=332.0 gapL=0.00% gapZ=7.72% gapP=2.47% t_exact=0.037s tL=0.614s
+seed=320 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.003s tL=0.073s
+seed=320 beam=5 exact=162.0 L=162.0 Z=166.0 P=166.0 gapL=0.00% gapZ=2.47% gapP=2.47% t_exact=0.003s tL=0.091s
+seed=321 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.008s tL=0.089s
+seed=321 beam=5 exact=243.0 L=243.0 Z=253.0 P=249.0 gapL=0.00% gapZ=4.12% gapP=2.47% t_exact=0.008s tL=0.208s
+seed=322 beam=2 exact=162.0 L=162.0 Z=178.0 P=166.0 gapL=0.00% gapZ=9.88% gapP=2.47% t_exact=0.003s tL=0.071s
+seed=322 beam=5 exact=162.0 L=162.0 Z=165.0 P=165.0 gapL=0.00% gapZ=1.85% gapP=1.85% t_exact=0.003s tL=0.097s
+seed=323 beam=2 exact=324.0 L=324.0 Z=357.0 P=333.0 gapL=0.00% gapZ=10.19% gapP=2.78% t_exact=0.053s tL=0.284s
+seed=323 beam=5 exact=324.0 L=324.0 Z=349.0 P=333.0 gapL=0.00% gapZ=7.72% gapP=2.78% t_exact=0.053s tL=0.785s
+seed=324 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.020s tL=0.164s
+seed=324 beam=5 exact=243.0 L=243.0 Z=253.0 P=248.0 gapL=0.00% gapZ=4.12% gapP=2.06% t_exact=0.020s tL=0.385s
+seed=325 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.004s tL=0.080s
+seed=325 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.004s tL=0.195s
+seed=326 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.006s tL=0.096s
+seed=326 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.006s tL=0.214s
+seed=327 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.007s tL=0.153s
+seed=327 beam=5 exact=243.0 L=243.0 Z=253.0 P=249.0 gapL=0.00% gapZ=4.12% gapP=2.47% t_exact=0.007s tL=0.217s
+seed=328 beam=2 exact=162.0 L=162.0 Z=171.0 P=166.0 gapL=0.00% gapZ=5.56% gapP=2.47% t_exact=0.002s tL=0.015s
+seed=328 beam=5 exact=162.0 L=162.0 Z=162.0 P=162.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=329 beam=2 exact=324.0 L=324.0 Z=357.0 P=333.0 gapL=0.00% gapZ=10.19% gapP=2.78% t_exact=0.039s tL=0.315s
+seed=329 beam=5 exact=324.0 L=324.0 Z=349.0 P=333.0 gapL=0.00% gapZ=7.72% gapP=2.78% t_exact=0.039s tL=0.701s
+seed=330 beam=2 exact=243.0 L=243.0 Z=259.0 P=247.0 gapL=0.00% gapZ=6.58% gapP=1.65% t_exact=0.003s tL=0.023s
+seed=330 beam=5 exact=243.0 L=243.0 Z=246.0 P=244.0 gapL=0.00% gapZ=1.23% gapP=0.41% t_exact=0.003s tL=0.057s
+seed=331 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.006s tL=0.090s
+seed=331 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.006s tL=0.202s
+seed=332 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.017s tL=0.186s
+seed=332 beam=5 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.017s tL=0.492s
+seed=333 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.003s tL=0.016s
+seed=333 beam=5 exact=162.0 L=162.0 Z=164.0 P=164.0 gapL=0.00% gapZ=1.23% gapP=1.23% t_exact=0.003s tL=0.072s
+seed=334 beam=2 exact=243.0 L=243.0 Z=259.0 P=248.0 gapL=0.00% gapZ=6.58% gapP=2.06% t_exact=0.012s tL=0.170s
+seed=334 beam=5 exact=243.0 L=243.0 Z=253.0 P=248.0 gapL=0.00% gapZ=4.12% gapP=2.06% t_exact=0.012s tL=0.313s
+seed=335 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.004s tL=0.076s
+seed=335 beam=5 exact=162.0 L=162.0 Z=167.0 P=165.0 gapL=0.00% gapZ=3.09% gapP=1.85% t_exact=0.004s tL=0.112s
+seed=336 beam=2 exact=243.0 L=243.0 Z=259.0 P=249.0 gapL=0.00% gapZ=6.58% gapP=2.47% t_exact=0.005s tL=0.090s
+seed=336 beam=5 exact=243.0 L=243.0 Z=247.0 P=246.0 gapL=0.00% gapZ=1.65% gapP=1.23% t_exact=0.005s tL=0.108s
+seed=337 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.005s tL=0.097s
+seed=337 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.005s tL=0.192s
+seed=338 beam=2 exact=243.0 L=243.0 Z=259.0 P=247.0 gapL=0.00% gapZ=6.58% gapP=1.65% t_exact=0.008s tL=0.098s
+seed=338 beam=5 exact=243.0 L=243.0 Z=253.0 P=247.0 gapL=0.00% gapZ=4.12% gapP=1.65% t_exact=0.008s tL=0.255s
+seed=339 beam=2 exact=162.0 L=162.0 Z=178.0 P=167.0 gapL=0.00% gapZ=9.88% gapP=3.09% t_exact=0.005s tL=0.035s
+seed=339 beam=5 exact=162.0 L=162.0 Z=167.0 P=166.0 gapL=0.00% gapZ=3.09% gapP=2.47% t_exact=0.005s tL=0.177s
+
+[pool] === SUMMARY ===
+beam=  2  n= 40  gapL=  0.00%/  0.00%  gapZ=  8.33%/  9.88%  gapP=  2.64%/  2.47%  speedL=0.10x
+beam=  5  n= 40  gapL=  0.00%/  0.00%  gapZ=  3.91%/  3.09%  gapP=  1.98%/  2.47%  speedL=0.31x
+
+[pool] Overall: gapL=0.00%  gapZ=6.12%  gapP=2.31%
+[pool] Train time: 6092.9s (amortized over 40 eval instances)
+[pool] CSV: ADP/logs/deploy_epsilon_profiles_all_sizes/pooled_small_generate_data_lgbm.csv

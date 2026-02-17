@@ -1,0 +1,450 @@
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+[pool] === TRAINING PHASE ===
+[pool] Model type: mlp
+[pool] Instance params: D=3 (range=(2, 4)), N=40 (range=(20, 60)), pmax=12
+[pool] Train seeds: 0-99 (100 instances)
+[pool] Samples per instance: 4000
+[pool] Features: spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True)
+[pool] normalize_labels=True
+[pool] Workers: 128
+[pool] Collecting data with 128 parallel workers...
+[pool] collected 1/100 instances (4000 samples)
+[pool] collected 2/100 instances (4000 samples)
+[pool] collected 3/100 instances (4000 samples)
+[pool] collected 4/100 instances (4000 samples)
+[pool] collected 5/100 instances (4000 samples)
+[pool] collected 6/100 instances (4000 samples)
+[pool] collected 7/100 instances (4000 samples)
+[pool] collected 8/100 instances (4000 samples)
+[pool] collected 9/100 instances (4000 samples)
+[pool] collected 10/100 instances (4000 samples)
+[pool] collected 11/100 instances (4000 samples)
+[pool] collected 12/100 instances (4000 samples)
+[pool] collected 13/100 instances (4000 samples)
+[pool] collected 14/100 instances (4000 samples)
+[pool] collected 15/100 instances (4000 samples)
+[pool] collected 16/100 instances (4000 samples)
+[pool] collected 17/100 instances (4000 samples)
+[pool] collected 18/100 instances (4000 samples)
+[pool] collected 19/100 instances (4000 samples)
+[pool] collected 20/100 instances (4000 samples)
+[pool] collected 21/100 instances (4000 samples)
+[pool] collected 22/100 instances (4000 samples)
+[pool] collected 23/100 instances (4000 samples)
+[pool] collected 24/100 instances (4000 samples)
+[pool] collected 25/100 instances (4000 samples)
+[pool] collected 26/100 instances (4000 samples)
+[pool] collected 27/100 instances (4000 samples)
+[pool] collected 28/100 instances (4000 samples)
+[pool] collected 29/100 instances (4000 samples)
+[pool] collected 30/100 instances (4000 samples)
+[pool] collected 31/100 instances (4000 samples)
+[pool] collected 32/100 instances (4000 samples)
+[pool] collected 33/100 instances (4000 samples)
+[pool] collected 34/100 instances (4000 samples)
+[pool] collected 35/100 instances (4000 samples)
+[pool] collected 36/100 instances (4000 samples)
+[pool] collected 37/100 instances (4000 samples)
+[pool] collected 38/100 instances (4000 samples)
+[pool] collected 39/100 instances (4000 samples)
+[pool] collected 40/100 instances (4000 samples)
+[pool] collected 41/100 instances (4000 samples)
+[pool] collected 42/100 instances (4000 samples)
+[pool] collected 43/100 instances (4000 samples)
+[pool] collected 44/100 instances (4000 samples)
+[pool] collected 45/100 instances (4000 samples)
+[pool] collected 46/100 instances (4000 samples)
+[pool] collected 47/100 instances (4000 samples)
+[pool] collected 48/100 instances (4000 samples)
+[pool] collected 49/100 instances (4000 samples)
+[pool] collected 50/100 instances (4000 samples)
+[pool] collected 51/100 instances (4000 samples)
+[pool] collected 52/100 instances (4000 samples)
+[pool] collected 53/100 instances (4000 samples)
+[pool] collected 54/100 instances (4000 samples)
+[pool] collected 55/100 instances (4000 samples)
+[pool] collected 56/100 instances (4000 samples)
+[pool] collected 57/100 instances (4000 samples)
+[pool] collected 58/100 instances (4000 samples)
+[pool] collected 59/100 instances (4000 samples)
+[pool] collected 60/100 instances (4000 samples)
+[pool] collected 61/100 instances (4000 samples)
+[pool] collected 62/100 instances (4000 samples)
+[pool] collected 63/100 instances (4000 samples)
+[pool] collected 64/100 instances (4000 samples)
+[pool] collected 65/100 instances (4000 samples)
+[pool] collected 66/100 instances (4000 samples)
+[pool] collected 67/100 instances (4000 samples)
+[pool] collected 68/100 instances (4000 samples)
+[pool] collected 69/100 instances (4000 samples)
+[pool] collected 70/100 instances (4000 samples)
+[pool] collected 71/100 instances (4000 samples)
+[pool] collected 72/100 instances (4000 samples)
+[pool] collected 73/100 instances (4000 samples)
+[pool] collected 74/100 instances (4000 samples)
+[pool] collected 75/100 instances (4000 samples)
+[pool] collected 76/100 instances (4000 samples)
+[pool] collected 77/100 instances (4000 samples)
+[pool] collected 78/100 instances (4000 samples)
+[pool] collected 79/100 instances (4000 samples)
+[pool] collected 80/100 instances (4000 samples)
+[pool] collected 81/100 instances (4000 samples)
+[pool] collected 82/100 instances (4000 samples)
+[pool] collected 83/100 instances (4000 samples)
+[pool] collected 84/100 instances (4000 samples)
+[pool] collected 85/100 instances (4000 samples)
+[pool] collected 86/100 instances (4000 samples)
+[pool] collected 87/100 instances (4000 samples)
+[pool] collected 88/100 instances (4000 samples)
+[pool] collected 89/100 instances (4000 samples)
+[pool] collected 90/100 instances (4000 samples)
+[pool] collected 91/100 instances (4000 samples)
+[pool] collected 92/100 instances (4000 samples)
+[pool] collected 93/100 instances (4000 samples)
+[pool] collected 94/100 instances (4000 samples)
+[pool] collected 95/100 instances (4000 samples)
+[pool] collected 96/100 instances (4000 samples)
+[pool] collected 97/100 instances (4000 samples)
+[pool] collected 98/100 instances (4000 samples)
+[pool] collected 99/100 instances (4000 samples)
+[pool] collected 100/100 instances (4000 samples)
+[pool] Data collection: 400000 samples in 49.3s
+  [mlp] Training on device=cuda
+  [mlp] epoch=  1  train_loss=0.055977  val_loss=0.003717  best=0.003717  lr=1.0e-03
+  [mlp] epoch=  2  train_loss=0.002287  val_loss=0.001551  best=0.001551  lr=1.0e-03
+  [mlp] epoch=  3  train_loss=0.001261  val_loss=0.001102  best=0.001102  lr=1.0e-03
+  [mlp] epoch=  4  train_loss=0.000966  val_loss=0.000900  best=0.000900  lr=1.0e-03
+  [mlp] epoch=  5  train_loss=0.000807  val_loss=0.000771  best=0.000771  lr=1.0e-03
+  [mlp] epoch=  6  train_loss=0.000695  val_loss=0.000671  best=0.000671  lr=1.0e-03
+  [mlp] epoch=  7  train_loss=0.000607  val_loss=0.000591  best=0.000591  lr=1.0e-03
+  [mlp] epoch=  8  train_loss=0.000536  val_loss=0.000529  best=0.000529  lr=1.0e-03
+  [mlp] epoch=  9  train_loss=0.000484  val_loss=0.000483  best=0.000483  lr=1.0e-03
+  [mlp] epoch= 10  train_loss=0.000443  val_loss=0.000444  best=0.000444  lr=1.0e-03
+  [mlp] epoch= 11  train_loss=0.000408  val_loss=0.000411  best=0.000411  lr=1.0e-03
+  [mlp] epoch= 12  train_loss=0.000378  val_loss=0.000382  best=0.000382  lr=1.0e-03
+  [mlp] epoch= 13  train_loss=0.000350  val_loss=0.000354  best=0.000354  lr=1.0e-03
+  [mlp] epoch= 14  train_loss=0.000324  val_loss=0.000328  best=0.000328  lr=1.0e-03
+  [mlp] epoch= 15  train_loss=0.000301  val_loss=0.000305  best=0.000305  lr=1.0e-03
+  [mlp] epoch= 16  train_loss=0.000280  val_loss=0.000286  best=0.000286  lr=1.0e-03
+  [mlp] epoch= 17  train_loss=0.000263  val_loss=0.000270  best=0.000270  lr=1.0e-03
+  [mlp] epoch= 18  train_loss=0.000248  val_loss=0.000254  best=0.000254  lr=1.0e-03
+  [mlp] epoch= 19  train_loss=0.000233  val_loss=0.000240  best=0.000240  lr=1.0e-03
+  [mlp] epoch= 20  train_loss=0.000220  val_loss=0.000227  best=0.000227  lr=1.0e-03
+  [mlp] epoch= 21  train_loss=0.000208  val_loss=0.000214  best=0.000214  lr=1.0e-03
+  [mlp] epoch= 22  train_loss=0.000196  val_loss=0.000202  best=0.000202  lr=1.0e-03
+  [mlp] epoch= 23  train_loss=0.000185  val_loss=0.000190  best=0.000190  lr=1.0e-03
+  [mlp] epoch= 24  train_loss=0.000174  val_loss=0.000180  best=0.000180  lr=1.0e-03
+  [mlp] epoch= 25  train_loss=0.000165  val_loss=0.000170  best=0.000170  lr=1.0e-03
+  [mlp] epoch= 26  train_loss=0.000156  val_loss=0.000161  best=0.000161  lr=1.0e-03
+  [mlp] epoch= 27  train_loss=0.000147  val_loss=0.000152  best=0.000152  lr=1.0e-03
+  [mlp] epoch= 28  train_loss=0.000139  val_loss=0.000144  best=0.000144  lr=1.0e-03
+  [mlp] epoch= 29  train_loss=0.000132  val_loss=0.000136  best=0.000136  lr=1.0e-03
+  [mlp] epoch= 30  train_loss=0.000125  val_loss=0.000130  best=0.000130  lr=1.0e-03
+  [mlp] epoch= 31  train_loss=0.000118  val_loss=0.000121  best=0.000121  lr=1.0e-03
+  [mlp] epoch= 32  train_loss=0.000110  val_loss=0.000113  best=0.000113  lr=1.0e-03
+  [mlp] epoch= 33  train_loss=0.000104  val_loss=0.000106  best=0.000106  lr=1.0e-03
+  [mlp] epoch= 34  train_loss=0.000098  val_loss=0.000099  best=0.000099  lr=1.0e-03
+  [mlp] epoch= 35  train_loss=0.000091  val_loss=0.000093  best=0.000093  lr=1.0e-03
+  [mlp] epoch= 36  train_loss=0.000087  val_loss=0.000089  best=0.000089  lr=1.0e-03
+  [mlp] epoch= 37  train_loss=0.000082  val_loss=0.000086  best=0.000086  lr=1.0e-03
+  [mlp] epoch= 38  train_loss=0.000078  val_loss=0.000079  best=0.000079  lr=1.0e-03
+  [mlp] epoch= 39  train_loss=0.000073  val_loss=0.000076  best=0.000076  lr=1.0e-03
+  [mlp] epoch= 40  train_loss=0.000070  val_loss=0.000072  best=0.000072  lr=1.0e-03
+  [mlp] epoch= 41  train_loss=0.000067  val_loss=0.000069  best=0.000069  lr=1.0e-03
+  [mlp] epoch= 42  train_loss=0.000064  val_loss=0.000066  best=0.000066  lr=1.0e-03
+  [mlp] epoch= 43  train_loss=0.000061  val_loss=0.000062  best=0.000062  lr=1.0e-03
+  [mlp] epoch= 44  train_loss=0.000058  val_loss=0.000061  best=0.000061  lr=1.0e-03
+  [mlp] epoch= 45  train_loss=0.000056  val_loss=0.000058  best=0.000058  lr=1.0e-03
+  [mlp] epoch= 46  train_loss=0.000053  val_loss=0.000057  best=0.000057  lr=1.0e-03
+  [mlp] epoch= 47  train_loss=0.000052  val_loss=0.000053  best=0.000053  lr=1.0e-03
+  [mlp] epoch= 48  train_loss=0.000050  val_loss=0.000051  best=0.000051  lr=1.0e-03
+  [mlp] epoch= 49  train_loss=0.000047  val_loss=0.000049  best=0.000049  lr=1.0e-03
+  [mlp] epoch= 50  train_loss=0.000045  val_loss=0.000048  best=0.000048  lr=1.0e-03
+  [mlp] epoch= 52  train_loss=0.000043  val_loss=0.000044  best=0.000044  lr=1.0e-03
+  [mlp] epoch= 53  train_loss=0.000041  val_loss=0.000043  best=0.000043  lr=1.0e-03
+  [mlp] epoch= 55  train_loss=0.000039  val_loss=0.000042  best=0.000042  lr=1.0e-03
+  [mlp] epoch= 56  train_loss=0.000037  val_loss=0.000039  best=0.000039  lr=1.0e-03
+  [mlp] epoch= 57  train_loss=0.000036  val_loss=0.000038  best=0.000038  lr=1.0e-03
+  [mlp] epoch= 58  train_loss=0.000035  val_loss=0.000036  best=0.000036  lr=1.0e-03
+  [mlp] epoch= 59  train_loss=0.000033  val_loss=0.000036  best=0.000036  lr=1.0e-03
+  [mlp] epoch= 60  train_loss=0.000034  val_loss=0.000034  best=0.000034  lr=1.0e-03
+  [mlp] epoch= 62  train_loss=0.000031  val_loss=0.000033  best=0.000033  lr=1.0e-03
+  [mlp] epoch= 63  train_loss=0.000030  val_loss=0.000032  best=0.000032  lr=1.0e-03
+  [mlp] epoch= 64  train_loss=0.000030  val_loss=0.000030  best=0.000030  lr=1.0e-03
+  [mlp] epoch= 66  train_loss=0.000029  val_loss=0.000030  best=0.000030  lr=1.0e-03
+  [mlp] epoch= 67  train_loss=0.000028  val_loss=0.000029  best=0.000029  lr=1.0e-03
+  [mlp] epoch= 70  train_loss=0.000026  val_loss=0.000028  best=0.000028  lr=1.0e-03
+  [mlp] epoch= 71  train_loss=0.000026  val_loss=0.000026  best=0.000026  lr=1.0e-03
+  [mlp] epoch= 72  train_loss=0.000025  val_loss=0.000026  best=0.000026  lr=1.0e-03
+  [mlp] epoch= 74  train_loss=0.000025  val_loss=0.000025  best=0.000025  lr=1.0e-03
+  [mlp] epoch= 78  train_loss=0.000023  val_loss=0.000023  best=0.000023  lr=1.0e-03
+  [mlp] epoch= 79  train_loss=0.000022  val_loss=0.000022  best=0.000022  lr=1.0e-03
+  [mlp] epoch= 80  train_loss=0.000023  val_loss=0.000024  best=0.000022  lr=1.0e-03
+  [mlp] epoch= 83  train_loss=0.000021  val_loss=0.000021  best=0.000021  lr=1.0e-03
+  [mlp] epoch= 85  train_loss=0.000021  val_loss=0.000021  best=0.000021  lr=1.0e-03
+  [mlp] epoch= 88  train_loss=0.000020  val_loss=0.000020  best=0.000020  lr=1.0e-03
+  [mlp] epoch= 89  train_loss=0.000020  val_loss=0.000020  best=0.000020  lr=1.0e-03
+  [mlp] epoch= 91  train_loss=0.000020  val_loss=0.000020  best=0.000020  lr=1.0e-03
+  [mlp] epoch= 92  train_loss=0.000019  val_loss=0.000019  best=0.000019  lr=1.0e-03
+  [mlp] epoch= 93  train_loss=0.000019  val_loss=0.000019  best=0.000019  lr=1.0e-03
+  [mlp] epoch= 95  train_loss=0.000020  val_loss=0.000019  best=0.000019  lr=1.0e-03
+  [mlp] epoch= 96  train_loss=0.000018  val_loss=0.000018  best=0.000018  lr=1.0e-03
+  [mlp] epoch= 98  train_loss=0.000018  val_loss=0.000018  best=0.000018  lr=1.0e-03
+  [mlp] epoch=100  train_loss=0.000018  val_loss=0.000018  best=0.000018  lr=1.0e-03
+  [mlp] epoch=104  train_loss=0.000018  val_loss=0.000017  best=0.000017  lr=1.0e-03
+  [mlp] epoch=108  train_loss=0.000016  val_loss=0.000017  best=0.000017  lr=1.0e-03
+  [mlp] epoch=109  train_loss=0.000017  val_loss=0.000017  best=0.000017  lr=1.0e-03
+  [mlp] epoch=111  train_loss=0.000017  val_loss=0.000017  best=0.000017  lr=1.0e-03
+  [mlp] epoch=112  train_loss=0.000016  val_loss=0.000016  best=0.000016  lr=1.0e-03
+  [mlp] epoch=116  train_loss=0.000016  val_loss=0.000016  best=0.000016  lr=1.0e-03
+  [mlp] epoch=118  train_loss=0.000016  val_loss=0.000015  best=0.000015  lr=1.0e-03
+  [mlp] epoch=120  train_loss=0.000015  val_loss=0.000016  best=0.000015  lr=1.0e-03
+  [mlp] epoch=124  train_loss=0.000015  val_loss=0.000015  best=0.000015  lr=1.0e-03
+  [mlp] epoch=125  train_loss=0.000015  val_loss=0.000015  best=0.000015  lr=1.0e-03
+  [mlp] epoch=129  train_loss=0.000015  val_loss=0.000014  best=0.000014  lr=1.0e-03
+  [mlp] epoch=131  train_loss=0.000014  val_loss=0.000014  best=0.000014  lr=1.0e-03
+  [mlp] epoch=137  train_loss=0.000014  val_loss=0.000014  best=0.000014  lr=1.0e-03
+  [mlp] epoch=140  train_loss=0.000014  val_loss=0.000019  best=0.000014  lr=1.0e-03
+  [mlp] epoch=142  train_loss=0.000014  val_loss=0.000014  best=0.000014  lr=1.0e-03
+  [mlp] epoch=147  train_loss=0.000014  val_loss=0.000013  best=0.000013  lr=1.0e-03
+  [mlp] epoch=150  train_loss=0.000014  val_loss=0.000013  best=0.000013  lr=1.0e-03
+  [mlp] epoch=156  train_loss=0.000013  val_loss=0.000012  best=0.000012  lr=1.0e-03
+  [mlp] epoch=160  train_loss=0.000013  val_loss=0.000014  best=0.000012  lr=1.0e-03
+  [mlp] epoch=163  train_loss=0.000012  val_loss=0.000012  best=0.000012  lr=5.0e-04
+  [mlp] epoch=164  train_loss=0.000011  val_loss=0.000012  best=0.000012  lr=5.0e-04
+  [mlp] epoch=168  train_loss=0.000011  val_loss=0.000012  best=0.000012  lr=5.0e-04
+  [mlp] epoch=175  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=2.5e-04
+  [mlp] epoch=176  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=2.5e-04
+  [mlp] epoch=178  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=2.5e-04
+  [mlp] epoch=179  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=2.5e-04
+  [mlp] epoch=180  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=2.5e-04
+  [mlp] epoch=183  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=2.5e-04
+  [mlp] epoch=190  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=1.3e-04
+  [mlp] epoch=194  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=1.3e-04
+  [mlp] epoch=195  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=1.3e-04
+  [mlp] epoch=200  train_loss=0.000011  val_loss=0.000011  best=0.000011  lr=1.3e-04
+  [mlp] epoch=202  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=6.3e-05
+  [mlp] epoch=205  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=6.3e-05
+  [mlp] epoch=209  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=6.3e-05
+  [mlp] epoch=215  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=6.3e-05
+  [mlp] epoch=220  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=6.3e-05
+  [mlp] epoch=221  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=6.3e-05
+  [mlp] epoch=228  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=3.1e-05
+  [mlp] epoch=230  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=3.1e-05
+  [mlp] epoch=231  train_loss=0.000010  val_loss=0.000011  best=0.000011  lr=3.1e-05
+  [mlp] epoch=238  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.6e-05
+  [mlp] epoch=239  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.6e-05
+  [mlp] epoch=240  train_loss=0.000010  val_loss=0.000011  best=0.000010  lr=1.6e-05
+  [mlp] epoch=242  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.6e-05
+  [mlp] epoch=243  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.6e-05
+  [mlp] epoch=250  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=7.8e-06
+  [mlp] epoch=251  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=7.8e-06
+  [mlp] epoch=252  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=7.8e-06
+  [mlp] epoch=259  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=3.9e-06
+  [mlp] epoch=260  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=3.9e-06
+  [mlp] epoch=262  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=3.9e-06
+  [mlp] epoch=263  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=3.9e-06
+  [mlp] epoch=270  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=2.0e-06
+  [mlp] epoch=275  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=2.0e-06
+  [mlp] epoch=280  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=2.0e-06
+  [mlp] epoch=282  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=284  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=293  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=297  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=298  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=300  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=304  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=307  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=308  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=315  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=318  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=320  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=326  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=328  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=330  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=331  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=333  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=336  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=337  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=340  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=341  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=348  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=351  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=352  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=354  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=360  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=364  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=367  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=370  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=375  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=380  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=381  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=386  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=391  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=398  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=399  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=400  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=404  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=413  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=414  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=415  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=418  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=420  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=424  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=431  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=432  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=435  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=437  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=440  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=447  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=448  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=449  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=452  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=456  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=460  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=463  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=466  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=467  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=474  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=476  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=480  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=481  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=486  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=489  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=492  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=493  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=498  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=500  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=506  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=507  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=514  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=516  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=518  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=520  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=523  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=524  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=534  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=539  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=540  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=542  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=549  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=551  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=557  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=560  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=561  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=566  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=572  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=578  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=580  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=584  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=586  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=592  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=595  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=596  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+  [mlp] epoch=600  train_loss=0.000010  val_loss=0.000010  best=0.000010  lr=1.0e-06
+
+[pool] === TRAINING RESULTS ===
+[pool] Model: mlp
+[pool] Pooled samples: 400000 (from 100 instances)
+[pool] feat_dim=18
+[pool] R2_train=0.9998  R2_test=0.9998
+[pool] MAE_train=0.0014  MAE_test=0.0014
+[pool] Data collection: 49.3s  Model fitting: 161.7s
+[pool] Total training time: 211.0s
+[pool] Model saved to ADP/models/deploy_epsilon_profiles_all_sizes/vhat_small_daily_tou_mlp.npz (type=mlp)
+
+[pool] === EVALUATION PHASE ===
+[pool] Eval params: D=3 (range=(2, 4)), N=40 (range=(20, 60)), pmax=12
+[pool] Eval seeds: 300-339 (40 instances)
+[pool] Beams: [2, 5]
+[pool] Comparing variants: Exact DP vs Guided(Learned-Vhat) vs Guided(Zero-Vhat) vs Guided(Price-Vhat)
+[pool] Vhat model: type=mlp, spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True), normalize_labels=True
+[pool] Legend per-row: exact=Exact DP cost, L=Learned-Vhat, Z=Zero-Vhat, P=Price-Vhat
+seed=300 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.044s tL=0.008s
+seed=300 beam=5 exact=56.0 L=56.0 Z=67.0 P=56.0 gapL=0.00% gapZ=19.64% gapP=0.00% t_exact=0.044s tL=0.018s
+seed=301 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.005s tL=0.006s
+seed=301 beam=5 exact=56.0 L=56.0 Z=70.0 P=56.0 gapL=0.00% gapZ=25.00% gapP=0.00% t_exact=0.005s tL=0.012s
+seed=302 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.020s tL=0.016s
+seed=302 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.020s tL=0.034s
+seed=303 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.025s tL=0.015s
+seed=303 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.025s tL=0.031s
+seed=304 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.033s tL=0.018s
+seed=304 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.033s tL=0.036s
+seed=305 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.004s tL=0.005s
+seed=305 beam=5 exact=56.0 L=56.0 Z=70.0 P=56.0 gapL=0.00% gapZ=25.00% gapP=0.00% t_exact=0.004s tL=0.009s
+seed=306 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.036s tL=0.022s
+seed=306 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.036s tL=0.043s
+seed=307 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.035s tL=0.017s
+seed=307 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.035s tL=0.037s
+seed=308 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.009s tL=0.012s
+seed=308 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.009s tL=0.024s
+seed=309 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.022s tL=0.016s
+seed=309 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.022s tL=0.031s
+seed=310 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.005s tL=0.006s
+seed=310 beam=5 exact=56.0 L=56.0 Z=72.0 P=56.0 gapL=0.00% gapZ=28.57% gapP=0.00% t_exact=0.005s tL=0.011s
+seed=311 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.012s tL=0.013s
+seed=311 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.012s tL=0.026s
+seed=312 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.003s tL=0.005s
+seed=312 beam=5 exact=56.0 L=56.0 Z=64.0 P=56.0 gapL=0.00% gapZ=14.29% gapP=0.00% t_exact=0.003s tL=0.005s
+seed=313 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.004s tL=0.006s
+seed=313 beam=5 exact=56.0 L=56.0 Z=70.0 P=56.0 gapL=0.00% gapZ=25.00% gapP=0.00% t_exact=0.004s tL=0.012s
+seed=314 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.005s tL=0.009s
+seed=314 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.005s tL=0.012s
+seed=315 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.008s tL=0.011s
+seed=315 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.008s tL=0.019s
+seed=316 beam=2 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.002s tL=0.002s
+seed=316 beam=5 exact=56.0 L=56.0 Z=56.0 P=56.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=317 beam=2 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.002s tL=0.002s
+seed=317 beam=5 exact=56.0 L=56.0 Z=56.0 P=56.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=318 beam=2 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.002s tL=0.002s
+seed=318 beam=5 exact=56.0 L=56.0 Z=56.0 P=56.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=319 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.035s tL=0.021s
+seed=319 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.035s tL=0.044s
+seed=320 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.003s tL=0.005s
+seed=320 beam=5 exact=56.0 L=56.0 Z=69.0 P=56.0 gapL=0.00% gapZ=23.21% gapP=0.00% t_exact=0.003s tL=0.007s
+seed=321 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.008s tL=0.010s
+seed=321 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.008s tL=0.021s
+seed=322 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.003s tL=0.004s
+seed=322 beam=5 exact=56.0 L=56.0 Z=66.0 P=56.0 gapL=0.00% gapZ=17.86% gapP=0.00% t_exact=0.003s tL=0.006s
+seed=323 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.050s tL=0.021s
+seed=323 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.050s tL=0.049s
+seed=324 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.014s tL=0.014s
+seed=324 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.014s tL=0.035s
+seed=325 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.004s tL=0.006s
+seed=325 beam=5 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.004s tL=0.012s
+seed=326 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.006s tL=0.007s
+seed=326 beam=5 exact=56.0 L=56.0 Z=73.0 P=56.0 gapL=0.00% gapZ=30.36% gapP=0.00% t_exact=0.006s tL=0.013s
+seed=327 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.007s tL=0.009s
+seed=327 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.007s tL=0.020s
+seed=328 beam=2 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.002s tL=0.002s
+seed=328 beam=5 exact=56.0 L=56.0 Z=56.0 P=56.0 gapL=0.00% gapZ=0.00% gapP=0.00% t_exact=0.002s tL=0.001s
+seed=329 beam=2 exact=112.0 L=112.0 Z=139.0 P=112.0 gapL=0.00% gapZ=24.11% gapP=0.00% t_exact=0.038s tL=0.020s
+seed=329 beam=5 exact=112.0 L=112.0 Z=137.0 P=112.0 gapL=0.00% gapZ=22.32% gapP=0.00% t_exact=0.038s tL=0.044s
+seed=330 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.003s tL=0.004s
+seed=330 beam=5 exact=84.0 L=84.0 Z=96.0 P=84.0 gapL=0.00% gapZ=14.29% gapP=0.00% t_exact=0.003s tL=0.002s
+seed=331 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.005s tL=0.006s
+seed=331 beam=5 exact=56.0 L=56.0 Z=72.0 P=56.0 gapL=0.00% gapZ=28.57% gapP=0.00% t_exact=0.005s tL=0.012s
+seed=332 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.017s tL=0.014s
+seed=332 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.017s tL=0.026s
+seed=333 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.003s tL=0.005s
+seed=333 beam=5 exact=56.0 L=56.0 Z=66.0 P=56.0 gapL=0.00% gapZ=17.86% gapP=0.00% t_exact=0.003s tL=0.005s
+seed=334 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.011s tL=0.012s
+seed=334 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.011s tL=0.023s
+seed=335 beam=2 exact=56.0 L=56.0 Z=74.0 P=56.0 gapL=0.00% gapZ=32.14% gapP=0.00% t_exact=0.003s tL=0.005s
+seed=335 beam=5 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.003s tL=0.009s
+seed=336 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.004s tL=0.007s
+seed=336 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.004s tL=0.008s
+seed=337 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.005s tL=0.006s
+seed=337 beam=5 exact=56.0 L=56.0 Z=71.0 P=56.0 gapL=0.00% gapZ=26.79% gapP=0.00% t_exact=0.005s tL=0.012s
+seed=338 beam=2 exact=84.0 L=84.0 Z=109.0 P=84.0 gapL=0.00% gapZ=29.76% gapP=0.00% t_exact=0.008s tL=0.012s
+seed=338 beam=5 exact=84.0 L=84.0 Z=103.0 P=84.0 gapL=0.00% gapZ=22.62% gapP=0.00% t_exact=0.008s tL=0.027s
+seed=339 beam=2 exact=56.0 L=56.0 Z=75.0 P=56.0 gapL=0.00% gapZ=33.93% gapP=0.00% t_exact=0.005s tL=0.006s
+seed=339 beam=5 exact=56.0 L=56.0 Z=70.0 P=56.0 gapL=0.00% gapZ=25.00% gapP=0.00% t_exact=0.005s tL=0.011s
+
+[pool] === SUMMARY ===
+beam=  2  n= 40  gapL=  0.00%/  0.00%  gapZ= 29.99%/ 29.76%  gapP=  0.00%/  0.00%  speedL=1.10x
+beam=  5  n= 40  gapL=  0.00%/  0.00%  gapZ= 20.63%/ 22.62%  gapP=  0.00%/  0.00%  speedL=0.86x
+
+[pool] Overall: gapL=0.00%  gapZ=25.31%  gapP=0.00%
+[pool] Train time: 211.0s (amortized over 40 eval instances)
+[pool] CSV: ADP/logs/deploy_epsilon_profiles_all_sizes/pooled_small_daily_tou_mlp.csv

@@ -1,0 +1,52 @@
+[SingleMachinePeriodEnv v1.1-SM] Loading single-machine period-aware environment...
+[epsilon] === RUN CONFIG ===
+[epsilon] out_csv=ADP/logs/deploy_epsilon_profiles_all_sizes/epsilon_small_generate_data_mlp.csv
+[epsilon] category=small replicates=10 seed=123
+[epsilon] N=40 N_range=(20, 60)  M=5  D=3 D_range=(2, 4)
+[epsilon] pmax=12 target_util=0.8
+[epsilon] price_mode=daily_tou low=1.0 high=8.0 freeze=False freeze_scope=daily price_seed=None
+[epsilon] assign_alpha=1.2 assign_uniform_mix=0.15
+[epsilon] guided=True skip_exact=False beam=80 prune_factor=2.0
+[epsilon] load_model=ADP/models/deploy_epsilon_profiles_all_sizes/vhat_small_generate_data_mlp.npz normalize_labels=True spec=FeatureSpec(include_per_class_counts=False, include_per_class_now_cost=False, include_bins=True, normalize=True)
+inst_seed=37472 eps=60 min_eps=60 loads=[39;60;45] u=[2;1;3] exact(E=1394.00,mk=60,t=0.04s) guided(E=1394.00,mk=60,t=0.13s)
+inst_seed=48833 eps=60 min_eps=56 loads=[28;7;41;56;13;24] u=[1;3;2;1;3;2] exact(E=1306.00,mk=60,t=0.04s) guided(E=1306.00,mk=60,t=0.15s)
+inst_seed=48833 eps=59 min_eps=56 loads=[28;7;41;56;13;24] u=[1;3;2;1;3;2] exact(E=1307.00,mk=59,t=0.04s) guided(E=1307.00,mk=59,t=0.12s)
+inst_seed=48833 eps=58 min_eps=56 loads=[28;7;41;56;13;24] u=[1;3;2;1;3;2] exact(E=1308.00,mk=58,t=0.04s) guided(E=1308.00,mk=58,t=0.06s)
+inst_seed=48833 eps=57 min_eps=56 loads=[28;7;41;56;13;24] u=[1;3;2;1;3;2] exact(E=1317.00,mk=57,t=0.04s) guided(E=1317.00,mk=57,t=0.03s)
+inst_seed=48833 eps=56 min_eps=56 loads=[28;7;41;56;13;24] u=[1;3;2;1;3;2] exact(E=1322.00,mk=56,t=0.04s) guided(E=1322.00,mk=56,t=0.02s)
+inst_seed=52076 eps=40 min_eps=37 loads=[18;36;37;37] u=[3;3;3;3] exact(E=1968.00,mk=40,t=0.03s) guided(E=1968.00,mk=40,t=0.03s)
+inst_seed=52076 eps=39 min_eps=37 loads=[18;36;37;37] u=[3;3;3;3] exact(E=1977.00,mk=39,t=0.02s) guided(E=1977.00,mk=39,t=0.02s)
+inst_seed=52076 eps=38 min_eps=37 loads=[18;36;37;37] u=[3;3;3;3] exact(E=1986.00,mk=38,t=0.02s) guided(E=1986.00,mk=38,t=0.02s)
+inst_seed=52076 eps=37 min_eps=37 loads=[18;36;37;37] u=[3;3;3;3] exact(E=2019.00,mk=37,t=0.02s) guided(E=2019.00,mk=37,t=0.01s)
+inst_seed=78886 eps=80 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3362.00,mk=80,t=0.10s) guided(E=3362.00,mk=80,t=0.47s)
+inst_seed=78886 eps=79 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3367.00,mk=79,t=0.10s) guided(E=3367.00,mk=79,t=0.48s)
+inst_seed=78886 eps=78 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3372.00,mk=78,t=0.09s) guided(E=3372.00,mk=78,t=0.43s)
+inst_seed=78886 eps=77 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3383.00,mk=77,t=0.09s) guided(E=3383.00,mk=77,t=0.40s)
+inst_seed=78886 eps=76 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3402.00,mk=76,t=0.09s) guided(E=3402.00,mk=76,t=0.34s)
+inst_seed=78886 eps=75 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3421.00,mk=75,t=0.10s) guided(E=3421.00,mk=75,t=0.27s)
+inst_seed=78886 eps=74 min_eps=74 loads=[73;38;48;39;74;65] u=[1;3;2;3;2;2] exact(E=3458.00,mk=74,t=0.09s) guided(E=3458.00,mk=74,t=0.17s)
+inst_seed=80773 eps=60 min_eps=60 loads=[45;44;40;43;56;60] u=[3;3;3;3;2;3] exact(E=4148.00,mk=60,t=0.05s) guided(E=4148.00,mk=60,t=0.09s)
+inst_seed=97723 eps=80 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1582.00,mk=80,t=0.09s) guided(E=1582.00,mk=80,t=0.37s)
+inst_seed=97723 eps=79 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1583.00,mk=79,t=0.08s) guided(E=1583.00,mk=79,t=0.36s)
+inst_seed=97723 eps=78 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1584.00,mk=78,t=0.07s) guided(E=1584.00,mk=78,t=0.34s)
+inst_seed=97723 eps=77 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1587.00,mk=77,t=0.07s) guided(E=1587.00,mk=77,t=0.32s)
+inst_seed=97723 eps=76 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1592.00,mk=76,t=0.07s) guided(E=1592.00,mk=76,t=0.27s)
+inst_seed=97723 eps=75 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1595.00,mk=75,t=0.07s) guided(E=1595.00,mk=75,t=0.24s)
+inst_seed=97723 eps=74 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1603.00,mk=74,t=0.07s) guided(E=1603.00,mk=74,t=0.19s)
+inst_seed=97723 eps=73 min_eps=72 loads=[7;21;28;16;10;42;72] u=[2;2;2;3;3;2;1] exact(E=1609.00,mk=72,t=0.07s) guided(E=1609.00,mk=72,t=0.09s)
+inst_seed=106652 eps=80 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=2925.00,mk=80,t=0.09s) guided(E=2925.00,mk=80,t=0.96s)
+inst_seed=106652 eps=79 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=2928.00,mk=79,t=0.09s) guided(E=2928.00,mk=79,t=0.98s)
+inst_seed=106652 eps=78 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=2931.00,mk=78,t=0.09s) guided(E=2931.00,mk=78,t=0.98s)
+inst_seed=106652 eps=77 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=2952.00,mk=77,t=0.09s) guided(E=2952.00,mk=77,t=0.94s)
+inst_seed=106652 eps=76 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=2973.00,mk=76,t=0.10s) guided(E=2973.00,mk=76,t=0.86s)
+inst_seed=106652 eps=75 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=2994.00,mk=75,t=0.08s) guided(E=2994.00,mk=75,t=0.80s)
+inst_seed=106652 eps=74 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=3042.00,mk=74,t=0.08s) guided(E=3042.00,mk=74,t=0.70s)
+inst_seed=106652 eps=73 min_eps=71 loads=[59;71;62] u=[3;3;3] exact(E=3093.00,mk=71,t=0.08s) guided(E=3093.00,mk=71,t=0.65s)
+inst_seed=100622 eps=40 min_eps=40 loads=[29;25;36;30;40] u=[2;3;2;3;1] exact(E=1673.00,mk=40,t=0.02s) guided(E=1673.00,mk=40,t=0.01s)
+inst_seed=111980 eps=40 min_eps=38 loads=[35;24;38;27;36] u=[3;2;2;2;1] exact(E=1626.00,mk=40,t=0.03s) guided(E=1626.00,mk=40,t=0.02s)
+inst_seed=111980 eps=39 min_eps=38 loads=[35;24;38;27;36] u=[3;2;2;2;1] exact(E=1632.00,mk=39,t=0.03s) guided(E=1632.00,mk=39,t=0.02s)
+inst_seed=111980 eps=38 min_eps=38 loads=[35;24;38;27;36] u=[3;2;2;2;1] exact(E=1638.00,mk=38,t=0.02s) guided(E=1638.00,mk=38,t=0.01s)
+inst_seed=123242 eps=40 min_eps=38 loads=[33;32;27;27;35;38] u=[3;2;3;2;1;1] exact(E=1858.00,mk=40,t=0.03s) guided(E=1858.00,mk=40,t=0.02s)
+inst_seed=123242 eps=39 min_eps=38 loads=[33;32;27;27;35;38] u=[3;2;3;2;1;1] exact(E=1860.00,mk=39,t=0.03s) guided(E=1860.00,mk=39,t=0.02s)
+inst_seed=123242 eps=38 min_eps=38 loads=[33;32;27;27;35;38] u=[3;2;3;2;1;1] exact(E=1865.00,mk=38,t=0.03s) guided(E=1865.00,mk=38,t=0.02s)
+Wrote ADP/logs/deploy_epsilon_profiles_all_sizes/epsilon_small_generate_data_mlp.csv
