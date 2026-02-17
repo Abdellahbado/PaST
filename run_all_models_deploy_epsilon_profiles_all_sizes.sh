@@ -42,7 +42,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 # Multiprocessing workers for pooled data collection.
 # On HPC, mp.cpu_count() can be very large and may OOM / violate process limits.
-WORKERS="${WORKERS:-16}"
+WORKERS="${WORKERS:-4}"
 
 # Hard cap for spawned Python worker processes (safety on memory-limited nodes).
 # Override if your node has ample RAM:
@@ -79,8 +79,8 @@ CATEGORIES=("small" "medium" "large")
 # - More seeds reduces overfitting risk (better than cranking epochs).
 # - You can shrink these if runtime is too high.
 TRAIN_SEEDS_SMALL="0-99"
-TRAIN_SEEDS_MEDIUM="0-79"
-TRAIN_SEEDS_LARGE="0-59"
+TRAIN_SEEDS_MEDIUM="0-199"
+TRAIN_SEEDS_LARGE="0-149"
 
 EVAL_SEEDS_SMALL="300-339"
 EVAL_SEEDS_MEDIUM="400-429"
@@ -88,8 +88,11 @@ EVAL_SEEDS_LARGE="500-519"
 
 # Samples per training instance (category-scaled for runtime)
 SAMPLES_SMALL=4000
-SAMPLES_MEDIUM=2000
-SAMPLES_LARGE=1000
+# For optimal_path labeling, samples per instance should match O(T*n_paths)
+# so we don't trigger top-up. With D_hi=15, n_paths=2 -> ~600.
+# With D_hi=30, n_paths=2 -> ~1200.
+SAMPLES_MEDIUM=600
+SAMPLES_LARGE=1200
 
 # Model training knobs (long-ish but guarded by early stopping)
 MLP_MAX_EPOCHS=600

@@ -53,7 +53,7 @@ fi
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 # Multiprocessing workers for pooled data collection.
-WORKERS="${WORKERS:-16}"
+WORKERS="${WORKERS:-4}"
 
 # Hard cap to avoid spawning too many heavy Python worker processes on HPC.
 # Override:
@@ -82,8 +82,8 @@ CATEGORIES=("small" "medium" "large")
 
 # Train/eval seeds
 TRAIN_SEEDS_SMALL="0-99"
-TRAIN_SEEDS_MEDIUM="0-79"
-TRAIN_SEEDS_LARGE="0-59"
+TRAIN_SEEDS_MEDIUM="0-199"
+TRAIN_SEEDS_LARGE="0-149"
 
 # Held-out same-size evaluation seeds (disjoint from training)
 EVAL_SEEDS_SMALL="300-339"
@@ -92,8 +92,8 @@ EVAL_SEEDS_LARGE="500-519"
 
 # Samples per training instance (category-scaled for runtime)
 SAMPLES_SMALL=4000
-SAMPLES_MEDIUM=2000
-SAMPLES_LARGE=1000
+SAMPLES_MEDIUM=600
+SAMPLES_LARGE=1200
 
 # Model training knobs (early stopping guards total runtime)
 MLP_MAX_EPOCHS=600

@@ -725,13 +725,21 @@ def _collect_worker(
             n_paths=int(optimal_path_n_paths),
             require_optimal_labels=bool(require_optimal_labels),
         )
-        # Top-up: optimal_path yields only ~O(T) labels. To reach the requested
-        # samples_per_instance, add extra random subproblem labels with a small
-        # DP time limit (feasible/approx labels on timeout).
+        # Top-up: optimal_path yields only ~O(T) labels. Optionally add extra
+        # random subproblem labels (can get expensive; keep it capped).
         need = int(samples_per_instance) - int(len(states))
         if need > 0:
             cap = int(optimal_path_topup_max)
-            topup_target = int(need if cap <= 0 else min(int(need), int(cap)))
+            # Semantics:
+            #   cap == 0 -> disable top-up
+            #   cap < 0  -> unlimited (fill to samples_per_instance)
+            #   cap > 0  -> add at most cap extra labels
+            if cap == 0:
+                topup_target = 0
+            elif cap < 0:
+                topup_target = int(need)
+            else:
+                topup_target = int(min(int(need), int(cap)))
             if topup_target > 0:
                 sp_states, sp_labels, sp_attempts = _collect_state_labels(
                     rng=rng,
@@ -756,9 +764,9 @@ def _collect_worker(
                         states.append(s)
                         labels.append(float(y))
 
-        if not states:
-            # Robust fallback: collect a small batch of subproblem labels.
-            # (Better than returning 0 samples for the whole seed.)
+        if not states and int(optimal_path_topup_max) != 0:
+            # Robust fallback (only when top-up is enabled): collect a small
+            # batch of subproblem labels rather than returning 0 samples.
             sp = min(int(samples_per_instance), 64)
             states, labels, attempts = _collect_state_labels(
                 rng=rng,
@@ -903,7 +911,8 @@ def main() -> None:
         help=(
             "For --label-mode=optimal_path: maximum number of additional random subproblem labels to add per instance. "
             "This is used to top up beyond the O(T) optimal-path labels. "
-            "0 means no cap (try to fill to --samples-per-instance)."
+            "0 disables top-up entirely (recommended for stability). "
+            "-1 means unlimited top-up (will try to fill to --samples-per-instance)."
         ),
     )
 
