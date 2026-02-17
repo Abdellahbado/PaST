@@ -190,6 +190,7 @@ def _collect_state_labels_optimal_path(
     normalize_labels: bool = False,
     prefix_prices: np.ndarray | None = None,
     dp_time_limit: float = -1.0,
+    n_paths: int = 1,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
     """Collect exact labels using ONE exact DP solve, labeling states on an optimal path.
 
@@ -211,64 +212,87 @@ def _collect_state_labels_optimal_path(
     if prefix_prices is None:
         prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
-    exact = solve_optimal_benchmark_dp(
-        p_list,
-        prices,
-        tie_break="cost",
-        time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
-    )
-    if not exact.feasible:
-        return [], [], 0
+    n_paths_i = int(n_paths)
+    if n_paths_i not in (1, 2):
+        raise ValueError("n_paths must be 1 or 2")
 
-    # If we didn't get a full schedule (e.g., reconstruction failed), abort.
-    # In that case, the caller can fall back to subproblem labels.
-    if len(exact.schedule) < len(p_list):
-        return [], [], 0
-
-    # Map job-start time -> length for the optimal schedule.
-    start_to_len: Dict[int, int] = {}
-    for _jid, s, e in exact.schedule:
-        start_to_len[int(s)] = int(e) - int(s)
+    # We can cheaply get more labels by extracting states from multiple
+    # equal-cost optimal schedules (different tie-breaks).
+    tie_breaks = ["cost"]
+    if n_paths_i >= 2:
+        tie_breaks.append("early")
 
     # Map length -> class index
     length_to_idx = {int(L): i for i, L in enumerate(lengths.tolist())}
     K = int(len(lengths))
-    used = [0] * K
-    t = 0
-    cost_so_far = 0.0
 
-    states: List[Tuple[int, Tuple[int, ...]]] = []
-    labels: List[float] = []
+    # Deduplicate by state; keep first label (they should match anyway).
+    state_to_label: Dict[Tuple[int, Tuple[int, ...]], float] = {}
+    attempts_total = 0
 
-    # Walk decision times until horizon. (Idle is 1-step, job-start jumps by L.)
-    while t < T:
-        y = float(exact.cost - cost_so_far)
-        if normalize_labels:
-            rem_budget = float(prefix_prices[T] - prefix_prices[t])
-            if rem_budget > 1e-9:
-                y = y / rem_budget
-        states.append((int(t), tuple(int(x) for x in used)))
-        labels.append(float(y))
-
-        L = start_to_len.get(int(t), 0)
-        if int(L) <= 0:
-            t += 1
+    for tb in tie_breaks:
+        exact = solve_optimal_benchmark_dp(
+            p_list,
+            prices,
+            tie_break=str(tb),
+            time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
+        )
+        if not exact.feasible:
             continue
 
-        # Advance by scheduling a job of length L.
-        end = int(t) + int(L)
-        if end > T:
-            # Defensive: should not happen for a feasible returned schedule.
-            break
-        cost_so_far += float(prefix_prices[end] - prefix_prices[int(t)])
-        idx = length_to_idx.get(int(L))
-        if idx is not None:
-            used[idx] += 1
-        t = end
+        # If we didn't get a full schedule (e.g., reconstruction failed), skip.
+        if len(exact.schedule) < len(p_list):
+            continue
 
-    # If the caller asked for more than O(T) labels, we keep what we have.
-    # The pooling pipeline supports variable samples-per-instance.
-    return states, labels, len(states)
+        # Map job-start time -> length for the optimal schedule.
+        start_to_len: Dict[int, int] = {}
+        for _jid, s, e in exact.schedule:
+            start_to_len[int(s)] = int(e) - int(s)
+
+        used = [0] * K
+        t = 0
+        cost_so_far = 0.0
+
+        while t < T:
+            y = float(exact.cost - cost_so_far)
+            if normalize_labels:
+                rem_budget = float(prefix_prices[T] - prefix_prices[t])
+                if rem_budget > 1e-9:
+                    y = y / rem_budget
+            key = (int(t), tuple(int(x) for x in used))
+            if key not in state_to_label:
+                state_to_label[key] = float(y)
+
+            L = start_to_len.get(int(t), 0)
+            if int(L) <= 0:
+                t += 1
+                continue
+
+            end = int(t) + int(L)
+            if end > T:
+                break
+            cost_so_far += float(prefix_prices[end] - prefix_prices[int(t)])
+            idx = length_to_idx.get(int(L))
+            if idx is not None:
+                used[idx] += 1
+            t = end
+
+        attempts_total += int(len(state_to_label))
+
+    if not state_to_label:
+        return [], [], 0
+
+    # Preserve a stable ordering by time.
+    items = sorted(state_to_label.items(), key=lambda kv: (kv[0][0], kv[0][1]))
+    states = [k for (k, _v) in items]
+    labels = [float(v) for (_k, v) in items]
+
+    # Respect target_samples if it is smaller than what we generated.
+    if int(target_samples) > 0 and len(states) > int(target_samples):
+        states = states[: int(target_samples)]
+        labels = labels[: int(target_samples)]
+
+    return states, labels, int(len(states))
 
 
 def _r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -380,6 +404,7 @@ def _collect_worker(
     x_dtype: str,
     label_mode: str,
     dp_time_limit: float,
+    optimal_path_n_paths: int,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
@@ -420,6 +445,7 @@ def _collect_worker(
             normalize_labels=normalize_labels,
             prefix_prices=prefix_prices,
             dp_time_limit=float(dp_time_limit),
+            n_paths=int(optimal_path_n_paths),
         )
         if not states:
             # Robust fallback: collect a small batch of subproblem labels.
@@ -549,6 +575,17 @@ def main() -> None:
     )
 
     ap.add_argument(
+        "--optimal-path-n-paths",
+        type=int,
+        default=1,
+        choices=[1, 2],
+        help=(
+            "For --label-mode=optimal_path: number of optimal schedules to extract labels from. "
+            "Uses different DP tie-breaks (cost vs early). 2 roughly doubles labels per instance with only one extra DP solve."
+        ),
+    )
+
+    ap.add_argument(
         "--dp-time-limit",
         type=float,
         default=-1.0,
@@ -556,6 +593,17 @@ def main() -> None:
             "Time limit (seconds) for exact DP calls during label collection. "
             "If >0, DP may return a greedy-completed solution on timeout (still feasible, but labels become approximate). "
             "Use this on HPC to prevent rare seeds from stalling the whole sweep."
+        ),
+    )
+
+    ap.add_argument(
+        "--eval-time-limit",
+        type=float,
+        default=-1.0,
+        help=(
+            "Time limit (seconds) for DP calls during EVALUATION (exact baseline + guided runs). "
+            "If >0, DP may return a greedy-completed solution on timeout (feasible but not proven optimal). "
+            "This prevents pathological eval seeds from stalling sweeps."
         ),
     )
 
@@ -953,6 +1001,7 @@ def main() -> None:
             x_dtype=str(args.pool_dtype),
             label_mode=str(args.label_mode),
             dp_time_limit=float(args.dp_time_limit),
+            optimal_path_n_paths=int(args.optimal_path_n_paths),
         )
 
         mtpc = int(args.maxtasksperchild)
@@ -1271,6 +1320,9 @@ def main() -> None:
         f"\n[pool] Beams: {beams}"
     )
 
+    eval_time_limit = float(args.eval_time_limit)
+    eval_time_limit = eval_time_limit if eval_time_limit > 0.0 else -1.0
+
     rows: List[Dict[str, float]] = []
     w = model.weights if hasattr(model, "weights") else None
 
@@ -1306,6 +1358,7 @@ def main() -> None:
     )
 
     for eval_seed in eval_seeds:
+        print(f"[pool] eval seed={eval_seed} starting...", flush=True)
         rng = np.random.default_rng(eval_seed)
         D_use, N_use = _sample_D_N_feasible(
             rng=rng,
@@ -1329,11 +1382,22 @@ def main() -> None:
         T = int(len(prices))
 
         t0 = time.perf_counter()
-        exact = solve_optimal_benchmark_dp(p, prices, tie_break="early")
+        exact = solve_optimal_benchmark_dp(
+            p, prices, tie_break="early", time_limit=float(eval_time_limit)
+        )
         exact_s = time.perf_counter() - t0
         if not exact.feasible:
             print(f"[pool] seed={eval_seed} INFEASIBLE, skipping")
             continue
+
+        if bool(exact.timed_out) or (
+            hasattr(exact, "is_optimal") and not exact.is_optimal
+        ):
+            print(
+                f"[pool] seed={eval_seed} exact DP timed out (time_limit={eval_time_limit}); "
+                "baseline is feasible but not proven optimal",
+                flush=True,
+            )
 
         lengths, totals, radices, _mult = encode_setup(p)
         ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
@@ -1420,6 +1484,7 @@ def main() -> None:
                 beam_width=int(beam),
                 prune_factor=float(args.prune_factor),
                 vhat=vhat,
+                time_limit=float(eval_time_limit),
             )
             guided_learned_s = time.perf_counter() - t1
 
@@ -1432,6 +1497,7 @@ def main() -> None:
                 beam_width=int(beam),
                 prune_factor=float(args.prune_factor),
                 vhat=lambda _t, _s: 0.0,
+                time_limit=float(eval_time_limit),
             )
             guided_zero_s = time.perf_counter() - t2
 
@@ -1444,6 +1510,7 @@ def main() -> None:
                 beam_width=int(beam),
                 prune_factor=float(args.prune_factor),
                 vhat=vhat_price,
+                time_limit=float(eval_time_limit),
             )
             guided_price_s = time.perf_counter() - t3
 
@@ -1465,13 +1532,24 @@ def main() -> None:
                 "K": float(len(lengths)),
                 "exact_cost": float(exact.cost),
                 "exact_s": float(exact_s),
+                "exact_timed_out": float(int(getattr(exact, "timed_out", False))),
+                "exact_is_optimal": float(int(getattr(exact, "is_optimal", True))),
                 "train_s": float(train_s),
                 "guided_learned_cost": float(guided_learned.cost),
                 "guided_learned_s": float(guided_learned_s),
+                "guided_learned_timed_out": float(
+                    int(getattr(guided_learned, "timed_out", False))
+                ),
                 "guided_zero_cost": float(guided_zero.cost),
                 "guided_zero_s": float(guided_zero_s),
+                "guided_zero_timed_out": float(
+                    int(getattr(guided_zero, "timed_out", False))
+                ),
                 "guided_price_cost": float(guided_price.cost),
                 "guided_price_s": float(guided_price_s),
+                "guided_price_timed_out": float(
+                    int(getattr(guided_price, "timed_out", False))
+                ),
                 "gap_learned_pct": float(gap_learned),
                 "gap_zero_pct": float(gap_zero),
                 "gap_price_pct": float(gap_price),

@@ -133,6 +133,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       POOL_ARGS=()
       LABEL_MODE="subproblem"
       DP_TIME_LIMIT="-1"
+      OPT_PATH_N_PATHS="1"
+      EVAL_TIME_LIMIT="-1"
       ;;
     medium)
       N_RANGE="100-200"; D_RANGE="5-15";  M_RANGE="8-16";  TARGET_UTIL="0.85";
@@ -141,6 +143,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
       DP_TIME_LIMIT="2.0"
+      OPT_PATH_N_PATHS="2"
+      EVAL_TIME_LIMIT="30.0"
       ;;
     large)
       N_RANGE="250-500"; D_RANGE="10-30"; M_RANGE="25-40"; TARGET_UTIL="0.90";
@@ -149,6 +153,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
       DP_TIME_LIMIT="5.0"
+      OPT_PATH_N_PATHS="2"
+      EVAL_TIME_LIMIT="60.0"
       ;;
     *)
       echo "Unknown CATEGORY=$CATEGORY"; exit 1;
@@ -202,8 +208,10 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --eval-seeds "$EVAL_SEEDS" \
           --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
           --transferable-features --normalize --normalize-labels \
-           --label-mode "$LABEL_MODE" \
+          --label-mode "$LABEL_MODE" \
+          --optimal-path-n-paths "$OPT_PATH_N_PATHS" \
           --dp-time-limit "$DP_TIME_LIMIT" \
+          --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \

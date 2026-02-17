@@ -155,12 +155,18 @@ for CATEGORY in "${CATEGORIES[@]}"; do
 
   LABEL_MODE="subproblem"
   DP_TIME_LIMIT="-1"
+  OPT_PATH_N_PATHS="1"
+  EVAL_TIME_LIMIT="-1"
   if [[ "$CATEGORY" == "medium" ]]; then
     LABEL_MODE="optimal_path"
     DP_TIME_LIMIT="2.0"
+    OPT_PATH_N_PATHS="2"
+    EVAL_TIME_LIMIT="30.0"
   elif [[ "$CATEGORY" == "large" ]]; then
     LABEL_MODE="optimal_path"
     DP_TIME_LIMIT="5.0"
+    OPT_PATH_N_PATHS="2"
+    EVAL_TIME_LIMIT="60.0"
   fi
 
   # Use on-disk pooling for bigger categories to avoid RAM spikes with many workers.
@@ -202,7 +208,9 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
           --transferable-features --normalize --normalize-labels \
           --label-mode "$LABEL_MODE" \
+          --optimal-path-n-paths "$OPT_PATH_N_PATHS" \
           --dp-time-limit "$DP_TIME_LIMIT" \
+          --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
@@ -255,6 +263,17 @@ echo "========================================================================"
 for PROFILE in "${PROFILES[@]}"; do
   PROFILE_ARGS=( $(_profile_args "$PROFILE") )
 
+  # Eval-time limit for cross-size eval depends on the TARGET size.
+  _eval_time_limit_for() {
+    local category="$1"
+    case "$category" in
+      small) echo "-1" ;;
+      medium) echo "30.0" ;;
+      large) echo "60.0" ;;
+      *) echo "-1" ;;
+    esac
+  }
+
   # small -> medium
   SRC="small"; TGT="medium"
   read -r N_RANGE_S D_RANGE_S _M_RANGE_S TARGET_UTIL_S _TRAIN_SEEDS_S _EVAL_SEEDS_S _SAMPLES_S _REPL_S <<< "$(_size_params "$SRC")"
@@ -278,6 +297,7 @@ for PROFILE in "${PROFILES[@]}"; do
         --eval-seeds "$EVAL_SEEDS_T" \
         --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
         --transferable-features --normalize \
+        --eval-time-limit "$(_eval_time_limit_for "$TGT")" \
         --target-util "$TARGET_UTIL_T" \
         "${PROFILE_ARGS[@]}" \
         --beams 2,5 \
@@ -309,6 +329,7 @@ for PROFILE in "${PROFILES[@]}"; do
         --eval-seeds "$EVAL_SEEDS_T" \
         --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
         --transferable-features --normalize \
+        --eval-time-limit "$(_eval_time_limit_for "$TGT")" \
         --target-util "$TARGET_UTIL_T" \
         "${PROFILE_ARGS[@]}" \
         --beams 2,5 \
