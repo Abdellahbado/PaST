@@ -174,6 +174,86 @@ def _collect_state_labels(
     return states, labels, attempts
 
 
+def _collect_state_labels_optimal_path(
+    *,
+    p_list: Sequence[int],
+    prices: np.ndarray,
+    totals: np.ndarray,
+    lengths: np.ndarray,
+    target_samples: int,
+    normalize_labels: bool = False,
+    prefix_prices: np.ndarray | None = None,
+) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
+    """Collect exact labels using ONE exact DP solve, labeling states on an optimal path.
+
+    This avoids running an exact DP sub-solve per sampled state (which becomes
+    extremely expensive for medium/large instances and can OOM/hang).
+
+    We solve the full instance once, then walk the optimal schedule as a shortest
+    path on the DAG. Any suffix of an optimal path is optimal from the intermediate
+    node, so the remaining cost along that schedule equals the exact cost-to-go
+    for those (t, used) states.
+
+    Returns up to O(T) labeled states (decision times), or fewer if T is small.
+    """
+    prices = np.asarray(prices, dtype=np.float64)
+    T = int(len(prices))
+    if T <= 0:
+        return [], [], 0
+
+    if prefix_prices is None:
+        prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
+
+    exact = solve_optimal_benchmark_dp(p_list, prices, tie_break="cost")
+    if not exact.feasible:
+        return [], [], 0
+
+    # Map job-start time -> length for the optimal schedule.
+    start_to_len: Dict[int, int] = {}
+    for _jid, s, e in exact.schedule:
+        start_to_len[int(s)] = int(e) - int(s)
+
+    # Map length -> class index
+    length_to_idx = {int(L): i for i, L in enumerate(lengths.tolist())}
+    K = int(len(lengths))
+    used = [0] * K
+    t = 0
+    cost_so_far = 0.0
+
+    states: List[Tuple[int, Tuple[int, ...]]] = []
+    labels: List[float] = []
+
+    # Walk decision times until horizon. (Idle is 1-step, job-start jumps by L.)
+    while t < T:
+        y = float(exact.cost - cost_so_far)
+        if normalize_labels:
+            rem_budget = float(prefix_prices[T] - prefix_prices[t])
+            if rem_budget > 1e-9:
+                y = y / rem_budget
+        states.append((int(t), tuple(int(x) for x in used)))
+        labels.append(float(y))
+
+        L = start_to_len.get(int(t), 0)
+        if int(L) <= 0:
+            t += 1
+            continue
+
+        # Advance by scheduling a job of length L.
+        end = int(t) + int(L)
+        if end > T:
+            # Defensive: should not happen for a feasible returned schedule.
+            break
+        cost_so_far += float(prefix_prices[end] - prefix_prices[int(t)])
+        idx = length_to_idx.get(int(L))
+        if idx is not None:
+            used[idx] += 1
+        t = end
+
+    # If the caller asked for more than O(T) labels, we keep what we have.
+    # The pooling pipeline supports variable samples-per-instance.
+    return states, labels, len(states)
+
+
 def _r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     var = float(np.sum((y_true - np.mean(y_true)) ** 2))
     if var <= 1e-12:
@@ -281,6 +361,7 @@ def _collect_worker(
     daily_prices_20: List[float] | None,
     target_util: float,
     x_dtype: str,
+    label_mode: str,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
@@ -310,16 +391,30 @@ def _collect_worker(
     ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
     prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
-    states, labels, attempts = _collect_state_labels(
-        rng=rng,
-        T=T,
-        totals=totals,
-        lengths=lengths,
-        prices=prices,
-        target_samples=samples_per_instance,
-        normalize_labels=normalize_labels,
-        prefix_prices=prefix_prices,
-    )
+    lm = str(label_mode).strip().lower()
+    if lm == "optimal_path":
+        states, labels, attempts = _collect_state_labels_optimal_path(
+            p_list=p,
+            prices=prices,
+            totals=totals,
+            lengths=lengths,
+            target_samples=samples_per_instance,
+            normalize_labels=normalize_labels,
+            prefix_prices=prefix_prices,
+        )
+    elif lm == "subproblem":
+        states, labels, attempts = _collect_state_labels(
+            rng=rng,
+            T=T,
+            totals=totals,
+            lengths=lengths,
+            prices=prices,
+            target_samples=samples_per_instance,
+            normalize_labels=normalize_labels,
+            prefix_prices=prefix_prices,
+        )
+    else:
+        raise ValueError(f"Unknown label_mode: {label_mode!r}")
 
     if not states:
         return np.empty((0, 0)), np.empty(0), attempts
@@ -404,6 +499,18 @@ def main() -> None:
         type=int,
         default=2000,
         help="Number of random state samples per training instance.",
+    )
+
+    ap.add_argument(
+        "--label-mode",
+        type=str,
+        default="subproblem",
+        choices=["subproblem", "optimal_path"],
+        help=(
+            "How to generate exact labels for training states. "
+            "subproblem: sample random states and solve an exact DP subproblem per state (very expensive for medium/large). "
+            "optimal_path: solve the full instance once and label states along an optimal schedule (exact cost-to-go, O(T) labels)."
+        ),
     )
 
     ap.add_argument(
@@ -691,7 +798,10 @@ def main() -> None:
                 include_meta=True,
             )
         model_type = "mlp"
-    n_workers = int(args.workers) if int(args.workers) > 0 else mp.cpu_count()
+    n_workers_req = int(args.workers) if int(args.workers) > 0 else mp.cpu_count()
+    # Spawning more processes than there are instances wastes RAM (each process
+    # imports numpy, solver modules, etc.). Cap at number of training seeds.
+    n_workers = min(int(n_workers_req), max(1, len(train_seeds)))
 
     # =========================================================================
     # PHASE 1: TRAINING — pool labeled states from multiple instances
@@ -794,6 +904,7 @@ def main() -> None:
             daily_prices_20=daily_prices_20,
             target_util=float(args.target_util),
             x_dtype=str(args.pool_dtype),
+            label_mode=str(args.label_mode),
         )
 
         mtpc = int(args.maxtasksperchild)
@@ -831,6 +942,7 @@ def main() -> None:
                 daily_prices_20=daily_prices_20,
                 target_util=float(args.target_util),
                 x_dtype=str(args.pool_dtype),
+                label_mode=str(args.label_mode),
             )
             probe_X, _probe_y, _probe_attempts = probe_fn(probe_seed)
             if probe_X.size == 0:
