@@ -164,7 +164,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
     LABEL_MODE="optimal_path"
     DP_TIME_LIMIT="-1"
     OPT_PATH_N_PATHS="2"
-    OPT_PATH_TOPUP_MAX="$SAMPLES"
+    OPT_PATH_TOPUP_MAX="0"
     OPT_PATH_TOPUP_TL="-1"
     REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
     EVAL_TIME_LIMIT="30.0"
@@ -172,7 +172,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
     LABEL_MODE="optimal_path"
     DP_TIME_LIMIT="-1"
     OPT_PATH_N_PATHS="2"
-    OPT_PATH_TOPUP_MAX="$SAMPLES"
+    OPT_PATH_TOPUP_MAX="0"
     OPT_PATH_TOPUP_TL="-1"
     REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
     EVAL_TIME_LIMIT="60.0"

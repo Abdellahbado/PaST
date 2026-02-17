@@ -318,6 +318,265 @@ def _r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return 1.0 - sse / var
 
 
+def _poly_powers_degree2(d_in: int) -> np.ndarray:
+    """Create sklearn-compatible powers_ for degree-2 PolynomialFeatures.
+
+    Duplicated here so we can do streaming poly ridge without materializing
+    the full expanded matrix.
+    """
+    d = int(d_in)
+    powers: List[np.ndarray] = []
+    powers.append(np.zeros(d, dtype=np.int32))
+    for i in range(d):
+        e = np.zeros(d, dtype=np.int32)
+        e[i] = 1
+        powers.append(e)
+    for i in range(d):
+        e2 = np.zeros(d, dtype=np.int32)
+        e2[i] = 2
+        powers.append(e2)
+        for j in range(i + 1, d):
+            e = np.zeros(d, dtype=np.int32)
+            e[i] = 1
+            e[j] = 1
+            powers.append(e)
+    return np.stack(powers, axis=0)
+
+
+def _split_train_mask(
+    indices: np.ndarray, *, train_frac: float = 0.85, seed: int = 42
+) -> np.ndarray:
+    """Deterministic split without storing/shuffling full index arrays."""
+    # Hash-like mapping to [0,1000)
+    idx = np.asarray(indices, dtype=np.uint64)
+    x = (idx * np.uint64(11400714819323198485) + np.uint64(seed)) % np.uint64(1000)
+    thr = int(round(float(train_frac) * 1000.0))
+    return x < np.uint64(thr)
+
+
+def _stream_fit_ridge(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    l2: float,
+    chunk_size: int,
+    train_frac: float = 0.85,
+    split_seed: int = 42,
+) -> Tuple[np.ndarray, Dict[str, float]]:
+    """Closed-form ridge fit using chunked passes over X/y."""
+    n = int(y.shape[0])
+    d = int(X.shape[1])
+    A = np.zeros((d, d), dtype=np.float64)
+    b = np.zeros((d,), dtype=np.float64)
+
+    for start in range(0, n, int(chunk_size)):
+        end = min(n, start + int(chunk_size))
+        idx = np.arange(start, end, dtype=np.int64)
+        train_mask = _split_train_mask(
+            idx, train_frac=float(train_frac), seed=int(split_seed)
+        )
+        if not bool(np.any(train_mask)):
+            continue
+        Xc = np.asarray(X[start:end], dtype=np.float64)
+        yc = np.asarray(y[start:end], dtype=np.float64)
+        Xt = Xc[train_mask]
+        yt = yc[train_mask]
+        A += Xt.T @ Xt
+        b += Xt.T @ yt
+
+    A += float(l2) * np.eye(d, dtype=np.float64)
+    w = np.linalg.solve(A, b).astype(np.float64)
+
+    # Second pass for metrics
+    stats = {
+        "train_n": 0.0,
+        "test_n": 0.0,
+        "train_sum": 0.0,
+        "train_sum2": 0.0,
+        "test_sum": 0.0,
+        "test_sum2": 0.0,
+        "train_sse": 0.0,
+        "test_sse": 0.0,
+        "train_mae": 0.0,
+        "test_mae": 0.0,
+    }
+
+    for start in range(0, n, int(chunk_size)):
+        end = min(n, start + int(chunk_size))
+        idx = np.arange(start, end, dtype=np.int64)
+        train_mask = _split_train_mask(
+            idx, train_frac=float(train_frac), seed=int(split_seed)
+        )
+        Xc = np.asarray(X[start:end], dtype=np.float64)
+        yc = np.asarray(y[start:end], dtype=np.float64)
+        yhat = Xc @ w
+
+        for is_train, mask in ((True, train_mask), (False, ~train_mask)):
+            if not bool(np.any(mask)):
+                continue
+            yy = yc[mask]
+            yh = yhat[mask]
+            nmask = float(yy.shape[0])
+            if is_train:
+                stats["train_n"] += nmask
+                stats["train_sum"] += float(np.sum(yy))
+                stats["train_sum2"] += float(np.sum(yy * yy))
+                stats["train_sse"] += float(np.sum((yy - yh) ** 2))
+                stats["train_mae"] += float(np.sum(np.abs(yy - yh)))
+            else:
+                stats["test_n"] += nmask
+                stats["test_sum"] += float(np.sum(yy))
+                stats["test_sum2"] += float(np.sum(yy * yy))
+                stats["test_sse"] += float(np.sum((yy - yh) ** 2))
+                stats["test_mae"] += float(np.sum(np.abs(yy - yh)))
+
+    def _r2_from(sum_y: float, sum_y2: float, sse: float, n_: float) -> float:
+        if n_ <= 1.0:
+            return float("nan")
+        var = float(sum_y2 - (sum_y * sum_y) / max(n_, 1.0))
+        if var <= 1e-12:
+            return float("nan")
+        return 1.0 - float(sse) / var
+
+    metrics = {
+        "r2_train": float(
+            _r2_from(
+                stats["train_sum"],
+                stats["train_sum2"],
+                stats["train_sse"],
+                stats["train_n"],
+            )
+        ),
+        "mae_train": float(stats["train_mae"] / max(stats["train_n"], 1.0)),
+        "r2_test": float(
+            _r2_from(
+                stats["test_sum"],
+                stats["test_sum2"],
+                stats["test_sse"],
+                stats["test_n"],
+            )
+        ),
+        "mae_test": float(stats["test_mae"] / max(stats["test_n"], 1.0)),
+        "train_n": float(stats["train_n"]),
+        "test_n": float(stats["test_n"]),
+    }
+    return w, metrics
+
+
+def _stream_fit_poly_ridge(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    l2: float,
+    chunk_size: int,
+    train_frac: float = 0.85,
+    split_seed: int = 42,
+) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
+    """Degree-2 polynomial ridge using chunked passes."""
+    n = int(y.shape[0])
+    d_in = int(X.shape[1])
+    powers = _poly_powers_degree2(d_in)
+    d_out = int(powers.shape[0])
+    A = np.zeros((d_out, d_out), dtype=np.float64)
+    b = np.zeros((d_out,), dtype=np.float64)
+
+    for start in range(0, n, int(chunk_size)):
+        end = min(n, start + int(chunk_size))
+        idx = np.arange(start, end, dtype=np.int64)
+        train_mask = _split_train_mask(
+            idx, train_frac=float(train_frac), seed=int(split_seed)
+        )
+        if not bool(np.any(train_mask)):
+            continue
+        Xc = np.asarray(X[start:end], dtype=np.float64)
+        yc = np.asarray(y[start:end], dtype=np.float64)
+        Xt = Xc[train_mask]
+        yt = yc[train_mask]
+        Xt_poly = _poly_expand_batch(Xt, powers)
+        A += Xt_poly.T @ Xt_poly
+        b += Xt_poly.T @ yt
+
+    A += float(l2) * np.eye(d_out, dtype=np.float64)
+    w = np.linalg.solve(A, b).astype(np.float64)
+
+    # Second pass metrics
+    stats = {
+        "train_n": 0.0,
+        "test_n": 0.0,
+        "train_sum": 0.0,
+        "train_sum2": 0.0,
+        "test_sum": 0.0,
+        "test_sum2": 0.0,
+        "train_sse": 0.0,
+        "test_sse": 0.0,
+        "train_mae": 0.0,
+        "test_mae": 0.0,
+    }
+
+    for start in range(0, n, int(chunk_size)):
+        end = min(n, start + int(chunk_size))
+        idx = np.arange(start, end, dtype=np.int64)
+        train_mask = _split_train_mask(
+            idx, train_frac=float(train_frac), seed=int(split_seed)
+        )
+        Xc = np.asarray(X[start:end], dtype=np.float64)
+        yc = np.asarray(y[start:end], dtype=np.float64)
+        Xc_poly = _poly_expand_batch(Xc, powers)
+        yhat = Xc_poly @ w
+
+        for is_train, mask in ((True, train_mask), (False, ~train_mask)):
+            if not bool(np.any(mask)):
+                continue
+            yy = yc[mask]
+            yh = yhat[mask]
+            nmask = float(yy.shape[0])
+            if is_train:
+                stats["train_n"] += nmask
+                stats["train_sum"] += float(np.sum(yy))
+                stats["train_sum2"] += float(np.sum(yy * yy))
+                stats["train_sse"] += float(np.sum((yy - yh) ** 2))
+                stats["train_mae"] += float(np.sum(np.abs(yy - yh)))
+            else:
+                stats["test_n"] += nmask
+                stats["test_sum"] += float(np.sum(yy))
+                stats["test_sum2"] += float(np.sum(yy * yy))
+                stats["test_sse"] += float(np.sum((yy - yh) ** 2))
+                stats["test_mae"] += float(np.sum(np.abs(yy - yh)))
+
+    def _r2_from(sum_y: float, sum_y2: float, sse: float, n_: float) -> float:
+        if n_ <= 1.0:
+            return float("nan")
+        var = float(sum_y2 - (sum_y * sum_y) / max(n_, 1.0))
+        if var <= 1e-12:
+            return float("nan")
+        return 1.0 - float(sse) / var
+
+    metrics = {
+        "r2_train": float(
+            _r2_from(
+                stats["train_sum"],
+                stats["train_sum2"],
+                stats["train_sse"],
+                stats["train_n"],
+            )
+        ),
+        "mae_train": float(stats["train_mae"] / max(stats["train_n"], 1.0)),
+        "r2_test": float(
+            _r2_from(
+                stats["test_sum"],
+                stats["test_sum2"],
+                stats["test_sse"],
+                stats["test_n"],
+            )
+        ),
+        "mae_test": float(stats["test_mae"] / max(stats["test_n"], 1.0)),
+        "train_n": float(stats["train_n"]),
+        "test_n": float(stats["test_n"]),
+        "feat_dim_poly": float(d_out),
+    }
+    return w, powers, metrics
+
+
 def parse_seed_range(s: str) -> List[int]:
     """Parse '0-19' or '0,1,5,10' into list of ints."""
     s = s.strip()
@@ -775,6 +1034,21 @@ def main() -> None:
         ),
     )
 
+    ap.add_argument(
+        "--stream-fit",
+        action="store_true",
+        help=(
+            "Fit linear/poly models in a streaming (chunked) way to avoid loading the full pooled dataset into RAM. "
+            "Recommended when using --pool-on-disk with large numbers of instances/samples."
+        ),
+    )
+    ap.add_argument(
+        "--fit-chunk-size",
+        type=int,
+        default=200_000,
+        help="Chunk size (rows) for --stream-fit passes.",
+    )
+
     # Evaluation
     ap.add_argument(
         "--eval-seeds",
@@ -1111,6 +1385,22 @@ def main() -> None:
                 tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_")
 
             expected_per_inst = int(args.samples_per_instance)
+
+            # If we're using optimal_path with no top-up, the true number of labels per
+            # instance is O(T * n_paths), not samples_per_instance. Preallocating
+            # samples_per_instance can waste huge disk and slow down.
+            if (
+                str(args.label_mode).strip().lower() == "optimal_path"
+                and int(args.optimal_path_topup_max) == 0
+            ):
+                D_hi = (
+                    int(train_D_range[1]) if train_D_range is not None else int(args.D)
+                )
+                Tmax = int(20 * D_hi)
+                est = int(int(args.optimal_path_n_paths) * Tmax)
+                if est > 0:
+                    expected_per_inst = int(min(expected_per_inst, est))
+
             expected_total = int(len(train_seeds)) * expected_per_inst
 
             # Probe feature dimension WITHOUT any DP/label computation.
@@ -1271,25 +1561,54 @@ def main() -> None:
         collect_time = time.perf_counter() - train_t0
         print(f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s")
 
-        # Train/test split on pooled data
-        idx = np.arange(len(y_pool))
-        np.random.default_rng(42).shuffle(idx)
-        split = int(0.85 * len(idx))
-        train_idx = idx[:split]
-        test_idx = idx[split:]
-
-        X_train, y_train = X_pool[train_idx], y_pool[train_idx]
-        X_test, y_test = X_pool[test_idx], y_pool[test_idx]
-
         # ============== Model-specific training ==============
         fit_t0 = time.perf_counter()
 
+        stream_fit = bool(args.stream_fit)
+        chunk_size = int(args.fit_chunk_size)
+
+        if stream_fit and model_type not in ("linear", "poly"):
+            raise ValueError(
+                "--stream-fit currently supports only model-type linear/poly. "
+                "For MLP/LGBM, either reduce pooled sample count or train with linear/poly."
+            )
+
         if model_type == "linear":
-            w = fit_ridge(X_train, y_train, l2=float(args.l2))
-            model = LinearRidgeValueModel(weights=w, spec=spec)
-            y_hat_train = X_train @ w
-            y_hat_test = X_test @ w
-            feat_dim = int(X_pool.shape[1])
+            if stream_fit:
+                w, m = _stream_fit_ridge(
+                    X_pool,
+                    y_pool,
+                    l2=float(args.l2),
+                    chunk_size=chunk_size,
+                    train_frac=0.85,
+                    split_seed=42,
+                )
+                model = LinearRidgeValueModel(weights=w, spec=spec)
+                feat_dim = int(X_pool.shape[1])
+                r2_train = float(m["r2_train"])
+                mae_train = float(m["mae_train"])
+                r2_test = float(m["r2_test"])
+                mae_test = float(m["mae_test"])
+            else:
+                # Train/test split on pooled data (in-memory indexing)
+                idx = np.arange(len(y_pool))
+                np.random.default_rng(42).shuffle(idx)
+                split = int(0.85 * len(idx))
+                train_idx = idx[:split]
+                test_idx = idx[split:]
+
+                X_train, y_train = X_pool[train_idx], y_pool[train_idx]
+                X_test, y_test = X_pool[test_idx], y_pool[test_idx]
+                w = fit_ridge(X_train, y_train, l2=float(args.l2))
+                model = LinearRidgeValueModel(weights=w, spec=spec)
+                y_hat_train = X_train @ w
+                y_hat_test = X_test @ w
+                feat_dim = int(X_pool.shape[1])
+                r2_train = _r2_score(y_train, y_hat_train)
+                mae_train = float(np.mean(np.abs(y_train - y_hat_train)))
+                r2_test = _r2_score(y_test, y_hat_test)
+                mae_test = float(np.mean(np.abs(y_test - y_hat_test)))
+
             # Print top weights
             top_k = min(10, len(w))
             sorted_idx = np.argsort(np.abs(w))[::-1][:top_k]
@@ -1298,15 +1617,46 @@ def main() -> None:
                 print(f"    #{rank+1} feat[{fi}] w={w[fi]:.6f}")
 
         elif model_type == "poly":
-            w, powers = fit_poly_ridge(X_train, y_train, l2=float(args.l2), degree=2)
-            model = PolyRidgeValueModel(weights=w, spec=spec, powers_=powers)
-            X_train_poly = _poly_expand_batch(X_train, powers)
-            X_test_poly = _poly_expand_batch(X_test, powers)
-            y_hat_train = X_train_poly @ w
-            y_hat_test = X_test_poly @ w
-            feat_dim = int(X_train_poly.shape[1])
+            if stream_fit:
+                w, powers, m = _stream_fit_poly_ridge(
+                    X_pool,
+                    y_pool,
+                    l2=float(args.l2),
+                    chunk_size=chunk_size,
+                    train_frac=0.85,
+                    split_seed=42,
+                )
+                model = PolyRidgeValueModel(weights=w, spec=spec, powers_=powers)
+                feat_dim = int(m.get("feat_dim_poly", float(powers.shape[0])))
+                r2_train = float(m["r2_train"])
+                mae_train = float(m["mae_train"])
+                r2_test = float(m["r2_test"])
+                mae_test = float(m["mae_test"])
+            else:
+                idx = np.arange(len(y_pool))
+                np.random.default_rng(42).shuffle(idx)
+                split = int(0.85 * len(idx))
+                train_idx = idx[:split]
+                test_idx = idx[split:]
+
+                X_train, y_train = X_pool[train_idx], y_pool[train_idx]
+                X_test, y_test = X_pool[test_idx], y_pool[test_idx]
+                w, powers = fit_poly_ridge(
+                    X_train, y_train, l2=float(args.l2), degree=2
+                )
+                model = PolyRidgeValueModel(weights=w, spec=spec, powers_=powers)
+                X_train_poly = _poly_expand_batch(X_train, powers)
+                X_test_poly = _poly_expand_batch(X_test, powers)
+                y_hat_train = X_train_poly @ w
+                y_hat_test = X_test_poly @ w
+                feat_dim = int(X_train_poly.shape[1])
+                r2_train = _r2_score(y_train, y_hat_train)
+                mae_train = float(np.mean(np.abs(y_train - y_hat_train)))
+                r2_test = _r2_score(y_test, y_hat_test)
+                mae_test = float(np.mean(np.abs(y_test - y_hat_test)))
+
             print(
-                f"[pool] Polynomial: {X_pool.shape[1]} raw → {feat_dim} poly features"
+                f"[pool] Polynomial: {X_pool.shape[1]} raw → {int(feat_dim)} poly features"
             )
 
         elif model_type == "mlp":
@@ -1355,11 +1705,12 @@ def main() -> None:
         fit_time = time.perf_counter() - fit_t0
         train_s = time.perf_counter() - train_t0
 
-        # Training diagnostics
-        r2_train = _r2_score(y_train, y_hat_train)
-        mae_train = float(np.mean(np.abs(y_train - y_hat_train)))
-        r2_test = _r2_score(y_test, y_hat_test)
-        mae_test = float(np.mean(np.abs(y_test - y_hat_test)))
+        # Training diagnostics (for streaming linear/poly, computed above)
+        if not (stream_fit and model_type in ("linear", "poly")):
+            r2_train = _r2_score(y_train, y_hat_train)
+            mae_train = float(np.mean(np.abs(y_train - y_hat_train)))
+            r2_test = _r2_score(y_test, y_hat_test)
+            mae_test = float(np.mean(np.abs(y_test - y_hat_test)))
 
         print(
             f"\n[pool] === TRAINING RESULTS ==="
