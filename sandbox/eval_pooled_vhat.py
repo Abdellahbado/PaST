@@ -35,7 +35,8 @@ from typing import Any, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+_REPO_PARENT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_PARENT))
 
 from PaST.solvers.optimal_benchmark_dp import solve_optimal_benchmark_dp
 from PaST.solvers.vhat_linear import (
@@ -421,7 +422,17 @@ def main() -> None:
         "--model-type",
         type=str,
         default="linear",
-        choices=["linear", "poly", "mlp", "lgbm"],
+        choices=[
+            "linear",
+            "poly",
+            "mlp",
+            "lgbm",
+            # Fast-inference MLP variants (feature-spec toggles)
+            "mlp_hist",
+            "mlp_price",
+            "mlp_meta",
+            "mlp_all",
+        ],
         help="Model type: linear (Ridge), poly (degree-2 polynomial Ridge), "
         "mlp (small neural net), lgbm (gradient boosted trees).",
     )
@@ -586,6 +597,53 @@ def main() -> None:
     )
 
     model_type = str(args.model_type).strip().lower()
+    # Normalize MLP variants to the MLP trainer while toggling FeatureSpec flags.
+    if model_type in {"mlp_hist", "mlp_price", "mlp_meta", "mlp_all"}:
+        if model_type == "mlp_hist":
+            spec = FeatureSpec(
+                include_per_class_counts=spec.include_per_class_counts,
+                include_per_class_now_cost=spec.include_per_class_now_cost,
+                include_bins=spec.include_bins,
+                normalize=spec.normalize,
+                include_len_hist=True,
+                pmax_for_hist=int(args.pmax),
+                include_price_shape=False,
+                include_meta=False,
+            )
+        elif model_type == "mlp_price":
+            spec = FeatureSpec(
+                include_per_class_counts=spec.include_per_class_counts,
+                include_per_class_now_cost=spec.include_per_class_now_cost,
+                include_bins=spec.include_bins,
+                normalize=spec.normalize,
+                include_len_hist=False,
+                pmax_for_hist=int(args.pmax),
+                include_price_shape=True,
+                include_meta=False,
+            )
+        elif model_type == "mlp_meta":
+            spec = FeatureSpec(
+                include_per_class_counts=spec.include_per_class_counts,
+                include_per_class_now_cost=spec.include_per_class_now_cost,
+                include_bins=spec.include_bins,
+                normalize=spec.normalize,
+                include_len_hist=False,
+                pmax_for_hist=int(args.pmax),
+                include_price_shape=False,
+                include_meta=True,
+            )
+        else:
+            spec = FeatureSpec(
+                include_per_class_counts=spec.include_per_class_counts,
+                include_per_class_now_cost=spec.include_per_class_now_cost,
+                include_bins=spec.include_bins,
+                normalize=spec.normalize,
+                include_len_hist=True,
+                pmax_for_hist=int(args.pmax),
+                include_price_shape=True,
+                include_meta=True,
+            )
+        model_type = "mlp"
     n_workers = int(args.workers) if int(args.workers) > 0 else mp.cpu_count()
 
     # =========================================================================
@@ -615,6 +673,16 @@ def main() -> None:
                 ),
                 include_bins=bool(int(ckpt["include_bins"])),
                 normalize=_norm,
+                include_len_hist=bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False,
+                pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else int(args.pmax),
+                include_price_shape=bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False,
+                include_meta=bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False,
             )
 
         if _mt == "poly":

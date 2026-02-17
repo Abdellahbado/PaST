@@ -12,7 +12,25 @@ cd "$(dirname "$0")"
 #   then evaluate under epsilon-constraint multi-machine deployment.
 # ============================================================
 
-ENV_NAME="new-ml-env"
+# Python executable to use (override if needed):
+#   PYTHON_BIN=/path/to/python bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+PYTHON_BIN="${PYTHON_BIN:-python}"
+
+# ============================================================
+# Resume behavior
+#
+# Default is resume-friendly: rerunning the script will skip
+# steps that already produced non-empty outputs.
+#
+# Override from the shell if needed:
+#   RESUME=0 bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+#   FORCE_TRAIN=1 bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+#   FORCE_EVAL=1 bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+# ============================================================
+
+RESUME="${RESUME:-1}"
+FORCE_TRAIN="${FORCE_TRAIN:-0}"
+FORCE_EVAL="${FORCE_EVAL:-0}"
 
 # Two profiles (train+eval within profile; no cross-profile testing here)
 PROFILES=("daily_tou" "generate_data")
@@ -64,7 +82,7 @@ mkdir -p "$LOG_DIR" "$MODEL_DIR"
 
 # Convenience: LightGBM availability check
 HAS_LGBM=1
-if ! conda run -n "$ENV_NAME" python -c "import lightgbm" >/dev/null 2>&1; then
+if ! "$PYTHON_BIN" -c "import lightgbm" >/dev/null 2>&1; then
   HAS_LGBM=0
 fi
 
@@ -108,48 +126,60 @@ for CATEGORY in "${CATEGORIES[@]}"; do
 
     for MODEL in "${MODELS[@]}"; do
       if [[ "$MODEL" == "lgbm" && "$HAS_LGBM" == "0" ]]; then
-        echo "[skip] lightgbm not installed in conda env '$ENV_NAME'"
+        echo "[skip] lightgbm not installed for $PYTHON_BIN"
         continue
       fi
 
       CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
+      POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
+      POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      EPS_CSV="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv"
+      EPS_LOG="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
 
       echo ""
       echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      conda run -n "$ENV_NAME" python sandbox/eval_pooled_vhat.py \
-        --D 3 --N 40 --pmax "$PMAX" \
-        --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
-        --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
-        --eval-seeds "$EVAL_SEEDS" \
-        --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
-        --transferable-features --normalize --normalize-labels \
-        --target-util "$TARGET_UTIL" \
-        --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
-        --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
-        --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" --lgbm-learning-rate "$LGBM_LR" \
-        "${PROFILE_ARGS[@]}" \
-        --model-type "$MODEL" --beams 2,5 \
-        --save-model "$CKPT" \
-        --out-csv "$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv" \
-        2>&1 | tee "$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
+        echo "[resume] skip TRAIN (ckpt+csv exist): $CKPT"
+      else
+        "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+          --D 3 --N 40 --pmax "$PMAX" \
+          --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
+          --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
+          --eval-seeds "$EVAL_SEEDS" \
+          --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
+          --transferable-features --normalize --normalize-labels \
+          --target-util "$TARGET_UTIL" \
+          --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
+          --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
+          --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" --lgbm-learning-rate "$LGBM_LR" \
+          "${PROFILE_ARGS[@]}" \
+          --model-type "$MODEL" --beams 2,5 \
+          --save-model "$CKPT" \
+          --out-csv "$POOLED_CSV" \
+          2>&1 | tee "$POOLED_LOG"
+      fi
 
       echo ">>> DEPLOY epsilon-sim: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      conda run -n "$ENV_NAME" python sandbox/eval_epsilon_constraint_sim.py \
-        --category "$CATEGORY" \
-        --N 40 --N-range "$N_RANGE" \
-        --M 5 --M-range "$M_RANGE" \
-        --D 3 --D-range "$D_RANGE" \
-        --replicates "$REPLICATES" --seed "$EPS_SEED" \
-        --pmax "$PMAX" --target-util "$TARGET_UTIL" \
-        --price-mode daily_tou \
-        "${PROFILE_ARGS[@]}" \
-        --assign-alpha "$ASSIGN_ALPHA" --assign-uniform-mix "$ASSIGN_UNIFORM_MIX" \
-        --guided --beam "$BEAM" --prune-factor "$PRUNE_FACTOR" \
-        --load-model "$CKPT" --transferable-features --normalize \
-        --out-csv "$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv" \
-        2>&1 | tee "$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      if [[ "$RESUME" == "1" && "$FORCE_EVAL" == "0" && -s "$EPS_CSV" ]]; then
+        echo "[resume] skip DEPLOY (csv exists): $EPS_CSV"
+      else
+        "$PYTHON_BIN" sandbox/eval_epsilon_constraint_sim.py \
+          --category "$CATEGORY" \
+          --N 40 --N-range "$N_RANGE" \
+          --M 5 --M-range "$M_RANGE" \
+          --D 3 --D-range "$D_RANGE" \
+          --replicates "$REPLICATES" --seed "$EPS_SEED" \
+          --pmax "$PMAX" --target-util "$TARGET_UTIL" \
+          --price-mode daily_tou \
+          "${PROFILE_ARGS[@]}" \
+          --assign-alpha "$ASSIGN_ALPHA" --assign-uniform-mix "$ASSIGN_UNIFORM_MIX" \
+          --guided --beam "$BEAM" --prune-factor "$PRUNE_FACTOR" \
+          --load-model "$CKPT" --transferable-features --normalize \
+          --out-csv "$EPS_CSV" \
+          2>&1 | tee "$EPS_LOG"
+      fi
 
       echo ">>> Done: category=$CATEGORY model=$MODEL profile=$PROFILE"
     done

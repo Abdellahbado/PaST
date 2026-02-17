@@ -70,6 +70,10 @@ class PolyRidgeValueModel:
             include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
             include_bins=int(self.spec.include_bins),
             normalize=int(self.spec.normalize),
+            include_len_hist=int(self.spec.include_len_hist),
+            pmax_for_hist=int(self.spec.pmax_for_hist),
+            include_price_shape=int(self.spec.include_price_shape),
+            include_meta=int(self.spec.include_meta),
             model_type="poly",
         )
 
@@ -81,6 +85,16 @@ class PolyRidgeValueModel:
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=bool(int(ckpt["normalize"])),
+            include_len_hist=bool(int(ckpt["include_len_hist"]))
+            if "include_len_hist" in ckpt.files
+            else False,
+            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
+            include_price_shape=bool(int(ckpt["include_price_shape"]))
+            if "include_price_shape" in ckpt.files
+            else False,
+            include_meta=bool(int(ckpt["include_meta"]))
+            if "include_meta" in ckpt.files
+            else False,
         )
         return PolyRidgeValueModel(
             weights=np.asarray(ckpt["weights"], dtype=np.float64),
@@ -263,6 +277,10 @@ class MLPValueModel:
             include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
             include_bins=int(self.spec.include_bins),
             normalize=int(self.spec.normalize),
+            include_len_hist=int(self.spec.include_len_hist),
+            pmax_for_hist=int(self.spec.pmax_for_hist),
+            include_price_shape=int(self.spec.include_price_shape),
+            include_meta=int(self.spec.include_meta),
             model_type="mlp",
         )
 
@@ -274,6 +292,16 @@ class MLPValueModel:
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=bool(int(ckpt["normalize"])),
+            include_len_hist=bool(int(ckpt["include_len_hist"]))
+            if "include_len_hist" in ckpt.files
+            else False,
+            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
+            include_price_shape=bool(int(ckpt["include_price_shape"]))
+            if "include_price_shape" in ckpt.files
+            else False,
+            include_meta=bool(int(ckpt["include_meta"]))
+            if "include_meta" in ckpt.files
+            else False,
         )
         W3 = np.asarray(ckpt["W3"], dtype=np.float64)
         b3 = np.asarray(ckpt["b3"], dtype=np.float64)

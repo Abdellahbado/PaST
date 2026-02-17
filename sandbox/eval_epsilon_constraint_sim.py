@@ -47,8 +47,9 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-# Allow running this script directly: `python PaST/sandbox/...`
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+# Allow running this script directly from the repo: add the parent of the repo root
+_REPO_PARENT = Path(__file__).resolve().parents[2]
+sys.path.append(str(_REPO_PARENT))
 
 # Local imports
 from PaST.solvers.optimal_benchmark_dp import solve_optimal_benchmark_dp
@@ -358,6 +359,16 @@ def _load_vhat_checkpoint(path: str, fallback_spec: FeatureSpec) -> _ValueModelL
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=norm,
+            include_len_hist=bool(int(ckpt["include_len_hist"]))
+            if "include_len_hist" in ckpt.files
+            else False,
+            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else int(getattr(fallback_spec, "pmax_for_hist", 12)),
+            include_price_shape=bool(int(ckpt["include_price_shape"]))
+            if "include_price_shape" in ckpt.files
+            else False,
+            include_meta=bool(int(ckpt["include_meta"]))
+            if "include_meta" in ckpt.files
+            else False,
         )
     return LinearRidgeValueModel(weights=w, spec=spec)
 

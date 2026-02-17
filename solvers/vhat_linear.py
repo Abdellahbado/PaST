@@ -21,6 +21,12 @@ class FeatureSpec:
     include_bins: bool = True
     normalize: bool = False  # divide absolute quantities by T for cross-size transfer
 
+    # Optional cross-size / cross-profile features (defaults off for compatibility)
+    include_len_hist: bool = False  # fixed-length histogram over p in {1..pmax}
+    pmax_for_hist: int = 12
+    include_price_shape: bool = False  # features derived from ctx.day (length H)
+    include_meta: bool = False  # extra metadata/log-scale features
+
 
 def _remaining_from_used(used: Sequence[int], totals: np.ndarray) -> np.ndarray:
     used_arr = np.asarray(used, dtype=np.int32)
@@ -98,6 +104,22 @@ def phi_for_state(
     # Workload summary (normalized by T when normalize=True)
     feats.extend([N / norm, W / norm, R / norm, S_pos / norm])
 
+    # Optional: extra meta features for smoother cross-size generalization.
+    if spec.include_meta:
+        # Note: use log1p for stability across ranges.
+        # Utilization proxies: W/T and slack ratio.
+        util = float(W / float(T)) if T > 0 else 0.0
+        slack_ratio = float(S_pos / (W + 1.0))
+        feats.extend(
+            [
+                float(np.log1p(float(T))),
+                float(np.log1p(float(N))),
+                float(np.log1p(float(W))),
+                util,
+                slack_ratio,
+            ]
+        )
+
     # Slack-regime interactions (normalized)
     feats.extend([(S_pos / norm) * reg_oh[0], (S_pos / norm) * reg_oh[2]])
 
@@ -111,6 +133,45 @@ def phi_for_state(
         long_thr = max(3, median_len)
         long = float(int(np.sum(remaining[lengths_arr >= long_thr])))
         feats.extend([short / norm, long / norm])
+
+    # Optional: fixed-length histogram of remaining job lengths.
+    # This provides a size-agnostic set representation even when K varies.
+    if spec.include_len_hist:
+        pmax_h = int(max(1, int(spec.pmax_for_hist)))
+        # Build counts for p in 1..pmax_h; lengths outside are clipped.
+        # Note: remaining is per unique length class, so we accumulate.
+        hist = np.zeros(pmax_h, dtype=np.float64)
+        for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
+            if nk <= 0:
+                continue
+            idx = int(L)
+            if idx < 1:
+                continue
+            if idx > pmax_h:
+                idx = pmax_h
+            hist[idx - 1] += float(int(nk))
+        feats.extend((hist / norm).tolist())
+
+    # Optional: price-shape features from the daily pattern.
+    # Useful when profiles vary (even if still repeating daily).
+    if spec.include_price_shape:
+        day = np.asarray(ctx.day, dtype=np.float64)
+        # Basic stats
+        feats.extend(
+            [
+                float(np.mean(day)),
+                float(np.std(day)),
+                float(np.min(day)),
+                float(np.max(day)),
+            ]
+        )
+        # Fourier components (k=1..3) to capture within-day shape.
+        H = int(ctx.H)
+        x = np.arange(H, dtype=np.float64)
+        for k in (1, 2, 3):
+            ang = 2.0 * np.pi * float(k) * x / float(H)
+            feats.append(float(np.mean(day * np.cos(ang))))
+            feats.append(float(np.mean(day * np.sin(ang))))
 
     # Per-class counts (normalized)
     if spec.include_per_class_counts:

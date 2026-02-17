@@ -5,6 +5,10 @@ export PYTHONUNBUFFERED=1
 # Run from this script's directory (PaST/)
 cd "$(dirname "$0")"
 
+# Python executable to use (override if needed):
+#   PYTHON_BIN=/path/to/python bash PaST/run_all_models_deploy_epsilon_profiles.sh
+PYTHON_BIN="${PYTHON_BIN:-python}"
+
 # -----------------------------
 # Config (deployment-like)
 # -----------------------------
@@ -54,8 +58,8 @@ for PROFILE in "${PROFILES[@]}"; do
 		echo ">>> Training pooled Vhat: model=$MODEL profile=$PROFILE"
 
 		if [[ "$MODEL" == "lgbm" ]]; then
-			if ! conda run -n new-ml-env python -c "import lightgbm" >/dev/null 2>&1; then
-				echo "    [skip] lightgbm is not installed in conda env 'new-ml-env'"
+			if ! "$PYTHON_BIN" -c "import lightgbm" >/dev/null 2>&1; then
+				echo "    [skip] lightgbm is not installed for $PYTHON_BIN"
 				continue
 			fi
 		fi
@@ -63,7 +67,7 @@ for PROFILE in "${PROFILES[@]}"; do
 		CKPT="$MODEL_DIR/vhat_${PROFILE}_${MODEL}.npz"
 
 		# 1) Train pooled model on variable N/D within interval
-		conda run -n new-ml-env python sandbox/eval_pooled_vhat.py \
+		"$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
 			--D 3 --N 40 --pmax "$PMAX" \
 			--train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
 			--train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
@@ -80,7 +84,7 @@ for PROFILE in "${PROFILES[@]}"; do
 		echo ">>> Epsilon-constraint deployment sim: model=$MODEL profile=$PROFILE"
 
 		# 2) Deployment-like multi-machine epsilon simulation
-		conda run -n new-ml-env python sandbox/eval_epsilon_constraint_sim.py \
+		"$PYTHON_BIN" sandbox/eval_epsilon_constraint_sim.py \
 			--category small \
 			--N 40 --N-range "$N_RANGE" \
 			--M 5 --M-range "$M_RANGE" \
