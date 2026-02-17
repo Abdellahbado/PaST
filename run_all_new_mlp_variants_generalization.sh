@@ -76,6 +76,13 @@ mkdir -p "$POOL_DIR"
 # - RESUME=0: force re-run everything (overwrites CSVs; checkpoints overwritten by training)
 RESUME="${RESUME:-1}"
 
+# Start point for long runs.
+# Default: start from medium so reruns don't waste time on already-finished small.
+# Override:
+#   START_CATEGORY=small  bash PaST/run_all_new_mlp_variants_generalization.sh
+#   START_CATEGORY=large  bash PaST/run_all_new_mlp_variants_generalization.sh
+START_CATEGORY="${START_CATEGORY:-medium}"
+
 PROFILES=("daily_tou" "generate_data")
 NEW_MODELS=("mlp_hist" "mlp_price" "mlp_meta" "mlp_all")
 CATEGORIES=("small" "medium" "large")
@@ -151,6 +158,13 @@ _size_params() {
 # In-size train + eval
 # ------------------------
 for CATEGORY in "${CATEGORIES[@]}"; do
+  if [[ "${STARTED:-0}" == "0" ]]; then
+    if [[ "$CATEGORY" != "$START_CATEGORY" ]]; then
+      echo "[skip] CATEGORY=$CATEGORY (START_CATEGORY=$START_CATEGORY)"
+      continue
+    fi
+    STARTED=1
+  fi
   read -r N_RANGE D_RANGE M_RANGE TARGET_UTIL TRAIN_SEEDS EVAL_SEEDS SAMPLES REPLICATES <<< "$(_size_params "$CATEGORY")"
 
   LABEL_MODE="subproblem"
@@ -199,18 +213,22 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
       POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
       POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      POOLED_DONE="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.done"
       EPS_CSV="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv"
       EPS_LOG="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      EPS_DONE="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.done"
 
       echo ""
       echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      if [[ "$RESUME" == "1" && -f "$CKPT" && -f "$POOLED_CSV" ]]; then
+      if [[ "$RESUME" == "1" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
         echo "[resume] skip pooled train/eval (exists): ckpt=$CKPT csv=$POOLED_CSV"
       else
+        rm -f "$POOLED_DONE"
         "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
           --D 3 --N 40 --pmax "$PMAX" \
           --workers "$EFFECTIVE_WORKERS" \
+          --maxtasksperchild 1 \
           --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
           --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
           --eval-seeds "$EVAL_SEEDS" \
@@ -232,13 +250,16 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --save-model "$CKPT" \
           --out-csv "$POOLED_CSV" \
           2>&1 | tee "$POOLED_LOG"
+
+        touch "$POOLED_DONE"
       fi
 
       echo ">>> DEPLOY epsilon-sim (within-size): category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      if [[ "$RESUME" == "1" && -f "$EPS_CSV" ]]; then
+      if [[ "$RESUME" == "1" && -f "$EPS_DONE" && -s "$EPS_CSV" ]]; then
         echo "[resume] skip epsilon-sim (exists): csv=$EPS_CSV"
       else
+        rm -f "$EPS_DONE"
         "$PYTHON_BIN" sandbox/eval_epsilon_constraint_sim.py \
           --category "$CATEGORY" \
           --N 40 --N-range "$N_RANGE" \
@@ -253,6 +274,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --load-model "$CKPT" --transferable-features --normalize \
           --out-csv "$EPS_CSV" \
           2>&1 | tee "$EPS_LOG"
+
+        touch "$EPS_DONE"
       fi
 
       echo ">>> Done: category=$CATEGORY model=$MODEL profile=$PROFILE"
@@ -302,10 +325,12 @@ for PROFILE in "${PROFILES[@]}"; do
     if [[ "$RESUME" == "1" && -f "$CROSS_CSV" ]]; then
       echo "[resume] skip cross eval (exists): csv=$CROSS_CSV"
     else
+      rm -f "$CROSS_CSV.done"
       "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
         --load-model "$CKPT" \
         --D 3 --N 40 --pmax "$PMAX" \
         --workers "$EFFECTIVE_WORKERS" \
+        --maxtasksperchild 1 \
         --eval-seeds "$EVAL_SEEDS_T" \
         --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
         --transferable-features --normalize \
@@ -315,6 +340,8 @@ for PROFILE in "${PROFILES[@]}"; do
         --beams 2,5 \
         --out-csv "$CROSS_CSV" \
         2>&1 | tee "$CROSS_LOG"
+
+      touch "$CROSS_CSV.done"
     fi
   done
 
@@ -334,10 +361,12 @@ for PROFILE in "${PROFILES[@]}"; do
     if [[ "$RESUME" == "1" && -f "$CROSS_CSV" ]]; then
       echo "[resume] skip cross eval (exists): csv=$CROSS_CSV"
     else
+      rm -f "$CROSS_CSV.done"
       "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
         --load-model "$CKPT" \
         --D 3 --N 40 --pmax "$PMAX" \
         --workers "$EFFECTIVE_WORKERS" \
+        --maxtasksperchild 1 \
         --eval-seeds "$EVAL_SEEDS_T" \
         --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
         --transferable-features --normalize \
@@ -347,6 +376,8 @@ for PROFILE in "${PROFILES[@]}"; do
         --beams 2,5 \
         --out-csv "$CROSS_CSV" \
         2>&1 | tee "$CROSS_LOG"
+
+      touch "$CROSS_CSV.done"
     fi
   done
 

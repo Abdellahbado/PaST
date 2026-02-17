@@ -70,6 +70,13 @@ RESUME="${RESUME:-1}"
 FORCE_TRAIN="${FORCE_TRAIN:-0}"
 FORCE_EVAL="${FORCE_EVAL:-0}"
 
+# Start point for long runs.
+# Default: start from medium so reruns don't waste time on already-finished small.
+# Override:
+#   START_CATEGORY=small  bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+#   START_CATEGORY=large  bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+START_CATEGORY="${START_CATEGORY:-medium}"
+
 # Two profiles (train+eval within profile; no cross-profile testing here)
 PROFILES=("daily_tou" "generate_data")
 MODELS=("linear" "poly" "mlp" "lgbm")
@@ -128,6 +135,13 @@ if ! "$PYTHON_BIN" -c "import lightgbm" >/dev/null 2>&1; then
 fi
 
 for CATEGORY in "${CATEGORIES[@]}"; do
+  if [[ "${STARTED:-0}" == "0" ]]; then
+    if [[ "$CATEGORY" != "$START_CATEGORY" ]]; then
+      echo "[skip] CATEGORY=$CATEGORY (START_CATEGORY=$START_CATEGORY)"
+      continue
+    fi
+    STARTED=1
+  fi
   case "$CATEGORY" in
     small)
       N_RANGE="20-60";  D_RANGE="2-4";   M_RANGE="3-7";   TARGET_UTIL="0.80";
@@ -198,15 +212,24 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
       POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
       POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      POOLED_DONE="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.done"
       EPS_CSV="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv"
       EPS_LOG="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      EPS_DONE="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.done"
 
       echo ""
       echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
+      STREAM_FIT_ARGS=()
+      if [[ "$MODEL" == "linear" || "$MODEL" == "poly" ]]; then
+        # Helps keep RAM stable when pooling on disk.
+        STREAM_FIT_ARGS=(--stream-fit --fit-chunk-size 200000)
+      fi
+
+      if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
         echo "[resume] skip TRAIN (ckpt+csv exist): $CKPT"
       else
+        rm -f "$POOLED_DONE"
         # Cap worker count to avoid spawning too many heavy Python processes.
         WORKERS_EFF="$WORKERS"
         if [[ "$WORKERS_EFF" -gt "$MAX_WORKERS" ]]; then
@@ -215,6 +238,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
         "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
           --D 3 --N 40 --pmax "$PMAX" \
           --workers "$WORKERS_EFF" \
+          --maxtasksperchild 1 \
           --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
           --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
           --eval-seeds "$EVAL_SEEDS" \
@@ -229,6 +253,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \
+          "${STREAM_FIT_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
           --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
           --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" --lgbm-learning-rate "$LGBM_LR" \
@@ -237,13 +262,16 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --save-model "$CKPT" \
           --out-csv "$POOLED_CSV" \
           2>&1 | tee "$POOLED_LOG"
+
+        touch "$POOLED_DONE"
       fi
 
       echo ">>> DEPLOY epsilon-sim: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      if [[ "$RESUME" == "1" && "$FORCE_EVAL" == "0" && -s "$EPS_CSV" ]]; then
+      if [[ "$RESUME" == "1" && "$FORCE_EVAL" == "0" && -f "$EPS_DONE" && -s "$EPS_CSV" ]]; then
         echo "[resume] skip DEPLOY (csv exists): $EPS_CSV"
       else
+        rm -f "$EPS_DONE"
         "$PYTHON_BIN" sandbox/eval_epsilon_constraint_sim.py \
           --category "$CATEGORY" \
           --N 40 --N-range "$N_RANGE" \
@@ -258,6 +286,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --load-model "$CKPT" --transferable-features --normalize \
           --out-csv "$EPS_CSV" \
           2>&1 | tee "$EPS_LOG"
+
+        touch "$EPS_DONE"
       fi
 
       echo ">>> Done: category=$CATEGORY model=$MODEL profile=$PROFILE"

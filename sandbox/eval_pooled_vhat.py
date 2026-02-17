@@ -244,12 +244,20 @@ def _collect_state_labels_optimal_path(
     attempts_total = 0
 
     for tb in tie_breaks:
-        exact = solve_optimal_benchmark_dp(
-            p_list,
-            prices,
-            tie_break=str(tb),
-            time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
-        )
+        try:
+            exact = solve_optimal_benchmark_dp(
+                p_list,
+                prices,
+                tie_break=str(tb),
+                time_limit=(
+                    float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0
+                ),
+            )
+        except MemoryError:
+            # Some seeds can trigger extreme DP growth; skip rather than crashing.
+            continue
+        except Exception:
+            continue
         if not exact.feasible:
             continue
         if bool(require_optimal_labels) and not bool(exact.is_optimal):
@@ -684,148 +692,152 @@ def _collect_worker(
     require_optimal_labels: bool,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
-    rng = np.random.default_rng(seed)
+    attempts = 0
+    try:
+        rng = np.random.default_rng(int(seed))
 
-    D_use, N_use = _sample_D_N_feasible(
-        rng=rng,
-        base_D=int(D),
-        base_N=int(N),
-        D_range=D_range,
-        N_range=N_range,
-        target_util=float(target_util),
-        H=20,
-    )
-
-    tu = float(target_util)
-    p, prices = build_instance(
-        rng=rng,
-        D=D_use,
-        N=N_use,
-        pmax=pmax,
-        daily_prices_20=daily_prices_20,
-        target_util=(tu if tu > 0.0 else None),
-        M_for_cap=1,
-    )
-    T = int(len(prices))
-    lengths, totals, radices, _mult = encode_setup(p)
-    ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
-    prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
-
-    lm = str(label_mode).strip().lower()
-    if lm == "optimal_path":
-        states, labels, attempts = _collect_state_labels_optimal_path(
-            p_list=p,
-            prices=prices,
-            totals=totals,
-            lengths=lengths,
-            target_samples=samples_per_instance,
-            normalize_labels=normalize_labels,
-            prefix_prices=prefix_prices,
-            dp_time_limit=float(dp_time_limit),
-            n_paths=int(optimal_path_n_paths),
-            require_optimal_labels=bool(require_optimal_labels),
+        D_use, N_use = _sample_D_N_feasible(
+            rng=rng,
+            base_D=int(D),
+            base_N=int(N),
+            D_range=D_range,
+            N_range=N_range,
+            target_util=float(target_util),
+            H=20,
         )
-        # Top-up: optimal_path yields only ~O(T) labels. Optionally add extra
-        # random subproblem labels (can get expensive; keep it capped).
-        need = int(samples_per_instance) - int(len(states))
-        if need > 0:
-            cap = int(optimal_path_topup_max)
-            # Semantics:
-            #   cap == 0 -> disable top-up
-            #   cap < 0  -> unlimited (fill to samples_per_instance)
-            #   cap > 0  -> add at most cap extra labels
-            if cap == 0:
-                topup_target = 0
-            elif cap < 0:
-                topup_target = int(need)
-            else:
-                topup_target = int(min(int(need), int(cap)))
-            if topup_target > 0:
-                sp_states, sp_labels, sp_attempts = _collect_state_labels(
+
+        tu = float(target_util)
+        p, prices = build_instance(
+            rng=rng,
+            D=int(D_use),
+            N=int(N_use),
+            pmax=int(pmax),
+            daily_prices_20=daily_prices_20,
+            target_util=(tu if tu > 0.0 else None),
+            M_for_cap=1,
+        )
+
+        T = int(len(prices))
+        lengths, totals, radices, _mult = encode_setup(p)
+        ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
+        prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
+
+        lm = str(label_mode).strip().lower()
+        if lm == "optimal_path":
+            states, labels, attempts = _collect_state_labels_optimal_path(
+                p_list=p,
+                prices=prices,
+                totals=totals,
+                lengths=lengths,
+                target_samples=int(samples_per_instance),
+                normalize_labels=bool(normalize_labels),
+                prefix_prices=prefix_prices,
+                dp_time_limit=float(dp_time_limit),
+                n_paths=int(optimal_path_n_paths),
+                require_optimal_labels=bool(require_optimal_labels),
+            )
+
+            # Optional top-up beyond O(T)
+            need = int(samples_per_instance) - int(len(states))
+            if need > 0:
+                cap = int(optimal_path_topup_max)
+                if cap == 0:
+                    topup_target = 0
+                elif cap < 0:
+                    topup_target = int(need)
+                else:
+                    topup_target = int(min(int(need), int(cap)))
+
+                if topup_target > 0:
+                    sp_states, sp_labels, sp_attempts = _collect_state_labels(
+                        rng=rng,
+                        T=T,
+                        totals=totals,
+                        lengths=lengths,
+                        prices=prices,
+                        target_samples=topup_target,
+                        normalize_labels=bool(normalize_labels),
+                        prefix_prices=prefix_prices,
+                        dp_time_limit=float(optimal_path_topup_dp_time_limit),
+                        require_optimal_labels=bool(require_optimal_labels),
+                    )
+                    attempts += int(sp_attempts)
+                    if sp_states:
+                        seen = set(states)
+                        for s, y in zip(sp_states, sp_labels):
+                            if s in seen:
+                                continue
+                            seen.add(s)
+                            states.append(s)
+                            labels.append(float(y))
+
+            # Fallback (only if top-up enabled)
+            if not states and int(optimal_path_topup_max) != 0:
+                sp = min(int(samples_per_instance), 64)
+                states, labels, attempts = _collect_state_labels(
                     rng=rng,
                     T=T,
                     totals=totals,
                     lengths=lengths,
                     prices=prices,
-                    target_samples=topup_target,
-                    normalize_labels=normalize_labels,
+                    target_samples=sp,
+                    normalize_labels=bool(normalize_labels),
                     prefix_prices=prefix_prices,
                     dp_time_limit=float(optimal_path_topup_dp_time_limit),
                     require_optimal_labels=bool(require_optimal_labels),
                 )
-                attempts += int(sp_attempts)
-                if sp_states:
-                    # Deduplicate (state, label) by state.
-                    seen = set(states)
-                    for s, y in zip(sp_states, sp_labels):
-                        if s in seen:
-                            continue
-                        seen.add(s)
-                        states.append(s)
-                        labels.append(float(y))
 
-        if not states and int(optimal_path_topup_max) != 0:
-            # Robust fallback (only when top-up is enabled): collect a small
-            # batch of subproblem labels rather than returning 0 samples.
-            sp = min(int(samples_per_instance), 64)
+        elif lm == "subproblem":
             states, labels, attempts = _collect_state_labels(
                 rng=rng,
                 T=T,
                 totals=totals,
                 lengths=lengths,
                 prices=prices,
-                target_samples=sp,
-                normalize_labels=normalize_labels,
+                target_samples=int(samples_per_instance),
+                normalize_labels=bool(normalize_labels),
                 prefix_prices=prefix_prices,
-                dp_time_limit=float(optimal_path_topup_dp_time_limit),
+                dp_time_limit=float(dp_time_limit),
                 require_optimal_labels=bool(require_optimal_labels),
             )
-    elif lm == "subproblem":
-        states, labels, attempts = _collect_state_labels(
-            rng=rng,
-            T=T,
-            totals=totals,
-            lengths=lengths,
-            prices=prices,
-            target_samples=samples_per_instance,
-            normalize_labels=normalize_labels,
-            prefix_prices=prefix_prices,
-            dp_time_limit=float(dp_time_limit),
-            require_optimal_labels=bool(require_optimal_labels),
-        )
-    else:
-        raise ValueError(f"Unknown label_mode: {label_mode!r}")
+        else:
+            raise ValueError(f"Unknown label_mode: {label_mode!r}")
 
-    if not states:
-        return np.empty((0, 0)), np.empty(0), attempts
+        if not states:
+            return np.empty((0, 0)), np.empty(0), int(attempts)
 
-    # Avoid list-of-arrays + vstack (high peak RAM). Preallocate and fill.
-    dtype = np.dtype(str(x_dtype))
-    t0, used0 = states[0]
-    phi0 = phi_for_state(
-        t=int(t0),
-        used=used0,
-        totals=totals,
-        lengths=lengths.tolist(),
-        ctx=ctx,
-        spec=spec,
-    )
-    feat_dim = int(phi0.shape[0])
-    X_inst = np.empty((len(states), feat_dim), dtype=dtype)
-    X_inst[0, :] = phi0.astype(dtype, copy=False)
-    for i in range(1, len(states)):
-        t_v, used_v = states[i]
-        phi_v = phi_for_state(
-            t=int(t_v),
-            used=used_v,
+        # Avoid list-of-arrays + vstack (high peak RAM). Preallocate and fill.
+        dtype = np.dtype(str(x_dtype))
+        t0, used0 = states[0]
+        phi0 = phi_for_state(
+            t=int(t0),
+            used=used0,
             totals=totals,
             lengths=lengths.tolist(),
             ctx=ctx,
             spec=spec,
         )
-        X_inst[i, :] = phi_v.astype(dtype, copy=False)
-    y_inst = np.asarray(labels, dtype=np.float64)
-    return X_inst, y_inst, attempts
+        feat_dim = int(phi0.shape[0])
+        X_inst = np.empty((len(states), feat_dim), dtype=dtype)
+        X_inst[0, :] = phi0.astype(dtype, copy=False)
+        for i in range(1, len(states)):
+            t_v, used_v = states[i]
+            phi_v = phi_for_state(
+                t=int(t_v),
+                used=used_v,
+                totals=totals,
+                lengths=lengths.tolist(),
+                ctx=ctx,
+                spec=spec,
+            )
+            X_inst[i, :] = phi_v.astype(dtype, copy=False)
+        y_inst = np.asarray(labels, dtype=np.float64)
+        return X_inst, y_inst, int(attempts)
+
+    except MemoryError:
+        return np.empty((0, 0)), np.empty(0), int(attempts)
+    except Exception:
+        return np.empty((0, 0)), np.empty(0), int(attempts)
 
 
 def main() -> None:
