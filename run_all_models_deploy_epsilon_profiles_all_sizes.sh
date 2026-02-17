@@ -44,6 +44,16 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 # On HPC, mp.cpu_count() can be very large and may OOM / violate process limits.
 WORKERS="${WORKERS:-16}"
 
+# Hard cap for spawned Python worker processes (safety on memory-limited nodes).
+# Override if your node has ample RAM:
+#   MAX_WORKERS=128 WORKERS=128 bash ...
+MAX_WORKERS="${MAX_WORKERS:-32}"
+
+# Directory for on-disk pooling (memmap). Using an explicit path avoids relying
+# on system temp dirs (which can be small/slow on some clusters).
+POOL_DIR="${POOL_DIR:-ADP/tmp/pool}"
+mkdir -p "$POOL_DIR"
+
 # ============================================================
 # Resume behavior
 #
@@ -122,20 +132,23 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       SAMPLES="$SAMPLES_SMALL"; REPLICATES="$REPLICATES_SMALL";
       POOL_ARGS=()
       LABEL_MODE="subproblem"
+      DP_TIME_LIMIT="-1"
       ;;
     medium)
       N_RANGE="100-200"; D_RANGE="5-15";  M_RANGE="8-16";  TARGET_UTIL="0.85";
       TRAIN_SEEDS="$TRAIN_SEEDS_MEDIUM"; EVAL_SEEDS="$EVAL_SEEDS_MEDIUM";
       SAMPLES="$SAMPLES_MEDIUM"; REPLICATES="$REPLICATES_MEDIUM";
-      POOL_ARGS=(--pool-on-disk --pool-dtype float32)
+      POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
+      DP_TIME_LIMIT="2.0"
       ;;
     large)
       N_RANGE="250-500"; D_RANGE="10-30"; M_RANGE="25-40"; TARGET_UTIL="0.90";
       TRAIN_SEEDS="$TRAIN_SEEDS_LARGE"; EVAL_SEEDS="$EVAL_SEEDS_LARGE";
       SAMPLES="$SAMPLES_LARGE"; REPLICATES="$REPLICATES_LARGE";
-      POOL_ARGS=(--pool-on-disk --pool-dtype float32)
+      POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
+      DP_TIME_LIMIT="5.0"
       ;;
     *)
       echo "Unknown CATEGORY=$CATEGORY"; exit 1;
@@ -176,15 +189,21 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
         echo "[resume] skip TRAIN (ckpt+csv exist): $CKPT"
       else
+        # Cap worker count to avoid spawning too many heavy Python processes.
+        WORKERS_EFF="$WORKERS"
+        if [[ "$WORKERS_EFF" -gt "$MAX_WORKERS" ]]; then
+          WORKERS_EFF="$MAX_WORKERS"
+        fi
         "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
           --D 3 --N 40 --pmax "$PMAX" \
-          --workers "$WORKERS" \
+          --workers "$WORKERS_EFF" \
           --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
           --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
           --eval-seeds "$EVAL_SEEDS" \
           --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
           --transferable-features --normalize --normalize-labels \
            --label-mode "$LABEL_MODE" \
+          --dp-time-limit "$DP_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \

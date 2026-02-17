@@ -55,6 +55,22 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 # Multiprocessing workers for pooled data collection.
 WORKERS="${WORKERS:-16}"
 
+# Hard cap to avoid spawning too many heavy Python worker processes on HPC.
+# Override:
+#   MAX_WORKERS=8 WORKERS=64 bash PaST/run_all_new_mlp_variants_generalization.sh
+MAX_WORKERS="${MAX_WORKERS:-16}"
+
+# Effective workers used by all calls.
+EFFECTIVE_WORKERS="$WORKERS"
+if [[ "$EFFECTIVE_WORKERS" -gt "$MAX_WORKERS" ]]; then
+  EFFECTIVE_WORKERS="$MAX_WORKERS"
+fi
+
+# Directory for on-disk pooling (memmap). Using an explicit path avoids relying
+# on system temp dirs (which can be small/slow on some clusters).
+POOL_DIR="${POOL_DIR:-ADP/tmp/pool}"
+mkdir -p "$POOL_DIR"
+
 # Resume behavior:
 # - RESUME=1 (default): skip steps whose outputs already exist
 # - RESUME=0: force re-run everything (overwrites CSVs; checkpoints overwritten by training)
@@ -137,10 +153,20 @@ _size_params() {
 for CATEGORY in "${CATEGORIES[@]}"; do
   read -r N_RANGE D_RANGE M_RANGE TARGET_UTIL TRAIN_SEEDS EVAL_SEEDS SAMPLES REPLICATES <<< "$(_size_params "$CATEGORY")"
 
+  LABEL_MODE="subproblem"
+  DP_TIME_LIMIT="-1"
+  if [[ "$CATEGORY" == "medium" ]]; then
+    LABEL_MODE="optimal_path"
+    DP_TIME_LIMIT="2.0"
+  elif [[ "$CATEGORY" == "large" ]]; then
+    LABEL_MODE="optimal_path"
+    DP_TIME_LIMIT="5.0"
+  fi
+
   # Use on-disk pooling for bigger categories to avoid RAM spikes with many workers.
   POOL_ARGS=()
   if [[ "$CATEGORY" == "medium" || "$CATEGORY" == "large" ]]; then
-    POOL_ARGS=(--pool-on-disk --pool-dtype float32)
+    POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
   fi
 
   echo "========================================================================"
@@ -169,12 +195,14 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       else
         "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
           --D 3 --N 40 --pmax "$PMAX" \
-          --workers "$WORKERS" \
+          --workers "$EFFECTIVE_WORKERS" \
           --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
           --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
           --eval-seeds "$EVAL_SEEDS" \
           --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
           --transferable-features --normalize --normalize-labels \
+          --label-mode "$LABEL_MODE" \
+          --dp-time-limit "$DP_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
@@ -246,7 +274,7 @@ for PROFILE in "${PROFILES[@]}"; do
       "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
         --load-model "$CKPT" \
         --D 3 --N 40 --pmax "$PMAX" \
-        --workers "$WORKERS" \
+        --workers "$EFFECTIVE_WORKERS" \
         --eval-seeds "$EVAL_SEEDS_T" \
         --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
         --transferable-features --normalize \
@@ -277,7 +305,7 @@ for PROFILE in "${PROFILES[@]}"; do
       "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
         --load-model "$CKPT" \
         --D 3 --N 40 --pmax "$PMAX" \
-        --workers "$WORKERS" \
+        --workers "$EFFECTIVE_WORKERS" \
         --eval-seeds "$EVAL_SEEDS_T" \
         --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
         --transferable-features --normalize \

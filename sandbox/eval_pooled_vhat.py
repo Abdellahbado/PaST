@@ -123,6 +123,7 @@ def _collect_state_labels(
     target_samples: int,
     normalize_labels: bool = False,
     prefix_prices: np.ndarray | None = None,
+    dp_time_limit: float = -1.0,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
     """Sample random (t, used) states and label them with exact DP cost-to-go.
 
@@ -157,7 +158,12 @@ def _collect_state_labels(
         if not rem_p:
             y = 0.0
         else:
-            sub = solve_optimal_benchmark_dp(rem_p, prices[t:], tie_break="cost")
+            sub = solve_optimal_benchmark_dp(
+                rem_p,
+                prices[t:],
+                tie_break="cost",
+                time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
+            )
             if not sub.feasible:
                 continue
             y = float(sub.cost)
@@ -183,6 +189,7 @@ def _collect_state_labels_optimal_path(
     target_samples: int,
     normalize_labels: bool = False,
     prefix_prices: np.ndarray | None = None,
+    dp_time_limit: float = -1.0,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
     """Collect exact labels using ONE exact DP solve, labeling states on an optimal path.
 
@@ -204,8 +211,18 @@ def _collect_state_labels_optimal_path(
     if prefix_prices is None:
         prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
-    exact = solve_optimal_benchmark_dp(p_list, prices, tie_break="cost")
+    exact = solve_optimal_benchmark_dp(
+        p_list,
+        prices,
+        tie_break="cost",
+        time_limit=float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0,
+    )
     if not exact.feasible:
+        return [], [], 0
+
+    # If we didn't get a full schedule (e.g., reconstruction failed), abort.
+    # In that case, the caller can fall back to subproblem labels.
+    if len(exact.schedule) < len(p_list):
         return [], [], 0
 
     # Map job-start time -> length for the optimal schedule.
@@ -362,6 +379,7 @@ def _collect_worker(
     target_util: float,
     x_dtype: str,
     label_mode: str,
+    dp_time_limit: float,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
@@ -401,7 +419,23 @@ def _collect_worker(
             target_samples=samples_per_instance,
             normalize_labels=normalize_labels,
             prefix_prices=prefix_prices,
+            dp_time_limit=float(dp_time_limit),
         )
+        if not states:
+            # Robust fallback: collect a small batch of subproblem labels.
+            # (Better than returning 0 samples for the whole seed.)
+            sp = min(int(samples_per_instance), 64)
+            states, labels, attempts = _collect_state_labels(
+                rng=rng,
+                T=T,
+                totals=totals,
+                lengths=lengths,
+                prices=prices,
+                target_samples=sp,
+                normalize_labels=normalize_labels,
+                prefix_prices=prefix_prices,
+                dp_time_limit=float(dp_time_limit),
+            )
     elif lm == "subproblem":
         states, labels, attempts = _collect_state_labels(
             rng=rng,
@@ -412,6 +446,7 @@ def _collect_worker(
             target_samples=samples_per_instance,
             normalize_labels=normalize_labels,
             prefix_prices=prefix_prices,
+            dp_time_limit=float(dp_time_limit),
         )
     else:
         raise ValueError(f"Unknown label_mode: {label_mode!r}")
@@ -510,6 +545,17 @@ def main() -> None:
             "How to generate exact labels for training states. "
             "subproblem: sample random states and solve an exact DP subproblem per state (very expensive for medium/large). "
             "optimal_path: solve the full instance once and label states along an optimal schedule (exact cost-to-go, O(T) labels)."
+        ),
+    )
+
+    ap.add_argument(
+        "--dp-time-limit",
+        type=float,
+        default=-1.0,
+        help=(
+            "Time limit (seconds) for exact DP calls during label collection. "
+            "If >0, DP may return a greedy-completed solution on timeout (still feasible, but labels become approximate). "
+            "Use this on HPC to prevent rare seeds from stalling the whole sweep."
         ),
     )
 
@@ -885,6 +931,7 @@ def main() -> None:
             f"\n[pool] Samples per instance: {args.samples_per_instance}"
             f"\n[pool] Features: spec={spec}"
             f"\n[pool] normalize_labels={use_normalize_labels}"
+            f"\n[pool] label_mode={str(args.label_mode).strip()}  dp_time_limit={float(args.dp_time_limit)}"
             f"\n[pool] Workers: {n_workers}"
         )
 
@@ -905,6 +952,7 @@ def main() -> None:
             target_util=float(args.target_util),
             x_dtype=str(args.pool_dtype),
             label_mode=str(args.label_mode),
+            dp_time_limit=float(args.dp_time_limit),
         )
 
         mtpc = int(args.maxtasksperchild)
@@ -912,7 +960,6 @@ def main() -> None:
 
         if bool(args.pool_on_disk):
             import tempfile
-            from pathlib import Path
 
             pool_dir = str(args.pool_dir).strip()
             if pool_dir:
@@ -924,34 +971,45 @@ def main() -> None:
             expected_per_inst = int(args.samples_per_instance)
             expected_total = int(len(train_seeds)) * expected_per_inst
 
-            # Probe a single seed with a tiny sample count to determine feature dimension.
-            # Important: do NOT probe with full samples_per_instance (can take hours for big instances).
+            # Probe feature dimension WITHOUT any DP/label computation.
             print(f"[pool] memmap: dir={tmp_dir}")
-            print("[pool] memmap: probing feature dimension (1 sample)...")
+            print("[pool] memmap: probing feature dimension (no DP)...")
             probe_seed = int(train_seeds[0])
-            probe_fn = partial(
-                _collect_worker,
-                D=int(args.D),
-                N=int(args.N),
-                pmax=int(args.pmax),
+            prng = np.random.default_rng(int(probe_seed))
+            D_use, N_use = _sample_D_N_feasible(
+                rng=prng,
+                base_D=int(args.D),
+                base_N=int(args.N),
                 D_range=train_D_range,
                 N_range=train_N_range,
-                samples_per_instance=1,
-                spec=spec,
-                normalize_labels=use_normalize_labels,
-                daily_prices_20=daily_prices_20,
                 target_util=float(args.target_util),
-                x_dtype=str(args.pool_dtype),
-                label_mode=str(args.label_mode),
+                H=20,
             )
-            probe_X, _probe_y, _probe_attempts = probe_fn(probe_seed)
-            if probe_X.size == 0:
-                raise RuntimeError(
-                    "Probe produced no samples; cannot determine feature dimension"
-                )
-            print(f"[pool] memmap: probe feature_dim={int(probe_X.shape[1])}")
-
-            feat_dim = int(probe_X.shape[1])
+            tu = float(args.target_util)
+            p_probe, prices_probe = build_instance(
+                rng=prng,
+                D=int(D_use),
+                N=int(N_use),
+                pmax=int(args.pmax),
+                daily_prices_20=daily_prices_20,
+                target_util=(tu if tu > 0.0 else None),
+                M_for_cap=1,
+            )
+            lengths_p, totals_p, _rad, _mul = encode_setup(p_probe)
+            ctx_p = build_tou_feature_context(
+                prices_probe, H=20, validate_repeating=True
+            )
+            used0 = tuple([0] * int(len(lengths_p)))
+            phi0 = phi_for_state(
+                t=0,
+                used=used0,
+                totals=totals_p,
+                lengths=lengths_p.tolist(),
+                ctx=ctx_p,
+                spec=spec,
+            )
+            feat_dim = int(phi0.shape[0])
+            print(f"[pool] memmap: probe feature_dim={feat_dim}")
             x_dtype = np.dtype(str(args.pool_dtype))
             X_path = os.path.join(tmp_dir, "X_pool.dat")
             y_path = os.path.join(tmp_dir, "y_pool.dat")
@@ -1018,6 +1076,14 @@ def main() -> None:
             X_pool = X_mm[:cursor]
             y_pool = y_mm[:cursor]
             print(f"[pool] memmap: finished collection; dir={tmp_dir}")
+
+            if int(cursor) <= 0 or int(len(y_pool)) <= 0:
+                raise RuntimeError(
+                    "No training samples collected (memmap). "
+                    "This usually means the labeler returned 0 states for every seed. "
+                    "Try loosening constraints (target_util/ranges), switching label_mode, "
+                    "or increasing dp_time_limit."
+                )
         else:
             if n_workers > 1 and len(train_seeds) > 1:
                 print(f"[pool] Collecting data with {n_workers} parallel workers...")
@@ -1048,6 +1114,14 @@ def main() -> None:
             all_X = [r[0] for r in results if r[0].size > 0]
             all_y = [r[1] for r in results if r[1].size > 0]
             total_attempts = sum(r[2] for r in results)
+
+            if not all_X or not all_y:
+                raise RuntimeError(
+                    "No training samples collected. "
+                    "This usually means the labeler returned 0 states for every seed. "
+                    "Try loosening constraints (target_util/ranges), switching label_mode, "
+                    "or increasing dp_time_limit."
+                )
 
             X_pool = np.vstack(all_X)
             y_pool = np.concatenate(all_y)
