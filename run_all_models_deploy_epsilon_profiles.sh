@@ -2,12 +2,42 @@
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 
+# Be conservative on shared/HPC nodes: avoid thread oversubscription.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+
 # Run from this script's directory (PaST/)
 cd "$(dirname "$0")"
+
+# -----------------------------
+# nohup launcher (default on)
+#
+# By default, the script re-launches itself under nohup in the background so
+# terminal/SSH disconnects won't stop the run.
+#
+# Disable:
+#   NOHUP=0 bash PaST/run_all_models_deploy_epsilon_profiles.sh
+# -----------------------------
+
+if [[ "${NOHUP:-1}" == "1" && -z "${IN_NOHUP:-}" ]]; then
+	mkdir -p "ADP/logs/nohup"
+	TS="$(date +"%Y%m%d_%H%M%S")"
+	LOG_FILE="ADP/logs/nohup/$(basename "$0" .sh)_${TS}.log"
+	echo "[nohup] launching in background; log: $LOG_FILE"
+	IN_NOHUP=1 NOHUP=0 nohup bash "$0" "$@" >"$LOG_FILE" 2>&1 &
+	echo "[nohup] pid=$!"
+	exit 0
+fi
 
 # Python executable to use (override if needed):
 #   PYTHON_BIN=/path/to/python bash PaST/run_all_models_deploy_epsilon_profiles.sh
 PYTHON_BIN="${PYTHON_BIN:-python}"
+
+# Multiprocessing workers for pooled data collection.
+WORKERS="${WORKERS:-16}"
 
 # -----------------------------
 # Config (deployment-like)
@@ -69,6 +99,7 @@ for PROFILE in "${PROFILES[@]}"; do
 		# 1) Train pooled model on variable N/D within interval
 		"$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
 			--D 3 --N 40 --pmax "$PMAX" \
+			--workers "$WORKERS" \
 			--train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
 			--train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
 			--eval-seeds "$EVAL_SEEDS" \

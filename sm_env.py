@@ -50,7 +50,7 @@ from .config import (
     ShortSlackSpec,
     PeriodAlignedSlackSpec,
 )
-from .sm_benchmark_data import (
+from .data.sm_benchmark_data import (
     SingleMachineEpisode,
     generate_single_machine_episode,
     DataConfig,

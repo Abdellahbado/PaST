@@ -1,0 +1,5566 @@
+Approximate dynamic programming for an energy-efficient parallel machine
+scheduling problem
+Mojtaba Heydara,b,∗, Elham Mardaneha , Ryan Loxtona
+a
+
+School of Electrical Engineering, Computing, and Mathematical Sciences, Curtin University, Bentley, WA 6102,
+Australia
+b
+ARC Training Center for Transforming Maintenance through Data Science, Curtin University, Bentley, WA 6102,
+Australia
+
+Abstract
+In this paper, we propose an approximate dynamic programming approach for an energy-efficient
+unrelated parallel machine scheduling problem. In this scheduling problem, jobs arrive at the system
+randomly, and each job’s ready and processing times become available when an order is placed.
+Therefore, we consider the online version of the problem. Our objective is to minimize a combination
+of makespan and the total energy costs. The energy costs include cost of energy consumption of
+machines for switching on, processing, and idleness. We propose a binary program to solve the
+optimization problem at each stage of the approximate dynamic program. We compare the results
+of the approximate programming approach against an integer linear programming formulation of
+the offline version of the scheduling problem and an existing heuristic method suitable for scheduling
+problem with ready times. The results show that the approximate dynamic programming algorithm
+outperforms the two off-line methods in terms of solution quality and computational time.
+Keywords: Scheduling, approximate dynamic programming, energy-efficient production planning,
+makespan, time-of-use tariff
+
+1. Introduction
+In recent years, many countries have introduced new regulations to enforce sustainability recognition and implementation in manufacturing industries to reduce resource consumption and carbon
+footprint. Energy efficiency in production systems from the operational standpoint and new advanced equipment have been pursued as two strategies to make the reduction possible. However,
+in recent years, more efforts have been devoted to operational energy efficiency in the form of production planning and scheduling through time-of-use (TOU) tariff schemes set by energy suppliers
+(Anghinolfi et al. 2020, Cao et al. 2020).
+Since the implementation of TOU tariff by utility suppliers, many companies, especially energyintensive industries, have applied energy-aware production scheduling policies to reduce the electric∗
+
+Corresponding author
+Email addresses: mojtaba.heydar@curtin.edu.au (Mojtaba Heydar), elham.mardaneh@curtin.edu.au (Elham
+Mardaneh), r.loxton@curtin.edu.au (Ryan Loxton)
+
+Preprint submitted to European Journal of Operational Research
+
+January 6, 2022
+
+ity cost by shifting from peak hours operations to medium-pick or off-pick hours operations (Hadera
+et al. 2015, Zhang et al. 2014). This creates a new interesting and challenging scheduling problem
+in which there is a cost associated with each period (this cost is also called green metric or green
+performance measure (Anghinolfi et al. 2020)). These problems belong to the class of bi-criteria
+scheduling problems with machine assignment costs, and there is a trade-off between the two criteria (Leung et al. 2012). Therefore, to measure the quality of each feasible schedule, a cost-oriented
+objective should be considered in addition to the conventional performance measures such as completion time and tardiness. Wan and Qi (2010) proved that a single machine scheduling problem
+with time-dependent scheduling cost is an NP-hard problem.
+This paper deals with a class of online scheduling problem. In this class, unlike the off-line
+problems, the required information is not available at the time of making decisions. For example,
+the jobs to be processed, their arrival and processing times, and machine availability time may not
+be known (Albers 2009). In this paper, we extend the work of Nezami et al. (2017) by considering
+random arrival time and processing time of jobs, and present an approximate dynamic programming
+(ADP) approach to solve the online bi-objective unrelated parallel machine scheduling problem.
+The objectives are minimizing the makespan and total energy cost, which is defined based on the
+TOU concept for measuring energy consumption. It is assumed that jobs arrive at the system
+randomly. Therefore, the ready times of jobs are not known in advance, but it is assumed that
+they follow a known probability distribution.
+The main contributions of this paper are twofold: this is the first study that considers an online
+energy-efficient unrelated parallel machine scheduling problem; and this is the first study in the
+literature that presents an approximate dynamic programming algorithm for this online scheduling
+problem. The remainder of this paper is organized as follows. A survey of previous works is given
+in Section 2. The online scheduling problem is defined and formulated in Section 3. Section 4
+presents the approximate dynamic programming algorithm designed for solving the problem at
+hand. The computational analysis is presented in Section 5. Finally, concluding remarks are given
+in Section 6.
+2. Literature review
+Energy-efficient scheduling has been the subject of many studies in the past few years, and the
+number is still growing, indicating the importance and popularity of the subject. An excellent survey on the energy-efficient scheduling problem was written by Gahm et al. (2016). They considered
+studies from 1990 to 2015 and introduced energetic coverage, energy supply, and energy demand as
+three dimensions for classifying the literature. In another survey, two approaches were defined for
+classifying energy-efficient scheduling problems known as input and output-oriented approach (Giret
+et al. 2015). According to this classification, the input-oriented approaches mostly deal with performance measures and energy minimization objectives, whereas output-oriented approaches deal with
+environmental waste and pollution minimization along with performance measures (Nezami et al.
+2017). This study, however, does not consider the output-related objectives such as carbon emission
+2
+
+minimization. Several studies that applied the concept of energy-efficient scheduling in real-world
+industries involved tempered glass process (Liu et al. 2020), glass production plant (Wang et al.
+2016, 2020b), steel production plant (Cao et al. 2020, Hadera et al. 2015), steelmaking-refiningcontinuous casting (Tan and Liu 2014), moulding industry (Paolucci et al. 2017), and scrap steel
+melting process (Gajic et al. 2017, Yang et al. 2018).
+In recent years, several studies have addressed the energy-efficient scheduling problem in different machine settings. Single machine scheduling problem was the first class of energy-efficient
+scheduling problems that were studied. Cheng et al. (2016) developed a bi-objective (makespan
+and total electricity costs) mixed-integer linear program for a single-machine batch scheduling
+problem based on the TOU concept and developed an -constraint method for generating Pareto
+optimal solutions. Wang et al. (2016) extended their problem by considering two new decision
+variables, which are processing in machine low-temperature mode and processing in machine hightemperature mode. They approximated the Pareto fronts by two decomposition-based heuristics.
+Shrouf et al. (2014) considered processing, idle, and shutdown as three machine modes in their
+formulation, which was solved by a genetic algorithm. Aghelinejad et al. (2018) solved the nonpreemptive case of Shrouf et al. (2014) by a genetic algorithm where scheduling at the machine
+and job levels were considered. Cheng et al. (2017a) also considered idle and processing modes in
+their MILP formulation and used an -constraint-based heuristic to handle instances of larger size.
+Fang et al. (2016) developed an approximation algorithm for the uniform and speed-scaling single
+machine problem. A weighted sum of the total energy costs and total completion time of all jobs
+on all machines combined was studied by Mouzon et al. (2007) and Rubaiee and Yildirim (2019).
+Energy-efficient scheduling problem in the flow-shop setting was studied extensively (for example, see Mansouri and Aktas (2016), Wang et al. (2020b), Zhang et al. (2014), Zheng et al.
+(2020)). Gong et al. (2020) studied the energy-efficient flexible flow shop with worker flexibility as
+it has a significant impact on the performance of the production system. Therefore, they considered makespan, worker or human factor cost, and energy indicator for their proposed MILP model.
+Then they developed a hybrid evolutionary algorithm for solving large-scale instances of the problem. Other variants of the energy-efficient flow-shop scheduling problem which have been studied
+include flexible flow-shop with sequence-dependent setup times (Jiang and Wang 2019, Mansouri
+et al. 2016), distributed no-idle flow-shop (Chen et al. 2019), permutation flow-shop (Lu et al.
+2017), and hybrid flow-shop (Li et al. 2019, Luo et al. 2013).
+Energy-efficient job-shop scheduling problem and its variants have been studied by many researchers over the past few years. A dynamic energy-efficient job-shop scheduling problem was
+addressed by Nouiri et al. (2018). They proposed a particle swarm optimization approach to minimize makespan and energy efficiency simultaneously. Golpı̂ra et al. (2018) studied a robust energyefficient production scheduling problem in which supply and demand are uncertain and developed
+risk-based robust mixed-integer linear program. Zhang et al. (2017) proposed a dynamic game
+theory approach to minimize makespan, machine load, and energy consumption. Meta-heuristic
+approaches such as genetic algorithms (Liu et al. 2016, May et al. 2015, Salido et al. 2016, Zhang and
+
+3
+
+Chiong 2016), evolutionary algorithms (Wang et al. 2020a), memetic algorithms (Abedi et al. 2020),
+and shuffled frog-leaping algorithms (Lei et al. 2017) were also used for solving the energy-efficient
+job shop scheduling problem. Other variants of job-shop scheduling that received attention from
+researchers include job shop scheduling with transportation constraint (Dai et al. 2019), scheduling
+and lot-sizing (Giglio et al. 2017), flexible job shop scheduling (Dai et al. 2019, Meng et al. 2019,
+Mokhtari and Hasani 2017), and job shop scheduling with variable spindle speed (Yin et al. 2017).
+The subject of this research, energy-efficient parallel machine scheduling problem, has received
+attention over the past few years. For a detailed literature review on the parallel machine environment see Safarzadeh and Niaki (2019) and the references therein. The off-line unrelated parallel
+machine problem solved by genetic algorithm was studied by Moon et al. (2013). Ding et al. (2015)
+proposed a MILP for the parallel machine scheduling problem based on TOU with makespan and
+total energy cost as the objectives. They developed a column generation algorithm to deal with the
+complexity. Their model was then improved by Cheng et al. (2017b). Che et al. (2017) developed
+a mixed-integer linear program for the off-line uniform parallel machine scheduling problem based
+on the concept of TOU and proposed a two-stage heuristic to handle the large-scale cases. Nezami
+et al. (2017) developed a mixed-integer nonlinear program for unrelated parallel machine scheduling with total completion time, total energy cost, and total power consumption as three objective
+functions. Anghinolfi et al. (2020) developed a time-indexed MILP based on the concept of TOU
+for an off-line identical parallel machine scheduling problem, where no-preemption is allowed, with
+minimization of makespan and total energy cost. Then, they introduced a heuristic procedure
+called Split-Greedy Heuristic, which is a constructive algorithm enhanced with a local search. Safarzadeh and Niaki (2019) studied an off-line uniform parallel machine problem with minimization
+of makespan and green production costs of all machines combined. Instead of using TOU, they
+introduced three cost factors called green processing cost, green working cost of machines per unit
+time, and green working cost of machines per unit of job processing. Using -constraint technique,
+an improvement of the heuristic algorithm of Ji et al. (2013) was used to generate Pareto optimal
+solutions. The current study and the work of Nezami et al. (2017), to the best of our knowledge,
+are the only two studies that consider machines’ modes (states) such as processing, idle, on/off,
+various processing speeds, and TOU policies simultaneously.
+The subject of this study is related to the applications of approximate dynamic programming.
+For some recent applications of approximate dynamic programming see (Al-Kanj et al. 2020, Godfrey and Powell 2002, Heydar et al. 2021, Jenkins et al. 2021, Koch and Klein 2020, Saure et al.
+2012, Yuan and Tang 2017). Ronconi and Powell (2010) is the only study that applies the approximate dynamic programming approach to the online single machine tardiness scheduling problem.
+The current study differs from their work in several ways. First, this study considers the parallel
+machine scheduling problem. Second, this study considers an energy-efficient scheduling problem
+where the performance measure is makespan. Third, we consider different modes of machines in
+this problem. Fourth, we use a double-pass approximate dynamic programming algorithm. Finally,
+we consider a 0-1 program at each stage of the problem to find the best decision where the objective
+
+4
+
+includes cost-per-stage and future costs.
+3. The scheduling problem
+In this section, we present the online energy-efficient unrelated parallel machine scheduling
+problem formally. We mostly use the conventions defined in Nezami et al. (2017). It is assumed
+
+that there are M = 1, 2, . . . .M unrelated parallel machines available to process a set of available
+jobs denoted by J . This implies that all jobs should be processed eventually. Each job arrives
+at the system randomly and its job ready time (arrival time) is denoted by rj ≥ 0. Each job j
+has an integer random machine-dependent processing time denoted by pmj > 0. If machine m is
+not suitable to process job j, then we have pmj = ∞. The processing time becomes available once
+the job appears at the system. We also assume that the planning horizon is discretized into time
+
+slots t ∈ T , where T := 0, 1, . . . , T H , with equal lengths of L. The newly arrived jobs are ready
+at the beginning of each time interval. Moreover, without loss of generality, it is assumed that
+the processing times are divisible by the interval length. No preemption is allowed. Finally, all
+machines are off at the beginning of the planning horizon, and each machine can be switched on
+only once over the planning horizon. The objective is to assign the arriving jobs to the machines
+in order to minimize makespan and total energy costs.
+We base the formulation of the problem on the following assumptions. We consider the TOU,
+meaning that energy prices vary in peak/off-peak periods. The energy price for each time slot t ∈ T
+is denoted by Et . We also assume that each machine can process only one job during each time slot
+t ∈ T . There is an electricity consumption rate for each machine’s mode during each time slot t.
+m
+The electricity consumption for processing and idle mode are µm
+t and κt , respectively. Similarly,
+
+the parameter λm
+t denotes the required electricity to switch on machine m at the beginning of time
+slot t. Finally, we assume that the time it takes to start a machine is negligible, however, during
+the period that the machine is switched on the average energy consumption increases. All problem
+notations are given in Table 1.
+This online scheduling problem can be modeled as a Markov Decision Process, in which all aspects of a stochastic optimization problem are available (see Ronconi and Powell (2010) and Powell
+(2007, Chapter 5)). These aspects are state variable, decision variables, an objective function,
+transition function, and exogenous information. In the following, we explain these aspects of the
+online scheduling problem at hand.
+
+The state of the system at time slot t ∈ T , denoted by St , is defined by set St = Jt , At , Υt .
+
+In this set, Jt is the set of unprocessed jobs at the beginning of time slot t and At = (rj , pmj )|j ∈
+Jt , m ∈ Mt , where Mt is the set of available machines at time slot t. The state of machines, Υt ,
+m
+m
+m
+m
+is defined by (ytm , ztm , ρm
+t , at ), where yt ∈ {0, 1}, zt ∈ {0, 1}, and ρt ∈ {0, 1} denote whether
+
+machine m is in idle mode, just switched on, and in processing mode at time slot t. In this
+convention, am
+t shows the time when machine m is available to process which can be any time at or
+after t. For instance, let us assume that job j with processing time pmj = 2 is scheduled on machine
+m at t − 1, then machine m will be available at time am
+t = t + 1. In this case, machine m will be
+5
+
+Table 1: Notations used in the paper
+Sets
+J
+Jt
+JtC
+JtCa
+T
+M
+
+Set of all jobs
+Set of unprocessed job at the beginning of time t, Jt ⊂ J
+Set of available jobs that can be scheduled at time t, Jtc ⊆ Jt
+Set of jobs scheduled at time t, JtCa ⊆ JtC
+The discretized planning horizon such that |T | = T H
+Set of all machines
+
+Parameters
+rj
+pmj
+κm
+t
+λm
+t
+µm
+t
+Et
+L
+ζi
+St
+At
+Mt
+Wt
+Υt
+am
+t
+ρm
+t
+ytm
+ztm
+
+Arrival (ready) time of job j ∈ J
+Processing time of job j on machine m
+Power consumption of machine m at time t in idle mode
+Power consumption of machine m at time t when switches on
+Power consumption of machine m at time t in processing mode
+Price of energy at time t
+The length of each interval t ∈ T
+The weight of objective i
+State of the system at time t
+The release time and processing time of unprocessed jobs at time t
+Set of available machine at time t
+The exogenous information that arrive at time t − 1 for time t
+State of machines at the beginning of time t
+Shows the time that machine m becomes available
+A binary parameter indicating whether machine m is processing (=1)
+at time t or not (=0)
+A binary parameter indicating whether machine m is idle (=1) at time
+t or not (=0)
+A binary parameter indicating whether machine m is switched on (=1)
+at time t or not (=0)
+
+Decisions
+xm
+tj
+m
+ωtj
+
+
+
+1
+
+ 0
+1
+0
+
+if machine m starts processing on job j at time t
+otherwise
+if machine m is processing job j during time t
+otherwise
+
+m
+m
+m
+m
+m
+occupied during time slots t and t + 1, i.e. ρm
+t = ρt+1 = 1 = 1 − yt = 1 − yt+1 =⇒ yt = yt+1 = 0.
+
+The following remark defines the constraints of each machine during each time slot:
+Remark 1. During each time slot t, a particular machine m is either in processing mode or idle
+m
+mode, mathematically, ρm
+t + yt ≤ 1.
+
+The inequality of Remark 1 implies that if machine m is off during time slot t, then ρm
+t =
+ytm = 0. On the other hand, if machine m is on during time slot t, then it is either processing,
+m
+m
+m
+ρm
+t = 1 = 1 − yt , or idle, ρt = 0 = 1 − yt . Furthermore, the following condition between two
+
+consecutive time slots holds
+m
+m
+m
+m
+ρm
+t−1 + yt−1 = ρt + yt − zt ,
+
+(1)
+
+m
+m
+with the initial condition ρm
+0 + y0 − z0 = 0. This initial condition is derived from the assumption
+
+that all machines are off at the beginning of the planning horizon. The condition in Eq. (1) states
+that if machine m is in processing or idle mode for the first time at time t, it should be switched
+
+6
+
+on first.
+Denote by JtC the subset of available jobs that can be scheduled at the beginning of time slot
+t. The set of decisions is defined on set JtC and represented as follows
+
+C
+
+ 1 job j ∈ Jt is scheduled on available machine m
+m
+xtj =
+at time t;
+
+
+0 otherwise.
+
+(2)
+
+m
+For any other jobs not in JtC or unavailable machines, i.e. am
+t > t, we have xtj = 0. At the beginning
+
+of each time slot t, candidate jobs are assigned to the available machines. If the number of available
+machines is less than the number of candidate jobs, i.e. |Mt | < |JtC |, only a subset of jobs can be
+scheduled and the rest will be considered in the next time slot. This subset is denoted by JtCa .
+The decision given by (2) is defined for the candidate jobs in JtC , and the available machines at
+time slot t. According to our definition of state of machines, a machine is available only if am
+t ≤ t,
+meaning that we can consider a machine only if it was freed before or just at the beginning of time
+slot t. By using decision variable xm
+tj , we decide whether or not to assign job j to machine m at
+m
+m
+time slot t. If xm
+tj = 1, then states of the machine should be updated as {ρt = 1, yt = 0}, for
+
+t, t + 1, t + 2, . . . , t + pmj − 1, and am
+t = t + pmj , for t + 1, t + 2, . . . , t + pmj .
+Using this kind of decision variables, we define a policy π ∈ Π (the family of policies) that
+satisfy some assignment constraints. The set of these decisions under policy π is defined by action
+space Xtπ .
+The contribution of the objective function at time slot t for makespan, Cmax,t , is calculated by
+Ct1 (St , Xtπ ) = Cmax,t =
+
+
+max
+
+m∈M
+j∈|JtCa |
+
+
+
+m
+m
+max rj , at + pmj xtj .
+
+(3)
+
+Since rj ≤ t for all j ∈ JtCa , and for all available machines we have am
+t = t, therefore, job j can only
+start at time t and the first term in Eq. (3) is max{rj , am
+t } = t. As a result, Eq. (3) is simplified to
+Ct1 (St , Xtπ ) = Cmax,t =
+
+
+max
+
+m∈M
+j∈|JtCa |
+
+t + pmj xm
+tj
+
+
+,
+
+which is equivalent to the constraints (45) in the off-line model of the appendix.
+Similarly, we define per stage contribution of the objective function with respect to total energy
+cost, T EC t , as follows
+Ca
+
+Ct2 (St , Xtπ ) = ECt = Et
+
+
+|Jt |
+M 
+X
+X
+m
+m
+m m
+m m
+µt
+ωtj + κt yt + λt zt ,
+m=1
+
+j=1
+
+m ∈ {0, 1} is an auxiliary variable indicating if job j is being processed by machine m
+where, ωtj
+
+at time slot t. The three terms in the above equation are energy cost associated with processing
+7
+
+mode, idle mode, and starting machine m at time slot t, and Et is the price of energy during time
+slot t. The processing state of machine m due to machine capacity during each time slot t will be
+updated as
+|JtC |
+
+X
+
+m
+ωtj
+= ρm
+t .
+
+(4)
+
+j=1
+
+According to this condition, if machine m is in processing mode, it should process only one job
+from the candidate list. By applying condition (4), the total energy cost can be written as follow:
+Ct2 (St , Xtπ ) = ECt = Et
+
+M 
+X
+
+
+m
+m m
+m m
+µm
+ρ
++
+κ
+y
++
+λ
+z
+,
+t t
+t t
+t t
+
+(5)
+
+ζi Cti (St , Xtπ ),
+
+(6)
+
+m=1
+
+The total cost at t is then defined by
+Ct (St , Xtπ ) =
+
+2
+X
+i=1
+
+where ζi is the weight of the objective i = {1, 2}. It should be pointed out that the two criteria
+in Eq. (6) have different dimensions. Therefore, the weights ζ1 and ζ2 should be determined or
+normalized in such way that all terms of the resulting single objective problem have the same
+dimensions. The weighted sum of Eq. (6) can be written as Ct1 (St , Xtπ ) + ( ζζ12 )Ct2 (St , Xtπ ) which
+means that the relativity of weights are important (Cohon 1978).
+Since we consider the online version of the energy-efficient unrelated parallel scheduling problem,
+the exogenous information is the arrival of the new jobs to the system for each time slot t. In any
+stochastic system a transition from state St to state St+1 is defined by the following function
+St+1 = S M (St , Xtπ , Rt+1 ),
+
+(7)
+
+where Rt+1 denotes the exogenous information that becomes available after time t and before time
+t + 1. In this problem the S M (·) is defined as follows
+
+ω ,
+Jt+1 = (Jt \ JtCa ) ∪ Jt+1
+
+
+
+
+
+
+
+At+1 = {(rj , pjm )|j ∈ Jt+1 , m ∈ Mt+1 },
+
+
+
+
+
+
+P
+ m
+m
+at+1 = max(am
+t +
+j∈J Ca pmj xtj , t + 1), ∀m ∈ Mt+1 ,
+
+(8)
+
+t
+
+ω is the set of jobs that become known to us between t and t + 1,
+In this transition function, Jt+1
+
+with their associated information such as ready time, rj , and processing times, pmj . Using am
+t+1 ,
+we are able to update the state of machine m ∈ Mt+1 during the time slot t.
+The last step in the modeling of the stochastic decision problem is to define the objective
+function. Our objective is to find the best policy π to minimize the expected value of a linear
+8
+
+Table 2: Data for example 1
+
+j
+
+Time information received
+
+rj
+
+p1j
+
+p2j
+
+1
+2
+3
+4
+5
+
+0
+0
+1
+1
+3
+
+0
+1
+3
+3
+3
+
+4
+1
+2
+3
+4
+
+6
+3
+3
+4
+3
+
+combination of the makespan and total energy cost as follows
+
+X
+TH
+π
+min E
+Ct (St , Xt ) S0 ,
+π∈Π
+
+(9)
+
+t=1
+
+where E denotes the expectation value. Using Bellman’s equation, we can write the optimization
+problem as follows
+
+
+
+Vt (St ) = minπ Ct (St , xt ) + E Vt+1 (St+1 )|St
+,
+xt ∈Xt
+
+(10)
+
+where Vt (St ) is the minimum value of the value function at state St . The optimization problem (10)
+can be solved using the backward dynamic programming. Reasons that make the computing of
+the exact value of Eq. (10) intractable include: (1) the size of state space St , (2) the size of the
+decision vector xt , and (3) the calculation of the expectation of the future cost due to the size
+of decision vector xt and exogenous information Rt . The three reasons are known as the curse of
+dimentionality (e.g., see Powell (2007, Chapter 4) for details on three curses of dimensionality). One
+approach to resolve this curse of dimensionality issue is to use approximate dynamic programming
+(ADP). Before introducing the proposed approximate dynamic programming approach, we provide
+a small example.
+Example 1. Consider a parallel machine environment with |M| = 2 machines. There are |J | = 5
+jobs that we want to schedule over T = 20 time slots with Et = 1. The jobs information are
+shown in Table 2. The second column of this table shows the time when exogenous information is
+available. For example, at time t = 0, information for jobs j = 1 and j = 2 are received but only
+m
+m
+j = 1 is available for processing. We also assume that µm
+t = κt = λt = 1, ∀m ∈ M, ∀t ∈ T . At
+
+time t = 0, only information of jobs j = 1, 2 are available, hence we need to apply a sequential
+decision making approach. One simple way is to use a myopic approach. In this approach we can
+make decision as jobs arrive at the system without considering the impact of our decision on the
+future cost. In this example, job j = 1 is assigned to machine m = 1. It results in Cmax,1 = 4 and
+EC1 = 2. At time t = 1, the second job, j = 2, arrives and it is assigned to machine m = 2, since
+this machine is the only available machine. The objective values are Cmax,2 = 4 and EC2 = 3,
+respectively. At times t = 2, no job arrives, and three jobs, j = 3, 4, 5, arrive at time t = 3. At
+this time slot we have to wait until t = 4, so that both machines become available. At time t = 4,
+from 3 × 3! = 18 different possible schedules, by scheduling jobs j = 3, 4 on machine m = 1 and job
+9
+
+Table 3: The value of objective functions for each time slot t
+
+t
+0
+Cmax,t
+ECt
+
+1
+
+2
+
+3
+
+4
+
+5
+
+6
+
+7
+
+8
+
+9
+
+10-20
+
+4
+2
+
+4
+3
+
+4
+2
+
+4
+2
+
+7
+2
+
+7
+2
+
+9
+2
+
+9
+2
+
+9
+2
+
+2
+
+j = 5 on machine m = 2, the values of makespan for each time slot will be Cmax,5 = Cmax,6 = 7,
+Cmax,7 = Cmax,8 = Cmax,9 = 9. Similarly, the energy costs for each time slot can be calculated.
+It should be noted that in this schedule, the first machine is idle for time slots t = 8, 9, and for
+t ≥ 10 both machines are idle. The sequential decision process using this myopic policy is depicted
+in Figure 1. After scheduling all five jobs the problem maskespan and total energy cost are 9 and
+41, respectively. The weighted sum of the objective value is 0.5 × (9 + 41) = 25. The values of
+makespan and energy costs are given in Table 3. It should be noted that the schedule obtained
+using the myopic policy is one of the 480 possibilities depending on the number of machines used.
+These number of schedules are known only if all information is available at the beginning of the
+planning horizon, which is the case for the off-line deterministic problems. Given this fact, other
+possibilities such as delaying the processing of jobs will increase the number of schedules, hence
+the complexity of the problem at hand. For the sake of comprehensiveness, we solve this example
+with the integer program of the Appendix A. Again, we assume that both objectives are equally
+important (ζ1 = ζ2 = 0.5). As depicted in Figure 2, the schedule starts as last as possible to
+reduce the total energy cost. This schedule allows the machines to be turned on towards the end
+of planning horizon, which eliminates the idle cost of machines. The overall objective of offline
+model is 17.5 with Cmax = 20 and EC = 15. Although better, this value can be obtained only if all
+information (exogenous and endogenous) are known prior to the decision making process; otherwise,
+this schedule might be infeasible if any new job shows up.
+
+4. Approximate Dynamic Programming
+Approximate dynamic programming has been successfully applied to many stochastic optimization problems (e.g., see (Alkaabneh et al. 2020, Silva and de Souza 2020)). ADP is an algorithmic
+strategy that moves forward through time to approximate the future expected value of the value
+function. Its origin dates back to the birth of dynamic programming when Bellman introduced the
+concept of the curse of dimensionality (Ronconi and Powell 2010). There are two approximation
+approaches for solving dynamic programs, namely optimization-based and simulation-based (Saure
+et al. 2012). The simulation-based ADP, which is the focus of this paper, uses the concept of a
+post-decision state to cope with the expectation in the Bellman’s equation (see (Powell 2007, 2016,
+2019)). Our solution approach to the online unrelated parallel machine scheduling problem is based
+on the double-pass value iteration algorithm within the framework of approximate dynamic programming. In particular, we combine the approximate dynamic programming and mathematical
+10
+
+t=0
+m2
+m1
+
+j1
+0
+
+4
+t=1
+
+m2
+m1
+
+j2
+j1
+0
+
+4
+t=4
+
+m2
+m1
+
+j2
+
+j4
+
+j1
+
+j3
+
+0
+
+4
+
+6
+
+7
+
+t=6
+m2
+m1
+
+j2
+
+j4
+
+j1
+
+j3
+
+0
+
+j5
+
+4
+
+6
+
+7
+
+9
+
+Figure 1: The sequential decisions made in Example 1
+
+m2
+m1
+
+j5
+j4
+0
+
+10
+
+j3
+13
+
+j2
+15
+
+j1
+16
+
+17
+
+Figure 2: The optimal schedule of Example 1 obtained by the IP of Appendix A
+
+11
+
+20
+
+programming to handle the three curses of dimnesionality. In this section, we present the details
+of our approach.
+4.1. Post-decision state
+We use the concept of post-decision state to reduce the size of the decision outcome space and
+intractability of expected future cost. The post-decision state, Stx , refers to the state of the system
+immediately after decision xt is made, but before the arrival of any new exogenous information Rt+1 .
+In other words, the post-decision state is a state between states St and St+1 . The post-decision
+state for this problem is defined by
+Stx = {Jtx , Axt , Mtx },
+
+(11)
+
+where Jtx , Axt , and Mtx are updated as follows
+
+x
+C
+
+ Jt = (Jt \ Jt ),
+
+
+
+
+
+
+Axt = {(rj , pjm )|j ∈ Jtx , m ∈ Mtx },
+
+
+
+
+
+
+
+
+
+(12)
+
+Mtx = {m ∈ M|xm
+tj = 1}.
+
+Here, Mtx denotes the post-decision states for machines with the updated states after making
+decision xt . After this post-decision state the system will move forward to the next pre-decision
+state St+1 which is defined as follows
+
+ω ,
+Jt+1 = Jtx ∪ Jt+1
+
+
+
+
+
+
+
+
+ω ,m ∈ M
+At+1 = Axt ∪ {(rj , pjm )|j ∈ Jt+1
+t+1 },
+
+
+
+
+
+
+
+
+
+(13)
+
+Mt+1 = Mt \ Mtx ∪ {m ∈ M : am
+t+1 = t + 1}.
+
+Using the concept of post-decision state, we are able to write the Bellman’s equation as follows
+
+Vt (St ) = minπ
+xt ∈Xt
+
+Ct (St , xt ) + Vtx (Stx )
+
+
+
+Vtx (Stx ) = E
+
+Vt+1 (St+1 )|Stx
+
+
+,
+
+(14)
+
+
+,
+
+(15)
+
+where Vtx (Stx ) is the value function approximation for being in post-decision state Stx . The expectation value in Eq. (15) still makes the calculation of the value function intractable. Therefore, it
+is necessary to estimate it based on the simulation-based approach which it benefits from statistical learning algorithms (Hulshof et al. 2016, Ronconi and Powell 2010). This estimation converts
+the stochastic optimization problem into a deterministic one which is easier to solve because it
+12
+
+removes the expected future cost. Next, we explain one method for approximating the expectation
+in Eq (15).
+4.2. Value function approximation
+To reduce the size of space-action space for a particular decision, we need to approximate the
+value of post-decision state Vtx (Stx ). We use a statistical learning algorithm that approximates the
+n
+
+value function over N iterations. Let V t (Stx ) denotes an estimation for Vtx (Stx ) at iteration n of
+the algorithm, then equation (15) can be expressed as
+
+
+n
+V t (Sxt ) = E
+
+Vt+1 (St+1 )|Stx
+
+
+.
+
+Using this new definition and the original definition of Bellman’s equation given by Eq. (10), we
+can write approximate dynamic programming equation as
+v̂tn =
+and
+
+
+
+n−1
+x
+minπ Ct (St , xt ) + V t (St ) ,
+
+xt ∈Xt
+
+
+
+n−1
+xnt = arg minπ Ct (St , xt ) + V t (Stx ) ,
+xt ∈Xt
+
+(16)
+
+(17)
+
+where xnt is the value of decision vector xt that optimizes value function Eq. (16) at iteration n
+of the algorithm (Mes and Rivera 2017). At iteration n, we have to solve Eq (17) to obtain the
+best decision that minimizes the value v̂tn for state St . Finally, using Eq. (16) we can update the
+estimate for the value function at time t − 1 and iteration n by
+
+n
+n−1
+x,n
+, v̂tn .
+V t−1 ←− U n V t−1 , St−1
+
+(18)
+
+The update function U n (·) depends on the value approximation at time t − 1 from iteration n − 1,
+n−1
+
+x,n
+V t1 , post-decision state at time slot t − 1 at iteration n denoted by St−1
+, and the objective value
+n
+
+estimation (16). Now the main challenge is to calculate V t−1 in Eq. (18).
+n
+
+There are various algorithms to estimate the value function V t−1 . In this paper, we use the
+concept of basis function. In the basis function, some particular features of a system that can
+capture required information of the system, which has impacts on the value function, are considered.
+Then, the value function calculation using an affine combinations of basis functions is defined by
+n
+
+V t (Stx ) =
+
+X
+
+ηfn φf (Stx ),
+
+(19)
+
+f ∈F
+
+where F is the set of features, ηfn is a weight for feature f ∈ F, and φf (Stx ) is the value of the
+basis function for a feature f given the post-decision state Stx . In this approximation of the value
+function, the weight ηfn is updated recursively at each iteration n of the algorithm.
+There are different approaches for calculating and updating ηfn , among which the recursive least
+13
+
+square method is the most effective approach (Hulshof et al. 2016, Powell 2007). Depending on the
+data, there are two methods for the recursive least square methods. If the data are stationary, the
+method puts equal weights on each data; while in the non-stationary data, the more recent data
+receives higher weights (Hulshof et al. 2016)(for details of this approach see Powell (2007)). At
+each iteration n of the algorithm, the weights ηfn are updated recursively using following equation
+ηfn = ηfn−1 −
+
+
+
+1 n−1
+n−1
+x
+x
+n
+B
+φ
+(S
+)
+V
+(S
+)
+−
+v̂
+f
+t
+t−1
+t−1
+t ,
+γn
+
+∀f ∈ F,
+
+(20)
+
+where B n−1 is a |F| × |F| matrix which is updated recursively by
+!
+
+
+1
+1
+T
+.
+B n = n B n−1 − n B n−1 φ(Stx ) φ(Stx ) B n−1
+α
+γ
+
+(21)
+
+The parameter γ n is defined and updated by
+γ n = αn + φ(Stx )T B n−1 φ(Stx ).
+
+(22)
+
+At iteration n = 1, we set B 0 = I, where I is the identity matrix and  is a very small constant. The
+parameter αn , n = 1, 2, . . . , N , shows that the observations are either stationary or non-stationary
+and is defined by
+n
+
+α =
+
+
+
+ 1
+
+stationary;
+
+
+
+
+non-stationary.
+
+1 − nδ
+
+(23)
+
+The parameter δ, which tunes our approximation, should be determined in advance. In our model,
+we assume that our data are non-stationary; therefore, we set αn = 1− nδ . The approximate dynamic
+programming algorithm, known as the double-pass algorithm, is given in Algorithm 1 (Heydar
+et al. 2021, Hulshof et al. 2016, Powell 2007). In this algorithm, we can arbitrarily assign values
+to parameters σ, , and ηt0 . At each iteration of the algorithm, we solve the decision problem
+to obtain the post-decision states, and then using the exogenous information and the transition
+function S M (·), the next pre-state will be obtained. In this study, we use probability distribution
+to generate the required information. The exogenous information for the problem at hand is the
+number of jobs along with their ready time and processing time on different machines. It should
+be noted that the exogenous information can be obtained from the historical data or the true
+distribution if it is known. Once we have cost-per-stage values Ct (St , xt ) for all t, we backward
+through time from the end of the planning horizon, T H , and calculate v̂tn . This will enable us to
+n
+
+update weights using Eqs. (20)-(23), and calculate the value approximation V t (Stx ) by Eq. (19).
+At the end of the algorithm, when the weights reach their steady-state values, the optimization
+method can be applied to the problem that we want to solve.
+As mentioned earlier, we use the basis functions to estimate the value function of the postdecision state. The basis function has an impact on the quality of the ADP algorithm. The basis
+14
+
+function is a set of features that captures the required information of the system. For the problem
+in this study, we define the indicator function 1{·} to capture the state of machine m at time t.
+Then, in each state, we count the number of machines in each processing, idle, and switched on
+mode. Also, we keep track of the number of jobs already assigned from the set of candidate jobs,
+denoted by JtCa , and the number of unassigned jobs. We use a linear approximation for value
+function in Eq. (16) as follows
+n
+
+X
+
+n
+n
+V t (Stx ) :=ηt,0
++ ηt,1
+|JtCa | +
+
+n
+ηt,2
+1{ytm =1}
+
+m∈M
+
+X
+
++
+
+n
+ηt,3
+1{ztm =1} +
+
+m∈M
+
+X
+
+n
+n
+ηt,4
+1{ρm
++ ηt,5
+(|Jt | − |JtCa |).
+t =1}
+
+(24)
+
+m∈M
+
+n is a constant and |J Ca | = min{|J C |, |M |} is the set of jobs that are assigned
+In this equation, ηt,0
+t
+t
+t
+
+to machines at time slot t. The function 1{ytm =1} returns 1 if machine m is idle at time t. Similarly,
+1{ρm
+and 1{ztm =1} are defined for processing and switched-on modes, respectively. The last term
+t =1}
+in Eq. (24) keeps track of the number of unassigned job at time slot t. Using this basis function,
+we can approximate the current and future costs that are imposed on the value function. In the
+next section, this new value function will be used to solve the decision problem.
+4.3. Optimal decision vector
+Making the best decision in each pre-decision state St is the most important and challenging
+part of the ADP as the dimensions of the problem increase. Therefore, it is of great importance to
+design powerful solution techniques. For this purpose, we develop a 0-1 programming model with
+the approximated value function given by Eq. (16) as an objective function. Then, we use CPLEX
+12.8 to solve this 0-1 program for each time slot t of the system. In this formulation, in addition to
+m
+m
+m
+decision variable xm
+tj , we define other binary decision variables for state variables ρt , yt , and zt .
+
+This new mathematical model is defined by
+
+n
+
+x
+min ζ1 Cmax,t + ζ2 T ECt −Lxm
+tj + V t (St )
+
+(25)
+
+subject to
+X
+
+xm
+tj ≤ 1,
+
+∀j ∈ JtC ,
+
+(26)
+
+m
+xm
+tj ≤ ρt ,
+
+∀m ∈ Mt ,
+
+(27)
+
+m∈Mt
+
+X
+j∈JtC
+
+m
+m
+ytm + ρm
+t ≥ ÿt−1 + ρ̈t−1 ,
+
+∀m ∈ Mt ,
+
+m
+m
+m
+m
+m
+ρm
+t + yt − zt ≤ ρ̈t−1 + ÿt−1 + z̈t−1 ,
+
+ytm + ρm
+t ≤ 1,
+ztm +
+
+θ=t−1
+X
+
+∀m ∈ Mt ,
+
+z̈θm ≤ 1,
+
+θ=0
+
+15
+
+∀m ∈ Mt ,
+
+(28)
+∀m ∈ Mt ,
+
+(29)
+(30)
+(31)
+
+Algorithm 1 The double-pass approximate dynamic programming algorithm
+0
+
+1: Initialize the value function approximation V t (Stx ), which mean initialize ηt0 and Bt0 = I.
+2: Set n = 1.
+3: Initialize S0 .
+4: while n ≤ N do
+5:
+for t = 0, 1, . . . , T H do
+6:
+Solve
+
+
+n−1
+x
+xn
+=
+arg
+min
+C
+(S
+,
+x
+)
++
+V
+(S
+)
+.
+t
+t
+t
+t
+t
+t
+π
+xt ∈Xt
+
+7:
+8:
+9:
+10:
+11:
+12:
+13:
+14:
+
+H
+
+if t < T then
+Generate the next state using St+1 = S M (St , Xt , Wt+1 ).
+end if
+end for
+Let v̂Tn H +1 = 0.
+for t = T H , T H − 1, . . . , 1 do
+Compute
+n
+v̂tn = Ct (St , xt ) + v̂t+1
+,
+Update
+
+n
+n−1
+x
+V t−1 ←− U n V t−1 , St−1
+, v̂tn ,
+
+15:
+
+and then calculate
+
+n
+
+x
+V t−1 (St−1
+)=
+
+X
+
+x
+φf (St−1
+)ηfn .
+
+f ∈F
+
+16:
+end for
+17: end while
+N
+18: Return V t (Stx ),
+
+∀t ∈ T H .
+
+t+
+
+X
+
+pmj xm
+tj ≤ Cmax,t ,
+
+∀j ∈ JtC .
+
+(32)
+
+m∈Mt
+m
+m
+m
+The values of ẍm
+(t−1),j , ρ̈t−1 , ÿt−1 , and z̈t−1 are known from previous stage with initial values of
+m
+m
+m
+ẍm
+0,j = ρ̈0 = ÿ0 = z̈0 = 0. In this formulation, constraints (26)- (27) are the job assignment and
+
+machine capacity constraints. Writing constraint (26) in inequality form refrains the model from
+infeasibility in cases where number of jobs to process is greater than number of available machines,
+|Jt | > |Mt |. On the other hand, having constraint (26) in its current form may render some machines
+useless. To resolve this, we added each decision variable xm
+tj with a very small coefficient (L) to
+the objective function. This guarantees that xt 6= ∅ at time slot t. Constraint (28) updates the
+state of machine m, and constraint (29) determines whether or not machine m must be switched
+on. Constraint (30) guarantees that the switched-on machine m can be either in its idle mode or
+processing mode. This constraint is equivalent to Remark 1. Constraint (31) ensures that each
+machine can be switched on only one time over the planning horizon. Constraint (32) links the
+completion time of each job to the makespan. This decision problem possesses the Markov property.
+It should be noted that it is not required to solve the 0-1 program at some time slots. If Jt = ∅
+or ρm
+t = 1, ∀m ∈ M , then the only decision is do nothing. In this situation, the value function can
+be easily computed using the system information and Eq. (25).
+Now let us explain how the strategy functions. At each time slot t, we solve the 0-1 program
+for the available jobs with rj ≤ t and their known processing times. These available jobs are those
+
+16
+
+which were in the system before t − 1 or became availabe between t − 1 and t. Using the solution of
+the 0-1 program, the contribution of the cost from time slot t to time slot t + 1 is calculated. The
+impact of the current decision on the time slots after t + 1 is then updated and calculated using
+the value function approximation V t . At time slot t + 1 new jobs may arrive, where rj ≥ t + 1,
+and the set of available jobs will be updated. At this point, we find an optimal schedule using 0-1
+program. This new schedule with its respective optimal objective value will be used to update the
+parameters of value function at time slot t, which can be used in the next iteration of the ADP
+algorithm.
+Now we present a small illustrative example to better explain the optimization problem and
+algorithm presented in this study.
+Example 2. We consider an instance with |M| = 3 and T = 13. In each time t, random jobs
+arrived according to a discrete distribution DU (0, 3) inclusive. We assume that system is empty
+at beginning of the process. To solve this problem using the proposed approximate dynamic programming, we start with an initial value of ηfn = Jf , where J is an all-one matrix of size f , and
+generate N = 3000 iterations or sample paths. Each sample path refers to a sequence of realization
+of the information over planning horizon. In this example, for each sample path n, starting from
+time t = 0 (current time) forward, number of arrivals is revealed using discrete uniform distribution. Once new information, such as job completion time and/or arrival time, is revealed, St , the
+(pre-)state of the system at the beginning of time t is obtained. Then, using the IP model of Section 4.3, a decision is made. This converts the system from pre-decision state to the post-decision
+state Stx . Then by arriving new information (denoted by Rt+1 ), the system moves to the next state
+St+1 . This process continues until the end of planning horizon, when the forward pass is completed
+(lines 5-10 of Algorithm 1). Through this forward pass, we make the best decision and calculate
+the per-stage cost for all t ∈ T . Then, the backward pass starts by setting v̂T +1 = 0, and solve
+n . Then, using Eqs. (20)- (23), the parameter η n is updated which is used
+v̂tn = Ct (St , xt ) + v̂t+1
+f
+n
+
+for updating the value function approximation at time t − 1, V t−1 (lines 11-16 of Algorithm 1).
+3000
+
+When the algorithm finalizes, ηf3000 converges to its approximation and V 0
+is calculated using
+P6
+3000
+x
+φf (S0 ). The results of each iteration through double-pass algorithm are given Table 4.
+f =1 ηf
+
+5. Computational study
+In this section, we present the performance of the ADP algorithm, as depicted in Algorithm 1.
+One way of measuring the performance of the ADP algorithm is to compare its results with a
+deterministic model of the stochastic problem (Godfrey and Powell 2002, Powell 2007, 2008). For
+this purpose, we compare the results of the ADP with the deterministic counterpart of the problem
+at hand which is presented in Appendix A as an integer linear program (referred to as IP hereafter).
+Since the IP is incapable to solve large instances, we also compare the ADP algorithm with a
+simulation-based heuristic algorithm for the energy efficient scheduling problem (Paolucci et al.
+2017). Their algorithm, to the best of our knowledge, is the only algorithm that can handle jobs
+17
+
+18
+
+143.7
+
+143.7
+
+143.7
+
+2998
+
+2999
+
+3000
+
+.
+.
+.
+
+.
+.
+.
+
+143.7
+
+15.7
+
+5
+
+2997
+
+15.5
+
+4
+
+143.7
+
+15.4
+
+3
+
+2996
+
+15.3
+
+2
+
+143.7
+
+14.9
+
+1
+
+2995
+
+v0
+
+n
+
+1
+
+1.2
+ 1 
+
+
+0.7
+
+
+ 1 
+1.3
+1
+
+
+1.1
+ 1 
+
+
+0.7
+
+
+ 1 
+1.3
+1
+
+
+1.1
+ 1 
+
+
+0.7
+
+
+ 1 
+1.3
+1
+.
+.
+.
+
+
+7.4
+ 11.2 
+
+
+ 4.8 
+
+
+ 1 
+−2.8
+
+1.1
+
+2.2
+ 1 
+
+
+−1.4
+
+
+ 1 
+ 3.4 
+1.1
+
+
+2.2
+ 1 
+
+
+−1.4
+
+
+ 1 
+ 3.4 
+1.1
+
+2.2
+ 1 
+
+
+−1.4
+
+
+ 1 
+ 3.4 
+1.1
+.
+.
+.
+
+
+−0.6
+ 2.9 
+
+
+−7.1
+
+
+ 1 
+ 9.1 
+
+1.3
+
+3.5
+ 3.4 
+
+
+ 2.9 
+
+
+ 1 
+−0.9
+1.3
+
+
+3.6
+ 3.4 
+
+
+ 2.9 
+
+
+ 1 
+−0.9
+1.3
+
+3.6
+ 3.4 
+
+
+ 2.9 
+
+
+ 1 
+−0.9
+1.3
+.
+.
+.
+
+
+8.3
+ 11.2 
+
+
+−4.9
+
+
+ 1 
+ 6.9 
+
+4.2
+
+
+4.2
+ 4 
+
+
+0.7
+
+
+ 1 
+1.3
+4.2
+
+
+4.2
+ 4 
+
+
+0.7
+
+
+ 1 
+1.3
+4.2
+
+
+4.2
+ 4 
+
+
+0.7
+
+
+ 1 
+1.3
+4.2
+.
+.
+.
+
+
+5.5
+ 5.9 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+
+4.5
+
+2.7
+2.8
+
+
+0.9
+
+
+ 1 
+1.1
+4.5
+
+
+2.8
+2.8
+
+
+0.8
+
+
+ 1 
+1.2
+4.5
+
+
+2.8
+2.8
+
+
+0.8
+
+
+ 1 
+1.2
+4.5
+.
+.
+.
+
+
+10.3
+ 12.4 
+
+
+−9.9
+
+
+ 1 
+ 11.9 
+
+10.5
+
+4.3
+ 0.9 
+
+
+−8.9
+
+
+ 1 
+ 10.9 
+10.5
+.
+.
+.
+
+
+12.8
+ 15.3 
+
+
+−12.5
+
+
+ 1 
+ 14.5 
+
+8.9
+
+
+3.7
+3.8
+
+
+0.7
+
+
+ 1 
+1.3
+8.9
+.
+.
+.
+
+
+17.6
+ 17.1 
+
+
+−13.8
+
+
+ 1 
+ 15.8 
+
+7.3
+
+3.9
+ 0.9 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+7.2
+.
+.
+.
+
+
+22.9
+ 22.5 
+
+
+−15.9
+
+
+ 1 
+ 17.9 
+
+7.1
+
+7.3
+ 0.9 
+
+
+−17.8
+
+
+ 1 
+ 19.8 
+6.6
+.
+.
+.
+
+
+31.1
+ 29.7 
+
+
+−23.3
+
+
+ 1 
+ 25.3 
+
+1.2
+
+
+4.8
+7.8
+
+
+0.2
+
+
+ 1 
+1.8
+1.7
+.
+.
+.
+
+
+44.1
+ 57.7 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+
+9.9
+
+5.8
+ 1.5 
+
+
+−12.4
+
+
+ 1 
+ 14.4 
+10.4
+.
+.
+.
+
+
+54
+ 82.7 
+
+
+ 15.9 
+
+
+ 1 
+−13.9
+25.7
+
+54.1
+ 82.7 
+
+
+ 15.5 
+
+
+ 1 
+−13.5
+26.4
+
+
+54.1
+ 82.7 
+
+
+ 15.5 
+
+
+ 1 
+−13.5
+26.3
+
+54.2
+ 82.9 
+
+
+ 15.6 
+
+
+ 1 
+−13.6
+26.3
+
+
+54.1
+ 82.8 
+
+
+ 15.6 
+
+
+ 1 
+−13.6
+26.2
+
+54.2
+ 82.8 
+
+
+ 15.3 
+
+
+ 1 
+−13.3
+26.6
+
+7.5
+
+8.5
+ 1.6 
+
+
+−19.5
+
+
+ 1 
+ 21.5 
+7.7
+.
+.
+.
+
+
+−6.4
+ 117.1 
+
+
+ 218.7 
+
+
+1
+
+
+−216.7
+−99.9
+
+−6.6
+ 117.1 
+
+
+ 219.3 
+
+
+1
+
+
+−217.3
+−100.3
+
+
+−6.8
+ 116.9 
+
+
+ 219.3 
+
+
+1
+
+
+−217.3
+−100.5
+
+
+−6.6
+ 116.9 
+
+
+ 219.3 
+
+
+1
+
+
+−217.3
+−100.5
+
+
+−6.7
+ 116.8 
+
+
+ 219.3 
+
+
+1
+
+
+−217.3
+−100.6
+
+
+−6.9
+ 116.8 
+
+
+ 219.9 
+
+
+1
+
+
+−217.9
+−100.9
+
+1
+
+15.7
+ 44 
+
+
+ 2.1 
+
+
+ 1 
+−0.1
+1
+.
+.
+.
+
+
+143.7
+ 263.9 
+
+
+ 54.6 
+
+
+ 1 
+−52.6
+
+1
+
+143.7
+ 263.9 
+
+
+ 54.6 
+
+
+ 1 
+−52.6
+1
+
+
+143.7
+ 264 
+
+
+ 54.6 
+
+
+ 1 
+−52.6
+
+1
+
+143.7
+ 264 
+
+
+ 54.6 
+
+
+ 1 
+−52.6
+1
+
+
+143.7
+ 264.1 
+
+
+ 54.6 
+
+
+ 1 
+−52.6
+
+1
+
+143.8
+ 264.1 
+
+
+ 54.6 
+
+
+ 1 
+−52.6
+1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+7.9
+
+44.1
+ 57.7 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+7.9
+
+
+7.9
+
+44.1
+ 57.7 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+7.9
+
+
+44.1
+ 57.7 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+
+
+7.9
+
+44.1
+ 57.7 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+7.8
+
+
+44.1
+ 57.7 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+
+
+−6.9
+
+31.4
+ 29.9 
+
+
+−23.8
+
+
+ 1 
+ 25.8 
+−6.4
+
+
+−7.1
+
+31.2
+ 29.9 
+
+
+−23.3
+
+
+ 1 
+ 25.3 
+−7.1
+
+
+31.2
+ 29.9 
+
+
+−23.5
+
+
+ 1 
+ 25.5 
+
+
+−7.3
+
+31.1
+ 29.7 
+
+
+−23.3
+
+
+ 1 
+ 25.3 
+−7.4
+
+
+31.2
+ 29.8 
+
+
+−23.3
+
+
+ 1 
+ 25.3 
+
+
+
+
+2.5
+
+22.9
+ 22.4 
+
+
+−16.1
+
+
+ 1 
+ 18.1 
+2.3
+
+
+2.4
+
+23
+ 22.5 
+
+
+−16.1
+
+
+ 1 
+ 18.1 
+2.5
+
+
+23
+ 22.5 
+
+
+−16.1
+
+
+ 1 
+ 18.1 
+
+
+2.7
+
+22.9
+ 22.5 
+
+
+−15.8
+
+
+ 1 
+ 17.8 
+2.2
+
+
+22.9
+ 22.5 
+
+
+−15.9
+
+
+ 1 
+ 17.9 
+
+
+
+
+3.8
+
+17.6
+ 17.1 
+
+
+−13.8
+
+
+ 1 
+ 15.8 
+3.9
+
+
+3.6
+
+17.5
+ 17 
+
+
+−13.8
+
+
+ 1 
+ 15.8 
+3.5
+
+
+17.6
+ 17.1 
+
+
+−13.8
+
+
+ 1 
+ 15.8 
+
+
+4.3
+
+17.5
+ 17 
+
+
+−13.8
+
+
+ 1 
+ 15.8 
+3.7
+
+
+17.5
+ 17 
+
+
+−13.8
+
+
+ 1 
+ 15.8 
+
+
+4.5
+
+12.9
+ 15.3 
+
+
+−12.8
+
+
+ 1 
+ 14.8 
+4.6
+
+
+4.1
+
+12.9
+ 15.3 
+
+
+−12.7
+
+
+ 1 
+ 14.7 
+4.3
+
+
+12.9
+ 15.3 
+
+
+−12.8
+
+
+ 1 
+ 14.8 
+
+
+4.1
+
+12.8
+ 15.3 
+
+
+−12.5
+
+
+ 1 
+ 14.5 
+4.2
+
+
+12.8
+ 15.3 
+
+
+−12.5
+
+
+ 1 
+ 14.5 
+
+
+
+
+
+
+4.7
+
+10.3
+ 12.5 
+
+
+−10.1
+
+
+ 1 
+ 12.1 
+4.8
+
+
+4.7
+
+10.3
+ 12.4 
+
+
+−10.1
+
+
+ 1 
+ 12.1 
+4.7
+
+
+10.3
+ 12.4 
+
+
+−10.1
+
+
+ 1 
+ 12.1 
+
+
+5.2
+
+10.2
+ 12.4 
+
+
+−9.9
+
+
+ 1 
+ 11.9 
+4.6
+
+
+10.3
+ 12.4 
+
+
+−10.1
+
+
+ 1 
+ 12.1 
+
+
+
+
+10.5
+
+4.3
+ 0.9 
+
+
+−8.9
+
+
+ 1 
+ 10.9 
+10.5
+
+
+4.3
+ 0.9 
+
+
+ −8 
+
+
+ 1 
+10.9
+
+8.9
+
+3.6
+3.7
+
+
+0.7
+
+
+ 1 
+1.3
+8.9
+
+
+3.7
+3.8
+
+
+0.7
+
+
+ 1 
+1.3
+
+
+
+
+
+7.3
+
+3.9
+ 1 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+7.3
+
+
+3.9
+ 1 
+
+
+−7.9
+
+
+ 1 
+ 9.9 
+
+7.1
+
+7.3
+ 0.9 
+
+
+−17.8
+
+
+ 1 
+ 19.8 
+7.1
+
+
+7.4
+ 0.9 
+
+
+−18
+
+
+ 1 
+ 20 
+
+
+1.2
+
+4.7
+7.8
+
+
+0.5
+
+
+ 1 
+1.5
+1.2
+
+
+4.7
+7.8
+
+
+0.5
+
+
+ 1 
+1.5
+
+
+
+
+
+9.9
+
+5.6
+ 1.4 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+9.9
+
+
+5.7
+ 1.5 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+
+7.5
+
+8.1
+ 1 
+
+
+−19.5
+
+
+ 1 
+ 21.5 
+7.5
+
+
+8.3
+ 1.2 
+
+
+−19.5
+
+
+ 1 
+ 21.5 
+
+1
+
+15.4
+43.7
+
+
+ 1.6 
+
+
+ 1 
+ 0.4 
+1
+
+
+15.5
+43.9
+
+
+ 1.7 
+
+
+ 1 
+ 0.3 
+
+
+
+
+
+
+1.1
+ 1 
+
+
+0.7
+
+
+ 1 
+1.3
+1
+
+
+1.2
+ 1 
+
+
+0.7
+
+
+ 1 
+1.3
+
+5.1
+
+5.6
+ 5.9 
+
+
+−12.2
+
+
+ 1 
+ 14.2 
+5.2
+
+
+5
+
+5.5
+ 5.9 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+5.1
+
+
+5.6
+ 5.9 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+
+
+5.2
+
+5.5
+ 5.9 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+5.1
+
+
+5.5
+ 5.9 
+
+
+−12.1
+
+
+ 1 
+ 14.1 
+
+
+3.1
+
+8.4
+11.2
+
+
+ −5 
+
+
+ 1 
+ 7 
+3.1
+
+
+3.1
+
+8.4
+11.2
+
+
+ −5 
+
+
+ 1 
+ 7 
+3.1
+
+
+8.4
+11.2
+
+
+ −5 
+
+
+ 1 
+ 7 
+
+
+3.3
+
+8.3
+ 11.2 
+
+
+−4.9
+
+
+ 1 
+ 6.9 
+3.1
+
+
+8.3
+ 11.2 
+
+
+−4.9
+
+
+ 1 
+ 6.9 
+
+
+
+
+
+
+2.2
+
+−0.5
+ 2.9 
+
+
+−7.1
+
+
+ 1 
+ 9.1 
+2.1
+
+
+2.2
+
+−0.5
+ 2.9 
+
+
+−7.1
+
+
+ 1 
+ 9.1 
+2.2
+
+
+−0.5
+ 2.9 
+
+
+−7.2
+
+
+ 1 
+ 9.2 
+
+
+2.1
+
+−0.5
+ 2.9 
+
+
+−7.1
+
+
+ 1 
+ 9.1 
+2.2
+
+
+−0.5
+ 2.9 
+
+
+−7.1
+
+
+ 1 
+ 9.1 
+
+
+
+
+
+
+1.4
+
+7.4
+ 11.2 
+
+
+ 4.8 
+
+
+ 1 
+−2.8
+1.4
+
+
+1.3
+
+7.4
+ 11.2 
+
+
+ 4.8 
+
+
+ 1 
+−2.8
+1.3
+
+
+7.4
+ 11.2 
+
+
+ 4.8 
+
+
+ 1 
+−2.8
+
+
+1.5
+
+7.3
+ 11.2 
+
+
+ 4.8 
+
+
+ 1 
+−2.8
+1.3
+
+
+7.4
+ 11.2 
+
+
+ 4.8 
+
+
+ 1 
+−2.8
+
+
+
+
+
+
+
+2.1
+ 1 
+
+
+−1.2
+
+
+ 1 
+ 3.2 
+1
+
+
+2.2
+ 1 
+
+
+−1.3
+
+
+ 1 
+ 3.3 
+
+
+
+3.4
+ 3.4 
+
+
+ 3.4 
+
+
+ 1 
+−1.4
+1
+
+
+3.5
+ 3.4 
+
+
+ 3.1 
+
+
+ 1 
+−1.1
+
+
+
+4.1
+4.1
+
+
+ 1 
+
+
+ 1 
+ 1 
+4.1
+
+
+4.1
+ 4 
+
+
+0.8
+
+
+ 1 
+1.2
+
+
+
+
+2.6
+2.6
+
+
+ 1 
+
+
+ 1 
+ 1 
+4.2
+
+
+2.7
+2.8
+
+
+ 1 
+
+
+ 1 
+ 1 
+
+
+4.3
+ 1 
+
+
+−8.8
+
+
+ 1 
+ 10.8 
+10.8
+
+
+4.2
+ 0.9 
+
+
+−8.8
+
+
+ 1 
+ 10.8 
+
+
+
+
+3.4
+3.4
+
+
+ 1 
+
+
+ 1 
+ 1 
+8.3
+
+
+3.5
+3.4
+
+
+0.7
+
+
+ 1 
+1.3
+
+
+3.8
+ 1 
+
+
+−7.4
+
+
+ 1 
+ 9.4 
+6.6
+
+
+3.9
+ 1 
+
+
+−7.8
+
+
+ 1 
+ 9.8 
+
+
+
+7.2
+ 1 
+
+
+−17.5
+
+
+ 1 
+ 19.5 
+7.2
+
+
+7.1
+ 0.9 
+
+
+−17.5
+
+
+ 1 
+ 19.5 
+
+
+
+
+4.3
+7.6
+
+
+ 1 
+
+
+ 1 
+ 1 
+1
+
+
+4.5
+7.6
+
+
+0.4
+
+
+ 1 
+1.6
+
+
+5.3
+ 1 
+
+
+−12
+
+
+ 1 
+ 14 
+9.7
+
+
+5.5
+ 1.4 
+
+
+−12
+
+
+ 1 
+ 14 
+
+
+
+17.5
+ 1 
+
+
+−18.5
+
+
+ 1 
+ 20.5 
+7.5
+
+
+7.9
+ 1 
+
+
+−19.2
+
+
+ 1 
+ 21.2 
+
+
+
+14.9
+42.9
+
+
+ 1 
+
+
+ 1 
+ 1 
+1
+
+
+15.3
+43.5
+
+
+ 1.3 
+
+
+ 1 
+ 0.7 
+
+
+
+t = 12
+η12
+
+t = 11
+η11
+
+t = 10
+η10
+
+t=9
+η9
+
+t=8
+η8
+
+t=7
+η7
+
+t=6
+η6
+
+t=5
+η5
+
+t=4
+η4
+
+Table 4: Set of sample paths for Example 2
+t=3
+η3
+
+t=2
+η2
+
+t=1
+η1
+
+t=0
+η0
+
+ready time (rj > 0) when multiple objectives are involved. This heuristic algorithm is presented in
+Appendix B. We refer to this algorithm as Paolucci-Anghinolfi-Tonelli algorithm or the heuristic
+algorithm in this paper.
+All algorithms were written in Python 3.6, and all tests were run on a desktop computer with
+a Windows 10 Enterprise Edition 64 bit, a i7 Core processor at 2.5 GHz, and 8 GB of RAM. For
+the optimization part of the algorithm as well as the IP, the solver of CPLEX 12.8 with its default
+parameters was called into the Python code. All text files containing the problem instances used
+in this study are available upon request.
+Several classes of instances were considered. These classes were defined based on the different
+levels of factors such as the length of the planning horizon, the number of jobs arriving at the
+system per time slot, the number of machines, and the interval from which jobs processing time
+on each machine is generated. These levels are given in Table 5. As shown in the table, in our
+
+numerical study, we considered three levels for time horizon which are T H = 50, 100, 150 units
+
+of time, and three levels for machines which are M = 6, 10, 15 . We also considered three levels
+for jobs. In the first level, it is assumed that the number of arrivals to the system between time
+slot t and t + 1 follows a discrete uniform distribution DU [0, 6], for the second level, the number of
+arrival jobs follows a discrete uniform distribution DU [0, 12], and in the third level, the number of
+arrival jobs follows a discrete uniform distribution DU [0, 16]. To avoid the infeasibility, we let the
+jobs arrive in the first [0, T2 ] time slots. Therefore, the average number of jobs in each sample path
+of each instance are 75, 300, and 600 for class one, two, and three, respectively. For processing
+times of jobs, pmj , we considered two levels. In the first level, processing times follow a discrete
+uniform distribution DU [1, 5], and in the second level, processing times follow another discrete
+uniform distribution DU [1, 10].
+In our numerical study, instances are categorized in classes which are presented by a quadruple (aM, [b, c]J , dT , [e, f ]pmj ), where a shows the number of machines, interval [b, c] indicates
+the discrete uniform distribution from which the arriving jobs in each time t are randomly generated, d shows the number of time slots in the planning horizon, and [e, f ] shows the discrete
+uniform distribution for generating processing times. We considered three classes of the problem denoted by C1 = (6M, [0, 6]J , 50T, [1, 10]pmj ), C2 = (10M, [0, 12]J , 100T, [1, 10]pmj ),
+and C3 = (15M, [0, 16]J , 150T, [1, 5]pmj ). For each class, we generated 10 instances, and for
+each instance, we generated N = 3000 sample paths. Overall, the double-pass ADP, the IP, and
+Paolucci-Anghinolfi-Tonelli algorithms were applied to 30 instances. From deterministic point of
+view, this problem can be considered as small to medium to large instances. But, more importantly,
+from stochastic point of view, all of these instances are categorized as large size due to the number
+of states, hence difficult to solve.
+The price of energy per time slot t was randomly generated from Et ∼ DU [1, 10]. The other
+problem parameters for instance generation such as energy consumption rates (λt , µt , κt ) were
+assumed to be random for all time slots t ∈ T throughout the experimental study and follows
+DU [1, 5]. After running several instances with different values for double-pass ADP parameters
+
+19
+
+Table 5: Levels of factors used in experimental study
+
+Parameters
+
+Levels and values
+
+TH
+
+50, 100, 150
+6, 10, 15
+∼ DU [0, a], where a = 6, 12, 16
+∼ DU [1, b], where b = 5, 10
+∼ DU [1, 10]
+∼ DU [1, 5]
+
+|M|
+|J |
+pmj
+Et
+λt , µt , κt
+
+Table 6: Parameter values selected for the ADP and Paolucci-Anghinolfi-Tonelli algorithm
+Parameter
+
+Value
+
+ADP
+δ
+
+α1
+ζ1
+ζ2
+γt1
+ηf1
+N
+
+0.99
+0.001
+1
+0.8
+0.2
+1, ∀t ∈ T
+1, ∀f ∈ F
+3000
+
+Heuristic
+H
+πmin
+q0
+χ
+
+500
+0.05
+0.9
+0.95
+
+and Paolucci-Anghinolfi-Tonelli algorithm, we chose the values depicted in Table 6.
+As mentioned, in order to evaluate the performance of the double-pass ADP, we compared
+it against a deterministic IP model of the energy-efficient unrelated parallel machine scheduling
+problem given in Appendix A, and another heuristic, called Paolucci-Anghinolfi-Tonelli algorithm,
+which is given in Appendix B. In the former, all information were known a priori (Godfrey and
+Powell 2002, Powell 2007, 2008), while in the latter, the jobs arrival process were simulated using
+discrete-even simulation. In our ADP approach, we considered that all jobs arrive at the system
+over a sample path, and solved the parallel machine scheduling problem by the MILP solver of
+CPLEX 12.8. We used the standard setting of CPLEX except that we limited the run-time to 100
+seconds for each problem of the sample path.
+Table 7 shows the results of 10 randomly generated instances of the first class, C1. For each
+instance of this table, we generated N = 3000 sample paths. These iterations are required until
+the approximated objective values converges to its steady state. It is worth mentioning that, in
+our case, each sample path is a parallel machine scheduling problem itself. In this table, total
+number of jobs arrived, percentage of jobs dropped, overall objective, makespan, energy cost and
+computational times for each instance are depicted. In this table, the total number of jobs and
+time are cumulative for all 3000 sample paths, and the percentage of dropped jobs is the average
+20
+
+Table 7: Results for applying the ADP on C1 (N = 3000, ζ1 = 0.8)
+Instance
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+Average
+per instance
+Average per
+sample path
+
+Total jobs arrived
+225157
+225010
+224841
+225006
+224656
+225149
+224653
+225366
+224820
+224629
+
+Dropped jobs (%)
+1.01
+0.97
+0.96
+1.04
+1.02
+0.99
+0.97
+0.94
+1.07
+1.03
+
+Overall objective
+1095.33
+1096.56
+1151.68
+1062.06
+1127.24
+1102.89
+1047.58
+1103.20
+1188.77
+1120.43
+
+Makespan
+46
+56
+54
+49
+41
+45
+47
+55
+39
+42
+
+Energy cost
+5292.66
+5258.77
+5542.39
+5114.32
+5472.22
+5334.49
+5049.89
+5296.01
+5787.84
+5434.17
+
+Time (seconds)
+2781.61
+3157.84
+3280.18
+2373.77
+2722.81
+2436.30
+2360.55
+2690.37
+2541.07
+3166.59
+
+224929
+
+1
+
+1109.57
+
+47.4
+
+5358.28
+
+2751.11
+
+74.98
+
+1
+
+1109.57
+
+47.4
+
+5358.28
+
+0.92
+
+of all 3000 sample paths. The overall objective, makespan, and energy cost is the converged value
+function of the ADP. This table also reports the average values per instance and average values
+per sample path. The last row of this table shows the value for each sample path. In this row, the
+2751.11
+average number of jobs per sample path and CPU time are simply obtained by 224929
+3000 and 3000 ,
+
+respectively. The reason is that, once we obtained the approximate value of ηf , we can simply
+solve any sample path by applying the decision problem of Sec 4.3. It should be mentioned that
+the value of overall objective, Makespan, and Energy cost are not divided by 3000 since they are
+approximate value after 3000 iterations where the values are converged. Finally, from this row, it
+can be concluded that after approximating ηf , we can find the best decision in about 0.92 seconds
+and schedule 99% of jobs.
+Table 8 shows the results of comparison of three methods. In this table, we considered the first
+five instances of Table 7, and within each instance, we considered the first five sample paths. Since
+each sample path is a realization of a deterministic parallel machine scheduling problem, we were
+able to apply the IP and the heuristic methods to each sample path. These three methods can
+be compared via three criteria, namely, percentage of the dropped jobs, the value of the objective
+functions, and computational time. In this table, all values of ADP (except the CPU time) for the
+first five instances are copied from the associated columns in Table 7. To obtain the CPU time, we
+divide the CPU time of each instance by N , for example the CPU time of Instance 1 is obtained by
+2781.61
+3000 = 0.93. The ADP approach is better than the other two methods in processing of jobs and
+
+computational time. Although at the first glance it may seem that the IP returns the minimum
+values for the objective among all these three approaches, considering its rate of assignment (it
+assigns only 50% of jobs), its actual objective values can be higher than ADP. Therefore, we can
+claim that the ADP outperforms the other two approaches for all three criteria.
+In our second experiment, we randomly generated 10 instances of the second class, C2, and the
+results are tabulated in Table 9. In this table, the overall objective, makespan, and energy cost is
+the converged value function of the ADP are reported. From last row of this table, it can be seen
+that the ADP can find the best schedule for more that 85% jobs in instance of 300 jobs in about
+13.90 seconds. The comparison results of the ADP, the IP, and the heuristics are given in Table 10.
+
+21
+
+22
+
+Average
+
+Average
+5
+
+Average
+4
+
+Average
+3
+
+Average
+2
+
+1
+
+Instance
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+Sample
+path
+1
+2
+3
+4
+5
+
+1.02
+
+1.04
+
+0.96
+
+0.97
+
+Dropped
+jobs (%)
+1.01
+
+1127.24
+
+1062.06
+
+1151.68
+
+1096.56
+
+Overall
+obj.
+1095.33
+
+41
+
+49
+
+54
+
+56
+
+46
+
+5472.22
+
+5114.32
+
+5542.39
+
+5258.77
+
+Energy
+cost
+5292.66
+
+0.91
+
+0.79
+
+1.09
+
+1.05
+
+Time
+(sec)
+0.93
+
+Dropped
+jobs (%)
+50.65
+54.59
+55.56
+56.06
+54.71
+54.31
+57.73
+59.88
+57.46
+55.89
+55.60
+56.91
+52.31
+50.61
+52.17
+52.24
+55.04
+52.47
+50.79
+51.07
+53.84
+52.73
+54.28
+52.54
+39.0
+46.78
+49.11
+51.69
+51.73
+47.66
+
+Overall
+obj.
+963.40
+828.59
+794.60
+51.80
+805.00
+688.68
+778.0
+49.20
+850.80
+67.80
+892.40
+527.64
+956.60
+106.60
+958.59
+45.79
+826.6
+578.84
+673.59
+721.19
+689.39
+846.59
+855.59
+757.27
+984.19
+802.59
+61.8
+886.4
+820.79
+711.15
+50
+50
+50
+27
+50
+45.4
+50
+36
+50
+29
+50
+43
+50
+28
+50
+29
+50
+41.4
+50
+50
+50
+50
+50
+50
+50
+50
+48
+50
+50
+49.6
+
+IP
+Cmax
+Energy
+cost
+4617.00
+3942.00
+3773.00
+151.00
+3825.00
+3261.6
+3690.00
+102.00
+4054.00
+223.00
+4262.00
+24466.2
+4583.0
+421.0
+4592.9
+112.9
+3933
+3938
+3167.9
+3405.9
+3246.9
+4032.9
+4077.9
+3586.3
+4720.9
+3812.9
+117
+4232
+3903.9
+3357.34
+
+Time
+(sec)
+84.33
+102.53
+34.85
+102.43
+78.21
+80.47
+127.92
+93.61
+80.75
+117.96
+102.15
+104.48
+60.92
+114.31
+94.03
+50.15
+73.85
+78.66
+48.19
+75.3
+50.12
+89.78
+79.91
+68.66
+103.91
+98.88
+107.77
+92.67
+95.48
+99.74
+
+Dropped
+jobs (%)
+22.07
+26.89
+17.93
+20.3
+21.71
+21.78
+46.39
+40.92
+38.68
+38.6
+35.69
+40.06
+9.23
+26.9
+28.91
+21.68
+21.67
+26.67
+0.0
+10.14
+8.84
+12.96
+15.55
+9.49
+35.37
+33.27
+31.34
+26.41
+25.68
+30.41
+
+Table 8: Comparing results of ADP, the IP, and the heuristic for C1
+ADP
+Cmax
+
+Overall
+obj.
+952.59
+981.79
+909.19
+958.4
+979.8
+956.35
+1001.79
+975.19
+962.59
+968.9
+1001.79
+982.05
+1099.19
+1097.6
+1098.39
+1110.6
+1115.19
+1120.19
+893.59
+922.79
+909.39
+914.9
+920.9
+912.31
+1016.39
+1039.79
+1039.79
+1034.59
+1025.6
+1031.23
+
+54
+52
+39
+54
+53
+50.4
+53
+52
+55
+54
+53
+53.4
+55
+53
+54
+53
+52
+57
+53
+53
+54
+52
+59
+54.2
+53
+53
+53
+56
+53
+53.6
+
+Heuristic
+Cmax
+
+Energy
+cost
+4547.0
+4701.0
+4390.0
+4576.0
+4687.0
+5480.2
+4797.0
+4668.0
+4593.0
+4629.0
+4797.0
+4696.8
+5276.0
+5276.0
+5276.0
+5341.0
+5368.0
+5373
+4256.0
+4402.0
+4331
+4367.0
+4369.0
+43.45
+4870.0
+4987.0
+4987.0
+4949.0
+4916.0
+4941.8
+
+Time
+(sec)
+3.99
+4.38
+1.62
+2.69
+2.63
+3.06
+6.46
+5.03
+3.29
+3.85
+3.72
+4.47
+3.62
+5.48
+3.9
+2.26
+2.9
+3.63
+2.72
+3.7
+3.18
+4.35
+2.91
+3.37
+5.51
+4.77
+5.33
+5.54
+6.12
+5.45
+
+Table 9: Results for applying the ADP on C2 (N = 3000, ζ1 = 0.8)
+Instance
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+Average
+per instance
+Average per
+sample path
+
+Total jobs arrived
+899250
+900780
+899508
+899861
+900539
+899404
+899168
+898277
+903194
+898116
+
+Dropped jobs (%)
+16.20
+16.29
+16.05
+16.02
+16.19
+15.99
+15.94
+16.12
+16.52
+16.07
+
+Overall objective
+4736.49
+4865.05
+4808.98
+4688.44
+4751.73
+4783.79
+4750.81
+4787.29
+4690.01
+4651.51
+
+Makespan
+101
+109
+100
+100
+101
+104
+96
+100
+100
+100
+
+Energy cost
+23278.45
+23889.23
+23644.95
+23042.18
+23354.63
+23502.97
+23370.03
+23536.47
+23050.03
+22857.56
+
+Time (seconds)
+46498.14
+45230.64
+42612.61
+39220.79
+39147.19
+39457.44
+38191.84
+36993.39
+37567.63
+52025.46
+
+899809.7
+
+16.14
+
+4751.41
+
+101.1
+
+23352.65
+
+41694.51
+
+299.94
+
+16.14
+
+4751.41
+
+101.1
+
+23352.65
+
+13.90
+
+The structure of this table is the same as Table 8. As can be seen from this table, the IP could
+only solve two sample paths out of 25 sample paths (which is only 8% of instances) to optimality.
+For the other 92%, the IP could not find even a feasible solution in 18000 seconds of computation
+time. Although the heuristic could solve all sample paths, its performance is inferior to the ADP
+for all three criteria. Therefore, this class of instances are more difficult than the instances of C1.
+The results of the third and last experiments are tabulated in Tables 11 and 12, respectively.
+In this class, every sample path has on 600 jobs on average, which is comparable with other studies
+in the literature. Interestingly, after approximating parameter ηf , it took less than 7 seconds to
+find the best schedule with zero job dropped. The computational time and objective values are
+higher for the heuristic according to Table 12. The IP could not find any feasible solution in 18000
+seconds for any 25 sample paths.
+6. Conclusion and future research
+This paper addresses an online energy-efficient unrelated parallel machine scheduling problem
+where random jobs arrive at the system over time. We minimize the weighted sum of makespan and
+total energy cost simultaneously. A double-pass approximate dynamic programming approach was
+developed to solve this problem. In order to make the best decision at each time slot, a bi-criteria
+0-1 program was solved where the objective function is the weighted sum of makespan and total
+energy cost combined with the estimate of future value function expressed by basis functions. Since
+the dimension of the problem explodes as the size of the instances increases, it is not possible to
+solve a dynamic program to find the exact solution for comparison. For this purpose, we compared
+the results of the approximate dynamic programming algorithm with a 0-1 programming model of
+the problem, assuming that all information is available at the beginning of the planning horizon,
+as well as a heuristic developed by Paolucci et al. (2017) which is suitable for solving dynamic
+unrelated parallel machine scheduling with two objectives.
+For numerical study, we considered three medium to large classes of problems and compared the
+performance of these three methods based on three different criteria. These performance criteria
+include the percentage of dropped jobs (those jobs which are not scheduled), the value of the
+23
+
+24
+
+Average
+
+Average
+5
+
+Average
+4
+
+Average
+3
+
+Average
+2
+
+1
+
+Instance
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+Sample
+path
+1
+2
+3
+4
+5
+
+16.19
+
+16.02
+
+16.05
+
+16.29
+
+Dropped
+jobs (%)
+16.20
+
+4751.73
+
+4688.44
+
+4808.98
+
+4865.05
+
+Overall
+obj.
+4736.49
+
+101
+
+100
+
+100
+
+109
+
+101
+
+23354.63
+
+23042.18
+
+23644.95
+
+23889.23
+
+Energy
+cost
+23278.45
+
+13.04
+
+13.07
+
+14.20
+
+15.08
+
+Time
+(sec)
+15.50
+
+-
+
+-
+
+38.46
+-
+
+35.41
+-
+
+Dropped
+jobs (%)
+-
+
+-
+
+-
+
+358.2
+-
+
+186.6
+-
+
+Overall
+obj.
+-
+
+-
+
+-
+
+52
+-
+
+99
+-
+
+-
+
+IP
+Cmax
+
+-
+
+-
+
+1583.0
+-
+
+536.9
+-
+
+Energy
+cost
+-
+
+-
+
+-
+
+17916.6
+-
+
+16863.8
+-
+
+Time
+(sec)
+-
+
+Dropped
+jobs (%)
+32.34
+37.36
+34.83
+36.23
+36.42
+35.44
+24.51
+29.21
+32.52
+33.66
+31.89
+30.36
+31.15
+37.72
+38.68
+40.23
+41.1
+37.78
+42.2
+43.03
+40.43
+38.31
+39.02
+40.59
+22.36
+29.11
+28.25
+23.94
+27.69
+31.81
+
+Table 10: Comparing results of ADP, the IP, and the heuristic for C2
+ADP
+Cmax
+
+Overall
+obj.
+3343.2
+3345.4
+3336.2
+3309.8
+3343.2
+3335.56
+3673.2
+3673.6
+3673.6
+3672.8
+3655.8
+3669.8
+3513.9
+3523.8
+3513.8
+3519.2
+3521.9
+3518.52
+3162.6
+3182.8
+3203.6
+3167.9
+3171.9
+3177.76
+3277.8
+3154.8
+3343.8
+3313.4
+3257.8
+3269.52
+
+105
+104
+106
+108
+104
+105.4
+104
+104
+104
+103
+104
+103.8
+104
+105
+105
+106
+105
+105
+105
+106
+104
+107
+107
+105.8
+106
+109
+106
+107
+107
+107
+
+Heuristic
+Cmax
+
+Energy
+cost
+16296.0
+16311.0
+16257.0
+16117.0
+16300.0
+16256.2
+17950.0
+17952.0
+17952.0
+17952.0
+17863.0
+17933.8
+17154.0
+17199.0
+17149.0
+17172.0
+17190.0
+17172.8
+15393.0
+15490.0
+15602.0
+15412.0
+15432.0
+15465.8
+15965.0
+15338.0
+16295.0
+16139.0
+15861.0
+15919.6
+
+Time
+(sec)
+37.76
+35.07
+26.55
+29.88
+33.59
+32.57
+29.05
+32.03
+34.49
+32.83
+23.96
+30.47
+32.37
+41.03
+33.72
+41.03
+42.01
+38.03
+41.71
+38.74
+35.96
+37.15
+38.22
+38.36
+25.24
+32.51
+27.57
+17.49
+42.73
+29.11
+
+Table 11: Results for applying the ADP on C3 (N = 3000, ζ1 = 0.8)
+Instance
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+Average
+per instance
+Average per
+sample path
+
+Total jobs arrived
+1799139
+1798442
+1800738
+1798376
+1797067
+1800606
+1796514
+1798873
+1800149
+1801347
+
+Dropped jobs (%)
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+
+Overall objective
+4838.71
+4692.94
+4570.06
+4739.52
+4884.62
+4791.59
+4651.82
+4601.54
+4837.14
+4598.12
+
+Makespan
+80
+83
+81
+79
+79
+78
+85
+81
+79
+81
+
+Energy cost
+23873.55
+23132.69
+22526.31
+23381.62
+24107.09
+23645.97
+22919.12
+22683.72
+23869.72
+22666.62
+
+Time (seconds)
+19093.89
+17934.68
+18510.46
+18384.18
+18577.93
+23645.97
+16509.95
+19876.89
+18324.70
+24436.80
+
+1799125.1
+
+0.0
+
+4720.61
+
+80.6
+
+23289.64
+
+19529.55
+
+599.71
+
+0.0
+
+4720.61
+
+80.6
+
+23289.64
+
+6.51
+
+weighted objectives, and run time. These results can be summarized as follows: 1) our ability to
+solve every instances using the ADP after approximating parameter ηf in a minimum amount of
+time, 2) the ADP drops the minimum number of jobs, while this value is over 50% for the IP and
+the heuristic), 3) comparing the results of the ADP and the heuristic reveals that in large scale
+instances the heuristic returns lower values for the objective function at the cost dropping about
+50% of jobs which we can conclude that the ADP is more reliable in handling such scenarios, and
+4) although the value of objective functions using the IP is better than the ADP in small instances,
+the IP can schedule on average 50% of jobs, therefore enforcing the IP to schedule more jobs will
+either deteriorate the objective value or make the problem infeasible.
+For future research, an algorithms for generating Pareto solutions could be devised. The performance of the algorithm with other policies could be investigated. The reliability of machines
+could be considered as an extension of the current model. Also, models and algorithms for other
+performance criteria as well as machine setting could be developed.
+Acknowledgements
+The authors wish to thank the two anonymous referees for several very helpful comments that
+strengthened this paper in many ways. The first author is partially supported by the Australian
+Research Council through the Centre for Transforming Maintenance through Data Science (grant
+number IC180100030).
+A. Appendix 1
+In this appendix, we present a 0-1 programming model for the off-line version of the scheduling
+problem, where its results are compared with the approximate dynamic programming approach in
+the computational study. A version of this model with three objectives was introduced by Nezami
+et al. (2017) for the deterministic model of the scheduling problem. The following decision variables
+are used in this model:
+
+25
+
+26
+
+Average
+
+Average
+5
+
+Average
+4
+
+Average
+3
+
+Average
+2
+
+1
+
+Instance
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+1
+2
+3
+4
+5
+
+Sample
+path
+1
+2
+3
+4
+5
+
+0.0
+
+0.0
+
+0.0
+
+0.0
+
+Dropped
+jobs (%)
+0.0
+
+4884.62
+
+4739.52
+
+4570.06
+
+4692.94
+
+Overall
+obj.
+4838.71
+
+79
+
+79
+
+81
+
+83
+
+80
+
+24107.09
+
+23381.62
+
+22526.31
+
+23132.69
+
+Energy
+cost
+23873.55
+
+6.19
+
+6.13
+
+6.17
+
+5.98
+
+Time
+(sec)
+6.36
+
+-
+
+-
+
+-
+
+-
+
+Dropped
+jobs (%)
+-
+
+-
+
+-
+
+-
+
+-
+
+Overall
+obj.
+-
+
+-
+
+-
+
+-
+
+-
+
+-
+
+IP
+Cmax
+
+-
+
+-
+
+-
+
+-
+
+Energy
+cost
+-
+
+-
+
+-
+
+-
+
+-
+
+Time
+(sec)
+-
+
+Dropped
+jobs (%)
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+0.0
+
+Table 12: Comparing results of ADP, the IP, and the heuristic for C3
+ADP
+Cmax
+
+Overall
+obj.
+7479.6
+7507.9
+7548.2
+7482.4
+7516.2
+7506.86
+6975.4
+7102.6
+7062.9
+7035.4
+7131.8
+7061.62
+7052.9
+7052.4
+7040.6
+7076.8
+7018.4
+7048.22
+7095.9
+7096.8
+7162.9
+7179.8
+7106.2
+7128.32
+7130.8
+7315.6
+7398.4
+7417.1
+7417.8
+7335.94
+
+119
+118
+129
+95
+132
+118.6
+100
+133
+131
+134
+129
+125.4
+125
+125
+126
+122
+125
+124.6
+121
+122
+130
+135
+119
+125.4
+100
+115
+131
+131
+128
+121
+
+Heuristic
+Cmax
+
+Energy
+cost
+36922.0
+37068.0
+37225.0
+37032.0
+37053.0
+37.060
+34477.0
+34981.0
+34791.0
+34641.0
+35143.0
+34806.6
+34765.0
+34762.0
+34699.0
+34896.0
+34592.0
+34742.8
+34996.0
+34996.0
+35295.0
+35359.0
+35055.0
+35140.2
+35254.0
+36118.0
+36468.0
+36562.0
+36577.0
+36195.8
+
+Time
+(sec)
+78.32
+87.09
+113.08
+40.86
+118.77
+87.62
+42.18
+108.94
+99.03
+104.26
+88.23
+88.53
+76.45
+84.13
+100.86
+78.18
+86.24
+85.17
+88.21
+72.64
+114.04
+126.60
+62.62
+92.82
+53.33
+80.22
+128.26
+122.82
+99.18
+96.76
+
+(
+
+1 if machine m starts processing on job j in time t,
+
+• xm
+tj =
+
+0 Otherwise
+(
+
+1 if machine m is processing job jin time t,
+
+m =
+• ωtj
+
+0 Otherwise
+(
+
+• ytm =
+
+1 if machine m is in idle mode in time t,
+0 Otherwise
+
+(
+• ztm =
+
+1 if machine m is turned on in time slot t,
+0 Otherwise.
+
+The parameters are the same as in defined in the paper.
+
+min
+
+ζ1 Cmax + ζ2
+
+X
+
+X
+
+Et
+
+t
+
+X
+
+m
+µm
+t ωtj +
+
+m∈M j∈J :rj ≥t
+
+X
+m∈M
+
+m
+κm
+t yt +
+
+X
+
+m
+λm
+t zt
+
+
+
+(33)
+
+m∈M
+
+subject to
+mj +1
+X T −p
+X
+
+m∈M
+
+xm
+tj ≤ 1,
+
+∀j ∈ J ,
+
+(34)
+
+xm
+tj ≤ 1,
+
+∀m ∈ M, ∀t,
+
+(35)
+
+m
+ωtj
+≤ 1,
+
+∀m ∈ M, ∀t,
+
+(36)
+
+t=rj
+
+X
+j∈J :rj ≤t
+
+X
+j∈J :rj ≤t
+
+t+pmj −1
+
+X
+
+pmj xm
+tj ≤
+
+m
+ωθj
+,
+
+∀m ∈ M, ∀j ∈ J , ∀t ∈ {rj , rj + 1, . . . , T − pmj + 1},
+
+(37)
+
+θ=t
+m
+ωtj
+=
+
+t
+X
+
+xm
+θj ,
+
+∀m ∈ M, ∀j ∈ J , ∀t ∈ {rj , rj + 1, . . . , rj + pmj − 1},
+
+(38)
+
+θ=rj
+t
+X
+
+m
+ωtj
+=
+
+xm
+θj ,
+
+∀m ∈ M, ∀j ∈ J , ∀t ∈ {rj + pmj , . . . , T },
+
+(39)
+
+θ=t−pmj +1
+
+X
+
+ztm ≤ 1,
+
+∀m ∈ M,
+
+(40)
+
+t
+
+X
+
+xm
+tj −
+
+j∈J :rj ≥t
+t
+X
+
+zθm ≤ 0,
+
+∀m ∈ M, ∀t,
+
+(41)
+
+θ=1
+
+zθm + (1 −
+
+X
+
+m
+ωtj
+) ≤ 1 + ytm
+
+∀m ∈ M, ∀t,
+
+(42)
+
+j∈J :rj ≤t
+
+θ=1
+
+1−
+
+t
+X
+
+X
+
+m
+ωtj
+≥ ytm
+
+∀m ∈ M, ∀t,
+
+j∈J :rj ≤t
+
+27
+
+(43)
+
+t
+X
+
+zθm ≥ ytm
+
+∀m ∈ M, ∀t,
+
+(44)
+
+θ=1
+
+X X
+(t + pmj − 1)xm
+tj ≤ Cmax
+
+∀j ∈ J ,
+
+(45)
+
+m∈M t∈T
+m m m
+xm
+tj , ωtj , zt , yt ∈ {0, 1}, Cmax ≥ 0.
+
+(46)
+
+The objective function (33) minimizes a linear combination of makespan and total energy cost. Constraint (34) ensures that jobs are assigned to exactly one time slot on all machines combined. Constraints (35)-(36) ensure that each machine processes at most one job at a time. Constraints (37)(39) ensure the necessary processing times for each job without preemption. Constraint (40) limit
+the number of times a machine can be switched on. Constraint (41) ensure that a job can be processed by a working machine. Constraints (42)-(44) define the state of each machine during each
+time slot. Constraint (45) defines the completion time of each job and links it to the makespan,
+Cmax . Constraint (46) is the integrality constraint. It should be noted that the IP (33)-(46) extends
+the decision problem of the approximate dynamic programming to the entire planning horizon.
+B. Appendix 2: Paolucci-Anghinolfi-Tonelli algorithm
+Presented below is the algorithm of Paolocci (Paolucci et al. 2017) that we used to compare the
+performance of our proposed method. First, we define the following notations:
+• h: the iteration index,
+• H: the maximum number of iteration,
+• SB: the current best solution,
+• SR: the current reference solution,
+• SC: the candidate schedule,
+• Γk : the list of jobs that are ready to be processed on machine k,
+• O: number of oredered candidate job (an algorithm parameter),
+• πmin : a small positive number (an algorithm parameter),
+• q0 : a fixed exploitation threshold,
+• f SB : the weighted sum of the objective function of the best schedule,
+• f SC : the weighted sum of the objective function of the candidate schedule,
+• Th : temperature at iteration h,
+• χ: the cooling factor.
+28
+
+The steps of algorithm are outlined below:
+Step 1. Read all relevant data such as number of jobs and number of machines. Create a list of
+future events based on the jobs arrival and completion times. Sort this list in the chronological
+order of events. Set h = 0.
+Step 2. Let t be the current simulation time at which the next event to be processed occurs. At
+each event time, t, an existing job in the system should be assigned to one of the available machines.
+Step 2.1. Consider all jobs ready to start and available machines at event time t. Machines are
+ordered randomly.
+Step 2.2. Select machine k from list of machines. Create a list of jobs that are ready to be
+processed on machine k, and denote it by Γk . From list Γk , choose job τ as follows:
+Step 2.2.1. Jobs in Γk is sorted according to their start time in the SR (ties are broken randomly).
+At the first iteration, SR = 0.
+Step 2.2.2. Create list of O ordered jobs, Ck = (τ1 , . . . , τO ), from jobs in Γk . Assign the following
+selection probability to each job in Ck :
+Pi =
+
+O−i
+O−1 + πmin
+,
+P
+O−j
+Oπmin + O
+j=1 O−1
+
+i = 1, . . . , O.
+
+(47)
+
+Step 2.2.3. Using (47), select job τC ∈ Ck .
+Step 2.2.4. Generate a random number q ∼ U [0, 1], if q < q0 , assign job τ1 to machine k; otherwise,
+assign job τC to machine k.
+Step 2.2.5 Update machine and set M = M \ {k} and event list. If M 6= ∅, go to Step 2.1;
+otherwise, go to Step 3.
+Step 3. If the event list is empty, a complete schedule SC has been generated, go to Step 4;
+otherwise, go to Step 2.
+Step 4. Evaluate the candidate schedule SC of Step 3 by the percentage deviation ∆Z(SC) with
+respect to SB defined as follows
+∆Z(SC) =
+
+f SB − f SC
+.
+f SB
+
+(48)
+
+If ∆Z(SC) > 0, then set SB = SC, SR = SC, and h = h + 1, go to Step 6; otherwise, go to step
+5.
+Step 5. Use a simulated annealing acceptance rule. Set SR = SC if random number p ∼ U [0, 1] <
+e
+
+∆Z(SC)
+Th
+
+. Set Th+1 = αTh and h = h + 1. Go to Step 2.
+
+Step 6. If h ≤ H, go to Step 2; otherwise STOP.
+References
+Abedi, M., Chiong, R., Noman, N., and Zhang, R. (2020). A multi-population, multi-objective
+memetic algorithm for energy-efficient job-shop scheduling with deteriorating machines. Expert
+Systems with Applications, page 113348.
+
+29
+
+Aghelinejad, M., Ouazene, Y., and Yalaoui, A. (2018). Production scheduling optimisation with
+machine state and time-dependent energy costs. International Journal of Production Research,
+56(16):5558–5575.
+Al-Kanj, L., Nascimento, J., and Powell, W. B. (2020). Approximate dynamic programming for
+planning a ride-hailing system using autonomous fleets of electric vehicles. European Journal
+of Operational Research, 284(3):1088–1106.
+Albers, S. (2009). Online scheduling.
+Alkaabneh, F., Diabat, A., and Gao, H. O. (2020). Unified framework for efficient, effective, and
+fair resource allocation by food banks: Approximate dynamic programming approach. Omega,
+page 102300.
+Anghinolfi, D., Paolucci, M., and Ronco, R. (2020). A bi-objective heuristic approach for green
+identical parallel machine scheduling. European Journal of Operational Research.
+Cao, J., Pan, R., Xia, X., Shao, X., and Wang, X. (2020). An efficient scheduling approach for an
+iron-steel plant equipped with self-generation equipment under time-of-use electricity tariffs.
+Swarm and Evolutionary Computation, page 100764.
+Che, A., Zhang, S., and Wu, X. (2017). Energy-conscious unrelated parallel machine scheduling
+under time-of-use electricity tariffs. Journal of Cleaner Production, 156:688–697.
+Chen, J.-f., Wang, L., and Peng, Z.-p. (2019). A collaborative optimization algorithm for energyefficient multi-objective distributed no-idle flow-shop scheduling. Swarm and Evolutionary
+Computation, 50:100557.
+Cheng, J., Chu, F., Chu, C., and Xia, W. (2016). Bi-objective optimization of single-machine batch
+scheduling under time-of-use electricity prices. RAIRO-Operations Research, 50(4-5):715–732.
+Cheng, J., Chu, F., Liu, M., Wu, P., and Xia, W. (2017a). Bi-criteria single-machine batch scheduling with machine on/off switching under time-of-use tariffs. Computers & Industrial Engineering, 112:721–734.
+Cheng, J., Chu, F., and Zhou, M. (2017b). An improved model for parallel machine scheduling under
+time-of-use electricity price. IEEE Transactions on Automation Science and Engineering,
+15(2):896–899.
+Cohon, J. (1978). MULTIOBJECTIVE PROGRAMMING AND PLANNING.
+Dai, M., Tang, D., Giret, A., and Salido, M. A. (2019). Multi-objective optimization for energyefficient flexible job shop scheduling problem with transportation constraints. Robotics and
+Computer-Integrated Manufacturing, 59:143–157.
+Ding, J.-Y., Song, S., Zhang, R., Chiong, R., and Wu, C. (2015). Parallel machine scheduling under
+time-of-use electricity prices: New models and optimization approaches. IEEE Transactions
+on Automation Science and Engineering, 13(2):1138–1154.
+Fang, K., Uhan, N. A., Zhao, F., and Sutherland, J. W. (2016). Scheduling on a single machine
+under time-of-use electricity tariffs. Annals of Operations Research, 238(1-2):199–227.
+30
+
+Gahm, C., Denz, F., Dirr, M., and Tuma, A. (2016). Energy-efficient scheduling in manufacturing
+companies: A review and research framework. European Journal of Operational Research,
+248(3):744–757.
+Gajic, D., Hadera, H., Onofri, L., Harjunkoski, I., and Di Gennaro, S. (2017). Implementation of
+an integrated production and electricity optimization system in melt shop. Journal of Cleaner
+Production, 155:39–46.
+Giglio, D., Paolucci, M., and Roshani, A. (2017). Integrated lot sizing and energy-efficient job shop
+scheduling problem in manufacturing/remanufacturing systems. Journal of Cleaner Production, 148:624–641.
+Giret, A., Trentesaux, D., and Prabhu, V. (2015). Sustainability in manufacturing operations
+scheduling: A state of the art review. Journal of Manufacturing Systems, 37:126–140.
+Godfrey, G. A. and Powell, W. B. (2002). An adaptive dynamic programming algorithm for dynamic
+fleet management, i: Single period travel times. Transportation Science, 36(1):21–39.
+Golpı̂ra, H., Khan, S. A. R., and Zhang, Y. (2018). Robust smart energy efficient production
+planning for a general job-shop manufacturing system under combined demand and supply uncertainty in the presence of grid-connected microgrid. Journal of Cleaner Production,
+202:649–665.
+Gong, G., Chiong, R., Deng, Q., Han, W., Zhang, L., Lin, W., and Li, K. (2020). Energyefficient flexible flow shop scheduling with worker flexibility. Expert Systems with Applications,
+141:112902.
+Hadera, H., Harjunkoski, I., Sand, G., Grossmann, I. E., and Engell, S. (2015). Optimization
+of steel production scheduling with complex time-sensitive electricity cost. Computers &
+Chemical Engineering, 76:117–136.
+Heydar, M., O’Reilly, M. M., Trainer, E., Fackrell, M., Taylor, P. G., and Tirdad, A. (2021). A
+stochastic model for the patient-to-bed assignment problem with random arrivals and departures. Annals of Operations Research.
+Hulshof, P. J., Mes, M. R., Boucherie, R. J., and Hans, E. W. (2016). Patient admission planning
+using approximate dynamic programming. Flexible Services and Manufacturing Journal, 28(12):30–61.
+Jenkins, P. R., Robbins, M. J., and Lunday, B. J. (2021). Approximate dynamic programming
+for the military aeromedical evacuation dispatching, preemption-rerouting, and redeployment
+problem. European Journal of Operational Research, 290(1):132–143.
+Ji, M., Wang, J.-Y., and Lee, W.-C. (2013). Minimizing resource consumption on uniform parallel
+machines with a bound on makespan. Computers & Operations Research, 40(12):2970–2974.
+Jiang, E.-d. and Wang, L. (2019). An improved multi-objective evolutionary algorithm based on
+decomposition for energy-efficient permutation flow shop scheduling problem with sequencedependent setup time. International Journal of Production Research, 57(6):1756–1771.
+
+31
+
+Koch, S. and Klein, R. (2020). Route-based approximate dynamic programming for dynamic pricing
+in attended home delivery. European Journal of Operational Research, 287(2):633–652.
+Lei, D., Zheng, Y., and Guo, X. (2017). A shuffled frog-leaping algorithm for flexible job shop
+scheduling with the consideration of energy consumption. International Journal of Production
+Research, 55(11):3126–3140.
+Leung, J. Y.-T., Lee, K., and Pinedo, M. L. (2012). Bi-criteria scheduling with machine assignment
+costs. International Journal of Production Economics, 139(1):321–329.
+Li, M., Lei, D., and Cai, J. (2019). Two-level imperialist competitive algorithm for energy-efficient
+hybrid flow shop scheduling problem with relative importance of objectives. Swarm and Evolutionary Computation, 49:34–43.
+Liu, M., Yang, X., Chu, F., Zhang, J., and Chu, C. (2020). Energy-oriented bi-objective optimization for the tempered glass scheduling. Omega, 90:101995.
+Liu, Y., Dong, H., Lohse, N., and Petrovic, S. (2016). A multi-objective genetic algorithm for
+optimisation of energy consumption and shop floor production performance. International
+Journal of Production Economics, 179:259–272.
+Lu, C., Gao, L., Li, X., Pan, Q., and Wang, Q. (2017). Energy-efficient permutation flow shop
+scheduling problem using a hybrid multi-objective backtracking search algorithm. Journal of
+Cleaner Production, 144:228–238.
+Luo, H., Du, B., Huang, G. Q., Chen, H., and Li, X. (2013). Hybrid flow shop scheduling considering machine electricity consumption cost. International Journal of Production Economics,
+146(2):423–439.
+Mansouri, S. A. and Aktas, E. (2016).
+
+Minimizing energy consumption and makespan in a
+
+two-machine flowshop scheduling problem.
+
+Journal of the Operational Research Society,
+
+67(11):1382–1394.
+Mansouri, S. A., Aktas, E., and Besikci, U. (2016). Green scheduling of a two-machine flowshop:
+Trade-off between makespan and energy consumption. European Journal of Operational Research, 248(3):772–788.
+May, G., Stahl, B., Taisch, M., and Prabhu, V. (2015). Multi-objective genetic algorithm for energyefficient job shop scheduling. International Journal of Production Research, 53(23):7071–7089.
+Meng, L., Zhang, C., Shao, X., and Ren, Y. (2019). Milp models for energy-aware flexible job shop
+scheduling problem. Journal of Cleaner Production, 210:710–723.
+Mes, M. R. and Rivera, A. P. (2017). Approximate dynamic programming by practical examples.
+In Markov Decision Processes in Practice, pages 63–101. Springer.
+Mokhtari, H. and Hasani, A. (2017). An energy-efficient multi-objective optimization for flexible
+job-shop scheduling problem. Computers & Chemical Engineering, 104:339–352.
+Moon, J.-Y., Shin, K., and Park, J. (2013). Optimization of production scheduling with timedependent and machine-dependent electricity cost for industrial energy efficiency. The International Journal of Advanced Manufacturing Technology, 68(1-4):523–535.
+32
+
+Mouzon, G., Yildirim, M. B., and Twomey, J. (2007). Operational methods for minimization
+of energy consumption of manufacturing equipment. International Journal of Production
+Research, 45(18-19):4247–4271.
+Nezami, F. G., Heydar, M., and Berretta, R. (2017). Optimizing production schedule with energy
+consumption and demand charges in parallel machine setting. In 8th Multidisciplinary International Conference on Scheduling: Theory and Applications (MISTA 2017), pages 133–143.
+Nouiri, M., Bekrar, A., and Trentesaux, D. (2018).
+
+Towards energy efficient scheduling and
+
+rescheduling for dynamic flexible job shop problem. IFAC-PapersOnLine, 51(11):1275–1280.
+Paolucci, M., Anghinolfi, D., and Tonelli, F. (2017). Facing energy-aware scheduling: a multiobjective extension of a scheduling support system for improving energy efficiency in a moulding industry. Soft Computing, 21(13):3687–3698.
+Powell, W. B. (2007). Approximate Dynamic Programming: Solving the curses of dimensionality.
+John Wiley & Sons.
+Powell, W. B. (2008). Approximate dynamic programming: lessons from the field. In 2008 Winter
+Simulation Conference, pages 205–214. IEEE.
+Powell, W. B. (2016). Perspectives of approximate dynamic programming. Annals of Operations
+Research, 241(1-2):319–356.
+Powell, W. B. (2019). A unified framework for stochastic optimization. European Journal of
+Operational Research, 275(3):795–821.
+Ronconi, D. P. and Powell, W. B. (2010). Minimizing total tardiness in a stochastic single machine scheduling problem using approximate dynamic programming. Journal of Scheduling,
+13(6):597–607.
+Rubaiee, S. and Yildirim, M. B. (2019). An energy-aware multiobjective ant colony algorithm to
+minimize total completion time and energy cost on a single-machine preemptive scheduling.
+Computers & Industrial Engineering, 127:240–252.
+Safarzadeh, H. and Niaki, S. T. A. (2019). Bi-objective green scheduling in uniform parallel machine
+environments. Journal of Cleaner Production, 217:559–572.
+Salido, M. A., Escamilla, J., Giret, A., and Barber, F. (2016). A genetic algorithm for energyefficiency in job-shop scheduling. The International Journal of Advanced Manufacturing Technology, 85(5-8):1303–1314.
+Saure, A., Patrick, J., Tyldesley, S., and Puterman, M. L. (2012). Dynamic multi-appointment patient scheduling for radiation therapy. European Journal of Operational Research, 223(2):573–
+584.
+Shrouf, F., Ordieres-Meré, J., Garcı́a-Sánchez, A., and Ortega-Mier, M. (2014). Optimizing the
+production scheduling of a single machine to minimize total energy consumption costs. Journal
+of Cleaner Production, 67:197–207.
+Silva, T. A. and de Souza, M. C. (2020). Surgical scheduling under uncertainty by approximate
+dynamic programming. Omega, 95:102066.
+33
+
+Tan, Y. and Liu, S. (2014). Models and optimisation approaches for scheduling steelmaking–
+refining–continuous casting production under variable electricity price. International Journal
+of Production Research, 52(4):1032–1049.
+Wan, G. and Qi, X. (2010). Scheduling with variable time slot costs. Naval Research Logistics
+(NRL), 57(2):159–171.
+Wang, L., Peng, Z.-p., et al. (2020a). Solving energy-efficient distributed job shop scheduling via
+multi-objective evolutionary algorithm with decomposition. Swarm and Evolutionary Computation, 58:100745.
+Wang, S., Liu, M., Chu, F., and Chu, C. (2016). Bi-objective optimization of a single machine
+batch scheduling problem with energy cost consideration. Journal of Cleaner Production,
+137:1205–1215.
+Wang, S., Wang, X., Chu, F., and Yu, J. (2020b). An energy-efficient two-stage hybrid flow
+shop scheduling problem in a glass production. International Journal of Production Research,
+58(8):2283–2314.
+Yang, Y., Chen, W., Wei, L., and Chen, X. (2018). Robust optimization for integrated scrap steel
+charge considering uncertain metal elements concentrations and production scheduling under
+time-of-use electricity tariff. Journal of Cleaner Production, 176:800–812.
+Yin, L., Li, X., Gao, L., Lu, C., and Zhang, Z. (2017). Energy-efficient job shop scheduling problem
+with variable spindle speed using a novel multi-objective algorithm. Advances in Mechanical
+Engineering, 9(4):1687814017695959.
+Yuan, Y. and Tang, L. (2017). Novel time-space network flow formulation and approximate dynamic
+programming approach for the crane scheduling in a coil warehouse. European Journal of
+Operational Research, 262(2):424–437.
+Zhang, H., Zhao, F., Fang, K., and Sutherland, J. W. (2014). Energy-conscious flow shop scheduling
+under time-of-use electricity tariffs. CIRP Annals, 63(1):37–40.
+Zhang, R. and Chiong, R. (2016). Solving the energy-efficient job shop scheduling problem: A
+multi-objective genetic algorithm with enhanced local search for minimizing the total weighted
+tardiness and total energy consumption. Journal of Cleaner Production, 112:3361–3375.
+Zhang, Y., Wang, J., and Liu, Y. (2017). Game theory based real-time multi-objective flexible job
+shop scheduling considering environmental impact. Journal of Cleaner Production, 167:665–
+679.
+Zheng, X., Zhou, S., Xu, R., and Chen, H. (2020). Energy-efficient scheduling for multi-objective
+two-stage flow shop using a hybrid ant colony optimisation algorithm. International Journal
+of Production Research, 58(13):4103–4120.
+
+34
+
+

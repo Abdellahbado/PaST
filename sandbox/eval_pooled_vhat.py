@@ -280,6 +280,7 @@ def _collect_worker(
     normalize_labels: bool,
     daily_prices_20: List[float] | None,
     target_util: float,
+    x_dtype: str,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     rng = np.random.default_rng(seed)
@@ -323,19 +324,31 @@ def _collect_worker(
     if not states:
         return np.empty((0, 0)), np.empty(0), attempts
 
-    X_inst = np.vstack(
-        [
-            phi_for_state(
-                t=int(t_v),
-                used=used_v,
-                totals=totals,
-                lengths=lengths.tolist(),
-                ctx=ctx,
-                spec=spec,
-            )
-            for (t_v, used_v) in states
-        ]
+    # Avoid list-of-arrays + vstack (high peak RAM). Preallocate and fill.
+    dtype = np.dtype(str(x_dtype))
+    t0, used0 = states[0]
+    phi0 = phi_for_state(
+        t=int(t0),
+        used=used0,
+        totals=totals,
+        lengths=lengths.tolist(),
+        ctx=ctx,
+        spec=spec,
     )
+    feat_dim = int(phi0.shape[0])
+    X_inst = np.empty((len(states), feat_dim), dtype=dtype)
+    X_inst[0, :] = phi0.astype(dtype, copy=False)
+    for i in range(1, len(states)):
+        t_v, used_v = states[i]
+        phi_v = phi_for_state(
+            t=int(t_v),
+            used=used_v,
+            totals=totals,
+            lengths=lengths.tolist(),
+            ctx=ctx,
+            spec=spec,
+        )
+        X_inst[i, :] = phi_v.astype(dtype, copy=False)
     y_inst = np.asarray(labels, dtype=np.float64)
     return X_inst, y_inst, attempts
 
@@ -441,6 +454,40 @@ def main() -> None:
         type=int,
         default=0,
         help="Number of parallel workers for data collection (0 = auto = cpu_count).",
+    )
+
+    ap.add_argument(
+        "--pool-on-disk",
+        action="store_true",
+        help=(
+            "Store pooled features/labels in on-disk memmaps while collecting to reduce peak RAM. "
+            "Useful on HPC with large worker counts."
+        ),
+    )
+    ap.add_argument(
+        "--pool-dir",
+        type=str,
+        default="",
+        help=(
+            "Directory to place memmap files when using --pool-on-disk. "
+            "Default: create a temporary directory."
+        ),
+    )
+    ap.add_argument(
+        "--pool-dtype",
+        type=str,
+        default="float32",
+        choices=["float32", "float64"],
+        help="Data type for pooled feature matrix X (float32 saves RAM).",
+    )
+    ap.add_argument(
+        "--maxtasksperchild",
+        type=int,
+        default=0,
+        help=(
+            "multiprocessing.Pool maxtasksperchild (0 disables). "
+            "Can reduce memory growth in long runs at some overhead."
+        ),
     )
 
     # Evaluation
@@ -673,16 +720,26 @@ def main() -> None:
                 ),
                 include_bins=bool(int(ckpt["include_bins"])),
                 normalize=_norm,
-                include_len_hist=bool(int(ckpt["include_len_hist"]))
-                if "include_len_hist" in ckpt.files
-                else False,
-                pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else int(args.pmax),
-                include_price_shape=bool(int(ckpt["include_price_shape"]))
-                if "include_price_shape" in ckpt.files
-                else False,
-                include_meta=bool(int(ckpt["include_meta"]))
-                if "include_meta" in ckpt.files
-                else False,
+                include_len_hist=(
+                    bool(int(ckpt["include_len_hist"]))
+                    if "include_len_hist" in ckpt.files
+                    else False
+                ),
+                pmax_for_hist=(
+                    int(ckpt["pmax_for_hist"])
+                    if "pmax_for_hist" in ckpt.files
+                    else int(args.pmax)
+                ),
+                include_price_shape=(
+                    bool(int(ckpt["include_price_shape"]))
+                    if "include_price_shape" in ckpt.files
+                    else False
+                ),
+                include_meta=(
+                    bool(int(ckpt["include_meta"]))
+                    if "include_meta" in ckpt.files
+                    else False
+                ),
             )
 
         if _mt == "poly":
@@ -736,39 +793,141 @@ def main() -> None:
             normalize_labels=use_normalize_labels,
             daily_prices_20=daily_prices_20,
             target_util=float(args.target_util),
+            x_dtype=str(args.pool_dtype),
         )
 
-        if n_workers > 1 and len(train_seeds) > 1:
-            print(f"[pool] Collecting data with {n_workers} parallel workers...")
-            with mp.Pool(n_workers) as pool:
-                results = []
-                for i, result in enumerate(pool.imap_unordered(worker_fn, train_seeds)):
-                    results.append(result)
-                    print(
-                        f"[pool] collected {i+1}/{len(train_seeds)} instances "
-                        f"({result[0].shape[0]} samples)"
-                    )
-        else:
-            print(f"[pool] Collecting data sequentially...")
-            results = []
-            for i, seed in enumerate(train_seeds):
-                t_inst = time.perf_counter()
-                result = worker_fn(seed)
-                results.append(result)
-                inst_time = time.perf_counter() - t_inst
-                print(
-                    f"[pool] train seed={seed} ({i+1}/{len(train_seeds)}) "
-                    f"samples={result[0].shape[0]} "
-                    f"time={inst_time:.1f}s"
+        mtpc = int(args.maxtasksperchild)
+        mtpc = None if mtpc <= 0 else mtpc
+
+        if bool(args.pool_on_disk):
+            import tempfile
+            from pathlib import Path
+
+            pool_dir = str(args.pool_dir).strip()
+            if pool_dir:
+                Path(pool_dir).mkdir(parents=True, exist_ok=True)
+                tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_", dir=pool_dir)
+            else:
+                tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_")
+
+            expected_per_inst = int(args.samples_per_instance)
+            expected_total = int(len(train_seeds)) * expected_per_inst
+
+            # Probe one seed to get feature dimension.
+            probe_seed = int(train_seeds[0])
+            probe_X, probe_y, probe_attempts = worker_fn(probe_seed)
+            if probe_X.size == 0:
+                raise RuntimeError(
+                    "Probe seed produced no samples; cannot determine feature dimension"
                 )
 
-        # Pool results
-        all_X = [r[0] for r in results if r[0].size > 0]
-        all_y = [r[1] for r in results if r[1].size > 0]
-        total_attempts = sum(r[2] for r in results)
+            feat_dim = int(probe_X.shape[1])
+            x_dtype = np.dtype(str(args.pool_dtype))
+            X_path = os.path.join(tmp_dir, "X_pool.dat")
+            y_path = os.path.join(tmp_dir, "y_pool.dat")
 
-        X_pool = np.vstack(all_X)
-        y_pool = np.concatenate(all_y)
+            X_mm = np.memmap(
+                X_path, mode="w+", dtype=x_dtype, shape=(expected_total, feat_dim)
+            )
+            y_mm = np.memmap(
+                y_path, mode="w+", dtype=np.float64, shape=(expected_total,)
+            )
+
+            cursor = 0
+            total_attempts = int(probe_attempts)
+            n0 = int(probe_X.shape[0])
+            X_mm[cursor : cursor + n0, :] = probe_X
+            y_mm[cursor : cursor + n0] = probe_y
+            cursor += n0
+            print(
+                f"[pool] collected 1/{len(train_seeds)} instances ({n0} samples) [probe]"
+            )
+
+            remaining_seeds = train_seeds[1:]
+            if n_workers > 1 and len(remaining_seeds) > 0:
+                print(
+                    f"[pool] Collecting remaining data with {n_workers} parallel workers (memmap)..."
+                )
+                with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
+                    for i, (X_i, y_i, attempts_i) in enumerate(
+                        pool.imap_unordered(worker_fn, remaining_seeds), start=2
+                    ):
+                        if X_i.size == 0:
+                            total_attempts += int(attempts_i)
+                            print(
+                                f"[pool] collected {i}/{len(train_seeds)} instances (0 samples)"
+                            )
+                            continue
+
+                        n_i = int(X_i.shape[0])
+                        if cursor + n_i > expected_total:
+                            raise RuntimeError(
+                                f"Memmap overflow: cursor={cursor} + n={n_i} > expected_total={expected_total}"
+                            )
+                        X_mm[cursor : cursor + n_i, :] = X_i
+                        y_mm[cursor : cursor + n_i] = y_i
+                        cursor += n_i
+                        total_attempts += int(attempts_i)
+                        print(
+                            f"[pool] collected {i}/{len(train_seeds)} instances ({n_i} samples)"
+                        )
+            else:
+                print("[pool] Collecting remaining data sequentially (memmap)...")
+                for i, seed in enumerate(remaining_seeds, start=2):
+                    t_inst = time.perf_counter()
+                    X_i, y_i, attempts_i = worker_fn(int(seed))
+                    inst_time = time.perf_counter() - t_inst
+                    if X_i.size == 0:
+                        total_attempts += int(attempts_i)
+                        print(
+                            f"[pool] train seed={seed} ({i}/{len(train_seeds)}) samples=0 time={inst_time:.1f}s"
+                        )
+                        continue
+                    n_i = int(X_i.shape[0])
+                    X_mm[cursor : cursor + n_i, :] = X_i
+                    y_mm[cursor : cursor + n_i] = y_i
+                    cursor += n_i
+                    total_attempts += int(attempts_i)
+                    print(
+                        f"[pool] train seed={seed} ({i}/{len(train_seeds)}) samples={n_i} time={inst_time:.1f}s"
+                    )
+
+            X_pool = X_mm[:cursor]
+            y_pool = y_mm[:cursor]
+            print(f"[pool] memmap dir: {tmp_dir}")
+        else:
+            if n_workers > 1 and len(train_seeds) > 1:
+                print(f"[pool] Collecting data with {n_workers} parallel workers...")
+                with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
+                    results = []
+                    for i, result in enumerate(
+                        pool.imap_unordered(worker_fn, train_seeds)
+                    ):
+                        results.append(result)
+                        print(
+                            f"[pool] collected {i+1}/{len(train_seeds)} instances "
+                            f"({result[0].shape[0]} samples)"
+                        )
+            else:
+                print(f"[pool] Collecting data sequentially...")
+                results = []
+                for i, seed in enumerate(train_seeds):
+                    t_inst = time.perf_counter()
+                    result = worker_fn(seed)
+                    results.append(result)
+                    inst_time = time.perf_counter() - t_inst
+                    print(
+                        f"[pool] train seed={seed} ({i+1}/{len(train_seeds)}) "
+                        f"samples={result[0].shape[0]} "
+                        f"time={inst_time:.1f}s"
+                    )
+
+            all_X = [r[0] for r in results if r[0].size > 0]
+            all_y = [r[1] for r in results if r[1].size > 0]
+            total_attempts = sum(r[2] for r in results)
+
+            X_pool = np.vstack(all_X)
+            y_pool = np.concatenate(all_y)
 
         collect_time = time.perf_counter() - train_t0
         print(f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s")

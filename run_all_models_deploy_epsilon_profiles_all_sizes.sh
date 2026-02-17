@@ -2,8 +2,35 @@
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 
+# Be conservative on shared/HPC nodes: avoid thread oversubscription.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+
 # Run from this script's directory (PaST/)
 cd "$(dirname "$0")"
+
+# -----------------------------
+# nohup launcher (default on)
+#
+# By default, the script re-launches itself under nohup in the background so
+# terminal/SSH disconnects won't stop the run.
+#
+# Disable:
+#   NOHUP=0 bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
+# -----------------------------
+
+if [[ "${NOHUP:-1}" == "1" && -z "${IN_NOHUP:-}" ]]; then
+  mkdir -p "ADP/logs/nohup"
+  TS="$(date +"%Y%m%d_%H%M%S")"
+  LOG_FILE="ADP/logs/nohup/$(basename "$0" .sh)_${TS}.log"
+  echo "[nohup] launching in background; log: $LOG_FILE"
+  IN_NOHUP=1 NOHUP=0 nohup bash "$0" "$@" >"$LOG_FILE" 2>&1 &
+  echo "[nohup] pid=$!"
+  exit 0
+fi
 
 # ============================================================
 # Comprehensive deployment-like sweep:
@@ -15,6 +42,10 @@ cd "$(dirname "$0")"
 # Python executable to use (override if needed):
 #   PYTHON_BIN=/path/to/python bash PaST/run_all_models_deploy_epsilon_profiles_all_sizes.sh
 PYTHON_BIN="${PYTHON_BIN:-python}"
+
+# Multiprocessing workers for pooled data collection.
+# On HPC, mp.cpu_count() can be very large and may OOM / violate process limits.
+WORKERS="${WORKERS:-16}"
 
 # ============================================================
 # Resume behavior
@@ -92,16 +123,19 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       N_RANGE="20-60";  D_RANGE="2-4";   M_RANGE="3-7";   TARGET_UTIL="0.80";
       TRAIN_SEEDS="$TRAIN_SEEDS_SMALL"; EVAL_SEEDS="$EVAL_SEEDS_SMALL";
       SAMPLES="$SAMPLES_SMALL"; REPLICATES="$REPLICATES_SMALL";
+      POOL_ARGS=()
       ;;
     medium)
       N_RANGE="100-200"; D_RANGE="5-15";  M_RANGE="8-16";  TARGET_UTIL="0.85";
       TRAIN_SEEDS="$TRAIN_SEEDS_MEDIUM"; EVAL_SEEDS="$EVAL_SEEDS_MEDIUM";
       SAMPLES="$SAMPLES_MEDIUM"; REPLICATES="$REPLICATES_MEDIUM";
+      POOL_ARGS=(--pool-on-disk --pool-dtype float32)
       ;;
     large)
       N_RANGE="250-500"; D_RANGE="10-30"; M_RANGE="25-40"; TARGET_UTIL="0.90";
       TRAIN_SEEDS="$TRAIN_SEEDS_LARGE"; EVAL_SEEDS="$EVAL_SEEDS_LARGE";
       SAMPLES="$SAMPLES_LARGE"; REPLICATES="$REPLICATES_LARGE";
+      POOL_ARGS=(--pool-on-disk --pool-dtype float32)
       ;;
     *)
       echo "Unknown CATEGORY=$CATEGORY"; exit 1;
@@ -144,12 +178,14 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       else
         "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
           --D 3 --N 40 --pmax "$PMAX" \
+          --workers "$WORKERS" \
           --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
           --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
           --eval-seeds "$EVAL_SEEDS" \
           --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
           --transferable-features --normalize --normalize-labels \
           --target-util "$TARGET_UTIL" \
+          "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
           --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
           --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" --lgbm-learning-rate "$LGBM_LR" \

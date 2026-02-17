@@ -2,8 +2,35 @@
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 
+# Be conservative on shared/HPC nodes: avoid thread oversubscription.
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+export VECLIB_MAXIMUM_THREADS="${VECLIB_MAXIMUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
+
 # Run from this script's directory (PaST/)
 cd "$(dirname "$0")"
+
+# -----------------------------
+# nohup launcher (default on)
+#
+# By default, the script re-launches itself under nohup in the background so
+# terminal/SSH disconnects won't stop the run.
+#
+# Disable:
+#   NOHUP=0 bash PaST/run_all_new_mlp_variants_generalization.sh
+# -----------------------------
+
+if [[ "${NOHUP:-1}" == "1" && -z "${IN_NOHUP:-}" ]]; then
+  mkdir -p "ADP/logs/nohup"
+  TS="$(date +"%Y%m%d_%H%M%S")"
+  LOG_FILE="ADP/logs/nohup/$(basename "$0" .sh)_${TS}.log"
+  echo "[nohup] launching in background; log: $LOG_FILE"
+  IN_NOHUP=1 NOHUP=0 nohup bash "$0" "$@" >"$LOG_FILE" 2>&1 &
+  echo "[nohup] pid=$!"
+  exit 0
+fi
 
 # ============================================================
 # Train + evaluate the NEW MLP feature-embedding variants:
@@ -24,6 +51,14 @@ cd "$(dirname "$0")"
 # Python executable to use (override if needed):
 #   PYTHON_BIN=/path/to/python bash PaST/run_all_new_mlp_variants_generalization.sh
 PYTHON_BIN="${PYTHON_BIN:-python}"
+
+# Multiprocessing workers for pooled data collection.
+WORKERS="${WORKERS:-16}"
+
+# Resume behavior:
+# - RESUME=1 (default): skip steps whose outputs already exist
+# - RESUME=0: force re-run everything (overwrites CSVs; checkpoints overwritten by training)
+RESUME="${RESUME:-1}"
 
 PROFILES=("daily_tou" "generate_data")
 NEW_MODELS=("mlp_hist" "mlp_price" "mlp_meta" "mlp_all")
@@ -102,6 +137,12 @@ _size_params() {
 for CATEGORY in "${CATEGORIES[@]}"; do
   read -r N_RANGE D_RANGE M_RANGE TARGET_UTIL TRAIN_SEEDS EVAL_SEEDS SAMPLES REPLICATES <<< "$(_size_params "$CATEGORY")"
 
+  # Use on-disk pooling for bigger categories to avoid RAM spikes with many workers.
+  POOL_ARGS=()
+  if [[ "$CATEGORY" == "medium" || "$CATEGORY" == "large" ]]; then
+    POOL_ARGS=(--pool-on-disk --pool-dtype float32)
+  fi
+
   echo "========================================================================"
   echo "CATEGORY=$CATEGORY  N_RANGE=$N_RANGE  D_RANGE=$D_RANGE  M_RANGE=$M_RANGE  target_util=$TARGET_UTIL"
   echo "========================================================================"
@@ -115,42 +156,56 @@ for CATEGORY in "${CATEGORIES[@]}"; do
 
     for MODEL in "${NEW_MODELS[@]}"; do
       CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
+      POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
+      POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      EPS_CSV="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv"
+      EPS_LOG="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
 
       echo ""
       echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
-        --D 3 --N 40 --pmax "$PMAX" \
-        --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
-        --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
-        --eval-seeds "$EVAL_SEEDS" \
-        --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
-        --transferable-features --normalize --normalize-labels \
-        --target-util "$TARGET_UTIL" \
-        --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
-        --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
-        "${PROFILE_ARGS[@]}" \
-        --model-type "$MODEL" --beams 2,5 \
-        --save-model "$CKPT" \
-        --out-csv "$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv" \
-        2>&1 | tee "$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      if [[ "$RESUME" == "1" && -f "$CKPT" && -f "$POOLED_CSV" ]]; then
+        echo "[resume] skip pooled train/eval (exists): ckpt=$CKPT csv=$POOLED_CSV"
+      else
+        "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+          --D 3 --N 40 --pmax "$PMAX" \
+          --workers "$WORKERS" \
+          --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
+          --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
+          --eval-seeds "$EVAL_SEEDS" \
+          --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
+          --transferable-features --normalize --normalize-labels \
+          --target-util "$TARGET_UTIL" \
+          "${POOL_ARGS[@]}" \
+          --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
+          --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
+          "${PROFILE_ARGS[@]}" \
+          --model-type "$MODEL" --beams 2,5 \
+          --save-model "$CKPT" \
+          --out-csv "$POOLED_CSV" \
+          2>&1 | tee "$POOLED_LOG"
+      fi
 
       echo ">>> DEPLOY epsilon-sim (within-size): category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      "$PYTHON_BIN" sandbox/eval_epsilon_constraint_sim.py \
-        --category "$CATEGORY" \
-        --N 40 --N-range "$N_RANGE" \
-        --M 5 --M-range "$M_RANGE" \
-        --D 3 --D-range "$D_RANGE" \
-        --replicates "$REPLICATES" --seed "$EPS_SEED" \
-        --pmax "$PMAX" --target-util "$TARGET_UTIL" \
-        --price-mode daily_tou \
-        "${PROFILE_ARGS[@]}" \
-        --assign-alpha "$ASSIGN_ALPHA" --assign-uniform-mix "$ASSIGN_UNIFORM_MIX" \
-        --guided --beam "$BEAM" --prune-factor "$PRUNE_FACTOR" \
-        --load-model "$CKPT" --transferable-features --normalize \
-        --out-csv "$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv" \
-        2>&1 | tee "$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      if [[ "$RESUME" == "1" && -f "$EPS_CSV" ]]; then
+        echo "[resume] skip epsilon-sim (exists): csv=$EPS_CSV"
+      else
+        "$PYTHON_BIN" sandbox/eval_epsilon_constraint_sim.py \
+          --category "$CATEGORY" \
+          --N 40 --N-range "$N_RANGE" \
+          --M 5 --M-range "$M_RANGE" \
+          --D 3 --D-range "$D_RANGE" \
+          --replicates "$REPLICATES" --seed "$EPS_SEED" \
+          --pmax "$PMAX" --target-util "$TARGET_UTIL" \
+          --price-mode daily_tou \
+          "${PROFILE_ARGS[@]}" \
+          --assign-alpha "$ASSIGN_ALPHA" --assign-uniform-mix "$ASSIGN_UNIFORM_MIX" \
+          --guided --beam "$BEAM" --prune-factor "$PRUNE_FACTOR" \
+          --load-model "$CKPT" --transferable-features --normalize \
+          --out-csv "$EPS_CSV" \
+          2>&1 | tee "$EPS_LOG"
+      fi
 
       echo ">>> Done: category=$CATEGORY model=$MODEL profile=$PROFILE"
     done
@@ -179,21 +234,28 @@ for PROFILE in "${PROFILES[@]}"; do
 
   for MODEL in "${NEW_MODELS[@]}"; do
     CKPT="$MODEL_DIR/vhat_${SRC}_${PROFILE}_${MODEL}.npz"
+    CROSS_CSV="$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.csv"
+    CROSS_LOG="$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.log"
 
     echo ""
     echo ">>> CROSS EVAL: train=${SRC} eval=${TGT} model=$MODEL profile=$PROFILE"
 
-    "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
-      --load-model "$CKPT" \
-      --D 3 --N 40 --pmax "$PMAX" \
-      --eval-seeds "$EVAL_SEEDS_T" \
-      --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
-      --transferable-features --normalize \
-      --target-util "$TARGET_UTIL_T" \
-      "${PROFILE_ARGS[@]}" \
-      --beams 2,5 \
-      --out-csv "$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.csv" \
-      2>&1 | tee "$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.log"
+    if [[ "$RESUME" == "1" && -f "$CROSS_CSV" ]]; then
+      echo "[resume] skip cross eval (exists): csv=$CROSS_CSV"
+    else
+      "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+        --load-model "$CKPT" \
+        --D 3 --N 40 --pmax "$PMAX" \
+        --workers "$WORKERS" \
+        --eval-seeds "$EVAL_SEEDS_T" \
+        --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
+        --transferable-features --normalize \
+        --target-util "$TARGET_UTIL_T" \
+        "${PROFILE_ARGS[@]}" \
+        --beams 2,5 \
+        --out-csv "$CROSS_CSV" \
+        2>&1 | tee "$CROSS_LOG"
+    fi
   done
 
   # medium -> large
@@ -203,21 +265,28 @@ for PROFILE in "${PROFILES[@]}"; do
 
   for MODEL in "${NEW_MODELS[@]}"; do
     CKPT="$MODEL_DIR/vhat_${SRC}_${PROFILE}_${MODEL}.npz"
+    CROSS_CSV="$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.csv"
+    CROSS_LOG="$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.log"
 
     echo ""
     echo ">>> CROSS EVAL: train=${SRC} eval=${TGT} model=$MODEL profile=$PROFILE"
 
-    "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
-      --load-model "$CKPT" \
-      --D 3 --N 40 --pmax "$PMAX" \
-      --eval-seeds "$EVAL_SEEDS_T" \
-      --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
-      --transferable-features --normalize \
-      --target-util "$TARGET_UTIL_T" \
-      "${PROFILE_ARGS[@]}" \
-      --beams 2,5 \
-      --out-csv "$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.csv" \
-      2>&1 | tee "$LOG_DIR/cross_${SRC}_to_${TGT}_${PROFILE}_${MODEL}.log"
+    if [[ "$RESUME" == "1" && -f "$CROSS_CSV" ]]; then
+      echo "[resume] skip cross eval (exists): csv=$CROSS_CSV"
+    else
+      "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+        --load-model "$CKPT" \
+        --D 3 --N 40 --pmax "$PMAX" \
+        --workers "$WORKERS" \
+        --eval-seeds "$EVAL_SEEDS_T" \
+        --eval-N-range "$N_RANGE_T" --eval-D-range "$D_RANGE_T" --eval-pmax "$PMAX" \
+        --transferable-features --normalize \
+        --target-util "$TARGET_UTIL_T" \
+        "${PROFILE_ARGS[@]}" \
+        --beams 2,5 \
+        --out-csv "$CROSS_CSV" \
+        2>&1 | tee "$CROSS_LOG"
+    fi
   done
 
 done

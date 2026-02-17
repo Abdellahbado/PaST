@@ -133,7 +133,7 @@ from .config import (
     VARIANT_FACTORIES,
 )
 
-from .sm_benchmark_data import (
+from .data.sm_benchmark_data import (
     generate_raw_instance,
     make_single_machine_episode,
     generate_episode_batch,
@@ -154,17 +154,27 @@ from .sm_env import (
     ENV_VERSION,
 )
 
-from .past_sm_model import (
-    PaSTSMNet,
-    build_model,
-)
+try:
+    from .past_sm_model import (
+        PaSTSMNet,
+        build_model,
+    )
+except Exception:  # pragma: no cover
+    PaSTSMNet = None  # type: ignore
+    build_model = None  # type: ignore
 
-from .q_sequence_model import (
-    DuelingQHead,
-    QSequenceNet,
-    QModelWrapper,
-    build_q_model,
-)
+try:
+    from .models.q_sequence_model import (
+        DuelingQHead,
+        QSequenceNet,
+        QModelWrapper,
+        build_q_model,
+    )
+except Exception:  # pragma: no cover
+    DuelingQHead = None  # type: ignore
+    QSequenceNet = None  # type: ignore
+    QModelWrapper = None  # type: ignore
+    build_q_model = None  # type: ignore
 
 # NOTE: We intentionally do NOT import `PaST.train_ppo` here.
 # Running `python -m PaST.train_ppo` first imports the `PaST` package; if we
