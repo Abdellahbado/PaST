@@ -302,6 +302,8 @@ def _solve_machine(
     beam: int,
     prune_factor: float,
     vhat_fn,
+    time_limit: float = -1.0,
+    max_states: int = 0,
 ) -> Tuple[float, int, float]:
     """Solve a single-machine subproblem; returns (cost, finish_time, wall_s)."""
     t0 = time.perf_counter()
@@ -313,6 +315,9 @@ def _solve_machine(
         beam_width=int(beam),
         prune_factor=float(prune_factor),
         vhat=vhat_fn,
+        time_limit=float(time_limit),
+        track_schedule=False,
+        max_states=int(max_states),
     )
     wall = time.perf_counter() - t0
     if not res.feasible:
@@ -720,6 +725,27 @@ def parse_args() -> argparse.Namespace:
         help="If set, do not compute exact DP baseline; only run guided (or exact if not guided).",
     )
 
+    ap.add_argument(
+        "--eps-dp-time-limit",
+        type=float,
+        default=-1.0,
+        help=(
+            "Per-machine DP time limit (seconds) for both exact and guided "
+            "solves inside the epsilon loop.  -1 = no limit (original behaviour). "
+            "Recommended: 120 for medium, 300 for large."
+        ),
+    )
+
+    ap.add_argument(
+        "--dp-max-states",
+        type=int,
+        default=0,
+        help=(
+            "Memory guardrail: if any single DP layer exceeds this many states, "
+            "abort gracefully (like a timeout).  0 = no limit."
+        ),
+    )
+
     return ap.parse_args()
 
 
@@ -832,6 +858,7 @@ def main() -> None:
         f"freeze={bool(args.price_freeze)} freeze_scope={args.price_freeze_scope} price_seed={args.price_seed}\n"
         f"[epsilon] assign_alpha={args.assign_alpha} assign_uniform_mix={args.assign_uniform_mix}\n"
         f"[epsilon] guided={bool(args.guided)} skip_exact={bool(args.skip_exact)} beam={args.beam} prune_factor={args.prune_factor}\n"
+        f"[epsilon] eps_dp_time_limit={args.eps_dp_time_limit}\n"
         f"[epsilon] load_model={str(args.load_model).strip() if bool(args.guided) else ''} "
         f"normalize_labels={bool(model_meta.get('normalize_labels', False)) if model_meta is not None else False} "
         f"spec={base_spec}"
@@ -936,6 +963,9 @@ def main() -> None:
                     if bool(args.guided) and vhat_fn is None:
                         vhat_fn = lambda _t, _s: 0.0
 
+                    _eps_tl = float(args.eps_dp_time_limit)
+                    _eps_ms = int(args.dp_max_states)
+
                     if not bool(args.guided):
                         # Exact only
                         m_t0 = time.perf_counter()
@@ -946,6 +976,8 @@ def main() -> None:
                             beam=int(args.beam),
                             prune_factor=float(args.prune_factor),
                             vhat_fn=None,
+                            time_limit=_eps_tl,
+                            max_states=_eps_ms,
                         )
                         m_wall = float(time.perf_counter() - m_t0)
                         total_energy_exact += float(cost)
@@ -966,6 +998,8 @@ def main() -> None:
                             beam=int(args.beam),
                             prune_factor=float(args.prune_factor),
                             vhat_fn=vhat_fn,
+                            time_limit=_eps_tl,
+                            max_states=_eps_ms,
                         )
                         m_wall = float(time.perf_counter() - m_t0)
                         total_energy_guided += float(cost_g)
@@ -986,6 +1020,8 @@ def main() -> None:
                             beam=int(args.beam),
                             prune_factor=float(args.prune_factor),
                             vhat_fn=None,
+                            time_limit=_eps_tl,
+                            max_states=_eps_ms,
                         )
                         m_wall_e = float(time.perf_counter() - m_t0)
                         total_energy_exact += float(cost_e)
@@ -1006,6 +1042,8 @@ def main() -> None:
                             beam=int(args.beam),
                             prune_factor=float(args.prune_factor),
                             vhat_fn=vhat_fn,
+                            time_limit=_eps_tl,
+                            max_states=_eps_ms,
                         )
                         m_wall_g = float(time.perf_counter() - m_t0)
                         total_energy_guided += float(cost_g)

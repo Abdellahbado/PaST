@@ -326,9 +326,18 @@ def solve_sparse_dp_numba(
     prefix: np.ndarray,
     T: int,
     time_limit: float = -1.0,
+    track_schedule: bool = True,
+    max_states: int = 0,
 ) -> DPResultNumba:
     """
-    Numba-accelerated sparse DP solver.
+    Sparse DP solver (delegates to pure-Python implementation).
+
+    Note: Despite the name, this currently delegates to solve_sparse_dp_python
+    rather than the experimental solve_sparse_dp_numba_core, because the Numba
+    core has limitations (fixed-size arrays, hash-based state lookup with
+    collision risk, no LB pruning, no best_partial tracking).  The Python
+    implementation with block-based LB pruning and rw/jobs_done tracking is
+    the production path.
 
     Args:
         lengths: Array of K distinct processing times
@@ -336,6 +345,8 @@ def solve_sparse_dp_numba(
         prefix: Prefix sums of price array (length T+1)
         T: Time horizon
         time_limit: Max seconds to run (-1 for no limit)
+        track_schedule: If False, skip parent-pointer tracking.
+        max_states: Memory guardrail — abort if any layer exceeds this.
 
     Returns:
         DPResultNumba with cost, finish_time, and segments
@@ -362,6 +373,8 @@ def solve_sparse_dp_numba(
         final_state=final_state,
         time_limit=float(time_limit),
         tie_break="early",
+        track_schedule=track_schedule,
+        max_states=max_states,
     )
 
     if not np.isfinite(best_cost) or best_t < 0:
@@ -396,9 +409,18 @@ def solve_sparse_dp_python(
     final_state: int,
     time_limit: float = -1.0,
     tie_break: str = "early",
+    track_schedule: bool = True,
+    max_states: int = 0,
 ) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
     """
     Pure Python sparse DP with time limit and early pruning.
+
+    Args:
+        track_schedule: If False, skip parent-pointer tracking to save memory.
+            The returned parent dict will be empty.  The caller must use a
+            greedy fallback if a concrete schedule is needed.
+        max_states: If > 0, abort (like timeout) when any single DP layer
+            exceeds this many states, to bound memory usage.
 
     Returns:
         (best_cost, best_finish_time, parent_dict, timed_out, best_partial)
@@ -411,40 +433,60 @@ def solve_sparse_dp_python(
     lengths_list = [int(x) for x in lengths]
     totals_arr = totals
     total_jobs = sum(int(t) for t in totals_arr)
+    max_job_len = max(lengths_list) if lengths_list else 1
 
     # Inc values for state transitions
     inc = [int(m) for m in mult]
 
-    # State decoding cache
-    used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * K)}
+    # Packed parent key: t * state_bound + state  →  L
+    state_bound = int(final_state) + 1
+
+    # -- Block-based admissible lower bound --
+    # Partition time into blocks of size B.  For each block boundary b, sort
+    # prices[b:T] and store prefix sums.  For time t use nearest b ≤ t.
+    # Admissible because [b, T) ⊇ [t, T).
+    _LB_BLOCK = 20
+    prices_arr = np.diff(prefix)  # prices_arr[i] = prefix[i+1] - prefix[i]
+    _lb_blocks: Dict[int, np.ndarray] = {}
+    for b in range(0, T + 1, _LB_BLOCK):
+        if b < T:
+            sp = np.sort(prices_arr[b:])
+            cs = np.empty(len(sp) + 1, dtype=np.float64)
+            cs[0] = 0.0
+            cs[1:] = np.cumsum(sp)
+            _lb_blocks[b] = cs
+        else:
+            _lb_blocks[b] = np.zeros(1, dtype=np.float64)
+
+    def _lb_cost(t: int, rw: int) -> float:
+        """Admissible lower bound: cheapest rw slots from block boundary ≤ t."""
+        b = (t // _LB_BLOCK) * _LB_BLOCK
+        arr = _lb_blocks[b]
+        if rw >= len(arr):
+            return float("inf")  # infeasible: need more slots than exist
+        return float(arr[rw])
+
+    # -- Decode used counts on demand (no cache, K ≤ 12 so cheap) --
+    radices_list = [int(r) for r in radices]
 
     def decode_used(state: int) -> Tuple[int, ...]:
-        cached = used_cache.get(state)
-        if cached is not None:
-            return cached
         u = [0] * K
         x = state
         for i in range(K):
-            r = int(radices[i])
-            u[i] = x % r
-            x //= r
-        tup = tuple(u)
-        used_cache[state] = tup
-        return tup
+            u[i] = x % radices_list[i]
+            x //= radices_list[i]
+        return tuple(u)
 
-    def remaining_work(used: Tuple[int, ...]) -> int:
-        work = 0
-        for i in range(K):
-            work += (int(totals_arr[i]) - used[i]) * lengths_list[i]
-        return work
+    # Total remaining work at initial state
+    total_rw = sum(int(totals_arr[i]) * lengths_list[i] for i in range(K))
 
-    def count_scheduled(used: Tuple[int, ...]) -> int:
-        return sum(used)
-
-    # DP layers
-    dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
-    dp_layers[0][0] = (0.0, 0)
-    parent: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+    # DP layers: layer[state] = (cost, pen, rw, jobs_done)
+    dp_layers: List[Dict[int, Tuple[float, int, int, int]]] = [
+        dict() for _ in range(T + 1)
+    ]
+    dp_layers[0][0] = (0.0, 0, total_rw, 0)
+    # Packed parent: int key (t*state_bound+s) → int value (L).
+    parent: Dict[int, int] = {}
 
     best_final_cost = _INF
     best_final_pen = 2**63 - 1
@@ -467,14 +509,17 @@ def solve_sparse_dp_python(
         if not layer:
             continue
 
-        # Update best partial state from this layer
-        for state, (cost, pen) in layer.items():
-            used = decode_used(state)
-            n_scheduled = count_scheduled(used)
-            if n_scheduled > best_partial_jobs or (
-                n_scheduled == best_partial_jobs and cost < best_partial_cost
+        # Memory guardrail: abort if layer exceeds max_states
+        if max_states > 0 and len(layer) > max_states:
+            timed_out = True
+            break
+
+        # Update best partial state from this layer (uses jobs_done, no decode)
+        for state, (cost, pen, rw, jd) in layer.items():
+            if jd > best_partial_jobs or (
+                jd == best_partial_jobs and cost < best_partial_cost
             ):
-                best_partial_jobs = n_scheduled
+                best_partial_jobs = jd
                 best_partial_cost = cost
                 best_partial_time = t
                 best_partial_state = state
@@ -502,16 +547,20 @@ def solve_sparse_dp_python(
 
         # Idle transitions
         next_layer = dp_layers[t + 1]
-        for state, (c0, p0) in layer.items():
-            # Early pruning
-            used = decode_used(state)
-            if remaining_work(used) > T - t:
+        for state, (c0, p0, rw, jd) in layer.items():
+            # Feasibility pruning (uses rw from layer value, no decode)
+            if rw > T - t:
+                continue
+
+            # Lower-bound pruning (block-based admissible bound)
+            if c0 + _lb_cost(t, rw) > best_final_cost:
                 continue
 
             prev = next_layer.get(state)
             if prev is None:
-                next_layer[state] = (float(c0), int(p0))
-                parent[(t + 1, state)] = (t, state, 0)
+                next_layer[state] = (float(c0), int(p0), rw, jd)
+                if track_schedule:
+                    parent[(t + 1) * state_bound + state] = 0
             else:
                 c_prev, p_prev = float(prev[0]), int(prev[1])
                 better = c0 < c_prev
@@ -522,16 +571,22 @@ def solve_sparse_dp_python(
                 ):
                     better = p0 < p_prev
                 if better:
-                    next_layer[state] = (float(c0), int(p0))
-                    parent[(t + 1, state)] = (t, state, 0)
+                    next_layer[state] = (float(c0), int(p0), rw, jd)
+                    if track_schedule:
+                        parent[(t + 1) * state_bound + state] = 0
 
         # Job transitions
-        for state, (c0, p0) in layer.items():
-            used = decode_used(state)
-
-            # Early pruning
-            if remaining_work(used) > T - t:
+        for state, (c0, p0, rw, jd) in layer.items():
+            # Feasibility pruning
+            if rw > T - t:
                 continue
+
+            # Lower-bound pruning
+            if c0 + _lb_cost(t, rw) > best_final_cost:
+                continue
+
+            # Decode used counts on demand
+            used = decode_used(state)
 
             for i, L in enumerate(lengths_list):
                 if used[i] >= int(totals_arr[i]):
@@ -541,6 +596,8 @@ def solve_sparse_dp_python(
                     continue
 
                 new_state = state + inc[i]
+                new_rw = rw - L
+                new_jd = jd + 1
                 cand_cost = float(c0 + (prefix[end] - prefix[t]))
                 cand_pen = int(p0)
                 if tie_break == "early":
@@ -549,8 +606,9 @@ def solve_sparse_dp_python(
                 target_layer = dp_layers[end]
                 prev = target_layer.get(new_state)
                 if prev is None:
-                    target_layer[new_state] = (cand_cost, cand_pen)
-                    parent[(end, new_state)] = (t, state, L)
+                    target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
+                    if track_schedule:
+                        parent[end * state_bound + new_state] = L
                 else:
                     prev_cost, prev_pen = float(prev[0]), int(prev[1])
                     better = cand_cost < prev_cost
@@ -561,8 +619,14 @@ def solve_sparse_dp_python(
                     ):
                         better = cand_pen < prev_pen
                     if better:
-                        target_layer[new_state] = (cand_cost, cand_pen)
-                        parent[(end, new_state)] = (t, state, L)
+                        target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
+                        if track_schedule:
+                            parent[end * state_bound + new_state] = L
+
+        # Free processed layer to save memory.
+        freed_t = t - max_job_len
+        if freed_t >= 0:
+            dp_layers[freed_t] = {}
 
     # Return best partial info if we timed out without finding complete solution
     best_partial = None

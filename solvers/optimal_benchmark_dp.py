@@ -105,6 +105,82 @@ def _interval_cost(prefix: np.ndarray, start: int, length: int) -> float:
     return float(prefix[end] - prefix[start])
 
 
+def _greedy_full_schedule(
+    p_list: List[int],
+    prices: np.ndarray,
+    ids: List[int],
+) -> DPResult:
+    """Pure greedy schedule from scratch — guaranteed feasible if sum(p) <= T.
+
+    Sorts time slots by price (ascending), then greedily assigns jobs to the
+    cheapest contiguous windows.  This is the *ultimate fallback* when DP
+    times out and partial-greedy completion also fails.
+
+    Returns a DPResult with ``is_optimal=False, timed_out=True``.
+    """
+    T = int(len(prices))
+    total_p = sum(p_list)
+    if total_p > T:
+        return DPResult(False, float("inf"), (), 0, is_optimal=False, timed_out=True)
+
+    prefix = _build_prefix(prices)
+
+    # Pair each job with its id, sort longest-first for easier placement.
+    jobs = sorted(zip(p_list, ids), key=lambda x: -x[0])
+
+    occupied = [False] * T
+    sched: List[Tuple[int, int, int]] = []
+    total_cost = 0.0
+
+    for length, jid in jobs:
+        best_start = -1
+        best_cost = float("inf")
+        # Slide a window of size `length` over the horizon.
+        t = 0
+        while t <= T - length:
+            # Check contiguous free block of size `length`.
+            ok = True
+            for dt in range(length):
+                if occupied[t + dt]:
+                    ok = False
+                    # Jump past the occupied slot.
+                    t = t + dt + 1
+                    break
+            if not ok:
+                continue
+            cost = float(prefix[t + length] - prefix[t])
+            if cost < best_cost:
+                best_cost = cost
+                best_start = t
+            t += 1
+
+        if best_start < 0:
+            # Should never happen when total_p <= T, but be safe.
+            # Place at first available contiguous block regardless.
+            t = 0
+            while t <= T - length:
+                ok = all(not occupied[t + dt] for dt in range(length))
+                if ok:
+                    best_start = t
+                    best_cost = float(prefix[t + length] - prefix[t])
+                    break
+                t += 1
+            if best_start < 0:
+                return DPResult(
+                    False, float("inf"), (), 0, is_optimal=False, timed_out=True
+                )
+
+        for dt in range(length):
+            occupied[best_start + dt] = True
+        total_cost += best_cost
+        sched.append((jid, best_start, best_start + length))
+
+    finish_time = max((e for _, _, e in sched), default=0)
+    return DPResult(
+        True, total_cost, tuple(sched), finish_time, is_optimal=False, timed_out=True
+    )
+
+
 def _greedy_complete_schedule(
     remaining_counts: Dict[int, int],  # length -> count remaining
     prices: np.ndarray,
@@ -201,8 +277,14 @@ def _solve_sparse_dp_inline(
     final_state: int,
     tie_break: str = "early",
     time_limit: float = -1.0,
+    track_schedule: bool = True,
+    max_states: int = 0,
 ) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
     """Inline sparse DP fallback with early pruning and time limit.
+
+    Args:
+        max_states: If > 0, abort (like timeout) when any single DP layer
+            exceeds this many states, to bound memory usage.
 
     Returns:
         (best_final_cost, best_final_time, parent, timed_out, best_partial)
@@ -218,36 +300,58 @@ def _solve_sparse_dp_inline(
     inc = [int(m) for m in mult]
     total_jobs = sum(int(t) for t in totals_arr)
 
-    # State decoding cache
-    used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * K)}
+    # Packed parent key: t * state_bound + state  →  L (job length or 0=idle)
+    state_bound = int(final_state) + 1
+
+    # -- Block-based admissible lower bound --
+    # Instead of sorting prices for every t (O(T² log T)), we partition time
+    # into blocks of size B.  For each block boundary b we sort prices[b:T]
+    # and store prefix sums.  For time t we use the nearest boundary b ≤ t.
+    # Because [b, T) ⊇ [t, T), the bound is admissible (≤ true lb).
+    # Cost: O(T/B · T log T) preprocessing.
+    _LB_BLOCK = 20
+    prices_arr = np.diff(prefix)  # prices_arr[i] = prefix[i+1] - prefix[i]
+    _lb_blocks: Dict[int, np.ndarray] = {}
+    for b in range(0, T + 1, _LB_BLOCK):
+        if b < T:
+            sp = np.sort(prices_arr[b:])
+            cs = np.empty(len(sp) + 1, dtype=np.float64)
+            cs[0] = 0.0
+            cs[1:] = np.cumsum(sp)
+            _lb_blocks[b] = cs
+        else:
+            _lb_blocks[b] = np.zeros(1, dtype=np.float64)
+
+    def _lb_cost(t: int, rw: int) -> float:
+        """Admissible lower bound: cheapest rw slots from block boundary ≤ t."""
+        b = (t // _LB_BLOCK) * _LB_BLOCK
+        arr = _lb_blocks[b]
+        if rw >= len(arr):
+            return float("inf")  # infeasible: need more slots than exist
+        return float(arr[rw])
+
+    # -- Decode used counts on demand (no cache, K ≤ 12 so cheap) --
+    radices_list = [int(r) for r in radices]
 
     def decode_used(state: int) -> Tuple[int, ...]:
-        cached = used_cache.get(state)
-        if cached is not None:
-            return cached
         u = [0] * K
         x = state
         for i in range(K):
-            r = int(radices[i])
-            u[i] = x % r
-            x //= r
-        tup = tuple(u)
-        used_cache[state] = tup
-        return tup
+            u[i] = x % radices_list[i]
+            x //= radices_list[i]
+        return tuple(u)
 
-    def remaining_work(used: Tuple[int, ...]) -> int:
-        work = 0
-        for i in range(K):
-            work += (int(totals_arr[i]) - used[i]) * lengths_list[i]
-        return work
+    # Total remaining work at initial state
+    total_rw = sum(int(totals_arr[i]) * lengths_list[i] for i in range(K))
 
-    def count_scheduled(used: Tuple[int, ...]) -> int:
-        return sum(used)
-
-    # DP layers
-    dp_layers: List[Dict[int, Tuple[float, int]]] = [dict() for _ in range(T + 1)]
-    dp_layers[0][0] = (0.0, 0)
-    parent: Dict[Tuple[int, int], Tuple[int, int, int]] = {}
+    # DP layers: layer[state] = (cost, pen, rw, jobs_done)
+    dp_layers: List[Dict[int, Tuple[float, int, int, int]]] = [
+        dict() for _ in range(T + 1)
+    ]
+    dp_layers[0][0] = (0.0, 0, total_rw, 0)
+    # Packed parent: int key (t*state_bound+s) → int value (L).
+    parent: Dict[int, int] = {}
+    max_job_len = max(lengths_list) if lengths_list else 1
 
     best_final_cost = float("inf")
     best_final_pen = 2**63 - 1
@@ -271,15 +375,17 @@ def _solve_sparse_dp_inline(
         if not layer:
             continue
 
-        # Update best partial state from this layer
-        for state, (cost, pen) in layer.items():
-            used = decode_used(state)
-            n_scheduled = count_scheduled(used)
-            # Better if: more jobs scheduled, or same jobs but lower cost
-            if n_scheduled > best_partial_jobs or (
-                n_scheduled == best_partial_jobs and cost < best_partial_cost
+        # Memory guardrail: abort if layer exceeds max_states
+        if max_states > 0 and len(layer) > max_states:
+            timed_out = True
+            break
+
+        # Update best partial state from this layer (uses jobs_done, no decode)
+        for state, (cost, pen, rw, jd) in layer.items():
+            if jd > best_partial_jobs or (
+                jd == best_partial_jobs and cost < best_partial_cost
             ):
-                best_partial_jobs = n_scheduled
+                best_partial_jobs = jd
                 best_partial_cost = cost
                 best_partial_time = t
                 best_partial_state = state
@@ -305,19 +411,28 @@ def _solve_sparse_dp_inline(
         if t == T:
             continue
 
+        # Free old layers to save memory
+        freed_t = t - max_job_len
+        if freed_t >= 0:
+            dp_layers[freed_t] = {}
+
         # Idle + job transitions
         next_layer = dp_layers[t + 1]
-        for state, (c0, p0) in layer.items():
-            # Early pruning
-            used = decode_used(state)
-            if remaining_work(used) > T - t:
+        for state, (c0, p0, rw, jd) in layer.items():
+            # Feasibility pruning (uses rw from layer value, no decode)
+            if rw > T - t:
                 continue
 
-            # Idle transition
+            # Lower-bound pruning (block-based admissible bound)
+            if c0 + _lb_cost(t, rw) > best_final_cost:
+                continue
+
+            # Idle transition: rw and jobs_done propagate unchanged
             prev = next_layer.get(state)
             if prev is None:
-                next_layer[state] = (float(c0), int(p0))
-                parent[(t + 1, state)] = (t, state, 0)
+                next_layer[state] = (float(c0), int(p0), rw, jd)
+                if track_schedule:
+                    parent[(t + 1) * state_bound + state] = 0
             else:
                 c_prev, p_prev = float(prev[0]), int(prev[1])
                 better = c0 < c_prev
@@ -328,10 +443,12 @@ def _solve_sparse_dp_inline(
                 ):
                     better = p0 < p_prev
                 if better:
-                    next_layer[state] = (float(c0), int(p0))
-                    parent[(t + 1, state)] = (t, state, 0)
+                    next_layer[state] = (float(c0), int(p0), rw, jd)
+                    if track_schedule:
+                        parent[(t + 1) * state_bound + state] = 0
 
-            # Job transitions
+            # Job transitions: decode used counts on demand
+            used = decode_used(state)
             for i, L in enumerate(lengths_list):
                 if used[i] >= int(totals_arr[i]):
                     continue
@@ -340,6 +457,8 @@ def _solve_sparse_dp_inline(
                     continue
 
                 new_state = state + inc[i]
+                new_rw = rw - L
+                new_jd = jd + 1
                 cand_cost = float(c0 + (prefix[end] - prefix[t]))
                 cand_pen = int(p0)
                 if tie_break == "early":
@@ -348,8 +467,9 @@ def _solve_sparse_dp_inline(
                 target_layer = dp_layers[end]
                 prev = target_layer.get(new_state)
                 if prev is None:
-                    target_layer[new_state] = (cand_cost, cand_pen)
-                    parent[(end, new_state)] = (t, state, L)
+                    target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
+                    if track_schedule:
+                        parent[end * state_bound + new_state] = L
                 else:
                     prev_cost, prev_pen = float(prev[0]), int(prev[1])
                     better = cand_cost < prev_cost
@@ -360,8 +480,9 @@ def _solve_sparse_dp_inline(
                     ):
                         better = cand_pen < prev_pen
                     if better:
-                        target_layer[new_state] = (cand_cost, cand_pen)
-                        parent[(end, new_state)] = (t, state, L)
+                        target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
+                        if track_schedule:
+                            parent[end * state_bound + new_state] = L
 
     # Return best partial info if we timed out without finding complete solution
     best_partial = None
@@ -382,6 +503,8 @@ def solve_optimal_benchmark_dp(
     beam_width: int = 2000,
     prune_factor: float = 2.0,
     vhat: Optional[callable] = None,
+    track_schedule: bool = True,
+    max_states: int = 0,
 ) -> DPResult:
     """Solve the simplified benchmark exactly.
 
@@ -560,6 +683,8 @@ def solve_optimal_benchmark_dp(
                     final_state=final_state,
                     time_limit=time_limit,
                     tie_break=tie_break,
+                    track_schedule=track_schedule,
+                    max_states=max_states,
                 )
             )
         else:
@@ -576,17 +701,34 @@ def solve_optimal_benchmark_dp(
                     final_state=final_state,
                     tie_break=tie_break,
                     time_limit=time_limit,
+                    track_schedule=track_schedule,
+                    max_states=max_states,
                 )
             )
 
         if np.isfinite(best_final_cost) and best_final_time >= 0:
+            if not track_schedule:
+                # No parent pointers — return cost/finish_time without schedule.
+                return DPResult(
+                    True,
+                    float(best_final_cost),
+                    (),
+                    int(best_final_time),
+                    is_optimal=not timed_out,
+                    timed_out=timed_out,
+                )
+
+            # Helpers for packed-parent backtracking
+            _sb = int(final_state) + 1
+            _len_to_inc = {int(lengths_list[i]): int(inc[i]) for i in range(K)}
+
             # Backtrack segments
             segments: List[Tuple[int, int]] = []
             t = best_final_time
             s = final_state
             while not (t == 0 and s == 0):
-                par = parent.get((t, s))
-                if par is None:
+                L = parent.get(t * _sb + s)
+                if L is None:
                     return DPResult(
                         True,
                         float(best_final_cost),
@@ -595,10 +737,12 @@ def solve_optimal_benchmark_dp(
                         is_optimal=True,
                         timed_out=False,
                     )
-                prev_t, prev_s, L = par
                 if L > 0:
-                    segments.append((prev_t, int(L)))
-                t, s = int(prev_t), int(prev_s)
+                    segments.append((t - L, int(L)))
+                    t = t - L
+                    s = s - _len_to_inc[L]
+                else:
+                    t -= 1
             segments.reverse()
 
             sched: List[Tuple[int, int, int]] = []
@@ -620,8 +764,11 @@ def solve_optimal_benchmark_dp(
                 timed_out=False,
             )
 
-        # Handle timeout with greedy completion for sparse DP
-        if timed_out and best_partial is not None:
+        # Handle timeout with greedy completion for sparse DP.
+        # REQUIRES track_schedule=True — without parent pointers we cannot
+        # know which slots the partial DP used, so partial+greedy would
+        # double-count cheap slots and produce invalid (too-low) costs.
+        if timed_out and best_partial is not None and track_schedule:
             partial_time, partial_state, partial_cost = best_partial
 
             # Decode partial state to get used counts
@@ -636,18 +783,23 @@ def solve_optimal_benchmark_dp(
 
             used_counts = decode_state(partial_state)
 
-            # Backtrack to get partial schedule
+            _sb = int(final_state) + 1
+            _len_to_inc = {int(lengths_list[i]): int(inc[i]) for i in range(K)}
+
+            # Backtrack to get partial schedule (packed parent format)
             segments = []
             t = partial_time
             s = partial_state
             while not (t == 0 and s == 0):
-                par = parent.get((t, s))
-                if par is None:
+                L = parent.get(t * _sb + s)
+                if L is None:
                     break
-                prev_t, prev_s, L = par
                 if L > 0:
-                    segments.append((prev_t, int(L)))
-                t, s = int(prev_t), int(prev_s)
+                    segments.append((t - L, int(L)))
+                    t = t - L
+                    s = s - _len_to_inc[L]
+                else:
+                    t -= 1
             segments.reverse()
 
             # Build partial schedule
@@ -691,9 +843,8 @@ def solve_optimal_benchmark_dp(
                     timed_out=True,
                 )
 
-        return DPResult(
-            False, float("inf"), (), 0, is_optimal=False, timed_out=timed_out
-        )
+        # Partial greedy failed — fall back to pure greedy from scratch.
+        return _greedy_full_schedule(p_list, prices, ids)
 
     # used[s, i] = used count of length i in state s
     used = np.zeros((n_states, K), dtype=np.int16)
@@ -927,7 +1078,8 @@ def solve_optimal_benchmark_dp(
                     timed_out=True,
                 )
 
-    return DPResult(False, float("inf"), (), 0, is_optimal=False, timed_out=timed_out)
+    # Ultimate fallback: pure greedy from scratch.
+    return _greedy_full_schedule(p_list, prices, ids)
 
 
 def solve_optimal_benchmark_dp_counts(

@@ -150,6 +150,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       POOL_ARGS=()
       LABEL_MODE="subproblem"
       DP_TIME_LIMIT="-1"
+      EPS_DP_TIME_LIMIT="-1"
+      DP_MAX_STATES="0"
       OPT_PATH_N_PATHS="1"
       OPT_PATH_TOPUP_MAX="0"
       OPT_PATH_TOPUP_TL="0.2"
@@ -163,6 +165,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
       DP_TIME_LIMIT="120"
+      EPS_DP_TIME_LIMIT="120"
+      DP_MAX_STATES="2000000"
       OPT_PATH_N_PATHS="2"
       OPT_PATH_TOPUP_MAX="0"
       OPT_PATH_TOPUP_TL="-1"
@@ -176,6 +180,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
       DP_TIME_LIMIT="300"
+      EPS_DP_TIME_LIMIT="300"
+      DP_MAX_STATES="5000000"
       OPT_PATH_N_PATHS="2"
       OPT_PATH_TOPUP_MAX="0"
       OPT_PATH_TOPUP_TL="-1"
@@ -284,6 +290,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --assign-alpha "$ASSIGN_ALPHA" --assign-uniform-mix "$ASSIGN_UNIFORM_MIX" \
           --guided --beam "$BEAM" --prune-factor "$PRUNE_FACTOR" \
           --load-model "$CKPT" --transferable-features --normalize \
+          --eps-dp-time-limit "$EPS_DP_TIME_LIMIT" \
+          --dp-max-states "$DP_MAX_STATES" \
           --out-csv "$EPS_CSV" \
           2>&1 | tee "$EPS_LOG"
 
