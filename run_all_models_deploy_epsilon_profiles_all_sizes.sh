@@ -162,7 +162,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       SAMPLES="$SAMPLES_MEDIUM"; REPLICATES="$REPLICATES_MEDIUM";
       POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
-      DP_TIME_LIMIT="-1"
+      DP_TIME_LIMIT="120"
       OPT_PATH_N_PATHS="2"
       OPT_PATH_TOPUP_MAX="0"
       OPT_PATH_TOPUP_TL="-1"
@@ -175,7 +175,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       SAMPLES="$SAMPLES_LARGE"; REPLICATES="$REPLICATES_LARGE";
       POOL_ARGS=(--pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR")
       LABEL_MODE="optimal_path"
-      DP_TIME_LIMIT="-1"
+      DP_TIME_LIMIT="300"
       OPT_PATH_N_PATHS="2"
       OPT_PATH_TOPUP_MAX="0"
       OPT_PATH_TOPUP_TL="-1"

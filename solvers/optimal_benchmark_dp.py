@@ -531,17 +531,19 @@ def solve_optimal_benchmark_dp(
     # This is typically very fast for benchmark p in 1..4 and horizons up to 500.
 
     n_states = int(np.prod(radices, dtype=np.int64))
-    # Dense DP threshold: balance speed vs memory
-    # For K <= 6, use higher threshold since vectorized NumPy is much faster
-    if K <= 6:
-        max_cells = 200_000_000  # 200M cells ≈ 1.6GB (acceptable for modern machines)
-    else:
-        max_cells = (
-            12_000_000  # 12M cells ≈ 96MB (conservative for many unique lengths)
-        )
+    total_cells = (T + 1) * n_states
 
-    # Use sparse DP only if K > 6 (many unique lengths) AND state space exceeds limit
-    use_sparse = K > 6 and (T + 1) * n_states > max_cells
+    # Dense DP threshold: balance speed vs memory.
+    # Dense allocates 4 arrays totalling ~18 bytes/cell.  With 4 parallel
+    # workers we must keep per-worker allocation reasonable (~2 GB).
+    # 100M cells × 18 B ≈ 1.8 GB → safe for 4 workers on a 64 GB machine.
+    max_cells = 100_000_000  # 100M cells
+
+    # Switch to sparse (dict-based) DP whenever the dense arrays would be
+    # too large, *regardless* of K.  The old guard "K > 6" caused the dense
+    # path to try allocating hundreds of GB for medium/large instances
+    # (e.g. K=6, radices ~34 each → n_states ~1.5 B) and hang/OOM.
+    use_sparse = total_cells > max_cells
     if use_sparse:
         # Fallback: use optimized sparse DP with early pruning and time limit.
         # This is much faster than the inline version due to early feasibility checks.

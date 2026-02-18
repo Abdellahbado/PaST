@@ -176,7 +176,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
   EVAL_TIME_LIMIT="-1"
   if [[ "$CATEGORY" == "medium" ]]; then
     LABEL_MODE="optimal_path"
-    DP_TIME_LIMIT="-1"
+    DP_TIME_LIMIT="120"
     OPT_PATH_N_PATHS="2"
     OPT_PATH_TOPUP_MAX="0"
     OPT_PATH_TOPUP_TL="-1"
@@ -184,7 +184,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
     EVAL_TIME_LIMIT="30.0"
   elif [[ "$CATEGORY" == "large" ]]; then
     LABEL_MODE="optimal_path"
-    DP_TIME_LIMIT="-1"
+    DP_TIME_LIMIT="300"
     OPT_PATH_N_PATHS="2"
     OPT_PATH_TOPUP_MAX="0"
     OPT_PATH_TOPUP_TL="-1"
