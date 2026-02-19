@@ -1681,6 +1681,13 @@ def main() -> None:
             )
 
         elif model_type == "mlp":
+            # Train/test split (same seed as linear/poly for consistency)
+            idx = np.arange(len(y_pool))
+            np.random.default_rng(42).shuffle(idx)
+            split = int(0.85 * len(idx))
+            X_train, y_train = X_pool[idx[:split]], y_pool[idx[:split]]
+            X_test, y_test = X_pool[idx[split:]], y_pool[idx[split:]]
+
             mlp_model = fit_mlp(
                 X_train,
                 y_train,
@@ -1705,6 +1712,13 @@ def main() -> None:
             feat_dim = int(X_pool.shape[1])
 
         elif model_type == "lgbm":
+            # Train/test split (same seed as linear/poly for consistency)
+            idx = np.arange(len(y_pool))
+            np.random.default_rng(42).shuffle(idx)
+            split = int(0.85 * len(idx))
+            X_train, y_train = X_pool[idx[:split]], y_pool[idx[:split]]
+            X_test, y_test = X_pool[idx[split:]], y_pool[idx[split:]]
+
             booster = fit_lgbm(
                 X_train,
                 y_train,
