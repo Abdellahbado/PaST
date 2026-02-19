@@ -88,7 +88,10 @@ START_CATEGORY="${START_CATEGORY:-medium}"
 
 # Two profiles (train+eval within profile; no cross-profile testing here)
 PROFILES=("daily_tou" "generate_data")
-MODELS=("linear" "poly" "mlp" "lgbm")
+# Comma-separated model list override, e.g.:
+#   MODEL_LIST_CSV=poly,mlp,lgbm bash ...
+MODEL_LIST_CSV="${MODEL_LIST_CSV:-linear,poly,mlp,lgbm}"
+IFS=',' read -r -a MODELS <<< "$MODEL_LIST_CSV"
 CATEGORIES=("small" "medium" "large")
 
 # Train/eval seeds
@@ -103,12 +106,12 @@ EVAL_SEEDS_MEDIUM="400-429"
 EVAL_SEEDS_LARGE="500-519"
 
 # Samples per training instance (category-scaled for runtime)
-SAMPLES_SMALL=4000
+SAMPLES_SMALL="${SAMPLES_SMALL:-4000}"
 # For optimal_path labeling, samples per instance should match O(T*n_paths)
 # so we don't trigger top-up. With D_hi=15, n_paths=2 -> ~600.
 # With D_hi=30, n_paths=2 -> ~1200.
-SAMPLES_MEDIUM=600
-SAMPLES_LARGE=1200
+SAMPLES_MEDIUM="${SAMPLES_MEDIUM:-600}"
+SAMPLES_LARGE="${SAMPLES_LARGE:-1200}"
 
 # Model training knobs (long-ish but guarded by early stopping)
 MLP_MAX_EPOCHS=600
@@ -162,8 +165,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       EPS_DP_TIME_LIMIT="-1"
       DP_MAX_STATES="0"
       OPT_PATH_N_PATHS="1"
-      OPT_PATH_TOPUP_MAX="0"
-      OPT_PATH_TOPUP_TL="0.2"
+      OPT_PATH_TOPUP_MAX="${OPT_PATH_TOPUP_MAX_SMALL:-0}"
+      OPT_PATH_TOPUP_TL="${OPT_PATH_TOPUP_TL_SMALL:-0.2}"
       REQUIRE_OPTIMAL_ARGS=()
       EVAL_TIME_LIMIT="-1"
       ;;
@@ -177,8 +180,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       EPS_DP_TIME_LIMIT="300"
       DP_MAX_STATES="25000000"
       OPT_PATH_N_PATHS="2"
-      OPT_PATH_TOPUP_MAX="0"
-      OPT_PATH_TOPUP_TL="-1"
+      OPT_PATH_TOPUP_MAX="${OPT_PATH_TOPUP_MAX_MEDIUM:-0}"
+      OPT_PATH_TOPUP_TL="${OPT_PATH_TOPUP_TL_MEDIUM:--1}"
       REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
       EVAL_TIME_LIMIT="30.0"
       ;;
@@ -192,8 +195,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       EPS_DP_TIME_LIMIT="900"
       DP_MAX_STATES="50000000"
       OPT_PATH_N_PATHS="2"
-      OPT_PATH_TOPUP_MAX="0"
-      OPT_PATH_TOPUP_TL="-1"
+      OPT_PATH_TOPUP_MAX="${OPT_PATH_TOPUP_MAX_LARGE:-0}"
+      OPT_PATH_TOPUP_TL="${OPT_PATH_TOPUP_TL_LARGE:--1}"
       REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
       EVAL_TIME_LIMIT="60.0"
       ;;

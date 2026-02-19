@@ -93,7 +93,7 @@ RESUME="${RESUME:-1}"
 START_CATEGORY="${START_CATEGORY:-medium}"
 
 PROFILES=("daily_tou" "generate_data")
-NEW_MODELS=("mlp_hist" "mlp_price" "mlp_meta" "mlp_all")
+NEW_MODELS=("mlp_all" "mlp_hist" "mlp_price" "mlp_meta")
 CATEGORIES=("small" "medium" "large")
 
 # Train/eval seeds
@@ -106,10 +106,12 @@ EVAL_SEEDS_SMALL="300-339"
 EVAL_SEEDS_MEDIUM="400-429"
 EVAL_SEEDS_LARGE="500-519"
 
-# Samples per training instance (category-scaled for runtime)
-SAMPLES_SMALL=4000
-SAMPLES_MEDIUM=600
-SAMPLES_LARGE=1200
+# Samples per training instance (category-scaled).
+# Since pooled labels are collected once (mlp_all) and reused by other variants,
+# use larger defaults to improve data quality.
+SAMPLES_SMALL="${SAMPLES_SMALL:-6000}"
+SAMPLES_MEDIUM="${SAMPLES_MEDIUM:-1200}"
+SAMPLES_LARGE="${SAMPLES_LARGE:-2400}"
 
 # Model training knobs (early stopping guards total runtime)
 MLP_MAX_EPOCHS=600
@@ -132,7 +134,9 @@ PMAX=12
 
 LOG_DIR="ADP/logs/new_mlp_variants_generalization"
 MODEL_DIR="ADP/models/new_mlp_variants_generalization"
+POOLED_CACHE_DIR="ADP/data/new_mlp_variants_generalization"
 mkdir -p "$LOG_DIR" "$MODEL_DIR"
+mkdir -p "$POOLED_CACHE_DIR"
 
 _profile_args() {
   local profile="$1"
@@ -226,6 +230,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
 
     for MODEL in "${NEW_MODELS[@]}"; do
       CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
+      POOLED_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_mlp_all.npz"
       POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
       POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
       POOLED_DONE="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.done"
@@ -260,6 +265,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
           --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
+          $( [[ "$MODEL" == "mlp_all" ]] && echo "--save-pooled-data $POOLED_CACHE" ) \
+          $( [[ "$MODEL" != "mlp_all" ]] && echo "--load-pooled-data $POOLED_CACHE" ) \
           "${PROFILE_ARGS[@]}" \
           --model-type "$MODEL" --beams 2,5 \
           --save-model "$CKPT" \

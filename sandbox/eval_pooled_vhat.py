@@ -840,6 +840,72 @@ def _collect_worker(
         return np.empty((0, 0)), np.empty(0), int(attempts)
 
 
+def _mlp_all_projection_indices(
+    *,
+    pmax: int,
+    target_variant: str,
+) -> np.ndarray:
+    """Return column indices to project mlp_all pooled features to a target variant.
+
+    This projection is valid for the transferable-features setup used by the
+    new MLP variants script (fixed-dimension features: no per-class blocks).
+    """
+    pmax_h = int(max(1, int(pmax)))
+    variant = str(target_variant).strip().lower()
+
+    pre_meta = np.arange(0, 10, dtype=np.int64)
+    meta = np.arange(10, 15, dtype=np.int64)
+    post_meta = np.arange(15, 23, dtype=np.int64)
+    hist = np.arange(23, 23 + pmax_h, dtype=np.int64)
+    price = np.arange(23 + pmax_h, 23 + pmax_h + 10, dtype=np.int64)
+
+    if variant == "mlp_all":
+        return np.arange(0, 23 + pmax_h + 10, dtype=np.int64)
+    if variant == "mlp_hist":
+        return np.concatenate([pre_meta, post_meta, hist])
+    if variant == "mlp_price":
+        return np.concatenate([pre_meta, post_meta, price])
+    if variant == "mlp_meta":
+        return np.concatenate([pre_meta, meta, post_meta])
+
+    raise ValueError(f"Unsupported target variant for projection: {target_variant}")
+
+
+def _load_or_project_pooled_data(
+    *,
+    load_path: str,
+    requested_model_type: str,
+    pmax: int,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Load pooled X/y and optionally project mlp_all features to another variant."""
+    z = np.load(load_path, allow_pickle=False)
+    if "X_pool" not in z.files or "y_pool" not in z.files:
+        raise ValueError(
+            f"Invalid pooled data file (missing X_pool/y_pool): {load_path}"
+        )
+
+    X_pool = np.asarray(z["X_pool"])
+    y_pool = np.asarray(z["y_pool"], dtype=np.float64)
+    src_variant = str(z["model_variant"]) if "model_variant" in z.files else ""
+
+    tgt_variant = str(requested_model_type).strip().lower()
+    if src_variant == "mlp_all" and tgt_variant in {
+        "mlp_hist",
+        "mlp_price",
+        "mlp_meta",
+        "mlp_all",
+    }:
+        idx = _mlp_all_projection_indices(pmax=int(pmax), target_variant=tgt_variant)
+        if int(np.max(idx)) >= int(X_pool.shape[1]):
+            raise ValueError(
+                "Pooled mlp_all cache does not match expected feature dimension for projection. "
+                f"X columns={X_pool.shape[1]}, max required index={int(np.max(idx))}."
+            )
+        X_pool = X_pool[:, idx]
+
+    return X_pool, y_pool
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Pooled cross-instance training: train ONE model on multiple instances, evaluate on held-out instances."
@@ -1122,6 +1188,23 @@ def main() -> None:
         default="",
         help="Save the pooled model to this .npz path.",
     )
+    ap.add_argument(
+        "--load-pooled-data",
+        type=str,
+        default="",
+        help=(
+            "Optional .npz file with pooled arrays (X_pool, y_pool). "
+            "If provided, skips DP data collection and trains from cached pooled data."
+        ),
+    )
+    ap.add_argument(
+        "--save-pooled-data",
+        type=str,
+        default="",
+        help=(
+            "Optional output .npz path to save pooled arrays (X_pool, y_pool) after collection."
+        ),
+    )
 
     # Eval for different sizes (optional overrides for eval phase)
     ap.add_argument(
@@ -1223,7 +1306,8 @@ def main() -> None:
         else None
     )
 
-    model_type = str(args.model_type).strip().lower()
+    requested_model_type = str(args.model_type).strip().lower()
+    model_type = requested_model_type
     # Normalize MLP variants to the MLP trainer while toggling FeatureSpec flags.
     if model_type in {"mlp_hist", "mlp_price", "mlp_meta", "mlp_all"}:
         if model_type == "mlp_hist":
@@ -1367,220 +1451,244 @@ def main() -> None:
         )
 
         train_t0 = time.perf_counter()
-
-        # === Parallel data collection ===
-        worker_fn = partial(
-            _collect_worker,
-            D=int(args.D),
-            N=int(args.N),
-            pmax=int(args.pmax),
-            D_range=train_D_range,
-            N_range=train_N_range,
-            samples_per_instance=int(args.samples_per_instance),
-            spec=spec,
-            normalize_labels=use_normalize_labels,
-            daily_prices_20=daily_prices_20,
-            target_util=float(args.target_util),
-            x_dtype=str(args.pool_dtype),
-            label_mode=str(args.label_mode),
-            dp_time_limit=float(args.dp_time_limit),
-            optimal_path_n_paths=int(args.optimal_path_n_paths),
-            optimal_path_topup_max=int(args.optimal_path_topup_max),
-            optimal_path_topup_dp_time_limit=float(
-                args.optimal_path_topup_dp_time_limit
-            ),
-            require_optimal_labels=bool(args.require_optimal_labels),
-        )
-
-        mtpc = int(args.maxtasksperchild)
-        mtpc = None if mtpc <= 0 else mtpc
-
-        if bool(args.pool_on_disk):
-            import tempfile
-
-            pool_dir = str(args.pool_dir).strip()
-            if pool_dir:
-                Path(pool_dir).mkdir(parents=True, exist_ok=True)
-                tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_", dir=pool_dir)
-            else:
-                tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_")
-
-            expected_per_inst = int(args.samples_per_instance)
-
-            # If we're using optimal_path with no top-up, the true number of labels per
-            # instance is O(T * n_paths), not samples_per_instance. Preallocating
-            # samples_per_instance can waste huge disk and slow down.
-            if (
-                str(args.label_mode).strip().lower() == "optimal_path"
-                and int(args.optimal_path_topup_max) == 0
-            ):
-                D_hi = (
-                    int(train_D_range[1]) if train_D_range is not None else int(args.D)
-                )
-                Tmax = int(20 * D_hi)
-                est = int(int(args.optimal_path_n_paths) * Tmax)
-                if est > 0:
-                    expected_per_inst = int(min(expected_per_inst, est))
-
-            expected_total = int(len(train_seeds)) * expected_per_inst
-
-            # Probe feature dimension WITHOUT any DP/label computation.
-            print(f"[pool] memmap: dir={tmp_dir}")
-            print("[pool] memmap: probing feature dimension (no DP)...")
-            probe_seed = int(train_seeds[0])
-            prng = np.random.default_rng(int(probe_seed))
-            D_use, N_use = _sample_D_N_feasible(
-                rng=prng,
-                base_D=int(args.D),
-                base_N=int(args.N),
+        load_pooled_data_path = str(args.load_pooled_data).strip()
+        if load_pooled_data_path:
+            print(f"[pool] Loading pooled dataset from {load_pooled_data_path}")
+            X_pool, y_pool = _load_or_project_pooled_data(
+                load_path=load_pooled_data_path,
+                requested_model_type=requested_model_type,
+                pmax=int(args.pmax),
+            )
+            total_attempts = 0
+            collect_time = 0.0
+            print(
+                f"[pool] Loaded pooled data: X={tuple(X_pool.shape)}, y={tuple(y_pool.shape)}"
+            )
+        else:
+            # === Parallel data collection ===
+            worker_fn = partial(
+                _collect_worker,
+                D=int(args.D),
+                N=int(args.N),
+                pmax=int(args.pmax),
                 D_range=train_D_range,
                 N_range=train_N_range,
-                target_util=float(args.target_util),
-                H=20,
-            )
-            tu = float(args.target_util)
-            p_probe, prices_probe = build_instance(
-                rng=prng,
-                D=int(D_use),
-                N=int(N_use),
-                pmax=int(args.pmax),
-                daily_prices_20=daily_prices_20,
-                target_util=(tu if tu > 0.0 else None),
-                M_for_cap=1,
-            )
-            lengths_p, totals_p, _rad, _mul = encode_setup(p_probe)
-            ctx_p = build_tou_feature_context(
-                prices_probe, H=20, validate_repeating=True
-            )
-            used0 = tuple([0] * int(len(lengths_p)))
-            phi0 = phi_for_state(
-                t=0,
-                used=used0,
-                totals=totals_p,
-                lengths=lengths_p.tolist(),
-                ctx=ctx_p,
+                samples_per_instance=int(args.samples_per_instance),
                 spec=spec,
+                normalize_labels=use_normalize_labels,
+                daily_prices_20=daily_prices_20,
+                target_util=float(args.target_util),
+                x_dtype=str(args.pool_dtype),
+                label_mode=str(args.label_mode),
+                dp_time_limit=float(args.dp_time_limit),
+                optimal_path_n_paths=int(args.optimal_path_n_paths),
+                optimal_path_topup_max=int(args.optimal_path_topup_max),
+                optimal_path_topup_dp_time_limit=float(
+                    args.optimal_path_topup_dp_time_limit
+                ),
+                require_optimal_labels=bool(args.require_optimal_labels),
             )
-            feat_dim = int(phi0.shape[0])
-            print(f"[pool] memmap: probe feature_dim={feat_dim}")
-            x_dtype = np.dtype(str(args.pool_dtype))
-            X_path = os.path.join(tmp_dir, "X_pool.dat")
-            y_path = os.path.join(tmp_dir, "y_pool.dat")
 
-            X_mm = np.memmap(
-                X_path, mode="w+", dtype=x_dtype, shape=(expected_total, feat_dim)
-            )
-            y_mm = np.memmap(
-                y_path, mode="w+", dtype=np.float64, shape=(expected_total,)
-            )
+            mtpc = int(args.maxtasksperchild)
+            mtpc = None if mtpc <= 0 else mtpc
 
-            cursor = 0
-            total_attempts = 0
+            if bool(args.pool_on_disk):
+                import tempfile
 
-            remaining_seeds = train_seeds
-            if n_workers > 1 and len(remaining_seeds) > 0:
-                print(
-                    f"[pool] Collecting remaining data with {n_workers} parallel workers (memmap)..."
+                pool_dir = str(args.pool_dir).strip()
+                if pool_dir:
+                    Path(pool_dir).mkdir(parents=True, exist_ok=True)
+                    tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_", dir=pool_dir)
+                else:
+                    tmp_dir = tempfile.mkdtemp(prefix="pooled_vhat_")
+
+                expected_per_inst = int(args.samples_per_instance)
+
+                if (
+                    str(args.label_mode).strip().lower() == "optimal_path"
+                    and int(args.optimal_path_topup_max) == 0
+                ):
+                    D_hi = (
+                        int(train_D_range[1])
+                        if train_D_range is not None
+                        else int(args.D)
+                    )
+                    Tmax = int(20 * D_hi)
+                    est = int(int(args.optimal_path_n_paths) * Tmax)
+                    if est > 0:
+                        expected_per_inst = int(min(expected_per_inst, est))
+
+                expected_total = int(len(train_seeds)) * expected_per_inst
+
+                print(f"[pool] memmap: dir={tmp_dir}")
+                print("[pool] memmap: probing feature dimension (no DP)...")
+                probe_seed = int(train_seeds[0])
+                prng = np.random.default_rng(int(probe_seed))
+                D_use, N_use = _sample_D_N_feasible(
+                    rng=prng,
+                    base_D=int(args.D),
+                    base_N=int(args.N),
+                    D_range=train_D_range,
+                    N_range=train_N_range,
+                    target_util=float(args.target_util),
+                    H=20,
                 )
-                with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
-                    for i, (X_i, y_i, attempts_i) in enumerate(
-                        pool.imap_unordered(worker_fn, remaining_seeds), start=1
-                    ):
+                tu = float(args.target_util)
+                p_probe, prices_probe = build_instance(
+                    rng=prng,
+                    D=int(D_use),
+                    N=int(N_use),
+                    pmax=int(args.pmax),
+                    daily_prices_20=daily_prices_20,
+                    target_util=(tu if tu > 0.0 else None),
+                    M_for_cap=1,
+                )
+                lengths_p, totals_p, _rad, _mul = encode_setup(p_probe)
+                ctx_p = build_tou_feature_context(
+                    prices_probe, H=20, validate_repeating=True
+                )
+                used0 = tuple([0] * int(len(lengths_p)))
+                phi0 = phi_for_state(
+                    t=0,
+                    used=used0,
+                    totals=totals_p,
+                    lengths=lengths_p.tolist(),
+                    ctx=ctx_p,
+                    spec=spec,
+                )
+                feat_dim = int(phi0.shape[0])
+                print(f"[pool] memmap: probe feature_dim={feat_dim}")
+                x_dtype = np.dtype(str(args.pool_dtype))
+                X_path = os.path.join(tmp_dir, "X_pool.dat")
+                y_path = os.path.join(tmp_dir, "y_pool.dat")
+
+                X_mm = np.memmap(
+                    X_path, mode="w+", dtype=x_dtype, shape=(expected_total, feat_dim)
+                )
+                y_mm = np.memmap(
+                    y_path, mode="w+", dtype=np.float64, shape=(expected_total,)
+                )
+
+                cursor = 0
+                total_attempts = 0
+
+                remaining_seeds = train_seeds
+                if n_workers > 1 and len(remaining_seeds) > 0:
+                    print(
+                        f"[pool] Collecting remaining data with {n_workers} parallel workers (memmap)..."
+                    )
+                    with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
+                        for i, (X_i, y_i, attempts_i) in enumerate(
+                            pool.imap_unordered(worker_fn, remaining_seeds), start=1
+                        ):
+                            if X_i.size == 0:
+                                total_attempts += int(attempts_i)
+                                print(
+                                    f"[pool] collected {i}/{len(train_seeds)} instances (0 samples)"
+                                )
+                                continue
+
+                            n_i = int(X_i.shape[0])
+                            if cursor + n_i > expected_total:
+                                raise RuntimeError(
+                                    f"Memmap overflow: cursor={cursor} + n={n_i} > expected_total={expected_total}"
+                                )
+                            X_mm[cursor : cursor + n_i, :] = X_i
+                            y_mm[cursor : cursor + n_i] = y_i
+                            cursor += n_i
+                            total_attempts += int(attempts_i)
+                            print(
+                                f"[pool] collected {i}/{len(train_seeds)} instances ({n_i} samples)"
+                            )
+                else:
+                    print("[pool] Collecting remaining data sequentially (memmap)...")
+                    for i, seed in enumerate(remaining_seeds, start=1):
+                        t_inst = time.perf_counter()
+                        X_i, y_i, attempts_i = worker_fn(int(seed))
+                        inst_time = time.perf_counter() - t_inst
                         if X_i.size == 0:
                             total_attempts += int(attempts_i)
                             print(
-                                f"[pool] collected {i}/{len(train_seeds)} instances (0 samples)"
+                                f"[pool] train seed={seed} ({i}/{len(train_seeds)}) samples=0 time={inst_time:.1f}s"
                             )
                             continue
-
                         n_i = int(X_i.shape[0])
-                        if cursor + n_i > expected_total:
-                            raise RuntimeError(
-                                f"Memmap overflow: cursor={cursor} + n={n_i} > expected_total={expected_total}"
-                            )
                         X_mm[cursor : cursor + n_i, :] = X_i
                         y_mm[cursor : cursor + n_i] = y_i
                         cursor += n_i
                         total_attempts += int(attempts_i)
                         print(
-                            f"[pool] collected {i}/{len(train_seeds)} instances ({n_i} samples)"
+                            f"[pool] train seed={seed} ({i}/{len(train_seeds)}) samples={n_i} time={inst_time:.1f}s"
                         )
-            else:
-                print("[pool] Collecting remaining data sequentially (memmap)...")
-                for i, seed in enumerate(remaining_seeds, start=1):
-                    t_inst = time.perf_counter()
-                    X_i, y_i, attempts_i = worker_fn(int(seed))
-                    inst_time = time.perf_counter() - t_inst
-                    if X_i.size == 0:
-                        total_attempts += int(attempts_i)
-                        print(
-                            f"[pool] train seed={seed} ({i}/{len(train_seeds)}) samples=0 time={inst_time:.1f}s"
-                        )
-                        continue
-                    n_i = int(X_i.shape[0])
-                    X_mm[cursor : cursor + n_i, :] = X_i
-                    y_mm[cursor : cursor + n_i] = y_i
-                    cursor += n_i
-                    total_attempts += int(attempts_i)
-                    print(
-                        f"[pool] train seed={seed} ({i}/{len(train_seeds)}) samples={n_i} time={inst_time:.1f}s"
+
+                X_pool = X_mm[:cursor]
+                y_pool = y_mm[:cursor]
+                print(f"[pool] memmap: finished collection; dir={tmp_dir}")
+
+                if int(cursor) <= 0 or int(len(y_pool)) <= 0:
+                    raise RuntimeError(
+                        "No training samples collected (memmap). "
+                        "This usually means the labeler returned 0 states for every seed. "
+                        "Try loosening constraints (target_util/ranges), switching label_mode, "
+                        "or increasing dp_time_limit."
                     )
-
-            X_pool = X_mm[:cursor]
-            y_pool = y_mm[:cursor]
-            print(f"[pool] memmap: finished collection; dir={tmp_dir}")
-
-            if int(cursor) <= 0 or int(len(y_pool)) <= 0:
-                raise RuntimeError(
-                    "No training samples collected (memmap). "
-                    "This usually means the labeler returned 0 states for every seed. "
-                    "Try loosening constraints (target_util/ranges), switching label_mode, "
-                    "or increasing dp_time_limit."
-                )
-        else:
-            if n_workers > 1 and len(train_seeds) > 1:
-                print(f"[pool] Collecting data with {n_workers} parallel workers...")
-                with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
+            else:
+                if n_workers > 1 and len(train_seeds) > 1:
+                    print(f"[pool] Collecting data with {n_workers} parallel workers...")
+                    with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
+                        results = []
+                        for i, result in enumerate(
+                            pool.imap_unordered(worker_fn, train_seeds)
+                        ):
+                            results.append(result)
+                            print(
+                                f"[pool] collected {i+1}/{len(train_seeds)} instances "
+                                f"({result[0].shape[0]} samples)"
+                            )
+                else:
+                    print(f"[pool] Collecting data sequentially...")
                     results = []
-                    for i, result in enumerate(
-                        pool.imap_unordered(worker_fn, train_seeds)
-                    ):
+                    for i, seed in enumerate(train_seeds):
+                        t_inst = time.perf_counter()
+                        result = worker_fn(seed)
                         results.append(result)
+                        inst_time = time.perf_counter() - t_inst
                         print(
-                            f"[pool] collected {i+1}/{len(train_seeds)} instances "
-                            f"({result[0].shape[0]} samples)"
+                            f"[pool] train seed={seed} ({i+1}/{len(train_seeds)}) "
+                            f"samples={result[0].shape[0]} "
+                            f"time={inst_time:.1f}s"
                         )
-            else:
-                print(f"[pool] Collecting data sequentially...")
-                results = []
-                for i, seed in enumerate(train_seeds):
-                    t_inst = time.perf_counter()
-                    result = worker_fn(seed)
-                    results.append(result)
-                    inst_time = time.perf_counter() - t_inst
-                    print(
-                        f"[pool] train seed={seed} ({i+1}/{len(train_seeds)}) "
-                        f"samples={result[0].shape[0]} "
-                        f"time={inst_time:.1f}s"
+
+                all_X = [r[0] for r in results if r[0].size > 0]
+                all_y = [r[1] for r in results if r[1].size > 0]
+                total_attempts = sum(r[2] for r in results)
+
+                if not all_X or not all_y:
+                    raise RuntimeError(
+                        "No training samples collected. "
+                        "This usually means the labeler returned 0 states for every seed. "
+                        "Try loosening constraints (target_util/ranges), switching label_mode, "
+                        "or increasing dp_time_limit."
                     )
 
-            all_X = [r[0] for r in results if r[0].size > 0]
-            all_y = [r[1] for r in results if r[1].size > 0]
-            total_attempts = sum(r[2] for r in results)
+                X_pool = np.vstack(all_X)
+                y_pool = np.concatenate(all_y)
 
-            if not all_X or not all_y:
-                raise RuntimeError(
-                    "No training samples collected. "
-                    "This usually means the labeler returned 0 states for every seed. "
-                    "Try loosening constraints (target_util/ranges), switching label_mode, "
-                    "or increasing dp_time_limit."
+            collect_time = time.perf_counter() - train_t0
+            print(f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s")
+
+            save_pooled_data_path = str(args.save_pooled_data).strip()
+            if save_pooled_data_path:
+                save_pool_p = Path(save_pooled_data_path)
+                save_pool_p.parent.mkdir(parents=True, exist_ok=True)
+                np.savez(
+                    save_pool_p,
+                    X_pool=np.asarray(X_pool),
+                    y_pool=np.asarray(y_pool, dtype=np.float64),
+                    model_variant=str(requested_model_type),
+                    pmax=np.int64(int(args.pmax)),
                 )
-
-            X_pool = np.vstack(all_X)
-            y_pool = np.concatenate(all_y)
-
-        collect_time = time.perf_counter() - train_t0
-        print(f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s")
+                print(f"[pool] Saved pooled dataset: {save_pool_p}")
 
         # ============== Model-specific training ==============
         fit_t0 = time.perf_counter()
