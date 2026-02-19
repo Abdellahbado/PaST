@@ -107,9 +107,9 @@ def test_track_schedule_same_cost_no_timeout(small_instance):
         p, prices, tie_break="early", time_limit=-1, track_schedule=False
     )
     assert r_track.feasible and r_notrack.feasible
-    assert abs(r_track.cost - r_notrack.cost) < 1e-9, (
-        f"track_schedule mismatch: {r_track.cost:.6f} vs {r_notrack.cost:.6f}"
-    )
+    assert (
+        abs(r_track.cost - r_notrack.cost) < 1e-9
+    ), f"track_schedule mismatch: {r_track.cost:.6f} vs {r_notrack.cost:.6f}"
 
 
 # ---------------------------------------------------------------------------
@@ -128,9 +128,9 @@ def test_max_states_guardrail(small_instance, exact_cost):
     )
     assert result.feasible
     assert np.isfinite(result.cost), "max_states abort must produce finite cost"
-    assert result.cost >= exact_cost - 1e-9, (
-        f"max_states cost {result.cost:.4f} < exact {exact_cost:.4f}"
-    )
+    assert (
+        result.cost >= exact_cost - 1e-9
+    ), f"max_states cost {result.cost:.4f} < exact {exact_cost:.4f}"
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +208,11 @@ def test_large_sparse_instance():
     prices = rng.uniform(1.0, 10.0, size=T).astype(np.float64)
 
     result = solve_optimal_benchmark_dp(
-        processing_times, prices, tie_break="early", time_limit=10.0, track_schedule=True
+        processing_times,
+        prices,
+        tie_break="early",
+        time_limit=10.0,
+        track_schedule=True,
     )
     assert result.feasible
     assert np.isfinite(result.cost)
@@ -230,6 +234,53 @@ def test_single_job():
     result = solve_optimal_benchmark_dp([1], prices, tie_break="early")
     assert result.feasible
     assert result.cost == 1.0  # cheapest single slot
+
+
+# ---------------------------------------------------------------------------
+# Test 8: Cython extension correctness (if compiled)
+# ---------------------------------------------------------------------------
+def test_cython_matches_python():
+    """If Cython extension is compiled, verify identical cost to Python."""
+    try:
+        sys.path.insert(0, os.path.join(_proj_root, "solvers"))
+        from _sparse_dp_cython import solve_sparse_dp_cython
+    except ImportError:
+        pytest.skip("Cython extension not compiled")
+
+    from PaST.solvers.optimal_benchmark_dp_numba import solve_sparse_dp_python
+
+    rng = np.random.RandomState(77)
+    processing_times = [2] * 5 + [3] * 3 + [5] * 2  # 10 jobs
+    T = sum(processing_times) + 15
+    prices = rng.uniform(1.0, 8.0, size=T).astype(np.float64)
+    prefix = np.zeros(T + 1, dtype=np.float64)
+    prefix[1:] = np.cumsum(prices)
+
+    from collections import Counter
+
+    ctr = Counter(processing_times)
+    lengths = np.array(sorted(ctr.keys()), dtype=np.int64)
+    totals = np.array([ctr[l] for l in lengths], dtype=np.int64)
+    K = len(lengths)
+    radices = (totals + 1).astype(np.int64)
+    mult = np.ones(K, dtype=np.int64)
+    for i in range(1, K):
+        mult[i] = mult[i - 1] * radices[i - 1]
+    final_state = int(np.sum(totals * mult))
+
+    py_cost, py_ft, _, py_to, _ = solve_sparse_dp_python(
+        lengths, totals, prefix, T, radices, mult, K, final_state, time_limit=60.0
+    )
+    cy_cost, cy_ft, _, cy_to, _ = solve_sparse_dp_cython(
+        lengths, totals, prefix, T, radices, mult, K, final_state, time_limit=60.0
+    )
+
+    assert not py_to, "Python version timed out"
+    assert not cy_to, "Cython version timed out"
+    assert (
+        abs(py_cost - cy_cost) < 1e-9
+    ), f"Cost mismatch: Python={py_cost} Cython={cy_cost}"
+    assert py_ft == cy_ft, f"Finish time mismatch: Python={py_ft} Cython={cy_ft}"
 
 
 if __name__ == "__main__":

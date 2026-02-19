@@ -62,6 +62,20 @@ from typing import Dict, Iterable, List, Optional, Tuple
 import numpy as np
 
 # Import accelerated solver (with fallback)
+# Priority: Cython > Python production path
+_CYTHON_AVAILABLE = False
+try:
+    from PaST.solvers._sparse_dp_cython import solve_sparse_dp_cython
+
+    _CYTHON_AVAILABLE = True
+except ImportError:
+    try:
+        from _sparse_dp_cython import solve_sparse_dp_cython
+
+        _CYTHON_AVAILABLE = True
+    except ImportError:
+        pass
+
 try:
     from PaST.solvers.optimal_benchmark_dp_numba import (
         solve_sparse_dp_python,
@@ -297,8 +311,9 @@ def _solve_sparse_dp_inline(
     start_time = time_module.perf_counter()
 
     totals_arr = totals
+    totals_list = [int(t) for t in totals_arr]
     inc = [int(m) for m in mult]
-    total_jobs = sum(int(t) for t in totals_arr)
+    total_jobs = sum(totals_list)
 
     # Packed parent key: t * state_bound + state  →  L (job length or 0=idle)
     state_bound = int(final_state) + 1
@@ -411,47 +426,53 @@ def _solve_sparse_dp_inline(
         if t == T:
             continue
 
-        # Free old layers to save memory
-        freed_t = t - max_job_len
-        if freed_t >= 0:
-            dp_layers[freed_t] = {}
-
-        # Idle + job transitions
+        # --- Merged idle + job transitions (single pass over layer) ---
         next_layer = dp_layers[t + 1]
+        remaining = T - t
+        # Pre-fetch lb block for this timestep
+        _lb_b = (t // _LB_BLOCK) * _LB_BLOCK
+        _lb_arr = _lb_blocks[_lb_b]
+        _lb_arr_len = len(_lb_arr)
+
+        early = tie_break == "early"
+
         for state, (c0, p0, rw, jd) in layer.items():
-            # Feasibility pruning (uses rw from layer value, no decode)
-            if rw > T - t:
+            # Feasibility pruning
+            if rw > remaining:
                 continue
 
-            # Lower-bound pruning (block-based admissible bound)
-            if c0 + _lb_cost(t, rw) > best_final_cost:
-                continue
+            # Lower-bound pruning (inlined)
+            if rw < _lb_arr_len:
+                if c0 + _lb_arr[rw] > best_final_cost:
+                    continue
+            else:
+                continue  # infeasible
 
-            # Idle transition: rw and jobs_done propagate unchanged
+            # -- Idle transition --
             prev = next_layer.get(state)
             if prev is None:
-                next_layer[state] = (float(c0), int(p0), rw, jd)
+                next_layer[state] = (c0, p0, rw, jd)
                 if track_schedule:
                     parent[(t + 1) * state_bound + state] = 0
             else:
-                c_prev, p_prev = float(prev[0]), int(prev[1])
+                c_prev = prev[0]
                 better = c0 < c_prev
-                if (
-                    tie_break == "early"
-                    and not better
-                    and abs(float(c0) - c_prev) <= _EPS
-                ):
-                    better = p0 < p_prev
+                if early and not better and abs(c0 - c_prev) <= _EPS:
+                    better = p0 < prev[1]
                 if better:
-                    next_layer[state] = (float(c0), int(p0), rw, jd)
+                    next_layer[state] = (c0, p0, rw, jd)
                     if track_schedule:
                         parent[(t + 1) * state_bound + state] = 0
 
-            # Job transitions: decode used counts on demand
-            used = decode_used(state)
-            for i, L in enumerate(lengths_list):
-                if used[i] >= int(totals_arr[i]):
+            # -- Job transitions (inline decode once per state) --
+            x = state
+            for i in range(K):
+                used_i = x % radices_list[i]
+                x //= radices_list[i]
+
+                if used_i >= totals_list[i]:
                     continue
+                L = lengths_list[i]
                 end = t + L
                 if end > T:
                     continue
@@ -459,10 +480,8 @@ def _solve_sparse_dp_inline(
                 new_state = state + inc[i]
                 new_rw = rw - L
                 new_jd = jd + 1
-                cand_cost = float(c0 + (prefix[end] - prefix[t]))
-                cand_pen = int(p0)
-                if tie_break == "early":
-                    cand_pen += t
+                cand_cost = c0 + (prefix[end] - prefix[t])
+                cand_pen = p0 + t if early else p0
 
                 target_layer = dp_layers[end]
                 prev = target_layer.get(new_state)
@@ -471,18 +490,19 @@ def _solve_sparse_dp_inline(
                     if track_schedule:
                         parent[end * state_bound + new_state] = L
                 else:
-                    prev_cost, prev_pen = float(prev[0]), int(prev[1])
+                    prev_cost = prev[0]
                     better = cand_cost < prev_cost
-                    if (
-                        tie_break == "early"
-                        and not better
-                        and abs(cand_cost - prev_cost) <= _EPS
-                    ):
-                        better = cand_pen < prev_pen
+                    if early and not better and abs(cand_cost - prev_cost) <= _EPS:
+                        better = cand_pen < prev[1]
                     if better:
                         target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
                         if track_schedule:
                             parent[end * state_bound + new_state] = L
+
+        # Free processed layer to save memory
+        freed_t = t - max_job_len
+        if freed_t >= 0:
+            dp_layers[freed_t] = {}
 
     # Return best partial info if we timed out without finding complete solution
     best_partial = None
@@ -546,8 +566,8 @@ def solve_optimal_benchmark_dp(
 
     prefix = _build_prefix(prices)
 
-    lengths, inv = np.unique(np.asarray(p_list, dtype=np.int32), return_inverse=True)
-    lengths = lengths.astype(np.int32, copy=False)
+    lengths, inv = np.unique(np.asarray(p_list, dtype=np.int64), return_inverse=True)
+    lengths = lengths.astype(np.int64, copy=False)
     K = int(len(lengths))
     if K == 0:
         return DPResult(True, 0.0, (), 0)
@@ -555,11 +575,11 @@ def solve_optimal_benchmark_dp(
         raise ValueError(
             f"Too many distinct processing times ({K}). This solver is optimized for the benchmark (few lengths)."
         )
-    totals = np.bincount(inv, minlength=K).astype(np.int32, copy=False)
+    totals = np.bincount(inv, minlength=K).astype(np.int64, copy=False)
 
     # Mixed-radix encoding: state = sum(u[i] * mult[i]), where 0<=u[i]<=totals[i]
-    radices = (totals + 1).astype(np.int32)
-    mult = np.ones(K, dtype=np.int32)
+    radices = (totals + 1).astype(np.int64)
+    mult = np.ones(K, dtype=np.int64)
     for i in range(1, K):
         mult[i] = mult[i - 1] * int(radices[i - 1])
 
@@ -669,8 +689,26 @@ def solve_optimal_benchmark_dp(
     use_sparse = total_cells > max_cells
     if use_sparse:
         # Fallback: use optimized sparse DP with early pruning and time limit.
-        # This is much faster than the inline version due to early feasibility checks.
-        if _ACCEL_AVAILABLE:
+        # Priority: Cython > Python accelerated > inline.
+        if _CYTHON_AVAILABLE:
+            # Cython expects int64 arrays
+            best_final_cost, best_final_time, parent, timed_out, best_partial = (
+                solve_sparse_dp_cython(
+                    lengths=lengths.astype(np.int64, copy=False),
+                    totals=totals.astype(np.int64, copy=False),
+                    prefix=prefix,
+                    T=T,
+                    radices=radices.astype(np.int64, copy=False),
+                    mult=mult.astype(np.int64, copy=False),
+                    K=K,
+                    final_state=final_state,
+                    time_limit=time_limit,
+                    tie_break=tie_break,
+                    track_schedule=track_schedule,
+                    max_states=max_states,
+                )
+            )
+        elif _ACCEL_AVAILABLE:
             best_final_cost, best_final_time, parent, timed_out, best_partial = (
                 solve_sparse_dp_python(
                     lengths=lengths,

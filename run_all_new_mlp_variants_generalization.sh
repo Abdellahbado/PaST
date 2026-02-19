@@ -71,6 +71,15 @@ fi
 POOL_DIR="${POOL_DIR:-ADP/tmp/pool}"
 mkdir -p "$POOL_DIR"
 
+# ============================================================
+# Build Cython sparse-DP extension (native C hash maps).
+# Compiles once; subsequent runs are no-ops if .so is up to date.
+# ============================================================
+echo "[build] Compiling Cython sparse-DP extension ..."
+( cd solvers && "$PYTHON_BIN" setup_cython.py build_ext --inplace 2>&1 \
+    | grep -vE '^(running|building|copying)' || true )
+echo "[build] done"
+
 # Resume behavior:
 # - RESUME=1 (default): skip steps whose outputs already exist
 # - RESUME=0: force re-run everything (overwrites CSVs; checkpoints overwritten by training)
@@ -180,7 +189,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
     LABEL_MODE="optimal_path"
     DP_TIME_LIMIT="120"
     EPS_DP_TIME_LIMIT="120"
-    DP_MAX_STATES="2000000"
+    DP_MAX_STATES="25000000"
     OPT_PATH_N_PATHS="2"
     OPT_PATH_TOPUP_MAX="0"
     OPT_PATH_TOPUP_TL="-1"
@@ -190,7 +199,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
     LABEL_MODE="optimal_path"
     DP_TIME_LIMIT="300"
     EPS_DP_TIME_LIMIT="300"
-    DP_MAX_STATES="5000000"
+    DP_MAX_STATES="50000000"
     OPT_PATH_N_PATHS="2"
     OPT_PATH_TOPUP_MAX="0"
     OPT_PATH_TOPUP_TL="-1"

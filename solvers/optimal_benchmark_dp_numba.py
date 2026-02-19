@@ -432,7 +432,8 @@ def solve_sparse_dp_python(
 
     lengths_list = [int(x) for x in lengths]
     totals_arr = totals
-    total_jobs = sum(int(t) for t in totals_arr)
+    totals_list = [int(t) for t in totals_arr]
+    total_jobs = sum(totals_list)
     max_job_len = max(lengths_list) if lengths_list else 1
 
     # Inc values for state transitions
@@ -545,52 +546,54 @@ def solve_sparse_dp_python(
         if t == T:
             continue
 
-        # Idle transitions
+        # --- Merged idle + job transitions (single pass over layer) ---
         next_layer = dp_layers[t + 1]
+        remaining = T - t
+        # Pre-fetch lb block for this timestep
+        _lb_b = (t // _LB_BLOCK) * _LB_BLOCK
+        _lb_arr = _lb_blocks[_lb_b]
+        _lb_arr_len = len(_lb_arr)
+
+        early = tie_break == "early"
+
         for state, (c0, p0, rw, jd) in layer.items():
-            # Feasibility pruning (uses rw from layer value, no decode)
-            if rw > T - t:
+            # Feasibility pruning
+            if rw > remaining:
                 continue
 
-            # Lower-bound pruning (block-based admissible bound)
-            if c0 + _lb_cost(t, rw) > best_final_cost:
-                continue
+            # Lower-bound pruning (inlined)
+            if rw < _lb_arr_len:
+                if c0 + _lb_arr[rw] > best_final_cost:
+                    continue
+            else:
+                continue  # infeasible
 
+            # -- Idle transition --
             prev = next_layer.get(state)
             if prev is None:
-                next_layer[state] = (float(c0), int(p0), rw, jd)
+                next_layer[state] = (c0, p0, rw, jd)
                 if track_schedule:
                     parent[(t + 1) * state_bound + state] = 0
             else:
-                c_prev, p_prev = float(prev[0]), int(prev[1])
+                c_prev = prev[0]
                 better = c0 < c_prev
-                if (
-                    tie_break == "early"
-                    and not better
-                    and abs(float(c0) - c_prev) <= _EPS
-                ):
-                    better = p0 < p_prev
+                if early and not better and abs(c0 - c_prev) <= _EPS:
+                    better = p0 < prev[1]
                 if better:
-                    next_layer[state] = (float(c0), int(p0), rw, jd)
+                    next_layer[state] = (c0, p0, rw, jd)
                     if track_schedule:
                         parent[(t + 1) * state_bound + state] = 0
 
-        # Job transitions
-        for state, (c0, p0, rw, jd) in layer.items():
-            # Feasibility pruning
-            if rw > T - t:
-                continue
+            # -- Job transitions (decode once per state) --
+            # Inline decode_used for speed
+            x = state
+            for i in range(K):
+                used_i = x % radices_list[i]
+                x //= radices_list[i]
 
-            # Lower-bound pruning
-            if c0 + _lb_cost(t, rw) > best_final_cost:
-                continue
-
-            # Decode used counts on demand
-            used = decode_used(state)
-
-            for i, L in enumerate(lengths_list):
-                if used[i] >= int(totals_arr[i]):
+                if used_i >= totals_list[i]:
                     continue
+                L = lengths_list[i]
                 end = t + L
                 if end > T:
                     continue
@@ -598,10 +601,8 @@ def solve_sparse_dp_python(
                 new_state = state + inc[i]
                 new_rw = rw - L
                 new_jd = jd + 1
-                cand_cost = float(c0 + (prefix[end] - prefix[t]))
-                cand_pen = int(p0)
-                if tie_break == "early":
-                    cand_pen += t
+                cand_cost = c0 + (prefix[end] - prefix[t])
+                cand_pen = p0 + t if early else p0
 
                 target_layer = dp_layers[end]
                 prev = target_layer.get(new_state)
@@ -610,14 +611,10 @@ def solve_sparse_dp_python(
                     if track_schedule:
                         parent[end * state_bound + new_state] = L
                 else:
-                    prev_cost, prev_pen = float(prev[0]), int(prev[1])
+                    prev_cost = prev[0]
                     better = cand_cost < prev_cost
-                    if (
-                        tie_break == "early"
-                        and not better
-                        and abs(cand_cost - prev_cost) <= _EPS
-                    ):
-                        better = cand_pen < prev_pen
+                    if early and not better and abs(cand_cost - prev_cost) <= _EPS:
+                        better = cand_pen < prev[1]
                     if better:
                         target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
                         if track_schedule:
