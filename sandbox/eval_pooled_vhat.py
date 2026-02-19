@@ -1634,7 +1634,9 @@ def main() -> None:
                     )
             else:
                 if n_workers > 1 and len(train_seeds) > 1:
-                    print(f"[pool] Collecting data with {n_workers} parallel workers...")
+                    print(
+                        f"[pool] Collecting data with {n_workers} parallel workers..."
+                    )
                     with mp.Pool(processes=n_workers, maxtasksperchild=mtpc) as pool:
                         results = []
                         for i, result in enumerate(
@@ -1675,7 +1677,9 @@ def main() -> None:
                 y_pool = np.concatenate(all_y)
 
             collect_time = time.perf_counter() - train_t0
-            print(f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s")
+            print(
+                f"[pool] Data collection: {len(y_pool)} samples in {collect_time:.1f}s"
+            )
 
             save_pooled_data_path = str(args.save_pooled_data).strip()
             if save_pooled_data_path:

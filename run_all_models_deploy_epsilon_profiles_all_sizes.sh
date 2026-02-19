@@ -87,7 +87,10 @@ FORCE_EVAL="${FORCE_EVAL:-0}"
 START_CATEGORY="${START_CATEGORY:-medium}"
 
 # Two profiles (train+eval within profile; no cross-profile testing here)
-PROFILES=("daily_tou" "generate_data")
+# Comma-separated profile list override, e.g.:
+#   PROFILE_LIST_CSV=daily_tou bash ...
+PROFILE_LIST_CSV="${PROFILE_LIST_CSV:-daily_tou,generate_data}"
+IFS=',' read -r -a PROFILES <<< "$PROFILE_LIST_CSV"
 # Comma-separated model list override, e.g.:
 #   MODEL_LIST_CSV=poly,mlp,lgbm bash ...
 MODEL_LIST_CSV="${MODEL_LIST_CSV:-linear,poly,mlp,lgbm}"
