@@ -65,8 +65,25 @@ mkdir -p "$POOL_DIR"
 # ============================================================
 echo "[build] Compiling Cython sparse-DP extension ..."
 if ! command -v gcc &> /dev/null; then
-  echo "[build] gcc not found! Attempting to install C compiler via conda-forge..."
+  echo "[build] gcc not found. Attempting to install toolchain via conda-forge..."
+  conda install -y -c conda-forge compilers || true
+  conda install -y -c conda-forge gcc_linux-64 gxx_linux-64 || true
   conda install -y -c conda-forge c-compiler cxx-compiler || true
+fi
+
+# Some conda images provide only the wrapper compiler (x86_64-conda-linux-gnu-cc)
+# without a `gcc` symlink. Set CC/CXX so setuptools can compile extensions.
+if ! command -v gcc &> /dev/null; then
+  if command -v x86_64-conda-linux-gnu-cc &> /dev/null; then
+    export CC="$(command -v x86_64-conda-linux-gnu-cc)"
+    if command -v x86_64-conda-linux-gnu-c++ &> /dev/null; then
+      export CXX="$(command -v x86_64-conda-linux-gnu-c++)"
+    fi
+    echo "[build] Using conda wrapper compiler: CC=$CC"
+  elif command -v cc &> /dev/null; then
+    export CC="$(command -v cc)"
+    echo "[build] Using CC=$CC"
+  fi
 fi
 ( cd solvers && "$PYTHON_BIN" setup_cython.py build_ext --inplace 2>&1 \
     | grep -vE '^(running|building|copying)' || true )
