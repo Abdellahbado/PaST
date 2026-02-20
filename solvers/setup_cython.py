@@ -26,6 +26,7 @@ setup(
     name="sparse_dp_cython",
     ext_modules=cythonize(
         extensions,
+        force=True,
         compiler_directives={
             "boundscheck": False,
             "wraparound": False,

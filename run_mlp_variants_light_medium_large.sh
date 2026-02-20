@@ -76,7 +76,18 @@ if ! command -v gcc &> /dev/null; then
 fi
 ( cd solvers && "$PYTHON_BIN" setup_cython.py build_ext --inplace 2>&1 \
     | grep -vE '^(running|building|copying)' || true )
-echo "[build] done"
+if "$PYTHON_BIN" - <<'PY'
+import importlib.util, sys
+sys.path.insert(0, 'solvers')
+ok = importlib.util.find_spec('_sparse_dp_cython') is not None
+print('[build] cython_sparse_dp_import=' + ('OK' if ok else 'FAIL'))
+raise SystemExit(0 if ok else 1)
+PY
+then
+  echo "[build] done"
+else
+  echo "[build] WARNING: Cython sparse-DP extension not available; falling back to slower solver."
+fi
 
 RESUME="${RESUME:-1}"
 
