@@ -82,7 +82,9 @@ RESUME="${RESUME:-1}"
 PROFILE="daily_tou"
 PROFILE_ARGS=(--daily-price-profile daily_tou)
 
-NEW_MODELS=("mlp_hist" "mlp_price" "mlp_meta" "mlp_all")
+# IMPORTANT: mlp_all must run first because other variants load and project
+# from its pooled feature matrix.
+NEW_MODELS=("mlp_all" "mlp_hist" "mlp_price" "mlp_meta")
 
 # ============================================================
 # DATA: enough seeds × samples to distinguish variant quality.
@@ -137,6 +139,10 @@ LOG_DIR="ADP/logs/mlp_variants_light_medium_large"
 MODEL_DIR="ADP/models/mlp_variants_light_medium_large"
 mkdir -p "$LOG_DIR" "$MODEL_DIR"
 
+# Shared pooled dataset cache (one per size/profile/data knobs).
+POOLED_CACHE_DIR="${POOLED_CACHE_DIR:-$LOG_DIR/pooled_cache}"
+mkdir -p "$POOLED_CACHE_DIR"
+
 _size_params() {
   local category="$1"
   case "$category" in
@@ -178,6 +184,9 @@ for CATEGORY in "medium" "large"; do
     EVAL_TIME_LIMIT="60.0"
   fi
 
+  # Cache is per (CATEGORY, PROFILE) AND per data-generation knobs.
+  POOLED_DATA_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_${LABEL_MODE}_p${PMAX}_s${SAMPLES}_train${TRAIN_SEEDS}_N${N_RANGE}_D${D_RANGE}_tu${TARGET_UTIL}.npz"
+
   echo "========================================================================"
   echo "PHASE 1 | CATEGORY=$CATEGORY  N_RANGE=$N_RANGE  D_RANGE=$D_RANGE  M_RANGE=$M_RANGE  target_util=$TARGET_UTIL"
   echo "PROFILE=$PROFILE  train_seeds=$TRAIN_SEEDS  samples=$SAMPLES"
@@ -200,6 +209,17 @@ for CATEGORY in "medium" "large"; do
       echo "[resume] skip pooled train/eval (exists): ckpt=$CKPT csv=$POOLED_CSV"
     else
       rm -f "$POOLED_DONE"
+
+      CACHE_ARGS=()
+      if [[ "$MODEL" == "mlp_all" ]]; then
+        if [[ -s "$POOLED_DATA_CACHE" ]]; then
+          CACHE_ARGS=(--load-pooled-data "$POOLED_DATA_CACHE")
+        else
+          CACHE_ARGS=(--save-pooled-data "$POOLED_DATA_CACHE")
+        fi
+      else
+        CACHE_ARGS=(--load-pooled-data "$POOLED_DATA_CACHE")
+      fi
       "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
         --D 3 --N 40 --pmax "$PMAX" \
         --workers "$EFFECTIVE_WORKERS" \
@@ -218,6 +238,7 @@ for CATEGORY in "medium" "large"; do
         --eval-time-limit "$EVAL_TIME_LIMIT" \
         --target-util "$TARGET_UTIL" \
         "${POOL_ARGS[@]}" \
+        "${CACHE_ARGS[@]}" \
         --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
         --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
         "${PROFILE_ARGS[@]}" \

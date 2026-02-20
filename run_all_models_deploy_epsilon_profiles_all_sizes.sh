@@ -54,6 +54,15 @@ MAX_WORKERS="${MAX_WORKERS:-32}"
 POOL_DIR="${POOL_DIR:-ADP/tmp/pool}"
 mkdir -p "$POOL_DIR"
 
+# Optional: reuse ONE pooled dataset across multiple models for the same
+# (CATEGORY, PROFILE). This avoids repeating expensive DP labeling per model.
+#
+# Enabled by default:
+#   REUSE_POOLED_ACROSS_MODELS=1 bash ...
+# Disable:
+#   REUSE_POOLED_ACROSS_MODELS=0 bash ...
+REUSE_POOLED_ACROSS_MODELS="${REUSE_POOLED_ACROSS_MODELS:-1}"
+
 # ============================================================
 # Build Cython sparse-DP extension (native C hash maps).
 # Compiles once; subsequent runs are no-ops if .so is up to date.
@@ -143,6 +152,10 @@ LOG_DIR="ADP/logs/deploy_epsilon_profiles_all_sizes"
 MODEL_DIR="ADP/models/deploy_epsilon_profiles_all_sizes"
 mkdir -p "$LOG_DIR" "$MODEL_DIR"
 
+# Shared pooled dataset cache directory (only used when REUSE_POOLED_ACROSS_MODELS=1)
+POOLED_CACHE_DIR="${POOLED_CACHE_DIR:-$LOG_DIR/pooled_cache}"
+mkdir -p "$POOLED_CACHE_DIR"
+
 # Convenience: LightGBM availability check
 HAS_LGBM=1
 if ! "$PYTHON_BIN" -c "import lightgbm" >/dev/null 2>&1; then
@@ -224,6 +237,13 @@ for CATEGORY in "${CATEGORIES[@]}"; do
     echo "PROFILE=$PROFILE (20-hour repeating)"
     echo "------------------------------------------------------------------------"
 
+    # Cache is per (CATEGORY, PROFILE) AND per data-generation knobs,
+    # so changing seeds/ranges/samples won't accidentally reuse stale data.
+    SHARED_POOLED_NPZ="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_${LABEL_MODE}_p${PMAX}_s${SAMPLES}_train${TRAIN_SEEDS}_N${N_RANGE}_D${D_RANGE}_tu${TARGET_UTIL}.npz"
+    if [[ "$REUSE_POOLED_ACROSS_MODELS" == "1" && "$FORCE_TRAIN" == "1" ]]; then
+      rm -f "$SHARED_POOLED_NPZ"
+    fi
+
     for MODEL in "${MODELS[@]}"; do
       if [[ "$MODEL" == "lgbm" && "$HAS_LGBM" == "0" ]]; then
         echo "[skip] lightgbm not installed for $PYTHON_BIN"
@@ -247,7 +267,9 @@ for CATEGORY in "${CATEGORIES[@]}"; do
         STREAM_FIT_ARGS=(--stream-fit --fit-chunk-size 200000)
       fi
 
-      if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
+      # If pooled-cache reuse is enabled, don't skip TRAIN if the shared cache
+      # file is missing (other models will need it).
+      if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" && ( "$REUSE_POOLED_ACROSS_MODELS" != "1" || -s "$SHARED_POOLED_NPZ" ) ]]; then
         echo "[resume] skip TRAIN (ckpt+csv exist): $CKPT"
       else
         rm -f "$POOLED_DONE"
@@ -256,6 +278,15 @@ for CATEGORY in "${CATEGORIES[@]}"; do
         if [[ "$WORKERS_EFF" -gt "$MAX_WORKERS" ]]; then
           WORKERS_EFF="$MAX_WORKERS"
         fi
+        POOLED_DATA_ARGS=()
+        if [[ "$REUSE_POOLED_ACROSS_MODELS" == "1" ]]; then
+          if [[ -s "$SHARED_POOLED_NPZ" ]]; then
+            POOLED_DATA_ARGS=(--load-pooled-data "$SHARED_POOLED_NPZ")
+          else
+            POOLED_DATA_ARGS=(--save-pooled-data "$SHARED_POOLED_NPZ")
+          fi
+        fi
+
         "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
           --D 3 --N 40 --pmax "$PMAX" \
           --workers "$WORKERS_EFF" \
@@ -275,6 +306,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \
           "${STREAM_FIT_ARGS[@]}" \
+          "${POOLED_DATA_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
           --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
           --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" --lgbm-learning-rate "$LGBM_LR" \

@@ -230,7 +230,9 @@ for CATEGORY in "${CATEGORIES[@]}"; do
 
     for MODEL in "${NEW_MODELS[@]}"; do
       CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
-      POOLED_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_mlp_all.npz"
+      # Cache is per (CATEGORY, PROFILE) AND per data-generation knobs,
+      # so changing seeds/ranges/samples won't accidentally reuse stale data.
+      POOLED_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_${LABEL_MODE}_p${PMAX}_s${SAMPLES}_train${TRAIN_SEEDS}_N${N_RANGE}_D${D_RANGE}_tu${TARGET_UTIL}.npz"
       POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
       POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
       POOLED_DONE="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.done"
@@ -241,7 +243,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
       echo ""
       echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL profile=$PROFILE"
 
-      if [[ "$RESUME" == "1" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
+      # Don't skip mlp_all TRAIN if the shared pooled cache is missing.
+      if [[ "$RESUME" == "1" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" && ( "$MODEL" != "mlp_all" || -s "$POOLED_CACHE" ) ]]; then
         echo "[resume] skip pooled train/eval (exists): ckpt=$CKPT csv=$POOLED_CSV"
       else
         rm -f "$POOLED_DONE"
@@ -265,7 +268,8 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           "${POOL_ARGS[@]}" \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
           --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
-          $( [[ "$MODEL" == "mlp_all" ]] && echo "--save-pooled-data $POOLED_CACHE" ) \
+          $( [[ "$MODEL" == "mlp_all" && ! -s "$POOLED_CACHE" ]] && echo "--save-pooled-data $POOLED_CACHE" ) \
+          $( [[ "$MODEL" == "mlp_all" && -s "$POOLED_CACHE" ]] && echo "--load-pooled-data $POOLED_CACHE" ) \
           $( [[ "$MODEL" != "mlp_all" ]] && echo "--load-pooled-data $POOLED_CACHE" ) \
           "${PROFILE_ARGS[@]}" \
           --model-type "$MODEL" --beams 2,5 \

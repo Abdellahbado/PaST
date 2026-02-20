@@ -143,6 +143,11 @@ LOG_DIR="ADP/logs/models_light_medium_large"
 MODEL_DIR="ADP/models/models_light_medium_large"
 mkdir -p "$LOG_DIR" "$MODEL_DIR"
 
+# Shared pooled dataset cache (one per size/profile/data knobs).
+# This is separate from POOL_DIR (memmap scratch), so it persists across runs.
+POOLED_CACHE_DIR="${POOLED_CACHE_DIR:-$LOG_DIR/pooled_cache}"
+mkdir -p "$POOLED_CACHE_DIR"
+
 HAS_LGBM=1
 if ! "$PYTHON_BIN" -c "import lightgbm" >/dev/null 2>&1; then
   HAS_LGBM=0
@@ -197,69 +202,85 @@ for CATEGORY in "medium" "large"; do
   echo "dp_time_limit=${DP_TIME_LIMIT}s  dp_max_states=$DP_MAX_STATES  (timed-out instances discarded)"
   echo "========================================================================"
 
-  for MODEL in "${MODELS[@]}"; do
-    if [[ "$MODEL" == "lgbm" && "$HAS_LGBM" == "0" ]]; then
-      echo "[skip] lightgbm not installed"
-      continue
-    fi
 
-    CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
-    POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
-    POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
-    POOLED_DONE="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.done"
-    EPS_CSV="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv"
-    EPS_LOG="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
-    EPS_DONE="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.done"
+    for MODEL in "${MODELS[@]}"; do
+      if [[ "$MODEL" == "lgbm" && "$HAS_LGBM" == "0" ]]; then
+        echo "[skip] lightgbm not installed"
+        continue
+      fi
 
-    echo ""
-    echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL"
+      CKPT="$MODEL_DIR/vhat_${CATEGORY}_${PROFILE}_${MODEL}.npz"
+      POOLED_CSV="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.csv"
+      POOLED_LOG="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      POOLED_DONE="$LOG_DIR/pooled_${CATEGORY}_${PROFILE}_${MODEL}.done"
+      EPS_CSV="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.csv"
+      EPS_LOG="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.log"
+      EPS_DONE="$LOG_DIR/epsilon_${CATEGORY}_${PROFILE}_${MODEL}.done"
 
-    STREAM_FIT_ARGS=()
-    if [[ "$MODEL" == "linear" || "$MODEL" == "poly" ]]; then
-      STREAM_FIT_ARGS=(--stream-fit --fit-chunk-size 200000)
-    fi
+      # Cache is per (CATEGORY, PROFILE) AND per data-generation knobs,
+      # so changing seeds/ranges/samples won't accidentally reuse stale data.
+      POOLED_DATA_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_${LABEL_MODE}_p${PMAX}_s${SAMPLES}_train${TRAIN_SEEDS}_N${N_RANGE}_D${D_RANGE}_tu${TARGET_UTIL}.npz"
+      if [[ "$FORCE_TRAIN" == "1" ]]; then
+        rm -f "$POOLED_DATA_CACHE"
+      fi
 
-    WORKERS_EFF="$WORKERS"
-    if [[ "$WORKERS_EFF" -gt "$MAX_WORKERS" ]]; then
-      WORKERS_EFF="$MAX_WORKERS"
-    fi
+      echo ""
+      echo ">>> TRAIN pooled: category=$CATEGORY model=$MODEL"
 
-    if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" ]]; then
-      echo "[resume] skip TRAIN (ckpt+csv exist): $CKPT"
-    else
-      rm -f "$POOLED_DONE"
-      "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
-        --D 3 --N 40 --pmax "$PMAX" \
-        --workers "$WORKERS_EFF" \
-        --maxtasksperchild 1 \
-        --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
-        --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
-        --eval-seeds "$EVAL_SEEDS" \
-        --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
-        --transferable-features --normalize --normalize-labels \
-        --label-mode "$LABEL_MODE" \
-        --optimal-path-n-paths "$OPT_PATH_N_PATHS" \
-        --optimal-path-topup-max "$OPT_PATH_TOPUP_MAX" \
-        --optimal-path-topup-dp-time-limit "$OPT_PATH_TOPUP_TL" \
-        "${REQUIRE_OPTIMAL_ARGS[@]}" \
-        --dp-time-limit "$DP_TIME_LIMIT" \
-        --eval-time-limit "$EVAL_TIME_LIMIT" \
-        --target-util "$TARGET_UTIL" \
-        "${POOL_ARGS[@]}" \
-        "${STREAM_FIT_ARGS[@]}" \
-        --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
-        --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
-        --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" \
-        --lgbm-learning-rate "$LGBM_LR" \
-        "${PROFILE_ARGS[@]}" \
-        --model-type "$MODEL" --beams 2,5 \
-        --save-model "$CKPT" \
-        --out-csv "$POOLED_CSV" \
-        2>&1 | tee "$POOLED_LOG"
+      STREAM_FIT_ARGS=()
+      if [[ "$MODEL" == "linear" || "$MODEL" == "poly" ]]; then
+        STREAM_FIT_ARGS=(--stream-fit --fit-chunk-size 200000)
+      fi
 
-      touch "$POOLED_DONE"
-    fi
+      WORKERS_EFF="$WORKERS"
+      if [[ "$WORKERS_EFF" -gt "$MAX_WORKERS" ]]; then
+        WORKERS_EFF="$MAX_WORKERS"
+      fi
 
+      CACHE_ARGS=()
+      if [[ -s "$POOLED_DATA_CACHE" ]]; then
+        CACHE_ARGS=(--load-pooled-data "$POOLED_DATA_CACHE")
+      else
+        CACHE_ARGS=(--save-pooled-data "$POOLED_DATA_CACHE")
+      fi
+
+      # Don't skip if the shared pooled cache is missing (other models need it).
+      if [[ "$RESUME" == "1" && "$FORCE_TRAIN" == "0" && -f "$POOLED_DONE" && -s "$CKPT" && -s "$POOLED_CSV" && -s "$POOLED_DATA_CACHE" ]]; then
+        echo "[resume] skip TRAIN (ckpt+csv exist): $CKPT"
+      else
+        rm -f "$POOLED_DONE"
+        "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+          --D 3 --N 40 --pmax "$PMAX" \
+          --workers "$WORKERS_EFF" \
+          --maxtasksperchild 1 \
+          --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$SAMPLES" \
+          --train-N-range "$N_RANGE" --train-D-range "$D_RANGE" \
+          --eval-seeds "$EVAL_SEEDS" \
+          --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
+          --transferable-features --normalize --normalize-labels \
+          --label-mode "$LABEL_MODE" \
+          --optimal-path-n-paths "$OPT_PATH_N_PATHS" \
+          --optimal-path-topup-max "$OPT_PATH_TOPUP_MAX" \
+          --optimal-path-topup-dp-time-limit "$OPT_PATH_TOPUP_TL" \
+          "${REQUIRE_OPTIMAL_ARGS[@]}" \
+          --dp-time-limit "$DP_TIME_LIMIT" \
+          --eval-time-limit "$EVAL_TIME_LIMIT" \
+          --target-util "$TARGET_UTIL" \
+          "${POOL_ARGS[@]}" \
+          "${STREAM_FIT_ARGS[@]}" \
+          "${CACHE_ARGS[@]}" \
+          --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
+          --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
+          --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" \
+          --lgbm-learning-rate "$LGBM_LR" \
+          "${PROFILE_ARGS[@]}" \
+          --model-type "$MODEL" --beams 2,5 \
+          --save-model "$CKPT" \
+          --out-csv "$POOLED_CSV" \
+          2>&1 | tee "$POOLED_LOG"
+
+        touch "$POOLED_DONE"
+      fi
     echo ">>> DEPLOY epsilon-sim (within-size): category=$CATEGORY model=$MODEL"
 
     if [[ "$RESUME" == "1" && "$FORCE_EVAL" == "0" && -f "$EPS_DONE" && -s "$EPS_CSV" ]]; then
