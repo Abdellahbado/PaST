@@ -83,8 +83,8 @@ cdef void smap_destroy(CStateMap* m) noexcept nogil:
         free(m)
 
 
-cdef void _smap_grow(CStateMap* m) noexcept:
-    """Double capacity and rehash."""
+cdef void _smap_grow(CStateMap* m) except *:
+    """Double capacity and rehash.  Raises MemoryError on allocation failure."""
     cdef Py_ssize_t old_cap = m.capacity
     cdef long long* old_keys = m.keys
     cdef StateVal*  old_vals = m.vals
@@ -92,8 +92,20 @@ cdef void _smap_grow(CStateMap* m) noexcept:
     cdef Py_ssize_t new_cap = old_cap << 1
     cdef Py_ssize_t new_mask = new_cap - 1
 
-    m.keys = <long long*>malloc(new_cap * sizeof(long long))
-    m.vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+    cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+    cdef StateVal*  new_vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+    if new_keys == NULL or new_vals == NULL:
+        # Allocation failed — free any partial alloc, keep old arrays.
+        if new_keys != NULL:
+            free(new_keys)
+        if new_vals != NULL:
+            free(new_vals)
+        raise MemoryError(
+            f"CStateMap: cannot grow to capacity {new_cap} "
+            f"({new_cap * (sizeof(long long) + sizeof(StateVal)) // 1048576} MB)"
+        )
+    m.keys = new_keys
+    m.vals = new_vals
     memset(m.keys, 0xFF, new_cap * sizeof(long long))
     m.capacity = new_cap
     m.mask = new_mask
@@ -123,10 +135,10 @@ cdef inline Py_ssize_t smap_lookup(CStateMap* m, long long key) noexcept nogil:
         idx = (idx + 1) & m.mask
 
 
-cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) noexcept:
+cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) except -2:
     """Insert new key with value.  Grows if needed.  Returns slot."""
     if m.size * 10 > m.capacity * 7:   # load > 70%
-        _smap_grow(m)
+        _smap_grow(m)  # may raise MemoryError
     cdef Py_ssize_t idx = _hash64(key, m.mask)
     while True:
         if m.keys[idx] == _EMPTY:
@@ -176,15 +188,26 @@ cdef void pmap_destroy(CParentMap* m) noexcept nogil:
         free(m)
 
 
-cdef void _pmap_grow(CParentMap* m) noexcept:
+cdef void _pmap_grow(CParentMap* m) except *:
     cdef Py_ssize_t old_cap = m.capacity
     cdef long long* old_keys = m.keys
     cdef int*       old_vals = m.vals
     cdef Py_ssize_t new_cap = old_cap << 1
     cdef Py_ssize_t new_mask = new_cap - 1
 
-    m.keys = <long long*>malloc(new_cap * sizeof(long long))
-    m.vals = <int*>malloc(new_cap * sizeof(int))
+    cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+    cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))
+    if new_keys == NULL or new_vals == NULL:
+        if new_keys != NULL:
+            free(new_keys)
+        if new_vals != NULL:
+            free(new_vals)
+        raise MemoryError(
+            f"CParentMap: cannot grow to capacity {new_cap} "
+            f"({new_cap * (sizeof(long long) + sizeof(int)) // 1048576} MB)"
+        )
+    m.keys = new_keys
+    m.vals = new_vals
     memset(m.keys, 0xFF, new_cap * sizeof(long long))
     m.capacity = new_cap
     m.mask = new_mask
@@ -203,10 +226,10 @@ cdef void _pmap_grow(CParentMap* m) noexcept:
     free(old_vals)
 
 
-cdef inline void pmap_set(CParentMap* m, long long key, int val) noexcept:
+cdef inline void pmap_set(CParentMap* m, long long key, int val) except *:
     """Insert or overwrite."""
     if m.size * 10 > m.capacity * 7:
-        _pmap_grow(m)
+        _pmap_grow(m)  # may raise MemoryError
     cdef Py_ssize_t idx = _hash64(key, m.mask)
     while True:
         if m.keys[idx] == _EMPTY:

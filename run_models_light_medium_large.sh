@@ -162,10 +162,10 @@ DP_TIME_LIMIT_LARGE="${DP_TIME_LIMIT_LARGE:-300}"
 EPS_DP_TIME_LIMIT_MEDIUM="${EPS_DP_TIME_LIMIT_MEDIUM:-60}"
 EPS_DP_TIME_LIMIT_LARGE="${EPS_DP_TIME_LIMIT_LARGE:-120}"
 
-# Memory guardrail: abort if any single DP layer exceeds this.
-# Much lighter than the full script (25M / 50M) to avoid OOM.
-DP_MAX_STATES_MEDIUM="${DP_MAX_STATES_MEDIUM:-8000000}"
-DP_MAX_STATES_LARGE="${DP_MAX_STATES_LARGE:-15000000}"
+# Memory guardrail: 0 = auto-compute from RAM & workers (recommended).
+# Override with a positive integer to set a manual cap.
+DP_MAX_STATES_MEDIUM="${DP_MAX_STATES_MEDIUM:-0}"
+DP_MAX_STATES_LARGE="${DP_MAX_STATES_LARGE:-0}"
 
 # Model training knobs
 MLP_MAX_EPOCHS=500

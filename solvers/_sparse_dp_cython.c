@@ -1876,7 +1876,7 @@ struct __pyx_t_17_sparse_dp_cython_CStateMap {
   Py_ssize_t size;
 };
 
-/* "_sparse_dp_cython.pyx":145
+/* "_sparse_dp_cython.pyx":157
  * #  CParentMap  open-addressing  int64  int  (job length)
  * # ===================================================================
  * cdef struct CParentMap:             # <<<<<<<<<<<<<<
@@ -2063,6 +2063,50 @@ static CYTHON_INLINE void __Pyx_ErrFetchInState(PyThreadState *tstate, PyObject 
 /* RaiseException.export */
 static void __Pyx_Raise(PyObject *type, PyObject *value, PyObject *tb, PyObject *cause);
 
+/* PyMemoryError_Check.proto */
+#define __Pyx_PyExc_MemoryError_Check(obj)  __Pyx_TypeCheck(obj, PyExc_MemoryError)
+
+/* BuildPyUnicode.proto (used by COrdinalToPyUnicode) */
+static PyObject* __Pyx_PyUnicode_BuildFromAscii(Py_ssize_t ulength, const char* chars, int clength,
+                                                int prepend_sign, char padding_char);
+
+/* COrdinalToPyUnicode.proto (used by CIntToPyUnicode) */
+static CYTHON_INLINE int __Pyx_CheckUnicodeValue(int value);
+static CYTHON_INLINE PyObject* __Pyx_PyUnicode_FromOrdinal_Padded(int value, Py_ssize_t width, char padding_char);
+
+/* GCCDiagnostics.proto (used by CIntToPyUnicode) */
+#if !defined(__INTEL_COMPILER) && defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#define __Pyx_HAS_GCC_DIAGNOSTIC
+#endif
+
+/* IncludeStdlibH.proto (used by CIntToPyUnicode) */
+#include <stdlib.h>
+
+/* IncludeStringH.proto (used by CIntToPyUnicode) */
+#include <string.h>
+
+/* CIntToPyUnicode.proto */
+#define __Pyx_PyUnicode_From_Py_ssize_t(value, width, padding_char, format_char) (\
+    ((format_char) == ('c')) ?\
+        __Pyx_uchar___Pyx_PyUnicode_From_Py_ssize_t(value, width, padding_char) :\
+        __Pyx____Pyx_PyUnicode_From_Py_ssize_t(value, width, padding_char, format_char)\
+    )
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_Py_ssize_t(Py_ssize_t value, Py_ssize_t width, char padding_char);
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_Py_ssize_t(Py_ssize_t value, Py_ssize_t width, char padding_char, char format_char);
+
+/* CIntToPyUnicode.proto */
+#define __Pyx_PyUnicode_From_size_t(value, width, padding_char, format_char) (\
+    ((format_char) == ('c')) ?\
+        __Pyx_uchar___Pyx_PyUnicode_From_size_t(value, width, padding_char) :\
+        __Pyx____Pyx_PyUnicode_From_size_t(value, width, padding_char, format_char)\
+    )
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_size_t(size_t value, Py_ssize_t width, char padding_char);
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_size_t(size_t value, Py_ssize_t width, char padding_char, char format_char);
+
+/* JoinPyUnicode.export */
+static PyObject* __Pyx_PyUnicode_Join(PyObject** values, Py_ssize_t value_count, Py_ssize_t result_ulength,
+                                      Py_UCS4 max_char);
+
 /* TupleAndListFromArray.proto (used by fastcall) */
 #if CYTHON_COMPILING_IN_CPYTHON
 static CYTHON_INLINE PyObject* __Pyx_PyList_FromArray(PyObject *const *src, Py_ssize_t n);
@@ -2070,9 +2114,6 @@ static CYTHON_INLINE PyObject* __Pyx_PyList_FromArray(PyObject *const *src, Py_s
 #if CYTHON_COMPILING_IN_CPYTHON || CYTHON_METH_FASTCALL
 static CYTHON_INLINE PyObject* __Pyx_PyTuple_FromArray(PyObject *const *src, Py_ssize_t n);
 #endif
-
-/* IncludeStringH.proto (used by BytesEquals) */
-#include <string.h>
 
 /* BytesEquals.proto (used by UnicodeEquals) */
 static CYTHON_INLINE int __Pyx_PyBytes_Equals(PyObject* s1, PyObject* s2, int equals);
@@ -2376,9 +2417,6 @@ static CYTHON_INLINE int __Pyx_PyObject_SetSlice(
         PyObject* obj, PyObject* value, Py_ssize_t cstart, Py_ssize_t cstop,
         PyObject** py_start, PyObject** py_stop, PyObject** py_slice,
         int has_cstart, int has_cstop, int wraparound);
-
-/* PyMemoryError_Check.proto */
-#define __Pyx_PyExc_MemoryError_Check(obj)  __Pyx_TypeCheck(obj, PyExc_MemoryError)
 
 /* DictGetItem.proto */
 #if !CYTHON_COMPILING_IN_PYPY
@@ -2791,11 +2829,6 @@ typedef struct {
   __Pyx_Buf_DimInfo diminfo[8];
 } __Pyx_LocalBuf_ND;
 
-/* GCCDiagnostics.proto */
-#if !defined(__INTEL_COMPILER) && defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
-#define __Pyx_HAS_GCC_DIAGNOSTIC
-#endif
-
 /* RealImag.proto */
 #if CYTHON_CCOMPLEX
   #ifdef __cplusplus
@@ -3116,7 +3149,7 @@ typedef struct {
   __Pyx_CachedCFunction __pyx_umethod_PyDict_Type_values;
   PyObject *__pyx_slice[1];
   PyObject *__pyx_codeobj_tab[1];
-  PyObject *__pyx_string_tab[112];
+  PyObject *__pyx_string_tab[116];
   PyObject *__pyx_number_tab[3];
 /* #### Code section: module_state_contents ### */
 /* CommonTypesMetaclass.module_state_decls */
@@ -3159,117 +3192,121 @@ static __pyx_mstatetype * const __pyx_mstate_global = &__pyx_mstate_global_stati
 #endif
 /* #### Code section: constant_name_defines ### */
 #define __pyx_kp_u_ __pyx_string_tab[0]
-#define __pyx_kp_u_DP_layers_allocation_failed __pyx_string_tab[1]
-#define __pyx_kp_u_Note_that_Cython_is_deliberately __pyx_string_tab[2]
-#define __pyx_kp_u_Parent_map_allocation_failed __pyx_string_tab[3]
-#define __pyx_kp_u_State_map_allocation_failed __pyx_string_tab[4]
-#define __pyx_kp_u_add_note __pyx_string_tab[5]
-#define __pyx_kp_u_numpy_core_multiarray_failed_to __pyx_string_tab[6]
-#define __pyx_kp_u_numpy_core_umath_failed_to_impor __pyx_string_tab[7]
-#define __pyx_kp_u_sparse_dp_cython_pyx __pyx_string_tab[8]
-#define __pyx_n_u_K __pyx_string_tab[9]
-#define __pyx_n_u_L __pyx_string_tab[10]
-#define __pyx_n_u_LB_BLOCK __pyx_string_tab[11]
-#define __pyx_n_u_Pyx_PyDict_NextRef __pyx_string_tab[12]
-#define __pyx_n_u_T __pyx_string_tab[13]
-#define __pyx_n_u_asyncio_coroutines __pyx_string_tab[14]
-#define __pyx_n_u_b __pyx_string_tab[15]
-#define __pyx_n_u_best_final_cost __pyx_string_tab[16]
-#define __pyx_n_u_best_final_pen __pyx_string_tab[17]
-#define __pyx_n_u_best_final_time __pyx_string_tab[18]
-#define __pyx_n_u_best_partial __pyx_string_tab[19]
-#define __pyx_n_u_better __pyx_string_tab[20]
-#define __pyx_n_u_bp_cost __pyx_string_tab[21]
-#define __pyx_n_u_bp_jobs __pyx_string_tab[22]
-#define __pyx_n_u_bp_state __pyx_string_tab[23]
-#define __pyx_n_u_bp_time __pyx_string_tab[24]
-#define __pyx_n_u_c0 __pyx_string_tab[25]
-#define __pyx_n_u_c_inc __pyx_string_tab[26]
-#define __pyx_n_u_c_len __pyx_string_tab[27]
-#define __pyx_n_u_c_parent __pyx_string_tab[28]
-#define __pyx_n_u_c_rad __pyx_string_tab[29]
-#define __pyx_n_u_c_tot __pyx_string_tab[30]
-#define __pyx_n_u_cc __pyx_string_tab[31]
-#define __pyx_n_u_cline_in_traceback __pyx_string_tab[32]
-#define __pyx_n_u_cp __pyx_string_tab[33]
-#define __pyx_n_u_cs __pyx_string_tab[34]
-#define __pyx_n_u_cumsum __pyx_string_tab[35]
-#define __pyx_n_u_diff __pyx_string_tab[36]
-#define __pyx_n_u_dtype __pyx_string_tab[37]
-#define __pyx_n_u_early __pyx_string_tab[38]
-#define __pyx_n_u_empty __pyx_string_tab[39]
-#define __pyx_n_u_end __pyx_string_tab[40]
-#define __pyx_n_u_final_state __pyx_string_tab[41]
-#define __pyx_n_u_float64 __pyx_string_tab[42]
-#define __pyx_n_u_freed_t __pyx_string_tab[43]
-#define __pyx_n_u_func __pyx_string_tab[44]
-#define __pyx_n_u_i __pyx_string_tab[45]
-#define __pyx_n_u_idx __pyx_string_tab[46]
-#define __pyx_n_u_inf __pyx_string_tab[47]
-#define __pyx_n_u_is_coroutine __pyx_string_tab[48]
-#define __pyx_n_u_items __pyx_string_tab[49]
-#define __pyx_n_u_jd __pyx_string_tab[50]
-#define __pyx_n_u_layer __pyx_string_tab[51]
-#define __pyx_n_u_layers __pyx_string_tab[52]
-#define __pyx_n_u_lb_arr __pyx_string_tab[53]
-#define __pyx_n_u_lb_b __pyx_string_tab[54]
-#define __pyx_n_u_lb_len __pyx_string_tab[55]
-#define __pyx_n_u_lb_py __pyx_string_tab[56]
-#define __pyx_n_u_lb_val __pyx_string_tab[57]
-#define __pyx_n_u_lengths __pyx_string_tab[58]
-#define __pyx_n_u_main __pyx_string_tab[59]
-#define __pyx_n_u_max_job_len __pyx_string_tab[60]
-#define __pyx_n_u_max_states __pyx_string_tab[61]
-#define __pyx_n_u_module __pyx_string_tab[62]
-#define __pyx_n_u_mult __pyx_string_tab[63]
-#define __pyx_n_u_name __pyx_string_tab[64]
-#define __pyx_n_u_njd __pyx_string_tab[65]
-#define __pyx_n_u_nlayer __pyx_string_tab[66]
-#define __pyx_n_u_np __pyx_string_tab[67]
-#define __pyx_n_u_nrw __pyx_string_tab[68]
-#define __pyx_n_u_ns __pyx_string_tab[69]
-#define __pyx_n_u_nsv __pyx_string_tab[70]
-#define __pyx_n_u_numpy __pyx_string_tab[71]
-#define __pyx_n_u_p0 __pyx_string_tab[72]
-#define __pyx_n_u_perf_counter __pyx_string_tab[73]
-#define __pyx_n_u_pop __pyx_string_tab[74]
-#define __pyx_n_u_pos __pyx_string_tab[75]
-#define __pyx_n_u_pprefix __pyx_string_tab[76]
-#define __pyx_n_u_prefix __pyx_string_tab[77]
-#define __pyx_n_u_prices_arr __pyx_string_tab[78]
-#define __pyx_n_u_py_parent __pyx_string_tab[79]
-#define __pyx_n_u_qualname __pyx_string_tab[80]
-#define __pyx_n_u_radices __pyx_string_tab[81]
-#define __pyx_n_u_remaining __pyx_string_tab[82]
-#define __pyx_n_u_ret_cost __pyx_string_tab[83]
-#define __pyx_n_u_rw __pyx_string_tab[84]
-#define __pyx_n_u_set_name __pyx_string_tab[85]
-#define __pyx_n_u_setdefault __pyx_string_tab[86]
-#define __pyx_n_u_solve_sparse_dp_cython __pyx_string_tab[87]
-#define __pyx_n_u_sort __pyx_string_tab[88]
-#define __pyx_n_u_sp __pyx_string_tab[89]
-#define __pyx_n_u_sparse_dp_cython __pyx_string_tab[90]
-#define __pyx_n_u_start_time __pyx_string_tab[91]
-#define __pyx_n_u_state __pyx_string_tab[92]
-#define __pyx_n_u_state_bound __pyx_string_tab[93]
-#define __pyx_n_u_sv __pyx_string_tab[94]
-#define __pyx_n_u_sv0 __pyx_string_tab[95]
-#define __pyx_n_u_test __pyx_string_tab[96]
-#define __pyx_n_u_tie_break __pyx_string_tab[97]
-#define __pyx_n_u_time __pyx_string_tab[98]
-#define __pyx_n_u_time_limit __pyx_string_tab[99]
-#define __pyx_n_u_time_module __pyx_string_tab[100]
-#define __pyx_n_u_timed_out __pyx_string_tab[101]
-#define __pyx_n_u_tlayer __pyx_string_tab[102]
-#define __pyx_n_u_total_rw __pyx_string_tab[103]
-#define __pyx_n_u_totals __pyx_string_tab[104]
-#define __pyx_n_u_track_schedule __pyx_string_tab[105]
-#define __pyx_n_u_tt __pyx_string_tab[106]
-#define __pyx_n_u_ui __pyx_string_tab[107]
-#define __pyx_n_u_values __pyx_string_tab[108]
-#define __pyx_n_u_x __pyx_string_tab[109]
-#define __pyx_n_u_zeros __pyx_string_tab[110]
-#define __pyx_kp_b_iso88591_Q_nA_U_1_QfE_QfE_q_QfE_QfD_5_Ba __pyx_string_tab[111]
+#define __pyx_kp_u_CParentMap_cannot_grow_to_capaci __pyx_string_tab[1]
+#define __pyx_kp_u_CStateMap_cannot_grow_to_capacit __pyx_string_tab[2]
+#define __pyx_kp_u_DP_layers_allocation_failed __pyx_string_tab[3]
+#define __pyx_kp_u_MB __pyx_string_tab[4]
+#define __pyx_kp_u_Note_that_Cython_is_deliberately __pyx_string_tab[5]
+#define __pyx_kp_u_Parent_map_allocation_failed __pyx_string_tab[6]
+#define __pyx_kp_u_State_map_allocation_failed __pyx_string_tab[7]
+#define __pyx_kp_u__2 __pyx_string_tab[8]
+#define __pyx_kp_u_add_note __pyx_string_tab[9]
+#define __pyx_kp_u_numpy_core_multiarray_failed_to __pyx_string_tab[10]
+#define __pyx_kp_u_numpy_core_umath_failed_to_impor __pyx_string_tab[11]
+#define __pyx_kp_u_sparse_dp_cython_pyx __pyx_string_tab[12]
+#define __pyx_n_u_K __pyx_string_tab[13]
+#define __pyx_n_u_L __pyx_string_tab[14]
+#define __pyx_n_u_LB_BLOCK __pyx_string_tab[15]
+#define __pyx_n_u_Pyx_PyDict_NextRef __pyx_string_tab[16]
+#define __pyx_n_u_T __pyx_string_tab[17]
+#define __pyx_n_u_asyncio_coroutines __pyx_string_tab[18]
+#define __pyx_n_u_b __pyx_string_tab[19]
+#define __pyx_n_u_best_final_cost __pyx_string_tab[20]
+#define __pyx_n_u_best_final_pen __pyx_string_tab[21]
+#define __pyx_n_u_best_final_time __pyx_string_tab[22]
+#define __pyx_n_u_best_partial __pyx_string_tab[23]
+#define __pyx_n_u_better __pyx_string_tab[24]
+#define __pyx_n_u_bp_cost __pyx_string_tab[25]
+#define __pyx_n_u_bp_jobs __pyx_string_tab[26]
+#define __pyx_n_u_bp_state __pyx_string_tab[27]
+#define __pyx_n_u_bp_time __pyx_string_tab[28]
+#define __pyx_n_u_c0 __pyx_string_tab[29]
+#define __pyx_n_u_c_inc __pyx_string_tab[30]
+#define __pyx_n_u_c_len __pyx_string_tab[31]
+#define __pyx_n_u_c_parent __pyx_string_tab[32]
+#define __pyx_n_u_c_rad __pyx_string_tab[33]
+#define __pyx_n_u_c_tot __pyx_string_tab[34]
+#define __pyx_n_u_cc __pyx_string_tab[35]
+#define __pyx_n_u_cline_in_traceback __pyx_string_tab[36]
+#define __pyx_n_u_cp __pyx_string_tab[37]
+#define __pyx_n_u_cs __pyx_string_tab[38]
+#define __pyx_n_u_cumsum __pyx_string_tab[39]
+#define __pyx_n_u_diff __pyx_string_tab[40]
+#define __pyx_n_u_dtype __pyx_string_tab[41]
+#define __pyx_n_u_early __pyx_string_tab[42]
+#define __pyx_n_u_empty __pyx_string_tab[43]
+#define __pyx_n_u_end __pyx_string_tab[44]
+#define __pyx_n_u_final_state __pyx_string_tab[45]
+#define __pyx_n_u_float64 __pyx_string_tab[46]
+#define __pyx_n_u_freed_t __pyx_string_tab[47]
+#define __pyx_n_u_func __pyx_string_tab[48]
+#define __pyx_n_u_i __pyx_string_tab[49]
+#define __pyx_n_u_idx __pyx_string_tab[50]
+#define __pyx_n_u_inf __pyx_string_tab[51]
+#define __pyx_n_u_is_coroutine __pyx_string_tab[52]
+#define __pyx_n_u_items __pyx_string_tab[53]
+#define __pyx_n_u_jd __pyx_string_tab[54]
+#define __pyx_n_u_layer __pyx_string_tab[55]
+#define __pyx_n_u_layers __pyx_string_tab[56]
+#define __pyx_n_u_lb_arr __pyx_string_tab[57]
+#define __pyx_n_u_lb_b __pyx_string_tab[58]
+#define __pyx_n_u_lb_len __pyx_string_tab[59]
+#define __pyx_n_u_lb_py __pyx_string_tab[60]
+#define __pyx_n_u_lb_val __pyx_string_tab[61]
+#define __pyx_n_u_lengths __pyx_string_tab[62]
+#define __pyx_n_u_main __pyx_string_tab[63]
+#define __pyx_n_u_max_job_len __pyx_string_tab[64]
+#define __pyx_n_u_max_states __pyx_string_tab[65]
+#define __pyx_n_u_module __pyx_string_tab[66]
+#define __pyx_n_u_mult __pyx_string_tab[67]
+#define __pyx_n_u_name __pyx_string_tab[68]
+#define __pyx_n_u_njd __pyx_string_tab[69]
+#define __pyx_n_u_nlayer __pyx_string_tab[70]
+#define __pyx_n_u_np __pyx_string_tab[71]
+#define __pyx_n_u_nrw __pyx_string_tab[72]
+#define __pyx_n_u_ns __pyx_string_tab[73]
+#define __pyx_n_u_nsv __pyx_string_tab[74]
+#define __pyx_n_u_numpy __pyx_string_tab[75]
+#define __pyx_n_u_p0 __pyx_string_tab[76]
+#define __pyx_n_u_perf_counter __pyx_string_tab[77]
+#define __pyx_n_u_pop __pyx_string_tab[78]
+#define __pyx_n_u_pos __pyx_string_tab[79]
+#define __pyx_n_u_pprefix __pyx_string_tab[80]
+#define __pyx_n_u_prefix __pyx_string_tab[81]
+#define __pyx_n_u_prices_arr __pyx_string_tab[82]
+#define __pyx_n_u_py_parent __pyx_string_tab[83]
+#define __pyx_n_u_qualname __pyx_string_tab[84]
+#define __pyx_n_u_radices __pyx_string_tab[85]
+#define __pyx_n_u_remaining __pyx_string_tab[86]
+#define __pyx_n_u_ret_cost __pyx_string_tab[87]
+#define __pyx_n_u_rw __pyx_string_tab[88]
+#define __pyx_n_u_set_name __pyx_string_tab[89]
+#define __pyx_n_u_setdefault __pyx_string_tab[90]
+#define __pyx_n_u_solve_sparse_dp_cython __pyx_string_tab[91]
+#define __pyx_n_u_sort __pyx_string_tab[92]
+#define __pyx_n_u_sp __pyx_string_tab[93]
+#define __pyx_n_u_sparse_dp_cython __pyx_string_tab[94]
+#define __pyx_n_u_start_time __pyx_string_tab[95]
+#define __pyx_n_u_state __pyx_string_tab[96]
+#define __pyx_n_u_state_bound __pyx_string_tab[97]
+#define __pyx_n_u_sv __pyx_string_tab[98]
+#define __pyx_n_u_sv0 __pyx_string_tab[99]
+#define __pyx_n_u_test __pyx_string_tab[100]
+#define __pyx_n_u_tie_break __pyx_string_tab[101]
+#define __pyx_n_u_time __pyx_string_tab[102]
+#define __pyx_n_u_time_limit __pyx_string_tab[103]
+#define __pyx_n_u_time_module __pyx_string_tab[104]
+#define __pyx_n_u_timed_out __pyx_string_tab[105]
+#define __pyx_n_u_tlayer __pyx_string_tab[106]
+#define __pyx_n_u_total_rw __pyx_string_tab[107]
+#define __pyx_n_u_totals __pyx_string_tab[108]
+#define __pyx_n_u_track_schedule __pyx_string_tab[109]
+#define __pyx_n_u_tt __pyx_string_tab[110]
+#define __pyx_n_u_ui __pyx_string_tab[111]
+#define __pyx_n_u_values __pyx_string_tab[112]
+#define __pyx_n_u_x __pyx_string_tab[113]
+#define __pyx_n_u_zeros __pyx_string_tab[114]
+#define __pyx_kp_b_iso88591_Q_nA_U_1_QfE_QfE_q_QfE_QfD_5_Ba __pyx_string_tab[115]
 #define __pyx_float_0_0 __pyx_number_tab[0]
 #define __pyx_int_0 __pyx_number_tab[1]
 #define __pyx_int_1 __pyx_number_tab[2]
@@ -3305,7 +3342,7 @@ static CYTHON_SMALL_CODE int __pyx_m_clear(PyObject *m) {
   Py_CLEAR(clear_module_state->__pyx_ptype_5numpy_ufunc);
   for (int i=0; i<1; ++i) { Py_CLEAR(clear_module_state->__pyx_slice[i]); }
   for (int i=0; i<1; ++i) { Py_CLEAR(clear_module_state->__pyx_codeobj_tab[i]); }
-  for (int i=0; i<112; ++i) { Py_CLEAR(clear_module_state->__pyx_string_tab[i]); }
+  for (int i=0; i<116; ++i) { Py_CLEAR(clear_module_state->__pyx_string_tab[i]); }
   for (int i=0; i<3; ++i) { Py_CLEAR(clear_module_state->__pyx_number_tab[i]); }
 /* #### Code section: module_state_clear_contents ### */
 /* CommonTypesMetaclass.module_state_clear */
@@ -3347,7 +3384,7 @@ static CYTHON_SMALL_CODE int __pyx_m_traverse(PyObject *m, visitproc visit, void
   Py_VISIT(traverse_module_state->__pyx_ptype_5numpy_ufunc);
   for (int i=0; i<1; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_slice[i]); }
   for (int i=0; i<1; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_codeobj_tab[i]); }
-  for (int i=0; i<112; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_string_tab[i]); }
+  for (int i=0; i<116; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_string_tab[i]); }
   for (int i=0; i<3; ++i) { __Pyx_VISIT_CONST(traverse_module_state->__pyx_number_tab[i]); }
 /* #### Code section: module_state_traverse_contents ### */
 /* CommonTypesMetaclass.module_state_traverse */
@@ -5004,8 +5041,8 @@ static void __pyx_f_17_sparse_dp_cython_smap_destroy(struct __pyx_t_17_sparse_dp
 /* "_sparse_dp_cython.pyx":86
  * 
  * 
- * cdef void _smap_grow(CStateMap* m) noexcept:             # <<<<<<<<<<<<<<
- *     """Double capacity and rehash."""
+ * cdef void _smap_grow(CStateMap* m) except *:             # <<<<<<<<<<<<<<
+ *     """Double capacity and rehash.  Raises MemoryError on allocation failure."""
  *     cdef Py_ssize_t old_cap = m.capacity
 */
 
@@ -5015,18 +5052,33 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
   struct __pyx_t_17_sparse_dp_cython_StateVal *__pyx_v_old_vals;
   Py_ssize_t __pyx_v_new_cap;
   Py_ssize_t __pyx_v_new_mask;
+  PY_LONG_LONG *__pyx_v_new_keys;
+  struct __pyx_t_17_sparse_dp_cython_StateVal *__pyx_v_new_vals;
   Py_ssize_t __pyx_v_i;
   Py_ssize_t __pyx_v_idx;
+  __Pyx_RefNannyDeclarations
   Py_ssize_t __pyx_t_1;
   PY_LONG_LONG *__pyx_t_2;
   struct __pyx_t_17_sparse_dp_cython_StateVal *__pyx_t_3;
-  Py_ssize_t __pyx_t_4;
-  Py_ssize_t __pyx_t_5;
-  int __pyx_t_6;
+  int __pyx_t_4;
+  int __pyx_t_5;
+  PyObject *__pyx_t_6 = NULL;
+  PyObject *__pyx_t_7 = NULL;
+  PyObject *__pyx_t_8 = NULL;
+  PyObject *__pyx_t_9 = NULL;
+  PyObject *__pyx_t_10[5];
+  PyObject *__pyx_t_11 = NULL;
+  size_t __pyx_t_12;
+  Py_ssize_t __pyx_t_13;
+  Py_ssize_t __pyx_t_14;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("_smap_grow", 0);
 
   /* "_sparse_dp_cython.pyx":88
- * cdef void _smap_grow(CStateMap* m) noexcept:
- *     """Double capacity and rehash."""
+ * cdef void _smap_grow(CStateMap* m) except *:
+ *     """Double capacity and rehash.  Raises MemoryError on allocation failure."""
  *     cdef Py_ssize_t old_cap = m.capacity             # <<<<<<<<<<<<<<
  *     cdef long long* old_keys = m.keys
  *     cdef StateVal*  old_vals = m.vals
@@ -5035,7 +5087,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
   __pyx_v_old_cap = __pyx_t_1;
 
   /* "_sparse_dp_cython.pyx":89
- *     """Double capacity and rehash."""
+ *     """Double capacity and rehash.  Raises MemoryError on allocation failure."""
  *     cdef Py_ssize_t old_cap = m.capacity
  *     cdef long long* old_keys = m.keys             # <<<<<<<<<<<<<<
  *     cdef StateVal*  old_vals = m.vals
@@ -5068,39 +5120,199 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
  *     cdef Py_ssize_t new_cap = old_cap << 1
  *     cdef Py_ssize_t new_mask = new_cap - 1             # <<<<<<<<<<<<<<
  * 
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
 */
   __pyx_v_new_mask = (__pyx_v_new_cap - 1);
 
   /* "_sparse_dp_cython.pyx":95
  *     cdef Py_ssize_t new_mask = new_cap - 1
  * 
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))             # <<<<<<<<<<<<<<
- *     m.vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
- *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))             # <<<<<<<<<<<<<<
+ *     cdef StateVal*  new_vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+ *     if new_keys == NULL or new_vals == NULL:
 */
-  __pyx_v_m->keys = ((PY_LONG_LONG *)malloc((__pyx_v_new_cap * (sizeof(PY_LONG_LONG)))));
+  __pyx_v_new_keys = ((PY_LONG_LONG *)malloc((__pyx_v_new_cap * (sizeof(PY_LONG_LONG)))));
 
   /* "_sparse_dp_cython.pyx":96
  * 
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))
- *     m.vals = <StateVal*>malloc(new_cap * sizeof(StateVal))             # <<<<<<<<<<<<<<
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef StateVal*  new_vals = <StateVal*>malloc(new_cap * sizeof(StateVal))             # <<<<<<<<<<<<<<
+ *     if new_keys == NULL or new_vals == NULL:
+ *         # Allocation failed  free any partial alloc, keep old arrays.
+*/
+  __pyx_v_new_vals = ((struct __pyx_t_17_sparse_dp_cython_StateVal *)malloc((__pyx_v_new_cap * (sizeof(struct __pyx_t_17_sparse_dp_cython_StateVal)))));
+
+  /* "_sparse_dp_cython.pyx":97
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef StateVal*  new_vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+ *     if new_keys == NULL or new_vals == NULL:             # <<<<<<<<<<<<<<
+ *         # Allocation failed  free any partial alloc, keep old arrays.
+ *         if new_keys != NULL:
+*/
+  __pyx_t_5 = (__pyx_v_new_keys == NULL);
+  if (!__pyx_t_5) {
+  } else {
+    __pyx_t_4 = __pyx_t_5;
+    goto __pyx_L4_bool_binop_done;
+  }
+  __pyx_t_5 = (__pyx_v_new_vals == NULL);
+  __pyx_t_4 = __pyx_t_5;
+  __pyx_L4_bool_binop_done:;
+  if (__pyx_t_4) {
+
+    /* "_sparse_dp_cython.pyx":99
+ *     if new_keys == NULL or new_vals == NULL:
+ *         # Allocation failed  free any partial alloc, keep old arrays.
+ *         if new_keys != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_keys)
+ *         if new_vals != NULL:
+*/
+    __pyx_t_4 = (__pyx_v_new_keys != NULL);
+    if (__pyx_t_4) {
+
+      /* "_sparse_dp_cython.pyx":100
+ *         # Allocation failed  free any partial alloc, keep old arrays.
+ *         if new_keys != NULL:
+ *             free(new_keys)             # <<<<<<<<<<<<<<
+ *         if new_vals != NULL:
+ *             free(new_vals)
+*/
+      free(__pyx_v_new_keys);
+
+      /* "_sparse_dp_cython.pyx":99
+ *     if new_keys == NULL or new_vals == NULL:
+ *         # Allocation failed  free any partial alloc, keep old arrays.
+ *         if new_keys != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_keys)
+ *         if new_vals != NULL:
+*/
+    }
+
+    /* "_sparse_dp_cython.pyx":101
+ *         if new_keys != NULL:
+ *             free(new_keys)
+ *         if new_vals != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_vals)
+ *         raise MemoryError(
+*/
+    __pyx_t_4 = (__pyx_v_new_vals != NULL);
+    if (__pyx_t_4) {
+
+      /* "_sparse_dp_cython.pyx":102
+ *             free(new_keys)
+ *         if new_vals != NULL:
+ *             free(new_vals)             # <<<<<<<<<<<<<<
+ *         raise MemoryError(
+ *             f"CStateMap: cannot grow to capacity {new_cap} "
+*/
+      free(__pyx_v_new_vals);
+
+      /* "_sparse_dp_cython.pyx":101
+ *         if new_keys != NULL:
+ *             free(new_keys)
+ *         if new_vals != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_vals)
+ *         raise MemoryError(
+*/
+    }
+
+    /* "_sparse_dp_cython.pyx":103
+ *         if new_vals != NULL:
+ *             free(new_vals)
+ *         raise MemoryError(             # <<<<<<<<<<<<<<
+ *             f"CStateMap: cannot grow to capacity {new_cap} "
+ *             f"({new_cap * (sizeof(long long) + sizeof(StateVal)) // 1048576} MB)"
+*/
+    __pyx_t_7 = NULL;
+
+    /* "_sparse_dp_cython.pyx":104
+ *             free(new_vals)
+ *         raise MemoryError(
+ *             f"CStateMap: cannot grow to capacity {new_cap} "             # <<<<<<<<<<<<<<
+ *             f"({new_cap * (sizeof(long long) + sizeof(StateVal)) // 1048576} MB)"
+ *         )
+*/
+    __pyx_t_8 = __Pyx_PyUnicode_From_Py_ssize_t(__pyx_v_new_cap, 0, ' ', 'd'); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 104, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_8);
+
+    /* "_sparse_dp_cython.pyx":105
+ *         raise MemoryError(
+ *             f"CStateMap: cannot grow to capacity {new_cap} "
+ *             f"({new_cap * (sizeof(long long) + sizeof(StateVal)) // 1048576} MB)"             # <<<<<<<<<<<<<<
+ *         )
+ *     m.keys = new_keys
+*/
+    __pyx_t_9 = __Pyx_PyUnicode_From_size_t(((__pyx_v_new_cap * ((sizeof(PY_LONG_LONG)) + (sizeof(struct __pyx_t_17_sparse_dp_cython_StateVal)))) / 0x100000), 0, ' ', 'd'); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 105, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_9);
+    __pyx_t_10[0] = __pyx_mstate_global->__pyx_kp_u_CStateMap_cannot_grow_to_capacit;
+    __pyx_t_10[1] = __pyx_t_8;
+    __pyx_t_10[2] = __pyx_mstate_global->__pyx_kp_u_;
+    __pyx_t_10[3] = __pyx_t_9;
+    __pyx_t_10[4] = __pyx_mstate_global->__pyx_kp_u_MB;
+
+    /* "_sparse_dp_cython.pyx":104
+ *             free(new_vals)
+ *         raise MemoryError(
+ *             f"CStateMap: cannot grow to capacity {new_cap} "             # <<<<<<<<<<<<<<
+ *             f"({new_cap * (sizeof(long long) + sizeof(StateVal)) // 1048576} MB)"
+ *         )
+*/
+    __pyx_t_11 = __Pyx_PyUnicode_Join(__pyx_t_10, 5, 35 + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_8) + 2 + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_9) + 4, 127);
+    if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 104, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_11);
+    __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+    __pyx_t_12 = 1;
+    {
+      PyObject *__pyx_callargs[2] = {__pyx_t_7, __pyx_t_11};
+      __pyx_t_6 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_MemoryError)), __pyx_callargs+__pyx_t_12, (2-__pyx_t_12) | (__pyx_t_12*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
+      __Pyx_DECREF(__pyx_t_11); __pyx_t_11 = 0;
+      if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 103, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_6);
+    }
+    __Pyx_Raise(__pyx_t_6, 0, 0, 0);
+    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+    __PYX_ERR(0, 103, __pyx_L1_error)
+
+    /* "_sparse_dp_cython.pyx":97
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef StateVal*  new_vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+ *     if new_keys == NULL or new_vals == NULL:             # <<<<<<<<<<<<<<
+ *         # Allocation failed  free any partial alloc, keep old arrays.
+ *         if new_keys != NULL:
+*/
+  }
+
+  /* "_sparse_dp_cython.pyx":107
+ *             f"({new_cap * (sizeof(long long) + sizeof(StateVal)) // 1048576} MB)"
+ *         )
+ *     m.keys = new_keys             # <<<<<<<<<<<<<<
+ *     m.vals = new_vals
+ *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
+*/
+  __pyx_v_m->keys = __pyx_v_new_keys;
+
+  /* "_sparse_dp_cython.pyx":108
+ *         )
+ *     m.keys = new_keys
+ *     m.vals = new_vals             # <<<<<<<<<<<<<<
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
  *     m.capacity = new_cap
 */
-  __pyx_v_m->vals = ((struct __pyx_t_17_sparse_dp_cython_StateVal *)malloc((__pyx_v_new_cap * (sizeof(struct __pyx_t_17_sparse_dp_cython_StateVal)))));
+  __pyx_v_m->vals = __pyx_v_new_vals;
 
-  /* "_sparse_dp_cython.pyx":97
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))
- *     m.vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+  /* "_sparse_dp_cython.pyx":109
+ *     m.keys = new_keys
+ *     m.vals = new_vals
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))             # <<<<<<<<<<<<<<
  *     m.capacity = new_cap
  *     m.mask = new_mask
 */
   (void)(memset(__pyx_v_m->keys, 0xFF, (__pyx_v_new_cap * (sizeof(PY_LONG_LONG)))));
 
-  /* "_sparse_dp_cython.pyx":98
- *     m.vals = <StateVal*>malloc(new_cap * sizeof(StateVal))
+  /* "_sparse_dp_cython.pyx":110
+ *     m.vals = new_vals
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
  *     m.capacity = new_cap             # <<<<<<<<<<<<<<
  *     m.mask = new_mask
@@ -5108,7 +5320,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_m->capacity = __pyx_v_new_cap;
 
-  /* "_sparse_dp_cython.pyx":99
+  /* "_sparse_dp_cython.pyx":111
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
  *     m.capacity = new_cap
  *     m.mask = new_mask             # <<<<<<<<<<<<<<
@@ -5117,7 +5329,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_m->mask = __pyx_v_new_mask;
 
-  /* "_sparse_dp_cython.pyx":100
+  /* "_sparse_dp_cython.pyx":112
  *     m.capacity = new_cap
  *     m.mask = new_mask
  *     m.size = 0             # <<<<<<<<<<<<<<
@@ -5126,7 +5338,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_m->size = 0;
 
-  /* "_sparse_dp_cython.pyx":103
+  /* "_sparse_dp_cython.pyx":115
  * 
  *     cdef Py_ssize_t i, idx
  *     for i in range(old_cap):             # <<<<<<<<<<<<<<
@@ -5134,21 +5346,21 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
  *             idx = _hash64(old_keys[i], new_mask)
 */
   __pyx_t_1 = __pyx_v_old_cap;
-  __pyx_t_4 = __pyx_t_1;
-  for (__pyx_t_5 = 0; __pyx_t_5 < __pyx_t_4; __pyx_t_5+=1) {
-    __pyx_v_i = __pyx_t_5;
+  __pyx_t_13 = __pyx_t_1;
+  for (__pyx_t_14 = 0; __pyx_t_14 < __pyx_t_13; __pyx_t_14+=1) {
+    __pyx_v_i = __pyx_t_14;
 
-    /* "_sparse_dp_cython.pyx":104
+    /* "_sparse_dp_cython.pyx":116
  *     cdef Py_ssize_t i, idx
  *     for i in range(old_cap):
  *         if old_keys[i] != _EMPTY:             # <<<<<<<<<<<<<<
  *             idx = _hash64(old_keys[i], new_mask)
  *             while m.keys[idx] != _EMPTY:
 */
-    __pyx_t_6 = ((__pyx_v_old_keys[__pyx_v_i]) != __pyx_v_17_sparse_dp_cython__EMPTY);
-    if (__pyx_t_6) {
+    __pyx_t_4 = ((__pyx_v_old_keys[__pyx_v_i]) != __pyx_v_17_sparse_dp_cython__EMPTY);
+    if (__pyx_t_4) {
 
-      /* "_sparse_dp_cython.pyx":105
+      /* "_sparse_dp_cython.pyx":117
  *     for i in range(old_cap):
  *         if old_keys[i] != _EMPTY:
  *             idx = _hash64(old_keys[i], new_mask)             # <<<<<<<<<<<<<<
@@ -5157,7 +5369,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
       __pyx_v_idx = __pyx_f_17_sparse_dp_cython__hash64((__pyx_v_old_keys[__pyx_v_i]), __pyx_v_new_mask);
 
-      /* "_sparse_dp_cython.pyx":106
+      /* "_sparse_dp_cython.pyx":118
  *         if old_keys[i] != _EMPTY:
  *             idx = _hash64(old_keys[i], new_mask)
  *             while m.keys[idx] != _EMPTY:             # <<<<<<<<<<<<<<
@@ -5165,10 +5377,10 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
  *             m.keys[idx] = old_keys[i]
 */
       while (1) {
-        __pyx_t_6 = ((__pyx_v_m->keys[__pyx_v_idx]) != __pyx_v_17_sparse_dp_cython__EMPTY);
-        if (!__pyx_t_6) break;
+        __pyx_t_4 = ((__pyx_v_m->keys[__pyx_v_idx]) != __pyx_v_17_sparse_dp_cython__EMPTY);
+        if (!__pyx_t_4) break;
 
-        /* "_sparse_dp_cython.pyx":107
+        /* "_sparse_dp_cython.pyx":119
  *             idx = _hash64(old_keys[i], new_mask)
  *             while m.keys[idx] != _EMPTY:
  *                 idx = (idx + 1) & new_mask             # <<<<<<<<<<<<<<
@@ -5178,7 +5390,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
         __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_new_mask);
       }
 
-      /* "_sparse_dp_cython.pyx":108
+      /* "_sparse_dp_cython.pyx":120
  *             while m.keys[idx] != _EMPTY:
  *                 idx = (idx + 1) & new_mask
  *             m.keys[idx] = old_keys[i]             # <<<<<<<<<<<<<<
@@ -5187,7 +5399,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
       (__pyx_v_m->keys[__pyx_v_idx]) = (__pyx_v_old_keys[__pyx_v_i]);
 
-      /* "_sparse_dp_cython.pyx":109
+      /* "_sparse_dp_cython.pyx":121
  *                 idx = (idx + 1) & new_mask
  *             m.keys[idx] = old_keys[i]
  *             m.vals[idx] = old_vals[i]             # <<<<<<<<<<<<<<
@@ -5196,7 +5408,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
       (__pyx_v_m->vals[__pyx_v_idx]) = (__pyx_v_old_vals[__pyx_v_i]);
 
-      /* "_sparse_dp_cython.pyx":110
+      /* "_sparse_dp_cython.pyx":122
  *             m.keys[idx] = old_keys[i]
  *             m.vals[idx] = old_vals[i]
  *             m.size += 1             # <<<<<<<<<<<<<<
@@ -5205,7 +5417,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
       __pyx_v_m->size = (__pyx_v_m->size + 1);
 
-      /* "_sparse_dp_cython.pyx":104
+      /* "_sparse_dp_cython.pyx":116
  *     cdef Py_ssize_t i, idx
  *     for i in range(old_cap):
  *         if old_keys[i] != _EMPTY:             # <<<<<<<<<<<<<<
@@ -5215,7 +5427,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
     }
   }
 
-  /* "_sparse_dp_cython.pyx":111
+  /* "_sparse_dp_cython.pyx":123
  *             m.vals[idx] = old_vals[i]
  *             m.size += 1
  *     free(old_keys)             # <<<<<<<<<<<<<<
@@ -5224,7 +5436,7 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
 */
   free(__pyx_v_old_keys);
 
-  /* "_sparse_dp_cython.pyx":112
+  /* "_sparse_dp_cython.pyx":124
  *             m.size += 1
  *     free(old_keys)
  *     free(old_vals)             # <<<<<<<<<<<<<<
@@ -5236,15 +5448,25 @@ static void __pyx_f_17_sparse_dp_cython__smap_grow(struct __pyx_t_17_sparse_dp_c
   /* "_sparse_dp_cython.pyx":86
  * 
  * 
- * cdef void _smap_grow(CStateMap* m) noexcept:             # <<<<<<<<<<<<<<
- *     """Double capacity and rehash."""
+ * cdef void _smap_grow(CStateMap* m) except *:             # <<<<<<<<<<<<<<
+ *     """Double capacity and rehash.  Raises MemoryError on allocation failure."""
  *     cdef Py_ssize_t old_cap = m.capacity
 */
 
   /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_6);
+  __Pyx_XDECREF(__pyx_t_7);
+  __Pyx_XDECREF(__pyx_t_8);
+  __Pyx_XDECREF(__pyx_t_9);
+  __Pyx_XDECREF(__pyx_t_11);
+  __Pyx_AddTraceback("_sparse_dp_cython._smap_grow", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_L0:;
+  __Pyx_RefNannyFinishContext();
 }
 
-/* "_sparse_dp_cython.pyx":115
+/* "_sparse_dp_cython.pyx":127
  * 
  * 
  * cdef inline Py_ssize_t smap_lookup(CStateMap* m, long long key) noexcept nogil:             # <<<<<<<<<<<<<<
@@ -5257,7 +5479,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
   Py_ssize_t __pyx_r;
   int __pyx_t_1;
 
-  /* "_sparse_dp_cython.pyx":117
+  /* "_sparse_dp_cython.pyx":129
  * cdef inline Py_ssize_t smap_lookup(CStateMap* m, long long key) noexcept nogil:
  *     """Return slot index or 1 if not found."""
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)             # <<<<<<<<<<<<<<
@@ -5266,7 +5488,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
 */
   __pyx_v_idx = __pyx_f_17_sparse_dp_cython__hash64(__pyx_v_key, __pyx_v_m->mask);
 
-  /* "_sparse_dp_cython.pyx":118
+  /* "_sparse_dp_cython.pyx":130
  *     """Return slot index or 1 if not found."""
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:             # <<<<<<<<<<<<<<
@@ -5275,7 +5497,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
 */
   while (1) {
 
-    /* "_sparse_dp_cython.pyx":119
+    /* "_sparse_dp_cython.pyx":131
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
  *         if m.keys[idx] == key:             # <<<<<<<<<<<<<<
@@ -5285,7 +5507,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
     __pyx_t_1 = ((__pyx_v_m->keys[__pyx_v_idx]) == __pyx_v_key);
     if (__pyx_t_1) {
 
-      /* "_sparse_dp_cython.pyx":120
+      /* "_sparse_dp_cython.pyx":132
  *     while True:
  *         if m.keys[idx] == key:
  *             return idx             # <<<<<<<<<<<<<<
@@ -5295,7 +5517,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
       __pyx_r = __pyx_v_idx;
       goto __pyx_L0;
 
-      /* "_sparse_dp_cython.pyx":119
+      /* "_sparse_dp_cython.pyx":131
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
  *         if m.keys[idx] == key:             # <<<<<<<<<<<<<<
@@ -5304,7 +5526,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
 */
     }
 
-    /* "_sparse_dp_cython.pyx":121
+    /* "_sparse_dp_cython.pyx":133
  *         if m.keys[idx] == key:
  *             return idx
  *         if m.keys[idx] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -5314,7 +5536,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
     __pyx_t_1 = ((__pyx_v_m->keys[__pyx_v_idx]) == __pyx_v_17_sparse_dp_cython__EMPTY);
     if (__pyx_t_1) {
 
-      /* "_sparse_dp_cython.pyx":122
+      /* "_sparse_dp_cython.pyx":134
  *             return idx
  *         if m.keys[idx] == _EMPTY:
  *             return -1             # <<<<<<<<<<<<<<
@@ -5324,7 +5546,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
       __pyx_r = -1L;
       goto __pyx_L0;
 
-      /* "_sparse_dp_cython.pyx":121
+      /* "_sparse_dp_cython.pyx":133
  *         if m.keys[idx] == key:
  *             return idx
  *         if m.keys[idx] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -5333,7 +5555,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
 */
     }
 
-    /* "_sparse_dp_cython.pyx":123
+    /* "_sparse_dp_cython.pyx":135
  *         if m.keys[idx] == _EMPTY:
  *             return -1
  *         idx = (idx + 1) & m.mask             # <<<<<<<<<<<<<<
@@ -5343,7 +5565,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
     __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_m->mask);
   }
 
-  /* "_sparse_dp_cython.pyx":115
+  /* "_sparse_dp_cython.pyx":127
  * 
  * 
  * cdef inline Py_ssize_t smap_lookup(CStateMap* m, long long key) noexcept nogil:             # <<<<<<<<<<<<<<
@@ -5357,10 +5579,10 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_lookup(struct _
   return __pyx_r;
 }
 
-/* "_sparse_dp_cython.pyx":126
+/* "_sparse_dp_cython.pyx":138
  * 
  * 
- * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) noexcept:             # <<<<<<<<<<<<<<
+ * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) except -2:             # <<<<<<<<<<<<<<
  *     """Insert new key with value.  Grows if needed.  Returns slot."""
  *     if m.size * 10 > m.capacity * 7:   # load > 70%
 */
@@ -5369,46 +5591,49 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
   Py_ssize_t __pyx_v_idx;
   Py_ssize_t __pyx_r;
   int __pyx_t_1;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
 
-  /* "_sparse_dp_cython.pyx":128
- * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) noexcept:
+  /* "_sparse_dp_cython.pyx":140
+ * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) except -2:
  *     """Insert new key with value.  Grows if needed.  Returns slot."""
  *     if m.size * 10 > m.capacity * 7:   # load > 70%             # <<<<<<<<<<<<<<
- *         _smap_grow(m)
+ *         _smap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
 */
   __pyx_t_1 = ((__pyx_v_m->size * 10) > (__pyx_v_m->capacity * 7));
   if (__pyx_t_1) {
 
-    /* "_sparse_dp_cython.pyx":129
+    /* "_sparse_dp_cython.pyx":141
  *     """Insert new key with value.  Grows if needed.  Returns slot."""
  *     if m.size * 10 > m.capacity * 7:   # load > 70%
- *         _smap_grow(m)             # <<<<<<<<<<<<<<
+ *         _smap_grow(m)  # may raise MemoryError             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
 */
-    __pyx_f_17_sparse_dp_cython__smap_grow(__pyx_v_m);
+    __pyx_f_17_sparse_dp_cython__smap_grow(__pyx_v_m); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 141, __pyx_L1_error)
 
-    /* "_sparse_dp_cython.pyx":128
- * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) noexcept:
+    /* "_sparse_dp_cython.pyx":140
+ * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) except -2:
  *     """Insert new key with value.  Grows if needed.  Returns slot."""
  *     if m.size * 10 > m.capacity * 7:   # load > 70%             # <<<<<<<<<<<<<<
- *         _smap_grow(m)
+ *         _smap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
 */
   }
 
-  /* "_sparse_dp_cython.pyx":130
+  /* "_sparse_dp_cython.pyx":142
  *     if m.size * 10 > m.capacity * 7:   # load > 70%
- *         _smap_grow(m)
+ *         _smap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)             # <<<<<<<<<<<<<<
  *     while True:
  *         if m.keys[idx] == _EMPTY:
 */
   __pyx_v_idx = __pyx_f_17_sparse_dp_cython__hash64(__pyx_v_key, __pyx_v_m->mask);
 
-  /* "_sparse_dp_cython.pyx":131
- *         _smap_grow(m)
+  /* "_sparse_dp_cython.pyx":143
+ *         _smap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:             # <<<<<<<<<<<<<<
  *         if m.keys[idx] == _EMPTY:
@@ -5416,7 +5641,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
 */
   while (1) {
 
-    /* "_sparse_dp_cython.pyx":132
+    /* "_sparse_dp_cython.pyx":144
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
  *         if m.keys[idx] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -5426,7 +5651,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
     __pyx_t_1 = ((__pyx_v_m->keys[__pyx_v_idx]) == __pyx_v_17_sparse_dp_cython__EMPTY);
     if (__pyx_t_1) {
 
-      /* "_sparse_dp_cython.pyx":133
+      /* "_sparse_dp_cython.pyx":145
  *     while True:
  *         if m.keys[idx] == _EMPTY:
  *             m.keys[idx] = key             # <<<<<<<<<<<<<<
@@ -5435,7 +5660,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
 */
       (__pyx_v_m->keys[__pyx_v_idx]) = __pyx_v_key;
 
-      /* "_sparse_dp_cython.pyx":134
+      /* "_sparse_dp_cython.pyx":146
  *         if m.keys[idx] == _EMPTY:
  *             m.keys[idx] = key
  *             m.vals[idx] = val             # <<<<<<<<<<<<<<
@@ -5444,7 +5669,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
 */
       (__pyx_v_m->vals[__pyx_v_idx]) = __pyx_v_val;
 
-      /* "_sparse_dp_cython.pyx":135
+      /* "_sparse_dp_cython.pyx":147
  *             m.keys[idx] = key
  *             m.vals[idx] = val
  *             m.size += 1             # <<<<<<<<<<<<<<
@@ -5453,7 +5678,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
 */
       __pyx_v_m->size = (__pyx_v_m->size + 1);
 
-      /* "_sparse_dp_cython.pyx":136
+      /* "_sparse_dp_cython.pyx":148
  *             m.vals[idx] = val
  *             m.size += 1
  *             return idx             # <<<<<<<<<<<<<<
@@ -5463,7 +5688,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
       __pyx_r = __pyx_v_idx;
       goto __pyx_L0;
 
-      /* "_sparse_dp_cython.pyx":132
+      /* "_sparse_dp_cython.pyx":144
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
  *         if m.keys[idx] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -5472,7 +5697,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
 */
     }
 
-    /* "_sparse_dp_cython.pyx":137
+    /* "_sparse_dp_cython.pyx":149
  *             m.size += 1
  *             return idx
  *         if m.keys[idx] == key:             # <<<<<<<<<<<<<<
@@ -5482,7 +5707,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
     __pyx_t_1 = ((__pyx_v_m->keys[__pyx_v_idx]) == __pyx_v_key);
     if (__pyx_t_1) {
 
-      /* "_sparse_dp_cython.pyx":138
+      /* "_sparse_dp_cython.pyx":150
  *             return idx
  *         if m.keys[idx] == key:
  *             return idx        # already exists  caller decides             # <<<<<<<<<<<<<<
@@ -5492,7 +5717,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
       __pyx_r = __pyx_v_idx;
       goto __pyx_L0;
 
-      /* "_sparse_dp_cython.pyx":137
+      /* "_sparse_dp_cython.pyx":149
  *             m.size += 1
  *             return idx
  *         if m.keys[idx] == key:             # <<<<<<<<<<<<<<
@@ -5501,7 +5726,7 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
 */
     }
 
-    /* "_sparse_dp_cython.pyx":139
+    /* "_sparse_dp_cython.pyx":151
  *         if m.keys[idx] == key:
  *             return idx        # already exists  caller decides
  *         idx = (idx + 1) & m.mask             # <<<<<<<<<<<<<<
@@ -5511,21 +5736,25 @@ static CYTHON_INLINE Py_ssize_t __pyx_f_17_sparse_dp_cython_smap_put(struct __py
     __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_m->mask);
   }
 
-  /* "_sparse_dp_cython.pyx":126
+  /* "_sparse_dp_cython.pyx":138
  * 
  * 
- * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) noexcept:             # <<<<<<<<<<<<<<
+ * cdef inline Py_ssize_t smap_put(CStateMap* m, long long key, StateVal val) except -2:             # <<<<<<<<<<<<<<
  *     """Insert new key with value.  Grows if needed.  Returns slot."""
  *     if m.size * 10 > m.capacity * 7:   # load > 70%
 */
 
   /* function exit code */
   __pyx_r = 0;
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __Pyx_AddTraceback("_sparse_dp_cython.smap_put", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_r = -2L;
   __pyx_L0:;
   return __pyx_r;
 }
 
-/* "_sparse_dp_cython.pyx":153
+/* "_sparse_dp_cython.pyx":165
  * 
  * 
  * cdef CParentMap* pmap_create(Py_ssize_t initial_cap) noexcept:             # <<<<<<<<<<<<<<
@@ -5540,7 +5769,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
   int __pyx_t_1;
   int __pyx_t_2;
 
-  /* "_sparse_dp_cython.pyx":154
+  /* "_sparse_dp_cython.pyx":166
  * 
  * cdef CParentMap* pmap_create(Py_ssize_t initial_cap) noexcept:
  *     cdef Py_ssize_t cap = 16             # <<<<<<<<<<<<<<
@@ -5549,7 +5778,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_cap = 16;
 
-  /* "_sparse_dp_cython.pyx":155
+  /* "_sparse_dp_cython.pyx":167
  * cdef CParentMap* pmap_create(Py_ssize_t initial_cap) noexcept:
  *     cdef Py_ssize_t cap = 16
  *     while cap < initial_cap:             # <<<<<<<<<<<<<<
@@ -5560,7 +5789,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
     __pyx_t_1 = (__pyx_v_cap < __pyx_v_initial_cap);
     if (!__pyx_t_1) break;
 
-    /* "_sparse_dp_cython.pyx":156
+    /* "_sparse_dp_cython.pyx":168
  *     cdef Py_ssize_t cap = 16
  *     while cap < initial_cap:
  *         cap <<= 1             # <<<<<<<<<<<<<<
@@ -5570,7 +5799,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
     __pyx_v_cap = (__pyx_v_cap << 1);
   }
 
-  /* "_sparse_dp_cython.pyx":157
+  /* "_sparse_dp_cython.pyx":169
  *     while cap < initial_cap:
  *         cap <<= 1
  *     cdef CParentMap* m = <CParentMap*>malloc(sizeof(CParentMap))             # <<<<<<<<<<<<<<
@@ -5579,7 +5808,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_m = ((struct __pyx_t_17_sparse_dp_cython_CParentMap *)malloc((sizeof(struct __pyx_t_17_sparse_dp_cython_CParentMap))));
 
-  /* "_sparse_dp_cython.pyx":158
+  /* "_sparse_dp_cython.pyx":170
  *         cap <<= 1
  *     cdef CParentMap* m = <CParentMap*>malloc(sizeof(CParentMap))
  *     if m == NULL:             # <<<<<<<<<<<<<<
@@ -5589,7 +5818,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
   __pyx_t_1 = (__pyx_v_m == NULL);
   if (__pyx_t_1) {
 
-    /* "_sparse_dp_cython.pyx":159
+    /* "_sparse_dp_cython.pyx":171
  *     cdef CParentMap* m = <CParentMap*>malloc(sizeof(CParentMap))
  *     if m == NULL:
  *         return NULL             # <<<<<<<<<<<<<<
@@ -5599,7 +5828,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
     __pyx_r = NULL;
     goto __pyx_L0;
 
-    /* "_sparse_dp_cython.pyx":158
+    /* "_sparse_dp_cython.pyx":170
  *         cap <<= 1
  *     cdef CParentMap* m = <CParentMap*>malloc(sizeof(CParentMap))
  *     if m == NULL:             # <<<<<<<<<<<<<<
@@ -5608,7 +5837,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   }
 
-  /* "_sparse_dp_cython.pyx":160
+  /* "_sparse_dp_cython.pyx":172
  *     if m == NULL:
  *         return NULL
  *     m.keys = <long long*>malloc(cap * sizeof(long long))             # <<<<<<<<<<<<<<
@@ -5617,7 +5846,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_m->keys = ((PY_LONG_LONG *)malloc((__pyx_v_cap * (sizeof(PY_LONG_LONG)))));
 
-  /* "_sparse_dp_cython.pyx":161
+  /* "_sparse_dp_cython.pyx":173
  *         return NULL
  *     m.keys = <long long*>malloc(cap * sizeof(long long))
  *     m.vals = <int*>malloc(cap * sizeof(int))             # <<<<<<<<<<<<<<
@@ -5626,7 +5855,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_m->vals = ((int *)malloc((__pyx_v_cap * (sizeof(int)))));
 
-  /* "_sparse_dp_cython.pyx":162
+  /* "_sparse_dp_cython.pyx":174
  *     m.keys = <long long*>malloc(cap * sizeof(long long))
  *     m.vals = <int*>malloc(cap * sizeof(int))
  *     if m.keys == NULL or m.vals == NULL:             # <<<<<<<<<<<<<<
@@ -5644,7 +5873,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
   __pyx_L7_bool_binop_done:;
   if (__pyx_t_1) {
 
-    /* "_sparse_dp_cython.pyx":163
+    /* "_sparse_dp_cython.pyx":175
  *     m.vals = <int*>malloc(cap * sizeof(int))
  *     if m.keys == NULL or m.vals == NULL:
  *         free(m.keys); free(m.vals); free(m)             # <<<<<<<<<<<<<<
@@ -5655,7 +5884,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
     free(__pyx_v_m->vals);
     free(__pyx_v_m);
 
-    /* "_sparse_dp_cython.pyx":164
+    /* "_sparse_dp_cython.pyx":176
  *     if m.keys == NULL or m.vals == NULL:
  *         free(m.keys); free(m.vals); free(m)
  *         return NULL             # <<<<<<<<<<<<<<
@@ -5665,7 +5894,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
     __pyx_r = NULL;
     goto __pyx_L0;
 
-    /* "_sparse_dp_cython.pyx":162
+    /* "_sparse_dp_cython.pyx":174
  *     m.keys = <long long*>malloc(cap * sizeof(long long))
  *     m.vals = <int*>malloc(cap * sizeof(int))
  *     if m.keys == NULL or m.vals == NULL:             # <<<<<<<<<<<<<<
@@ -5674,7 +5903,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   }
 
-  /* "_sparse_dp_cython.pyx":165
+  /* "_sparse_dp_cython.pyx":177
  *         free(m.keys); free(m.vals); free(m)
  *         return NULL
  *     memset(m.keys, 0xFF, cap * sizeof(long long))             # <<<<<<<<<<<<<<
@@ -5683,7 +5912,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   (void)(memset(__pyx_v_m->keys, 0xFF, (__pyx_v_cap * (sizeof(PY_LONG_LONG)))));
 
-  /* "_sparse_dp_cython.pyx":166
+  /* "_sparse_dp_cython.pyx":178
  *         return NULL
  *     memset(m.keys, 0xFF, cap * sizeof(long long))
  *     m.capacity = cap             # <<<<<<<<<<<<<<
@@ -5692,7 +5921,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_m->capacity = __pyx_v_cap;
 
-  /* "_sparse_dp_cython.pyx":167
+  /* "_sparse_dp_cython.pyx":179
  *     memset(m.keys, 0xFF, cap * sizeof(long long))
  *     m.capacity = cap
  *     m.mask = cap - 1             # <<<<<<<<<<<<<<
@@ -5701,7 +5930,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_m->mask = (__pyx_v_cap - 1);
 
-  /* "_sparse_dp_cython.pyx":168
+  /* "_sparse_dp_cython.pyx":180
  *     m.capacity = cap
  *     m.mask = cap - 1
  *     m.size = 0             # <<<<<<<<<<<<<<
@@ -5710,7 +5939,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 */
   __pyx_v_m->size = 0;
 
-  /* "_sparse_dp_cython.pyx":169
+  /* "_sparse_dp_cython.pyx":181
  *     m.mask = cap - 1
  *     m.size = 0
  *     return m             # <<<<<<<<<<<<<<
@@ -5720,7 +5949,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
   __pyx_r = __pyx_v_m;
   goto __pyx_L0;
 
-  /* "_sparse_dp_cython.pyx":153
+  /* "_sparse_dp_cython.pyx":165
  * 
  * 
  * cdef CParentMap* pmap_create(Py_ssize_t initial_cap) noexcept:             # <<<<<<<<<<<<<<
@@ -5733,7 +5962,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
   return __pyx_r;
 }
 
-/* "_sparse_dp_cython.pyx":172
+/* "_sparse_dp_cython.pyx":184
  * 
  * 
  * cdef void pmap_destroy(CParentMap* m) noexcept nogil:             # <<<<<<<<<<<<<<
@@ -5744,7 +5973,7 @@ static struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_f_17_sparse_dp_cytho
 static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_v_m) {
   int __pyx_t_1;
 
-  /* "_sparse_dp_cython.pyx":173
+  /* "_sparse_dp_cython.pyx":185
  * 
  * cdef void pmap_destroy(CParentMap* m) noexcept nogil:
  *     if m != NULL:             # <<<<<<<<<<<<<<
@@ -5754,7 +5983,7 @@ static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp
   __pyx_t_1 = (__pyx_v_m != NULL);
   if (__pyx_t_1) {
 
-    /* "_sparse_dp_cython.pyx":174
+    /* "_sparse_dp_cython.pyx":186
  * cdef void pmap_destroy(CParentMap* m) noexcept nogil:
  *     if m != NULL:
  *         free(m.keys)             # <<<<<<<<<<<<<<
@@ -5763,7 +5992,7 @@ static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp
 */
     free(__pyx_v_m->keys);
 
-    /* "_sparse_dp_cython.pyx":175
+    /* "_sparse_dp_cython.pyx":187
  *     if m != NULL:
  *         free(m.keys)
  *         free(m.vals)             # <<<<<<<<<<<<<<
@@ -5772,7 +6001,7 @@ static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp
 */
     free(__pyx_v_m->vals);
 
-    /* "_sparse_dp_cython.pyx":176
+    /* "_sparse_dp_cython.pyx":188
  *         free(m.keys)
  *         free(m.vals)
  *         free(m)             # <<<<<<<<<<<<<<
@@ -5781,7 +6010,7 @@ static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp
 */
     free(__pyx_v_m);
 
-    /* "_sparse_dp_cython.pyx":173
+    /* "_sparse_dp_cython.pyx":185
  * 
  * cdef void pmap_destroy(CParentMap* m) noexcept nogil:
  *     if m != NULL:             # <<<<<<<<<<<<<<
@@ -5790,7 +6019,7 @@ static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp
 */
   }
 
-  /* "_sparse_dp_cython.pyx":172
+  /* "_sparse_dp_cython.pyx":184
  * 
  * 
  * cdef void pmap_destroy(CParentMap* m) noexcept nogil:             # <<<<<<<<<<<<<<
@@ -5801,10 +6030,10 @@ static void __pyx_f_17_sparse_dp_cython_pmap_destroy(struct __pyx_t_17_sparse_dp
   /* function exit code */
 }
 
-/* "_sparse_dp_cython.pyx":179
+/* "_sparse_dp_cython.pyx":191
  * 
  * 
- * cdef void _pmap_grow(CParentMap* m) noexcept:             # <<<<<<<<<<<<<<
+ * cdef void _pmap_grow(CParentMap* m) except *:             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t old_cap = m.capacity
  *     cdef long long* old_keys = m.keys
 */
@@ -5815,18 +6044,33 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
   int *__pyx_v_old_vals;
   Py_ssize_t __pyx_v_new_cap;
   Py_ssize_t __pyx_v_new_mask;
+  PY_LONG_LONG *__pyx_v_new_keys;
+  int *__pyx_v_new_vals;
   Py_ssize_t __pyx_v_i;
   Py_ssize_t __pyx_v_idx;
+  __Pyx_RefNannyDeclarations
   Py_ssize_t __pyx_t_1;
   PY_LONG_LONG *__pyx_t_2;
   int *__pyx_t_3;
-  Py_ssize_t __pyx_t_4;
-  Py_ssize_t __pyx_t_5;
-  int __pyx_t_6;
+  int __pyx_t_4;
+  int __pyx_t_5;
+  PyObject *__pyx_t_6 = NULL;
+  PyObject *__pyx_t_7 = NULL;
+  PyObject *__pyx_t_8 = NULL;
+  PyObject *__pyx_t_9 = NULL;
+  PyObject *__pyx_t_10[5];
+  PyObject *__pyx_t_11 = NULL;
+  size_t __pyx_t_12;
+  Py_ssize_t __pyx_t_13;
+  Py_ssize_t __pyx_t_14;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
+  __Pyx_RefNannySetupContext("_pmap_grow", 0);
 
-  /* "_sparse_dp_cython.pyx":180
+  /* "_sparse_dp_cython.pyx":192
  * 
- * cdef void _pmap_grow(CParentMap* m) noexcept:
+ * cdef void _pmap_grow(CParentMap* m) except *:
  *     cdef Py_ssize_t old_cap = m.capacity             # <<<<<<<<<<<<<<
  *     cdef long long* old_keys = m.keys
  *     cdef int*       old_vals = m.vals
@@ -5834,8 +6078,8 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
   __pyx_t_1 = __pyx_v_m->capacity;
   __pyx_v_old_cap = __pyx_t_1;
 
-  /* "_sparse_dp_cython.pyx":181
- * cdef void _pmap_grow(CParentMap* m) noexcept:
+  /* "_sparse_dp_cython.pyx":193
+ * cdef void _pmap_grow(CParentMap* m) except *:
  *     cdef Py_ssize_t old_cap = m.capacity
  *     cdef long long* old_keys = m.keys             # <<<<<<<<<<<<<<
  *     cdef int*       old_vals = m.vals
@@ -5844,7 +6088,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
   __pyx_t_2 = __pyx_v_m->keys;
   __pyx_v_old_keys = __pyx_t_2;
 
-  /* "_sparse_dp_cython.pyx":182
+  /* "_sparse_dp_cython.pyx":194
  *     cdef Py_ssize_t old_cap = m.capacity
  *     cdef long long* old_keys = m.keys
  *     cdef int*       old_vals = m.vals             # <<<<<<<<<<<<<<
@@ -5854,7 +6098,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
   __pyx_t_3 = __pyx_v_m->vals;
   __pyx_v_old_vals = __pyx_t_3;
 
-  /* "_sparse_dp_cython.pyx":183
+  /* "_sparse_dp_cython.pyx":195
  *     cdef long long* old_keys = m.keys
  *     cdef int*       old_vals = m.vals
  *     cdef Py_ssize_t new_cap = old_cap << 1             # <<<<<<<<<<<<<<
@@ -5863,44 +6107,204 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_new_cap = (__pyx_v_old_cap << 1);
 
-  /* "_sparse_dp_cython.pyx":184
+  /* "_sparse_dp_cython.pyx":196
  *     cdef int*       old_vals = m.vals
  *     cdef Py_ssize_t new_cap = old_cap << 1
  *     cdef Py_ssize_t new_mask = new_cap - 1             # <<<<<<<<<<<<<<
  * 
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
 */
   __pyx_v_new_mask = (__pyx_v_new_cap - 1);
 
-  /* "_sparse_dp_cython.pyx":186
+  /* "_sparse_dp_cython.pyx":198
  *     cdef Py_ssize_t new_mask = new_cap - 1
  * 
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))             # <<<<<<<<<<<<<<
- *     m.vals = <int*>malloc(new_cap * sizeof(int))
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))             # <<<<<<<<<<<<<<
+ *     cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))
+ *     if new_keys == NULL or new_vals == NULL:
+*/
+  __pyx_v_new_keys = ((PY_LONG_LONG *)malloc((__pyx_v_new_cap * (sizeof(PY_LONG_LONG)))));
+
+  /* "_sparse_dp_cython.pyx":199
+ * 
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))             # <<<<<<<<<<<<<<
+ *     if new_keys == NULL or new_vals == NULL:
+ *         if new_keys != NULL:
+*/
+  __pyx_v_new_vals = ((int *)malloc((__pyx_v_new_cap * (sizeof(int)))));
+
+  /* "_sparse_dp_cython.pyx":200
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))
+ *     if new_keys == NULL or new_vals == NULL:             # <<<<<<<<<<<<<<
+ *         if new_keys != NULL:
+ *             free(new_keys)
+*/
+  __pyx_t_5 = (__pyx_v_new_keys == NULL);
+  if (!__pyx_t_5) {
+  } else {
+    __pyx_t_4 = __pyx_t_5;
+    goto __pyx_L4_bool_binop_done;
+  }
+  __pyx_t_5 = (__pyx_v_new_vals == NULL);
+  __pyx_t_4 = __pyx_t_5;
+  __pyx_L4_bool_binop_done:;
+  if (__pyx_t_4) {
+
+    /* "_sparse_dp_cython.pyx":201
+ *     cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))
+ *     if new_keys == NULL or new_vals == NULL:
+ *         if new_keys != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_keys)
+ *         if new_vals != NULL:
+*/
+    __pyx_t_4 = (__pyx_v_new_keys != NULL);
+    if (__pyx_t_4) {
+
+      /* "_sparse_dp_cython.pyx":202
+ *     if new_keys == NULL or new_vals == NULL:
+ *         if new_keys != NULL:
+ *             free(new_keys)             # <<<<<<<<<<<<<<
+ *         if new_vals != NULL:
+ *             free(new_vals)
+*/
+      free(__pyx_v_new_keys);
+
+      /* "_sparse_dp_cython.pyx":201
+ *     cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))
+ *     if new_keys == NULL or new_vals == NULL:
+ *         if new_keys != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_keys)
+ *         if new_vals != NULL:
+*/
+    }
+
+    /* "_sparse_dp_cython.pyx":203
+ *         if new_keys != NULL:
+ *             free(new_keys)
+ *         if new_vals != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_vals)
+ *         raise MemoryError(
+*/
+    __pyx_t_4 = (__pyx_v_new_vals != NULL);
+    if (__pyx_t_4) {
+
+      /* "_sparse_dp_cython.pyx":204
+ *             free(new_keys)
+ *         if new_vals != NULL:
+ *             free(new_vals)             # <<<<<<<<<<<<<<
+ *         raise MemoryError(
+ *             f"CParentMap: cannot grow to capacity {new_cap} "
+*/
+      free(__pyx_v_new_vals);
+
+      /* "_sparse_dp_cython.pyx":203
+ *         if new_keys != NULL:
+ *             free(new_keys)
+ *         if new_vals != NULL:             # <<<<<<<<<<<<<<
+ *             free(new_vals)
+ *         raise MemoryError(
+*/
+    }
+
+    /* "_sparse_dp_cython.pyx":205
+ *         if new_vals != NULL:
+ *             free(new_vals)
+ *         raise MemoryError(             # <<<<<<<<<<<<<<
+ *             f"CParentMap: cannot grow to capacity {new_cap} "
+ *             f"({new_cap * (sizeof(long long) + sizeof(int)) // 1048576} MB)"
+*/
+    __pyx_t_7 = NULL;
+
+    /* "_sparse_dp_cython.pyx":206
+ *             free(new_vals)
+ *         raise MemoryError(
+ *             f"CParentMap: cannot grow to capacity {new_cap} "             # <<<<<<<<<<<<<<
+ *             f"({new_cap * (sizeof(long long) + sizeof(int)) // 1048576} MB)"
+ *         )
+*/
+    __pyx_t_8 = __Pyx_PyUnicode_From_Py_ssize_t(__pyx_v_new_cap, 0, ' ', 'd'); if (unlikely(!__pyx_t_8)) __PYX_ERR(0, 206, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_8);
+
+    /* "_sparse_dp_cython.pyx":207
+ *         raise MemoryError(
+ *             f"CParentMap: cannot grow to capacity {new_cap} "
+ *             f"({new_cap * (sizeof(long long) + sizeof(int)) // 1048576} MB)"             # <<<<<<<<<<<<<<
+ *         )
+ *     m.keys = new_keys
+*/
+    __pyx_t_9 = __Pyx_PyUnicode_From_size_t(((__pyx_v_new_cap * ((sizeof(PY_LONG_LONG)) + (sizeof(int)))) / 0x100000), 0, ' ', 'd'); if (unlikely(!__pyx_t_9)) __PYX_ERR(0, 207, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_9);
+    __pyx_t_10[0] = __pyx_mstate_global->__pyx_kp_u_CParentMap_cannot_grow_to_capaci;
+    __pyx_t_10[1] = __pyx_t_8;
+    __pyx_t_10[2] = __pyx_mstate_global->__pyx_kp_u_;
+    __pyx_t_10[3] = __pyx_t_9;
+    __pyx_t_10[4] = __pyx_mstate_global->__pyx_kp_u_MB;
+
+    /* "_sparse_dp_cython.pyx":206
+ *             free(new_vals)
+ *         raise MemoryError(
+ *             f"CParentMap: cannot grow to capacity {new_cap} "             # <<<<<<<<<<<<<<
+ *             f"({new_cap * (sizeof(long long) + sizeof(int)) // 1048576} MB)"
+ *         )
+*/
+    __pyx_t_11 = __Pyx_PyUnicode_Join(__pyx_t_10, 5, 36 + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_8) + 2 + __Pyx_PyUnicode_GET_LENGTH(__pyx_t_9) + 4, 127);
+    if (unlikely(!__pyx_t_11)) __PYX_ERR(0, 206, __pyx_L1_error)
+    __Pyx_GOTREF(__pyx_t_11);
+    __Pyx_DECREF(__pyx_t_8); __pyx_t_8 = 0;
+    __Pyx_DECREF(__pyx_t_9); __pyx_t_9 = 0;
+    __pyx_t_12 = 1;
+    {
+      PyObject *__pyx_callargs[2] = {__pyx_t_7, __pyx_t_11};
+      __pyx_t_6 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_MemoryError)), __pyx_callargs+__pyx_t_12, (2-__pyx_t_12) | (__pyx_t_12*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
+      __Pyx_XDECREF(__pyx_t_7); __pyx_t_7 = 0;
+      __Pyx_DECREF(__pyx_t_11); __pyx_t_11 = 0;
+      if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 205, __pyx_L1_error)
+      __Pyx_GOTREF(__pyx_t_6);
+    }
+    __Pyx_Raise(__pyx_t_6, 0, 0, 0);
+    __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
+    __PYX_ERR(0, 205, __pyx_L1_error)
+
+    /* "_sparse_dp_cython.pyx":200
+ *     cdef long long* new_keys = <long long*>malloc(new_cap * sizeof(long long))
+ *     cdef int*       new_vals = <int*>malloc(new_cap * sizeof(int))
+ *     if new_keys == NULL or new_vals == NULL:             # <<<<<<<<<<<<<<
+ *         if new_keys != NULL:
+ *             free(new_keys)
+*/
+  }
+
+  /* "_sparse_dp_cython.pyx":209
+ *             f"({new_cap * (sizeof(long long) + sizeof(int)) // 1048576} MB)"
+ *         )
+ *     m.keys = new_keys             # <<<<<<<<<<<<<<
+ *     m.vals = new_vals
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
 */
-  __pyx_v_m->keys = ((PY_LONG_LONG *)malloc((__pyx_v_new_cap * (sizeof(PY_LONG_LONG)))));
+  __pyx_v_m->keys = __pyx_v_new_keys;
 
-  /* "_sparse_dp_cython.pyx":187
- * 
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))
- *     m.vals = <int*>malloc(new_cap * sizeof(int))             # <<<<<<<<<<<<<<
+  /* "_sparse_dp_cython.pyx":210
+ *         )
+ *     m.keys = new_keys
+ *     m.vals = new_vals             # <<<<<<<<<<<<<<
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
  *     m.capacity = new_cap
 */
-  __pyx_v_m->vals = ((int *)malloc((__pyx_v_new_cap * (sizeof(int)))));
+  __pyx_v_m->vals = __pyx_v_new_vals;
 
-  /* "_sparse_dp_cython.pyx":188
- *     m.keys = <long long*>malloc(new_cap * sizeof(long long))
- *     m.vals = <int*>malloc(new_cap * sizeof(int))
+  /* "_sparse_dp_cython.pyx":211
+ *     m.keys = new_keys
+ *     m.vals = new_vals
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))             # <<<<<<<<<<<<<<
  *     m.capacity = new_cap
  *     m.mask = new_mask
 */
   (void)(memset(__pyx_v_m->keys, 0xFF, (__pyx_v_new_cap * (sizeof(PY_LONG_LONG)))));
 
-  /* "_sparse_dp_cython.pyx":189
- *     m.vals = <int*>malloc(new_cap * sizeof(int))
+  /* "_sparse_dp_cython.pyx":212
+ *     m.vals = new_vals
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
  *     m.capacity = new_cap             # <<<<<<<<<<<<<<
  *     m.mask = new_mask
@@ -5908,7 +6312,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_m->capacity = __pyx_v_new_cap;
 
-  /* "_sparse_dp_cython.pyx":190
+  /* "_sparse_dp_cython.pyx":213
  *     memset(m.keys, 0xFF, new_cap * sizeof(long long))
  *     m.capacity = new_cap
  *     m.mask = new_mask             # <<<<<<<<<<<<<<
@@ -5917,7 +6321,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_m->mask = __pyx_v_new_mask;
 
-  /* "_sparse_dp_cython.pyx":191
+  /* "_sparse_dp_cython.pyx":214
  *     m.capacity = new_cap
  *     m.mask = new_mask
  *     m.size = 0             # <<<<<<<<<<<<<<
@@ -5926,7 +6330,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
   __pyx_v_m->size = 0;
 
-  /* "_sparse_dp_cython.pyx":194
+  /* "_sparse_dp_cython.pyx":217
  * 
  *     cdef Py_ssize_t i, idx
  *     for i in range(old_cap):             # <<<<<<<<<<<<<<
@@ -5934,21 +6338,21 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
  *             idx = _hash64(old_keys[i], new_mask)
 */
   __pyx_t_1 = __pyx_v_old_cap;
-  __pyx_t_4 = __pyx_t_1;
-  for (__pyx_t_5 = 0; __pyx_t_5 < __pyx_t_4; __pyx_t_5+=1) {
-    __pyx_v_i = __pyx_t_5;
+  __pyx_t_13 = __pyx_t_1;
+  for (__pyx_t_14 = 0; __pyx_t_14 < __pyx_t_13; __pyx_t_14+=1) {
+    __pyx_v_i = __pyx_t_14;
 
-    /* "_sparse_dp_cython.pyx":195
+    /* "_sparse_dp_cython.pyx":218
  *     cdef Py_ssize_t i, idx
  *     for i in range(old_cap):
  *         if old_keys[i] != _EMPTY:             # <<<<<<<<<<<<<<
  *             idx = _hash64(old_keys[i], new_mask)
  *             while m.keys[idx] != _EMPTY:
 */
-    __pyx_t_6 = ((__pyx_v_old_keys[__pyx_v_i]) != __pyx_v_17_sparse_dp_cython__EMPTY);
-    if (__pyx_t_6) {
+    __pyx_t_4 = ((__pyx_v_old_keys[__pyx_v_i]) != __pyx_v_17_sparse_dp_cython__EMPTY);
+    if (__pyx_t_4) {
 
-      /* "_sparse_dp_cython.pyx":196
+      /* "_sparse_dp_cython.pyx":219
  *     for i in range(old_cap):
  *         if old_keys[i] != _EMPTY:
  *             idx = _hash64(old_keys[i], new_mask)             # <<<<<<<<<<<<<<
@@ -5957,7 +6361,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
       __pyx_v_idx = __pyx_f_17_sparse_dp_cython__hash64((__pyx_v_old_keys[__pyx_v_i]), __pyx_v_new_mask);
 
-      /* "_sparse_dp_cython.pyx":197
+      /* "_sparse_dp_cython.pyx":220
  *         if old_keys[i] != _EMPTY:
  *             idx = _hash64(old_keys[i], new_mask)
  *             while m.keys[idx] != _EMPTY:             # <<<<<<<<<<<<<<
@@ -5965,10 +6369,10 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
  *             m.keys[idx] = old_keys[i]
 */
       while (1) {
-        __pyx_t_6 = ((__pyx_v_m->keys[__pyx_v_idx]) != __pyx_v_17_sparse_dp_cython__EMPTY);
-        if (!__pyx_t_6) break;
+        __pyx_t_4 = ((__pyx_v_m->keys[__pyx_v_idx]) != __pyx_v_17_sparse_dp_cython__EMPTY);
+        if (!__pyx_t_4) break;
 
-        /* "_sparse_dp_cython.pyx":198
+        /* "_sparse_dp_cython.pyx":221
  *             idx = _hash64(old_keys[i], new_mask)
  *             while m.keys[idx] != _EMPTY:
  *                 idx = (idx + 1) & new_mask             # <<<<<<<<<<<<<<
@@ -5978,7 +6382,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
         __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_new_mask);
       }
 
-      /* "_sparse_dp_cython.pyx":199
+      /* "_sparse_dp_cython.pyx":222
  *             while m.keys[idx] != _EMPTY:
  *                 idx = (idx + 1) & new_mask
  *             m.keys[idx] = old_keys[i]             # <<<<<<<<<<<<<<
@@ -5987,7 +6391,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
       (__pyx_v_m->keys[__pyx_v_idx]) = (__pyx_v_old_keys[__pyx_v_i]);
 
-      /* "_sparse_dp_cython.pyx":200
+      /* "_sparse_dp_cython.pyx":223
  *                 idx = (idx + 1) & new_mask
  *             m.keys[idx] = old_keys[i]
  *             m.vals[idx] = old_vals[i]             # <<<<<<<<<<<<<<
@@ -5996,7 +6400,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
       (__pyx_v_m->vals[__pyx_v_idx]) = (__pyx_v_old_vals[__pyx_v_i]);
 
-      /* "_sparse_dp_cython.pyx":201
+      /* "_sparse_dp_cython.pyx":224
  *             m.keys[idx] = old_keys[i]
  *             m.vals[idx] = old_vals[i]
  *             m.size += 1             # <<<<<<<<<<<<<<
@@ -6005,7 +6409,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
       __pyx_v_m->size = (__pyx_v_m->size + 1);
 
-      /* "_sparse_dp_cython.pyx":195
+      /* "_sparse_dp_cython.pyx":218
  *     cdef Py_ssize_t i, idx
  *     for i in range(old_cap):
  *         if old_keys[i] != _EMPTY:             # <<<<<<<<<<<<<<
@@ -6015,7 +6419,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
     }
   }
 
-  /* "_sparse_dp_cython.pyx":202
+  /* "_sparse_dp_cython.pyx":225
  *             m.vals[idx] = old_vals[i]
  *             m.size += 1
  *     free(old_keys)             # <<<<<<<<<<<<<<
@@ -6024,7 +6428,7 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
   free(__pyx_v_old_keys);
 
-  /* "_sparse_dp_cython.pyx":203
+  /* "_sparse_dp_cython.pyx":226
  *             m.size += 1
  *     free(old_keys)
  *     free(old_vals)             # <<<<<<<<<<<<<<
@@ -6033,21 +6437,31 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 */
   free(__pyx_v_old_vals);
 
-  /* "_sparse_dp_cython.pyx":179
+  /* "_sparse_dp_cython.pyx":191
  * 
  * 
- * cdef void _pmap_grow(CParentMap* m) noexcept:             # <<<<<<<<<<<<<<
+ * cdef void _pmap_grow(CParentMap* m) except *:             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t old_cap = m.capacity
  *     cdef long long* old_keys = m.keys
 */
 
   /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __Pyx_XDECREF(__pyx_t_6);
+  __Pyx_XDECREF(__pyx_t_7);
+  __Pyx_XDECREF(__pyx_t_8);
+  __Pyx_XDECREF(__pyx_t_9);
+  __Pyx_XDECREF(__pyx_t_11);
+  __Pyx_AddTraceback("_sparse_dp_cython._pmap_grow", __pyx_clineno, __pyx_lineno, __pyx_filename);
+  __pyx_L0:;
+  __Pyx_RefNannyFinishContext();
 }
 
-/* "_sparse_dp_cython.pyx":206
+/* "_sparse_dp_cython.pyx":229
  * 
  * 
- * cdef inline void pmap_set(CParentMap* m, long long key, int val) noexcept:             # <<<<<<<<<<<<<<
+ * cdef inline void pmap_set(CParentMap* m, long long key, int val) except *:             # <<<<<<<<<<<<<<
  *     """Insert or overwrite."""
  *     if m.size * 10 > m.capacity * 7:
 */
@@ -6055,46 +6469,49 @@ static void __pyx_f_17_sparse_dp_cython__pmap_grow(struct __pyx_t_17_sparse_dp_c
 static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17_sparse_dp_cython_CParentMap *__pyx_v_m, PY_LONG_LONG __pyx_v_key, int __pyx_v_val) {
   Py_ssize_t __pyx_v_idx;
   int __pyx_t_1;
+  int __pyx_lineno = 0;
+  const char *__pyx_filename = NULL;
+  int __pyx_clineno = 0;
 
-  /* "_sparse_dp_cython.pyx":208
- * cdef inline void pmap_set(CParentMap* m, long long key, int val) noexcept:
+  /* "_sparse_dp_cython.pyx":231
+ * cdef inline void pmap_set(CParentMap* m, long long key, int val) except *:
  *     """Insert or overwrite."""
  *     if m.size * 10 > m.capacity * 7:             # <<<<<<<<<<<<<<
- *         _pmap_grow(m)
+ *         _pmap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
 */
   __pyx_t_1 = ((__pyx_v_m->size * 10) > (__pyx_v_m->capacity * 7));
   if (__pyx_t_1) {
 
-    /* "_sparse_dp_cython.pyx":209
+    /* "_sparse_dp_cython.pyx":232
  *     """Insert or overwrite."""
  *     if m.size * 10 > m.capacity * 7:
- *         _pmap_grow(m)             # <<<<<<<<<<<<<<
+ *         _pmap_grow(m)  # may raise MemoryError             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
 */
-    __pyx_f_17_sparse_dp_cython__pmap_grow(__pyx_v_m);
+    __pyx_f_17_sparse_dp_cython__pmap_grow(__pyx_v_m); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 232, __pyx_L1_error)
 
-    /* "_sparse_dp_cython.pyx":208
- * cdef inline void pmap_set(CParentMap* m, long long key, int val) noexcept:
+    /* "_sparse_dp_cython.pyx":231
+ * cdef inline void pmap_set(CParentMap* m, long long key, int val) except *:
  *     """Insert or overwrite."""
  *     if m.size * 10 > m.capacity * 7:             # <<<<<<<<<<<<<<
- *         _pmap_grow(m)
+ *         _pmap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
 */
   }
 
-  /* "_sparse_dp_cython.pyx":210
+  /* "_sparse_dp_cython.pyx":233
  *     if m.size * 10 > m.capacity * 7:
- *         _pmap_grow(m)
+ *         _pmap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)             # <<<<<<<<<<<<<<
  *     while True:
  *         if m.keys[idx] == _EMPTY:
 */
   __pyx_v_idx = __pyx_f_17_sparse_dp_cython__hash64(__pyx_v_key, __pyx_v_m->mask);
 
-  /* "_sparse_dp_cython.pyx":211
- *         _pmap_grow(m)
+  /* "_sparse_dp_cython.pyx":234
+ *         _pmap_grow(m)  # may raise MemoryError
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:             # <<<<<<<<<<<<<<
  *         if m.keys[idx] == _EMPTY:
@@ -6102,7 +6519,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
   while (1) {
 
-    /* "_sparse_dp_cython.pyx":212
+    /* "_sparse_dp_cython.pyx":235
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
  *         if m.keys[idx] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -6112,7 +6529,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
     __pyx_t_1 = ((__pyx_v_m->keys[__pyx_v_idx]) == __pyx_v_17_sparse_dp_cython__EMPTY);
     if (__pyx_t_1) {
 
-      /* "_sparse_dp_cython.pyx":213
+      /* "_sparse_dp_cython.pyx":236
  *     while True:
  *         if m.keys[idx] == _EMPTY:
  *             m.keys[idx] = key             # <<<<<<<<<<<<<<
@@ -6121,7 +6538,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
       (__pyx_v_m->keys[__pyx_v_idx]) = __pyx_v_key;
 
-      /* "_sparse_dp_cython.pyx":214
+      /* "_sparse_dp_cython.pyx":237
  *         if m.keys[idx] == _EMPTY:
  *             m.keys[idx] = key
  *             m.vals[idx] = val             # <<<<<<<<<<<<<<
@@ -6130,7 +6547,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
       (__pyx_v_m->vals[__pyx_v_idx]) = __pyx_v_val;
 
-      /* "_sparse_dp_cython.pyx":215
+      /* "_sparse_dp_cython.pyx":238
  *             m.keys[idx] = key
  *             m.vals[idx] = val
  *             m.size += 1             # <<<<<<<<<<<<<<
@@ -6139,7 +6556,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
       __pyx_v_m->size = (__pyx_v_m->size + 1);
 
-      /* "_sparse_dp_cython.pyx":216
+      /* "_sparse_dp_cython.pyx":239
  *             m.vals[idx] = val
  *             m.size += 1
  *             return             # <<<<<<<<<<<<<<
@@ -6148,7 +6565,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
       goto __pyx_L0;
 
-      /* "_sparse_dp_cython.pyx":212
+      /* "_sparse_dp_cython.pyx":235
  *     cdef Py_ssize_t idx = _hash64(key, m.mask)
  *     while True:
  *         if m.keys[idx] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -6157,7 +6574,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
     }
 
-    /* "_sparse_dp_cython.pyx":217
+    /* "_sparse_dp_cython.pyx":240
  *             m.size += 1
  *             return
  *         if m.keys[idx] == key:             # <<<<<<<<<<<<<<
@@ -6167,7 +6584,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
     __pyx_t_1 = ((__pyx_v_m->keys[__pyx_v_idx]) == __pyx_v_key);
     if (__pyx_t_1) {
 
-      /* "_sparse_dp_cython.pyx":218
+      /* "_sparse_dp_cython.pyx":241
  *             return
  *         if m.keys[idx] == key:
  *             m.vals[idx] = val             # <<<<<<<<<<<<<<
@@ -6176,7 +6593,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
       (__pyx_v_m->vals[__pyx_v_idx]) = __pyx_v_val;
 
-      /* "_sparse_dp_cython.pyx":219
+      /* "_sparse_dp_cython.pyx":242
  *         if m.keys[idx] == key:
  *             m.vals[idx] = val
  *             return             # <<<<<<<<<<<<<<
@@ -6185,7 +6602,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
       goto __pyx_L0;
 
-      /* "_sparse_dp_cython.pyx":217
+      /* "_sparse_dp_cython.pyx":240
  *             m.size += 1
  *             return
  *         if m.keys[idx] == key:             # <<<<<<<<<<<<<<
@@ -6194,7 +6611,7 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
 */
     }
 
-    /* "_sparse_dp_cython.pyx":220
+    /* "_sparse_dp_cython.pyx":243
  *             m.vals[idx] = val
  *             return
  *         idx = (idx + 1) & m.mask             # <<<<<<<<<<<<<<
@@ -6204,19 +6621,22 @@ static CYTHON_INLINE void __pyx_f_17_sparse_dp_cython_pmap_set(struct __pyx_t_17
     __pyx_v_idx = ((__pyx_v_idx + 1) & __pyx_v_m->mask);
   }
 
-  /* "_sparse_dp_cython.pyx":206
+  /* "_sparse_dp_cython.pyx":229
  * 
  * 
- * cdef inline void pmap_set(CParentMap* m, long long key, int val) noexcept:             # <<<<<<<<<<<<<<
+ * cdef inline void pmap_set(CParentMap* m, long long key, int val) except *:             # <<<<<<<<<<<<<<
  *     """Insert or overwrite."""
  *     if m.size * 10 > m.capacity * 7:
 */
 
   /* function exit code */
+  goto __pyx_L0;
+  __pyx_L1_error:;
+  __Pyx_AddTraceback("_sparse_dp_cython.pmap_set", __pyx_clineno, __pyx_lineno, __pyx_filename);
   __pyx_L0:;
 }
 
-/* "_sparse_dp_cython.pyx":223
+/* "_sparse_dp_cython.pyx":246
  * 
  * 
  * cdef dict pmap_to_pydict(CParentMap* m):             # <<<<<<<<<<<<<<
@@ -6240,19 +6660,19 @@ static PyObject *__pyx_f_17_sparse_dp_cython_pmap_to_pydict(struct __pyx_t_17_sp
   int __pyx_clineno = 0;
   __Pyx_RefNannySetupContext("pmap_to_pydict", 0);
 
-  /* "_sparse_dp_cython.pyx":225
+  /* "_sparse_dp_cython.pyx":248
  * cdef dict pmap_to_pydict(CParentMap* m):
  *     """Convert native parent map  Python dict for the return value."""
  *     cdef dict out = {}             # <<<<<<<<<<<<<<
  *     cdef Py_ssize_t i
  *     for i in range(m.capacity):
 */
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 225, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 248, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_v_out = ((PyObject*)__pyx_t_1);
   __pyx_t_1 = 0;
 
-  /* "_sparse_dp_cython.pyx":227
+  /* "_sparse_dp_cython.pyx":250
  *     cdef dict out = {}
  *     cdef Py_ssize_t i
  *     for i in range(m.capacity):             # <<<<<<<<<<<<<<
@@ -6264,7 +6684,7 @@ static PyObject *__pyx_f_17_sparse_dp_cython_pmap_to_pydict(struct __pyx_t_17_sp
   for (__pyx_t_4 = 0; __pyx_t_4 < __pyx_t_3; __pyx_t_4+=1) {
     __pyx_v_i = __pyx_t_4;
 
-    /* "_sparse_dp_cython.pyx":228
+    /* "_sparse_dp_cython.pyx":251
  *     cdef Py_ssize_t i
  *     for i in range(m.capacity):
  *         if m.keys[i] != _EMPTY:             # <<<<<<<<<<<<<<
@@ -6274,22 +6694,22 @@ static PyObject *__pyx_f_17_sparse_dp_cython_pmap_to_pydict(struct __pyx_t_17_sp
     __pyx_t_5 = ((__pyx_v_m->keys[__pyx_v_i]) != __pyx_v_17_sparse_dp_cython__EMPTY);
     if (__pyx_t_5) {
 
-      /* "_sparse_dp_cython.pyx":229
+      /* "_sparse_dp_cython.pyx":252
  *     for i in range(m.capacity):
  *         if m.keys[i] != _EMPTY:
  *             out[m.keys[i]] = m.vals[i]             # <<<<<<<<<<<<<<
  *     return out
  * 
 */
-      __pyx_t_1 = __Pyx_PyLong_From_int((__pyx_v_m->vals[__pyx_v_i])); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 229, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyLong_From_int((__pyx_v_m->vals[__pyx_v_i])); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 252, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
-      __pyx_t_6 = __Pyx_PyLong_From_PY_LONG_LONG((__pyx_v_m->keys[__pyx_v_i])); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 229, __pyx_L1_error)
+      __pyx_t_6 = __Pyx_PyLong_From_PY_LONG_LONG((__pyx_v_m->keys[__pyx_v_i])); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 252, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_6);
-      if (unlikely((PyDict_SetItem(__pyx_v_out, __pyx_t_6, __pyx_t_1) < 0))) __PYX_ERR(0, 229, __pyx_L1_error)
+      if (unlikely((PyDict_SetItem(__pyx_v_out, __pyx_t_6, __pyx_t_1) < 0))) __PYX_ERR(0, 252, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-      /* "_sparse_dp_cython.pyx":228
+      /* "_sparse_dp_cython.pyx":251
  *     cdef Py_ssize_t i
  *     for i in range(m.capacity):
  *         if m.keys[i] != _EMPTY:             # <<<<<<<<<<<<<<
@@ -6299,7 +6719,7 @@ static PyObject *__pyx_f_17_sparse_dp_cython_pmap_to_pydict(struct __pyx_t_17_sp
     }
   }
 
-  /* "_sparse_dp_cython.pyx":230
+  /* "_sparse_dp_cython.pyx":253
  *         if m.keys[i] != _EMPTY:
  *             out[m.keys[i]] = m.vals[i]
  *     return out             # <<<<<<<<<<<<<<
@@ -6311,7 +6731,7 @@ static PyObject *__pyx_f_17_sparse_dp_cython_pmap_to_pydict(struct __pyx_t_17_sp
   __pyx_r = __pyx_v_out;
   goto __pyx_L0;
 
-  /* "_sparse_dp_cython.pyx":223
+  /* "_sparse_dp_cython.pyx":246
  * 
  * 
  * cdef dict pmap_to_pydict(CParentMap* m):             # <<<<<<<<<<<<<<
@@ -6332,7 +6752,7 @@ static PyObject *__pyx_f_17_sparse_dp_cython_pmap_to_pydict(struct __pyx_t_17_sp
   return __pyx_r;
 }
 
-/* "_sparse_dp_cython.pyx":236
+/* "_sparse_dp_cython.pyx":259
  * #  Main DP function  native storage, same interface as Python version
  * # ===================================================================
  * def solve_sparse_dp_cython(             # <<<<<<<<<<<<<<
@@ -6391,101 +6811,101 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   {
     PyObject ** const __pyx_pyargnames[] = {&__pyx_mstate_global->__pyx_n_u_lengths,&__pyx_mstate_global->__pyx_n_u_totals,&__pyx_mstate_global->__pyx_n_u_prefix,&__pyx_mstate_global->__pyx_n_u_T,&__pyx_mstate_global->__pyx_n_u_radices,&__pyx_mstate_global->__pyx_n_u_mult,&__pyx_mstate_global->__pyx_n_u_K,&__pyx_mstate_global->__pyx_n_u_final_state,&__pyx_mstate_global->__pyx_n_u_time_limit,&__pyx_mstate_global->__pyx_n_u_tie_break,&__pyx_mstate_global->__pyx_n_u_track_schedule,&__pyx_mstate_global->__pyx_n_u_max_states,0};
     const Py_ssize_t __pyx_kwds_len = (__pyx_kwds) ? __Pyx_NumKwargs_FASTCALL(__pyx_kwds) : 0;
-    if (unlikely(__pyx_kwds_len) < 0) __PYX_ERR(0, 236, __pyx_L3_error)
+    if (unlikely(__pyx_kwds_len) < 0) __PYX_ERR(0, 259, __pyx_L3_error)
     if (__pyx_kwds_len > 0) {
       switch (__pyx_nargs) {
         case 12:
         values[11] = __Pyx_ArgRef_FASTCALL(__pyx_args, 11);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[11])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[11])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case 11:
         values[10] = __Pyx_ArgRef_FASTCALL(__pyx_args, 10);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[10])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[10])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case 10:
         values[9] = __Pyx_ArgRef_FASTCALL(__pyx_args, 9);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[9])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[9])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  9:
         values[8] = __Pyx_ArgRef_FASTCALL(__pyx_args, 8);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[8])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[8])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  8:
         values[7] = __Pyx_ArgRef_FASTCALL(__pyx_args, 7);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[7])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[7])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  7:
         values[6] = __Pyx_ArgRef_FASTCALL(__pyx_args, 6);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[6])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[6])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  6:
         values[5] = __Pyx_ArgRef_FASTCALL(__pyx_args, 5);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[5])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[5])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  5:
         values[4] = __Pyx_ArgRef_FASTCALL(__pyx_args, 4);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[4])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[4])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  4:
         values[3] = __Pyx_ArgRef_FASTCALL(__pyx_args, 3);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[3])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[3])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  3:
         values[2] = __Pyx_ArgRef_FASTCALL(__pyx_args, 2);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[2])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[2])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  2:
         values[1] = __Pyx_ArgRef_FASTCALL(__pyx_args, 1);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[1])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[1])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  1:
         values[0] = __Pyx_ArgRef_FASTCALL(__pyx_args, 0);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[0])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[0])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  0: break;
         default: goto __pyx_L5_argtuple_error;
       }
       const Py_ssize_t kwd_pos_args = __pyx_nargs;
-      if (__Pyx_ParseKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values, kwd_pos_args, __pyx_kwds_len, "solve_sparse_dp_cython", 0) < (0)) __PYX_ERR(0, 236, __pyx_L3_error)
+      if (__Pyx_ParseKeywords(__pyx_kwds, __pyx_kwvalues, __pyx_pyargnames, 0, values, kwd_pos_args, __pyx_kwds_len, "solve_sparse_dp_cython", 0) < (0)) __PYX_ERR(0, 259, __pyx_L3_error)
       if (!values[9]) values[9] = __Pyx_NewRef(((PyObject*)((PyObject*)__pyx_mstate_global->__pyx_n_u_early)));
       for (Py_ssize_t i = __pyx_nargs; i < 8; i++) {
-        if (unlikely(!values[i])) { __Pyx_RaiseArgtupleInvalid("solve_sparse_dp_cython", 0, 8, 12, i); __PYX_ERR(0, 236, __pyx_L3_error) }
+        if (unlikely(!values[i])) { __Pyx_RaiseArgtupleInvalid("solve_sparse_dp_cython", 0, 8, 12, i); __PYX_ERR(0, 259, __pyx_L3_error) }
       }
     } else {
       switch (__pyx_nargs) {
         case 12:
         values[11] = __Pyx_ArgRef_FASTCALL(__pyx_args, 11);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[11])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[11])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case 11:
         values[10] = __Pyx_ArgRef_FASTCALL(__pyx_args, 10);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[10])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[10])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case 10:
         values[9] = __Pyx_ArgRef_FASTCALL(__pyx_args, 9);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[9])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[9])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  9:
         values[8] = __Pyx_ArgRef_FASTCALL(__pyx_args, 8);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[8])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[8])) __PYX_ERR(0, 259, __pyx_L3_error)
         CYTHON_FALLTHROUGH;
         case  8:
         values[7] = __Pyx_ArgRef_FASTCALL(__pyx_args, 7);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[7])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[7])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[6] = __Pyx_ArgRef_FASTCALL(__pyx_args, 6);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[6])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[6])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[5] = __Pyx_ArgRef_FASTCALL(__pyx_args, 5);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[5])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[5])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[4] = __Pyx_ArgRef_FASTCALL(__pyx_args, 4);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[4])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[4])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[3] = __Pyx_ArgRef_FASTCALL(__pyx_args, 3);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[3])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[3])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[2] = __Pyx_ArgRef_FASTCALL(__pyx_args, 2);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[2])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[2])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[1] = __Pyx_ArgRef_FASTCALL(__pyx_args, 1);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[1])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[1])) __PYX_ERR(0, 259, __pyx_L3_error)
         values[0] = __Pyx_ArgRef_FASTCALL(__pyx_args, 0);
-        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[0])) __PYX_ERR(0, 236, __pyx_L3_error)
+        if (!CYTHON_ASSUME_SAFE_MACROS && unlikely(!values[0])) __PYX_ERR(0, 259, __pyx_L3_error)
         break;
         default: goto __pyx_L5_argtuple_error;
       }
@@ -6494,22 +6914,22 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
     __pyx_v_lengths = ((PyArrayObject *)values[0]);
     __pyx_v_totals = ((PyArrayObject *)values[1]);
     __pyx_v_prefix = ((PyArrayObject *)values[2]);
-    __pyx_v_T = __Pyx_PyLong_As_int(values[3]); if (unlikely((__pyx_v_T == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 240, __pyx_L3_error)
+    __pyx_v_T = __Pyx_PyLong_As_int(values[3]); if (unlikely((__pyx_v_T == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 263, __pyx_L3_error)
     __pyx_v_radices = ((PyArrayObject *)values[4]);
     __pyx_v_mult = ((PyArrayObject *)values[5]);
-    __pyx_v_K = __Pyx_PyLong_As_int(values[6]); if (unlikely((__pyx_v_K == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 243, __pyx_L3_error)
-    __pyx_v_final_state = __Pyx_PyLong_As_PY_LONG_LONG(values[7]); if (unlikely((__pyx_v_final_state == (PY_LONG_LONG)-1) && PyErr_Occurred())) __PYX_ERR(0, 244, __pyx_L3_error)
+    __pyx_v_K = __Pyx_PyLong_As_int(values[6]); if (unlikely((__pyx_v_K == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 266, __pyx_L3_error)
+    __pyx_v_final_state = __Pyx_PyLong_As_PY_LONG_LONG(values[7]); if (unlikely((__pyx_v_final_state == (PY_LONG_LONG)-1) && PyErr_Occurred())) __PYX_ERR(0, 267, __pyx_L3_error)
     if (values[8]) {
-      __pyx_v_time_limit = __Pyx_PyFloat_AsDouble(values[8]); if (unlikely((__pyx_v_time_limit == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 245, __pyx_L3_error)
+      __pyx_v_time_limit = __Pyx_PyFloat_AsDouble(values[8]); if (unlikely((__pyx_v_time_limit == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 268, __pyx_L3_error)
     } else {
       __pyx_v_time_limit = ((double)((double)-1.0));
     }
     __pyx_v_tie_break = ((PyObject*)values[9]);
     if (values[10]) {
-      __pyx_v_track_schedule = __Pyx_PyObject_IsTrue(values[10]); if (unlikely((__pyx_v_track_schedule == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 247, __pyx_L3_error)
+      __pyx_v_track_schedule = __Pyx_PyObject_IsTrue(values[10]); if (unlikely((__pyx_v_track_schedule == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 270, __pyx_L3_error)
     } else {
 
-      /* "_sparse_dp_cython.pyx":247
+      /* "_sparse_dp_cython.pyx":270
  *     double time_limit = -1.0,
  *     str tie_break = "early",
  *     bint track_schedule = True,             # <<<<<<<<<<<<<<
@@ -6519,14 +6939,14 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
       __pyx_v_track_schedule = ((int)((int)1));
     }
     if (values[11]) {
-      __pyx_v_max_states = __Pyx_PyLong_As_PY_LONG_LONG(values[11]); if (unlikely((__pyx_v_max_states == (PY_LONG_LONG)-1) && PyErr_Occurred())) __PYX_ERR(0, 248, __pyx_L3_error)
+      __pyx_v_max_states = __Pyx_PyLong_As_PY_LONG_LONG(values[11]); if (unlikely((__pyx_v_max_states == (PY_LONG_LONG)-1) && PyErr_Occurred())) __PYX_ERR(0, 271, __pyx_L3_error)
     } else {
       __pyx_v_max_states = ((PY_LONG_LONG)((PY_LONG_LONG)0));
     }
   }
   goto __pyx_L6_skip;
   __pyx_L5_argtuple_error:;
-  __Pyx_RaiseArgtupleInvalid("solve_sparse_dp_cython", 0, 8, 12, __pyx_nargs); __PYX_ERR(0, 236, __pyx_L3_error)
+  __Pyx_RaiseArgtupleInvalid("solve_sparse_dp_cython", 0, 8, 12, __pyx_nargs); __PYX_ERR(0, 259, __pyx_L3_error)
   __pyx_L6_skip:;
   goto __pyx_L4_argument_unpacking_done;
   __pyx_L3_error:;
@@ -6537,15 +6957,15 @@ PyObject *__pyx_args, PyObject *__pyx_kwds
   __Pyx_RefNannyFinishContext();
   return NULL;
   __pyx_L4_argument_unpacking_done:;
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_lengths), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "lengths", 0))) __PYX_ERR(0, 237, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_totals), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "totals", 0))) __PYX_ERR(0, 238, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_prefix), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "prefix", 0))) __PYX_ERR(0, 239, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_radices), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "radices", 0))) __PYX_ERR(0, 241, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_mult), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "mult", 0))) __PYX_ERR(0, 242, __pyx_L1_error)
-  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_tie_break), (&PyUnicode_Type), 1, "tie_break", 1))) __PYX_ERR(0, 246, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_lengths), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "lengths", 0))) __PYX_ERR(0, 260, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_totals), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "totals", 0))) __PYX_ERR(0, 261, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_prefix), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "prefix", 0))) __PYX_ERR(0, 262, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_radices), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "radices", 0))) __PYX_ERR(0, 264, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_mult), __pyx_mstate_global->__pyx_ptype_5numpy_ndarray, 1, "mult", 0))) __PYX_ERR(0, 265, __pyx_L1_error)
+  if (unlikely(!__Pyx_ArgTypeTest(((PyObject *)__pyx_v_tie_break), (&PyUnicode_Type), 1, "tie_break", 1))) __PYX_ERR(0, 269, __pyx_L1_error)
   __pyx_r = __pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(__pyx_self, __pyx_v_lengths, __pyx_v_totals, __pyx_v_prefix, __pyx_v_T, __pyx_v_radices, __pyx_v_mult, __pyx_v_K, __pyx_v_final_state, __pyx_v_time_limit, __pyx_v_tie_break, __pyx_v_track_schedule, __pyx_v_max_states);
 
-  /* "_sparse_dp_cython.pyx":236
+  /* "_sparse_dp_cython.pyx":259
  * #  Main DP function  native storage, same interface as Python version
  * # ===================================================================
  * def solve_sparse_dp_cython(             # <<<<<<<<<<<<<<
@@ -6672,10 +7092,11 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   PyObject *__pyx_t_25 = NULL;
   PyObject *__pyx_t_26 = NULL;
   PyObject *__pyx_t_27 = NULL;
-  char const *__pyx_t_28;
-  PyObject *__pyx_t_29 = NULL;
+  Py_ssize_t __pyx_t_28;
+  char const *__pyx_t_29;
   PyObject *__pyx_t_30 = NULL;
   PyObject *__pyx_t_31 = NULL;
+  PyObject *__pyx_t_32 = NULL;
   int __pyx_lineno = 0;
   const char *__pyx_filename = NULL;
   int __pyx_clineno = 0;
@@ -6706,31 +7127,31 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   __pyx_pybuffernd_mult.rcbuffer = &__pyx_pybuffer_mult;
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_lengths.rcbuffer->pybuffer, (PyObject*)__pyx_v_lengths, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 236, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_lengths.rcbuffer->pybuffer, (PyObject*)__pyx_v_lengths, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 259, __pyx_L1_error)
   }
   __pyx_pybuffernd_lengths.diminfo[0].strides = __pyx_pybuffernd_lengths.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_lengths.diminfo[0].shape = __pyx_pybuffernd_lengths.rcbuffer->pybuffer.shape[0];
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_totals.rcbuffer->pybuffer, (PyObject*)__pyx_v_totals, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 236, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_totals.rcbuffer->pybuffer, (PyObject*)__pyx_v_totals, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 259, __pyx_L1_error)
   }
   __pyx_pybuffernd_totals.diminfo[0].strides = __pyx_pybuffernd_totals.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_totals.diminfo[0].shape = __pyx_pybuffernd_totals.rcbuffer->pybuffer.shape[0];
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_prefix.rcbuffer->pybuffer, (PyObject*)__pyx_v_prefix, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 236, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_prefix.rcbuffer->pybuffer, (PyObject*)__pyx_v_prefix, &__Pyx_TypeInfo_nn___pyx_t_5numpy_float64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 259, __pyx_L1_error)
   }
   __pyx_pybuffernd_prefix.diminfo[0].strides = __pyx_pybuffernd_prefix.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_prefix.diminfo[0].shape = __pyx_pybuffernd_prefix.rcbuffer->pybuffer.shape[0];
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_radices.rcbuffer->pybuffer, (PyObject*)__pyx_v_radices, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 236, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_radices.rcbuffer->pybuffer, (PyObject*)__pyx_v_radices, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 259, __pyx_L1_error)
   }
   __pyx_pybuffernd_radices.diminfo[0].strides = __pyx_pybuffernd_radices.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_radices.diminfo[0].shape = __pyx_pybuffernd_radices.rcbuffer->pybuffer.shape[0];
   {
     __Pyx_BufFmt_StackElem __pyx_stack[1];
-    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_mult.rcbuffer->pybuffer, (PyObject*)__pyx_v_mult, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 236, __pyx_L1_error)
+    if (unlikely(__Pyx_GetBufferAndValidate(&__pyx_pybuffernd_mult.rcbuffer->pybuffer, (PyObject*)__pyx_v_mult, &__Pyx_TypeInfo_nn___pyx_t_5numpy_int64_t, PyBUF_FORMAT| PyBUF_STRIDES, 1, 0, __pyx_stack) == -1)) __PYX_ERR(0, 259, __pyx_L1_error)
   }
   __pyx_pybuffernd_mult.diminfo[0].strides = __pyx_pybuffernd_mult.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd_mult.diminfo[0].shape = __pyx_pybuffernd_mult.rcbuffer->pybuffer.shape[0];
 
-  /* "_sparse_dp_cython.pyx":257
+  /* "_sparse_dp_cython.pyx":280
  *     (best_cost, best_finish_time, parent_dict, timed_out, best_partial)
  *     """
  *     cdef double start_time = time_module.perf_counter()             # <<<<<<<<<<<<<<
@@ -6738,9 +7159,9 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *     # -- Local typed copies (K  12) -----------------------------------
 */
   __pyx_t_2 = NULL;
-  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_time_module); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 257, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_time_module); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 280, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
-  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_perf_counter); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 257, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_perf_counter); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 280, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
   __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
   __pyx_t_5 = 1;
@@ -6760,14 +7181,14 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_1 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_4, __pyx_callargs+__pyx_t_5, (1-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
     __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 257, __pyx_L1_error)
+    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 280, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
   }
-  __pyx_t_6 = __Pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_6 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 257, __pyx_L1_error)
+  __pyx_t_6 = __Pyx_PyFloat_AsDouble(__pyx_t_1); if (unlikely((__pyx_t_6 == (double)-1) && PyErr_Occurred())) __PYX_ERR(0, 280, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   __pyx_v_start_time = __pyx_t_6;
 
-  /* "_sparse_dp_cython.pyx":262
+  /* "_sparse_dp_cython.pyx":285
  *     cdef int[12] c_len, c_tot, c_rad
  *     cdef long long[12] c_inc
  *     cdef int i, max_job_len = 0, total_rw = 0             # <<<<<<<<<<<<<<
@@ -6777,7 +7198,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   __pyx_v_max_job_len = 0;
   __pyx_v_total_rw = 0;
 
-  /* "_sparse_dp_cython.pyx":264
+  /* "_sparse_dp_cython.pyx":287
  *     cdef int i, max_job_len = 0, total_rw = 0
  * 
  *     for i in range(K):             # <<<<<<<<<<<<<<
@@ -6789,7 +7210,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   for (__pyx_t_9 = 0; __pyx_t_9 < __pyx_t_8; __pyx_t_9+=1) {
     __pyx_v_i = __pyx_t_9;
 
-    /* "_sparse_dp_cython.pyx":265
+    /* "_sparse_dp_cython.pyx":288
  * 
  *     for i in range(K):
  *         c_len[i]  = <int>lengths[i]             # <<<<<<<<<<<<<<
@@ -6799,7 +7220,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_10 = __pyx_v_i;
     (__pyx_v_c_len[__pyx_v_i]) = ((int)(*__Pyx_BufPtrStrided1d(__pyx_t_5numpy_int64_t *, __pyx_pybuffernd_lengths.rcbuffer->pybuffer.buf, __pyx_t_10, __pyx_pybuffernd_lengths.diminfo[0].strides)));
 
-    /* "_sparse_dp_cython.pyx":266
+    /* "_sparse_dp_cython.pyx":289
  *     for i in range(K):
  *         c_len[i]  = <int>lengths[i]
  *         c_tot[i]  = <int>totals[i]             # <<<<<<<<<<<<<<
@@ -6809,7 +7230,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_10 = __pyx_v_i;
     (__pyx_v_c_tot[__pyx_v_i]) = ((int)(*__Pyx_BufPtrStrided1d(__pyx_t_5numpy_int64_t *, __pyx_pybuffernd_totals.rcbuffer->pybuffer.buf, __pyx_t_10, __pyx_pybuffernd_totals.diminfo[0].strides)));
 
-    /* "_sparse_dp_cython.pyx":267
+    /* "_sparse_dp_cython.pyx":290
  *         c_len[i]  = <int>lengths[i]
  *         c_tot[i]  = <int>totals[i]
  *         c_rad[i]  = <int>radices[i]             # <<<<<<<<<<<<<<
@@ -6819,7 +7240,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_10 = __pyx_v_i;
     (__pyx_v_c_rad[__pyx_v_i]) = ((int)(*__Pyx_BufPtrStrided1d(__pyx_t_5numpy_int64_t *, __pyx_pybuffernd_radices.rcbuffer->pybuffer.buf, __pyx_t_10, __pyx_pybuffernd_radices.diminfo[0].strides)));
 
-    /* "_sparse_dp_cython.pyx":268
+    /* "_sparse_dp_cython.pyx":291
  *         c_tot[i]  = <int>totals[i]
  *         c_rad[i]  = <int>radices[i]
  *         c_inc[i]  = mult[i]             # <<<<<<<<<<<<<<
@@ -6829,7 +7250,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_10 = __pyx_v_i;
     (__pyx_v_c_inc[__pyx_v_i]) = (*__Pyx_BufPtrStrided1d(__pyx_t_5numpy_int64_t *, __pyx_pybuffernd_mult.rcbuffer->pybuffer.buf, __pyx_t_10, __pyx_pybuffernd_mult.diminfo[0].strides));
 
-    /* "_sparse_dp_cython.pyx":269
+    /* "_sparse_dp_cython.pyx":292
  *         c_rad[i]  = <int>radices[i]
  *         c_inc[i]  = mult[i]
  *         if c_len[i] > max_job_len:             # <<<<<<<<<<<<<<
@@ -6839,7 +7260,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_11 = ((__pyx_v_c_len[__pyx_v_i]) > __pyx_v_max_job_len);
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":270
+      /* "_sparse_dp_cython.pyx":293
  *         c_inc[i]  = mult[i]
  *         if c_len[i] > max_job_len:
  *             max_job_len = c_len[i]             # <<<<<<<<<<<<<<
@@ -6848,7 +7269,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v_max_job_len = (__pyx_v_c_len[__pyx_v_i]);
 
-      /* "_sparse_dp_cython.pyx":269
+      /* "_sparse_dp_cython.pyx":292
  *         c_rad[i]  = <int>radices[i]
  *         c_inc[i]  = mult[i]
  *         if c_len[i] > max_job_len:             # <<<<<<<<<<<<<<
@@ -6857,7 +7278,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     }
 
-    /* "_sparse_dp_cython.pyx":271
+    /* "_sparse_dp_cython.pyx":294
  *         if c_len[i] > max_job_len:
  *             max_job_len = c_len[i]
  *         total_rw += c_tot[i] * c_len[i]             # <<<<<<<<<<<<<<
@@ -6867,7 +7288,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_v_total_rw = (__pyx_v_total_rw + ((__pyx_v_c_tot[__pyx_v_i]) * (__pyx_v_c_len[__pyx_v_i])));
   }
 
-  /* "_sparse_dp_cython.pyx":273
+  /* "_sparse_dp_cython.pyx":296
  *         total_rw += c_tot[i] * c_len[i]
  * 
  *     cdef long long state_bound = final_state + 1             # <<<<<<<<<<<<<<
@@ -6876,7 +7297,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_state_bound = (__pyx_v_final_state + 1);
 
-  /* "_sparse_dp_cython.pyx":276
+  /* "_sparse_dp_cython.pyx":299
  * 
  *     # -- Block-based admissible LB (kept as NumPy  small, read-only) ---
  *     cdef int _LB_BLOCK = 20             # <<<<<<<<<<<<<<
@@ -6885,7 +7306,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v__LB_BLOCK = 20;
 
-  /* "_sparse_dp_cython.pyx":277
+  /* "_sparse_dp_cython.pyx":300
  *     # -- Block-based admissible LB (kept as NumPy  small, read-only) ---
  *     cdef int _LB_BLOCK = 20
  *     prices_arr = np.diff(prefix)             # <<<<<<<<<<<<<<
@@ -6893,9 +7314,9 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *     cdef int b
 */
   __pyx_t_4 = NULL;
-  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 277, __pyx_L1_error)
+  __Pyx_GetModuleGlobalName(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 300, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_diff); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 277, __pyx_L1_error)
+  __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_2, __pyx_mstate_global->__pyx_n_u_diff); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 300, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_3);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __pyx_t_5 = 1;
@@ -6915,25 +7336,25 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_1 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_3, __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
     __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
     __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 277, __pyx_L1_error)
+    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 300, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
   }
   __pyx_v_prices_arr = __pyx_t_1;
   __pyx_t_1 = 0;
 
-  /* "_sparse_dp_cython.pyx":278
+  /* "_sparse_dp_cython.pyx":301
  *     cdef int _LB_BLOCK = 20
  *     prices_arr = np.diff(prefix)
  *     cdef dict _lb_py = {}             # <<<<<<<<<<<<<<
  *     cdef int b
  *     for b in range(0, T + 1, _LB_BLOCK):
 */
-  __pyx_t_1 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 278, __pyx_L1_error)
+  __pyx_t_1 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 301, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_1);
   __pyx_v__lb_py = ((PyObject*)__pyx_t_1);
   __pyx_t_1 = 0;
 
-  /* "_sparse_dp_cython.pyx":280
+  /* "_sparse_dp_cython.pyx":303
  *     cdef dict _lb_py = {}
  *     cdef int b
  *     for b in range(0, T + 1, _LB_BLOCK):             # <<<<<<<<<<<<<<
@@ -6941,9 +7362,9 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *             sp = np.sort(prices_arr[b:])
 */
   __pyx_t_3 = NULL;
-  __pyx_t_4 = __Pyx_PyLong_From_long((__pyx_v_T + 1)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 280, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyLong_From_long((__pyx_v_T + 1)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 303, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
-  __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v__LB_BLOCK); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 280, __pyx_L1_error)
+  __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v__LB_BLOCK); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 303, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
   __pyx_t_5 = 1;
   {
@@ -6952,12 +7373,12 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
     __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 280, __pyx_L1_error)
+    if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_GOTREF(__pyx_t_1);
   }
-  __pyx_t_2 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 280, __pyx_L1_error)
+  __pyx_t_2 = PyObject_GetIter(__pyx_t_1); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 303, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
-  __pyx_t_12 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_2); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 280, __pyx_L1_error)
+  __pyx_t_12 = (CYTHON_COMPILING_IN_LIMITED_API) ? PyIter_Next : __Pyx_PyObject_GetIterNextFunc(__pyx_t_2); if (unlikely(!__pyx_t_12)) __PYX_ERR(0, 303, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
   for (;;) {
     {
@@ -6965,18 +7386,18 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       if (unlikely(!__pyx_t_1)) {
         PyObject* exc_type = PyErr_Occurred();
         if (exc_type) {
-          if (unlikely(!__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration))) __PYX_ERR(0, 280, __pyx_L1_error)
+          if (unlikely(!__Pyx_PyErr_GivenExceptionMatches(exc_type, PyExc_StopIteration))) __PYX_ERR(0, 303, __pyx_L1_error)
           PyErr_Clear();
         }
         break;
       }
     }
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_7 = __Pyx_PyLong_As_int(__pyx_t_1); if (unlikely((__pyx_t_7 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 280, __pyx_L1_error)
+    __pyx_t_7 = __Pyx_PyLong_As_int(__pyx_t_1); if (unlikely((__pyx_t_7 == (int)-1) && PyErr_Occurred())) __PYX_ERR(0, 303, __pyx_L1_error)
     __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     __pyx_v_b = __pyx_t_7;
 
-    /* "_sparse_dp_cython.pyx":281
+    /* "_sparse_dp_cython.pyx":304
  *     cdef int b
  *     for b in range(0, T + 1, _LB_BLOCK):
  *         if b < T:             # <<<<<<<<<<<<<<
@@ -6986,7 +7407,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_11 = (__pyx_v_b < __pyx_v_T);
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":282
+      /* "_sparse_dp_cython.pyx":305
  *     for b in range(0, T + 1, _LB_BLOCK):
  *         if b < T:
  *             sp = np.sort(prices_arr[b:])             # <<<<<<<<<<<<<<
@@ -6994,12 +7415,12 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *             cs[0] = 0.0
 */
       __pyx_t_4 = NULL;
-      __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 282, __pyx_L1_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 305, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
-      __pyx_t_13 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_sort); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 282, __pyx_L1_error)
+      __pyx_t_13 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_sort); if (unlikely(!__pyx_t_13)) __PYX_ERR(0, 305, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_13);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-      __pyx_t_3 = __Pyx_PyObject_GetSlice(__pyx_v_prices_arr, __pyx_v_b, 0, NULL, NULL, NULL, 1, 0, 0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 282, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_GetSlice(__pyx_v_prices_arr, __pyx_v_b, 0, NULL, NULL, NULL, 1, 0, 0); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 305, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __pyx_t_5 = 1;
       #if CYTHON_UNPACK_METHODS
@@ -7019,13 +7440,13 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
         __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_DECREF(__pyx_t_13); __pyx_t_13 = 0;
-        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 282, __pyx_L1_error)
+        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 305, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_1);
       }
       __Pyx_XDECREF_SET(__pyx_v_sp, __pyx_t_1);
       __pyx_t_1 = 0;
 
-      /* "_sparse_dp_cython.pyx":283
+      /* "_sparse_dp_cython.pyx":306
  *         if b < T:
  *             sp = np.sort(prices_arr[b:])
  *             cs = np.empty(len(sp) + 1, dtype=np.float64)             # <<<<<<<<<<<<<<
@@ -7033,17 +7454,17 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *             cs[1:] = np.cumsum(sp)
 */
       __pyx_t_13 = NULL;
-      __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 283, __pyx_L1_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
-      __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 283, __pyx_L1_error)
+      __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_3, __pyx_mstate_global->__pyx_n_u_empty); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_4);
       __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
-      __pyx_t_14 = PyObject_Length(__pyx_v_sp); if (unlikely(__pyx_t_14 == ((Py_ssize_t)-1))) __PYX_ERR(0, 283, __pyx_L1_error)
-      __pyx_t_3 = PyLong_FromSsize_t((__pyx_t_14 + 1)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 283, __pyx_L1_error)
+      __pyx_t_14 = PyObject_Length(__pyx_v_sp); if (unlikely(__pyx_t_14 == ((Py_ssize_t)-1))) __PYX_ERR(0, 306, __pyx_L1_error)
+      __pyx_t_3 = PyLong_FromSsize_t((__pyx_t_14 + 1)); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
-      __Pyx_GetModuleGlobalName(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 283, __pyx_L1_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_15);
-      __pyx_t_16 = __Pyx_PyObject_GetAttrStr(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_float64); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 283, __pyx_L1_error)
+      __pyx_t_16 = __Pyx_PyObject_GetAttrStr(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_float64); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 306, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_16);
       __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
       __pyx_t_5 = 1;
@@ -7060,31 +7481,31 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       #endif
       {
         PyObject *__pyx_callargs[2 + ((CYTHON_VECTORCALL) ? 1 : 0)] = {__pyx_t_13, __pyx_t_3};
-        __pyx_t_15 = __Pyx_MakeVectorcallBuilderKwds(1); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 283, __pyx_L1_error)
+        __pyx_t_15 = __Pyx_MakeVectorcallBuilderKwds(1); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 306, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_15);
-        if (__Pyx_VectorcallBuilder_AddArg(__pyx_mstate_global->__pyx_n_u_dtype, __pyx_t_16, __pyx_t_15, __pyx_callargs+2, 0) < (0)) __PYX_ERR(0, 283, __pyx_L1_error)
+        if (__Pyx_VectorcallBuilder_AddArg(__pyx_mstate_global->__pyx_n_u_dtype, __pyx_t_16, __pyx_t_15, __pyx_callargs+2, 0) < (0)) __PYX_ERR(0, 306, __pyx_L1_error)
         __pyx_t_1 = __Pyx_Object_Vectorcall_CallFromBuilder((PyObject*)__pyx_t_4, __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET), __pyx_t_15);
         __Pyx_XDECREF(__pyx_t_13); __pyx_t_13 = 0;
         __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
         __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
         __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 283, __pyx_L1_error)
+        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 306, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_1);
       }
       __Pyx_XDECREF_SET(__pyx_v_cs, __pyx_t_1);
       __pyx_t_1 = 0;
 
-      /* "_sparse_dp_cython.pyx":284
+      /* "_sparse_dp_cython.pyx":307
  *             sp = np.sort(prices_arr[b:])
  *             cs = np.empty(len(sp) + 1, dtype=np.float64)
  *             cs[0] = 0.0             # <<<<<<<<<<<<<<
  *             cs[1:] = np.cumsum(sp)
  *             _lb_py[b] = cs
 */
-      if (unlikely((__Pyx_SetItemInt(__pyx_v_cs, 0, __pyx_mstate_global->__pyx_float_0_0, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference) < 0))) __PYX_ERR(0, 284, __pyx_L1_error)
+      if (unlikely((__Pyx_SetItemInt(__pyx_v_cs, 0, __pyx_mstate_global->__pyx_float_0_0, long, 1, __Pyx_PyLong_From_long, 0, 0, 0, 1, __Pyx_ReferenceSharing_OwnStrongReference) < 0))) __PYX_ERR(0, 307, __pyx_L1_error)
 
-      /* "_sparse_dp_cython.pyx":285
+      /* "_sparse_dp_cython.pyx":308
  *             cs = np.empty(len(sp) + 1, dtype=np.float64)
  *             cs[0] = 0.0
  *             cs[1:] = np.cumsum(sp)             # <<<<<<<<<<<<<<
@@ -7092,9 +7513,9 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *         else:
 */
       __pyx_t_4 = NULL;
-      __Pyx_GetModuleGlobalName(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 285, __pyx_L1_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 308, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_15);
-      __pyx_t_16 = __Pyx_PyObject_GetAttrStr(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_cumsum); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 285, __pyx_L1_error)
+      __pyx_t_16 = __Pyx_PyObject_GetAttrStr(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_cumsum); if (unlikely(!__pyx_t_16)) __PYX_ERR(0, 308, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_16);
       __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
       __pyx_t_5 = 1;
@@ -7114,25 +7535,25 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_1 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_16, __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
         __Pyx_DECREF(__pyx_t_16); __pyx_t_16 = 0;
-        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 285, __pyx_L1_error)
+        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 308, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_1);
       }
-      if (__Pyx_PyObject_SetSlice(__pyx_v_cs, __pyx_t_1, 1, 0, NULL, NULL, &__pyx_mstate_global->__pyx_slice[0], 1, 0, 0) < (0)) __PYX_ERR(0, 285, __pyx_L1_error)
+      if (__Pyx_PyObject_SetSlice(__pyx_v_cs, __pyx_t_1, 1, 0, NULL, NULL, &__pyx_mstate_global->__pyx_slice[0], 1, 0, 0) < (0)) __PYX_ERR(0, 308, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-      /* "_sparse_dp_cython.pyx":286
+      /* "_sparse_dp_cython.pyx":309
  *             cs[0] = 0.0
  *             cs[1:] = np.cumsum(sp)
  *             _lb_py[b] = cs             # <<<<<<<<<<<<<<
  *         else:
  *             _lb_py[b] = np.zeros(1, dtype=np.float64)
 */
-      __pyx_t_1 = __Pyx_PyLong_From_int(__pyx_v_b); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 286, __pyx_L1_error)
+      __pyx_t_1 = __Pyx_PyLong_From_int(__pyx_v_b); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 309, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_1);
-      if (unlikely((PyDict_SetItem(__pyx_v__lb_py, __pyx_t_1, __pyx_v_cs) < 0))) __PYX_ERR(0, 286, __pyx_L1_error)
+      if (unlikely((PyDict_SetItem(__pyx_v__lb_py, __pyx_t_1, __pyx_v_cs) < 0))) __PYX_ERR(0, 309, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
 
-      /* "_sparse_dp_cython.pyx":281
+      /* "_sparse_dp_cython.pyx":304
  *     cdef int b
  *     for b in range(0, T + 1, _LB_BLOCK):
  *         if b < T:             # <<<<<<<<<<<<<<
@@ -7142,7 +7563,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       goto __pyx_L8;
     }
 
-    /* "_sparse_dp_cython.pyx":288
+    /* "_sparse_dp_cython.pyx":311
  *             _lb_py[b] = cs
  *         else:
  *             _lb_py[b] = np.zeros(1, dtype=np.float64)             # <<<<<<<<<<<<<<
@@ -7151,14 +7572,14 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     /*else*/ {
       __pyx_t_16 = NULL;
-      __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 288, __pyx_L1_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 311, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_4);
-      __pyx_t_15 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_zeros); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 288, __pyx_L1_error)
+      __pyx_t_15 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_zeros); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 311, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_15);
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-      __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 288, __pyx_L1_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_np); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 311, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_4);
-      __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_float64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 288, __pyx_L1_error)
+      __pyx_t_3 = __Pyx_PyObject_GetAttrStr(__pyx_t_4, __pyx_mstate_global->__pyx_n_u_float64); if (unlikely(!__pyx_t_3)) __PYX_ERR(0, 311, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_3);
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
       __pyx_t_5 = 1;
@@ -7175,26 +7596,26 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       #endif
       {
         PyObject *__pyx_callargs[2 + ((CYTHON_VECTORCALL) ? 1 : 0)] = {__pyx_t_16, __pyx_mstate_global->__pyx_int_1};
-        __pyx_t_4 = __Pyx_MakeVectorcallBuilderKwds(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 288, __pyx_L1_error)
+        __pyx_t_4 = __Pyx_MakeVectorcallBuilderKwds(1); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 311, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_4);
-        if (__Pyx_VectorcallBuilder_AddArg(__pyx_mstate_global->__pyx_n_u_dtype, __pyx_t_3, __pyx_t_4, __pyx_callargs+2, 0) < (0)) __PYX_ERR(0, 288, __pyx_L1_error)
+        if (__Pyx_VectorcallBuilder_AddArg(__pyx_mstate_global->__pyx_n_u_dtype, __pyx_t_3, __pyx_t_4, __pyx_callargs+2, 0) < (0)) __PYX_ERR(0, 311, __pyx_L1_error)
         __pyx_t_1 = __Pyx_Object_Vectorcall_CallFromBuilder((PyObject*)__pyx_t_15, __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET), __pyx_t_4);
         __Pyx_XDECREF(__pyx_t_16); __pyx_t_16 = 0;
         __Pyx_DECREF(__pyx_t_3); __pyx_t_3 = 0;
         __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
         __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
-        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 288, __pyx_L1_error)
+        if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 311, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_1);
       }
-      __pyx_t_15 = __Pyx_PyLong_From_int(__pyx_v_b); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 288, __pyx_L1_error)
+      __pyx_t_15 = __Pyx_PyLong_From_int(__pyx_v_b); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 311, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_15);
-      if (unlikely((PyDict_SetItem(__pyx_v__lb_py, __pyx_t_15, __pyx_t_1) < 0))) __PYX_ERR(0, 288, __pyx_L1_error)
+      if (unlikely((PyDict_SetItem(__pyx_v__lb_py, __pyx_t_15, __pyx_t_1) < 0))) __PYX_ERR(0, 311, __pyx_L1_error)
       __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
     }
     __pyx_L8:;
 
-    /* "_sparse_dp_cython.pyx":280
+    /* "_sparse_dp_cython.pyx":303
  *     cdef dict _lb_py = {}
  *     cdef int b
  *     for b in range(0, T + 1, _LB_BLOCK):             # <<<<<<<<<<<<<<
@@ -7204,7 +7625,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   }
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
 
-  /* "_sparse_dp_cython.pyx":291
+  /* "_sparse_dp_cython.pyx":314
  * 
  *     # -- Allocate native structures -------------------------------------
  *     cdef CStateMap** layers = <CStateMap**>malloc((T + 1) * sizeof(CStateMap*))             # <<<<<<<<<<<<<<
@@ -7213,7 +7634,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_layers = ((struct __pyx_t_17_sparse_dp_cython_CStateMap **)malloc(((__pyx_v_T + 1) * (sizeof(struct __pyx_t_17_sparse_dp_cython_CStateMap *)))));
 
-  /* "_sparse_dp_cython.pyx":292
+  /* "_sparse_dp_cython.pyx":315
  *     # -- Allocate native structures -------------------------------------
  *     cdef CStateMap** layers = <CStateMap**>malloc((T + 1) * sizeof(CStateMap*))
  *     if layers == NULL:             # <<<<<<<<<<<<<<
@@ -7223,7 +7644,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   __pyx_t_11 = (__pyx_v_layers == NULL);
   if (unlikely(__pyx_t_11)) {
 
-    /* "_sparse_dp_cython.pyx":293
+    /* "_sparse_dp_cython.pyx":316
  *     cdef CStateMap** layers = <CStateMap**>malloc((T + 1) * sizeof(CStateMap*))
  *     if layers == NULL:
  *         raise MemoryError("DP layers allocation failed")             # <<<<<<<<<<<<<<
@@ -7236,14 +7657,14 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       PyObject *__pyx_callargs[2] = {__pyx_t_1, __pyx_mstate_global->__pyx_kp_u_DP_layers_allocation_failed};
       __pyx_t_2 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_MemoryError)), __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
       __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 293, __pyx_L1_error)
+      if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 316, __pyx_L1_error)
       __Pyx_GOTREF(__pyx_t_2);
     }
     __Pyx_Raise(__pyx_t_2, 0, 0, 0);
     __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-    __PYX_ERR(0, 293, __pyx_L1_error)
+    __PYX_ERR(0, 316, __pyx_L1_error)
 
-    /* "_sparse_dp_cython.pyx":292
+    /* "_sparse_dp_cython.pyx":315
  *     # -- Allocate native structures -------------------------------------
  *     cdef CStateMap** layers = <CStateMap**>malloc((T + 1) * sizeof(CStateMap*))
  *     if layers == NULL:             # <<<<<<<<<<<<<<
@@ -7252,7 +7673,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   }
 
-  /* "_sparse_dp_cython.pyx":295
+  /* "_sparse_dp_cython.pyx":318
  *         raise MemoryError("DP layers allocation failed")
  *     cdef int tt
  *     for tt in range(T + 1):             # <<<<<<<<<<<<<<
@@ -7264,7 +7685,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   for (__pyx_t_7 = 0; __pyx_t_7 < __pyx_t_18; __pyx_t_7+=1) {
     __pyx_v_tt = __pyx_t_7;
 
-    /* "_sparse_dp_cython.pyx":296
+    /* "_sparse_dp_cython.pyx":319
  *     cdef int tt
  *     for tt in range(T + 1):
  *         layers[tt] = smap_create(16)             # <<<<<<<<<<<<<<
@@ -7273,7 +7694,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     (__pyx_v_layers[__pyx_v_tt]) = __pyx_f_17_sparse_dp_cython_smap_create(16);
 
-    /* "_sparse_dp_cython.pyx":297
+    /* "_sparse_dp_cython.pyx":320
  *     for tt in range(T + 1):
  *         layers[tt] = smap_create(16)
  *         if layers[tt] == NULL:             # <<<<<<<<<<<<<<
@@ -7283,7 +7704,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_11 = ((__pyx_v_layers[__pyx_v_tt]) == NULL);
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":298
+      /* "_sparse_dp_cython.pyx":321
  *         layers[tt] = smap_create(16)
  *         if layers[tt] == NULL:
  *             for i in range(tt):             # <<<<<<<<<<<<<<
@@ -7295,7 +7716,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       for (__pyx_t_19 = 0; __pyx_t_19 < __pyx_t_9; __pyx_t_19+=1) {
         __pyx_v_i = __pyx_t_19;
 
-        /* "_sparse_dp_cython.pyx":299
+        /* "_sparse_dp_cython.pyx":322
  *         if layers[tt] == NULL:
  *             for i in range(tt):
  *                 smap_destroy(layers[i])             # <<<<<<<<<<<<<<
@@ -7305,7 +7726,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_f_17_sparse_dp_cython_smap_destroy((__pyx_v_layers[__pyx_v_i]));
       }
 
-      /* "_sparse_dp_cython.pyx":300
+      /* "_sparse_dp_cython.pyx":323
  *             for i in range(tt):
  *                 smap_destroy(layers[i])
  *             free(layers)             # <<<<<<<<<<<<<<
@@ -7314,7 +7735,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       free(__pyx_v_layers);
 
-      /* "_sparse_dp_cython.pyx":301
+      /* "_sparse_dp_cython.pyx":324
  *                 smap_destroy(layers[i])
  *             free(layers)
  *             raise MemoryError("State map allocation failed")             # <<<<<<<<<<<<<<
@@ -7327,14 +7748,14 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         PyObject *__pyx_callargs[2] = {__pyx_t_1, __pyx_mstate_global->__pyx_kp_u_State_map_allocation_failed};
         __pyx_t_2 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_MemoryError)), __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 301, __pyx_L1_error)
+        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 324, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_2);
       }
       __Pyx_Raise(__pyx_t_2, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      __PYX_ERR(0, 301, __pyx_L1_error)
+      __PYX_ERR(0, 324, __pyx_L1_error)
 
-      /* "_sparse_dp_cython.pyx":297
+      /* "_sparse_dp_cython.pyx":320
  *     for tt in range(T + 1):
  *         layers[tt] = smap_create(16)
  *         if layers[tt] == NULL:             # <<<<<<<<<<<<<<
@@ -7344,7 +7765,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     }
   }
 
-  /* "_sparse_dp_cython.pyx":303
+  /* "_sparse_dp_cython.pyx":326
  *             raise MemoryError("State map allocation failed")
  * 
  *     cdef CParentMap* c_parent = NULL             # <<<<<<<<<<<<<<
@@ -7353,7 +7774,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_c_parent = NULL;
 
-  /* "_sparse_dp_cython.pyx":304
+  /* "_sparse_dp_cython.pyx":327
  * 
  *     cdef CParentMap* c_parent = NULL
  *     if track_schedule:             # <<<<<<<<<<<<<<
@@ -7362,7 +7783,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   if (__pyx_v_track_schedule) {
 
-    /* "_sparse_dp_cython.pyx":305
+    /* "_sparse_dp_cython.pyx":328
  *     cdef CParentMap* c_parent = NULL
  *     if track_schedule:
  *         c_parent = pmap_create(4096)             # <<<<<<<<<<<<<<
@@ -7371,7 +7792,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     __pyx_v_c_parent = __pyx_f_17_sparse_dp_cython_pmap_create(0x1000);
 
-    /* "_sparse_dp_cython.pyx":306
+    /* "_sparse_dp_cython.pyx":329
  *     if track_schedule:
  *         c_parent = pmap_create(4096)
  *         if c_parent == NULL:             # <<<<<<<<<<<<<<
@@ -7381,7 +7802,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_11 = (__pyx_v_c_parent == NULL);
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":307
+      /* "_sparse_dp_cython.pyx":330
  *         c_parent = pmap_create(4096)
  *         if c_parent == NULL:
  *             for tt in range(T + 1):             # <<<<<<<<<<<<<<
@@ -7393,7 +7814,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       for (__pyx_t_7 = 0; __pyx_t_7 < __pyx_t_18; __pyx_t_7+=1) {
         __pyx_v_tt = __pyx_t_7;
 
-        /* "_sparse_dp_cython.pyx":308
+        /* "_sparse_dp_cython.pyx":331
  *         if c_parent == NULL:
  *             for tt in range(T + 1):
  *                 smap_destroy(layers[tt])             # <<<<<<<<<<<<<<
@@ -7403,7 +7824,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_f_17_sparse_dp_cython_smap_destroy((__pyx_v_layers[__pyx_v_tt]));
       }
 
-      /* "_sparse_dp_cython.pyx":309
+      /* "_sparse_dp_cython.pyx":332
  *             for tt in range(T + 1):
  *                 smap_destroy(layers[tt])
  *             free(layers)             # <<<<<<<<<<<<<<
@@ -7412,7 +7833,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       free(__pyx_v_layers);
 
-      /* "_sparse_dp_cython.pyx":310
+      /* "_sparse_dp_cython.pyx":333
  *                 smap_destroy(layers[tt])
  *             free(layers)
  *             raise MemoryError("Parent map allocation failed")             # <<<<<<<<<<<<<<
@@ -7425,14 +7846,14 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         PyObject *__pyx_callargs[2] = {__pyx_t_1, __pyx_mstate_global->__pyx_kp_u_Parent_map_allocation_failed};
         __pyx_t_2 = __Pyx_PyObject_FastCall((PyObject*)(((PyTypeObject*)PyExc_MemoryError)), __pyx_callargs+__pyx_t_5, (2-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
-        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 310, __pyx_L1_error)
+        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 333, __pyx_L1_error)
         __Pyx_GOTREF(__pyx_t_2);
       }
       __Pyx_Raise(__pyx_t_2, 0, 0, 0);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
-      __PYX_ERR(0, 310, __pyx_L1_error)
+      __PYX_ERR(0, 333, __pyx_L1_error)
 
-      /* "_sparse_dp_cython.pyx":306
+      /* "_sparse_dp_cython.pyx":329
  *     if track_schedule:
  *         c_parent = pmap_create(4096)
  *         if c_parent == NULL:             # <<<<<<<<<<<<<<
@@ -7441,7 +7862,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     }
 
-    /* "_sparse_dp_cython.pyx":304
+    /* "_sparse_dp_cython.pyx":327
  * 
  *     cdef CParentMap* c_parent = NULL
  *     if track_schedule:             # <<<<<<<<<<<<<<
@@ -7450,7 +7871,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   }
 
-  /* "_sparse_dp_cython.pyx":314
+  /* "_sparse_dp_cython.pyx":337
  *     # Seed
  *     cdef StateVal sv0
  *     sv0.cost = 0.0;  sv0.pen = 0;  sv0.rw = total_rw;  sv0.jd = 0             # <<<<<<<<<<<<<<
@@ -7462,16 +7883,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
   __pyx_v_sv0.rw = __pyx_v_total_rw;
   __pyx_v_sv0.jd = 0;
 
-  /* "_sparse_dp_cython.pyx":315
+  /* "_sparse_dp_cython.pyx":338
  *     cdef StateVal sv0
  *     sv0.cost = 0.0;  sv0.pen = 0;  sv0.rw = total_rw;  sv0.jd = 0
  *     smap_put(layers[0], 0, sv0)             # <<<<<<<<<<<<<<
  * 
  *     # -- Tracking variables ---------------------------------------------
 */
-  (void)(__pyx_f_17_sparse_dp_cython_smap_put((__pyx_v_layers[0]), 0, __pyx_v_sv0));
+  __pyx_t_14 = __pyx_f_17_sparse_dp_cython_smap_put((__pyx_v_layers[0]), 0, __pyx_v_sv0); if (unlikely(__pyx_t_14 == ((Py_ssize_t)-2L))) __PYX_ERR(0, 338, __pyx_L1_error)
 
-  /* "_sparse_dp_cython.pyx":318
+  /* "_sparse_dp_cython.pyx":341
  * 
  *     # -- Tracking variables ---------------------------------------------
  *     cdef double best_final_cost = _C_INF             # <<<<<<<<<<<<<<
@@ -7480,7 +7901,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_best_final_cost = __pyx_v_17_sparse_dp_cython__C_INF;
 
-  /* "_sparse_dp_cython.pyx":319
+  /* "_sparse_dp_cython.pyx":342
  *     # -- Tracking variables ---------------------------------------------
  *     cdef double best_final_cost = _C_INF
  *     cdef long long best_final_pen = <long long>(1LL << 62)             # <<<<<<<<<<<<<<
@@ -7489,7 +7910,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_best_final_pen = ((PY_LONG_LONG)0x4000000000000000LL);
 
-  /* "_sparse_dp_cython.pyx":320
+  /* "_sparse_dp_cython.pyx":343
  *     cdef double best_final_cost = _C_INF
  *     cdef long long best_final_pen = <long long>(1LL << 62)
  *     cdef int best_final_time = -1             # <<<<<<<<<<<<<<
@@ -7498,7 +7919,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_best_final_time = -1;
 
-  /* "_sparse_dp_cython.pyx":321
+  /* "_sparse_dp_cython.pyx":344
  *     cdef long long best_final_pen = <long long>(1LL << 62)
  *     cdef int best_final_time = -1
  *     cdef bint timed_out = False             # <<<<<<<<<<<<<<
@@ -7507,7 +7928,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_timed_out = 0;
 
-  /* "_sparse_dp_cython.pyx":323
+  /* "_sparse_dp_cython.pyx":346
  *     cdef bint timed_out = False
  * 
  *     cdef int bp_jobs = 0             # <<<<<<<<<<<<<<
@@ -7516,7 +7937,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_bp_jobs = 0;
 
-  /* "_sparse_dp_cython.pyx":324
+  /* "_sparse_dp_cython.pyx":347
  * 
  *     cdef int bp_jobs = 0
  *     cdef double bp_cost = _C_INF             # <<<<<<<<<<<<<<
@@ -7525,7 +7946,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_bp_cost = __pyx_v_17_sparse_dp_cython__C_INF;
 
-  /* "_sparse_dp_cython.pyx":325
+  /* "_sparse_dp_cython.pyx":348
  *     cdef int bp_jobs = 0
  *     cdef double bp_cost = _C_INF
  *     cdef int bp_time = 0             # <<<<<<<<<<<<<<
@@ -7534,7 +7955,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_bp_time = 0;
 
-  /* "_sparse_dp_cython.pyx":326
+  /* "_sparse_dp_cython.pyx":349
  *     cdef double bp_cost = _C_INF
  *     cdef int bp_time = 0
  *     cdef long long bp_state = 0             # <<<<<<<<<<<<<<
@@ -7543,27 +7964,27 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   __pyx_v_bp_state = 0;
 
-  /* "_sparse_dp_cython.pyx":328
+  /* "_sparse_dp_cython.pyx":351
  *     cdef long long bp_state = 0
  * 
  *     cdef double* pprefix = <double*>prefix.data             # <<<<<<<<<<<<<<
  *     cdef bint early = (tie_break == "early")
  * 
 */
-  __pyx_t_20 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_v_prefix)); if (unlikely(__pyx_t_20 == ((void *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 328, __pyx_L1_error)
+  __pyx_t_20 = __pyx_f_5numpy_7ndarray_4data_data(((PyArrayObject *)__pyx_v_prefix)); if (unlikely(__pyx_t_20 == ((void *)NULL) && PyErr_Occurred())) __PYX_ERR(0, 351, __pyx_L1_error)
   __pyx_v_pprefix = ((double *)__pyx_t_20);
 
-  /* "_sparse_dp_cython.pyx":329
+  /* "_sparse_dp_cython.pyx":352
  * 
  *     cdef double* pprefix = <double*>prefix.data
  *     cdef bint early = (tie_break == "early")             # <<<<<<<<<<<<<<
  * 
  *     # -- Loop variables -------------------------------------------------
 */
-  __pyx_t_11 = (__Pyx_PyUnicode_Equals(__pyx_v_tie_break, __pyx_mstate_global->__pyx_n_u_early, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 329, __pyx_L1_error)
+  __pyx_t_11 = (__Pyx_PyUnicode_Equals(__pyx_v_tie_break, __pyx_mstate_global->__pyx_n_u_early, Py_EQ)); if (unlikely((__pyx_t_11 < 0))) __PYX_ERR(0, 352, __pyx_L1_error)
   __pyx_v_early = __pyx_t_11;
 
-  /* "_sparse_dp_cython.pyx":353
+  /* "_sparse_dp_cython.pyx":376
  *     #  MAIN DP LOOP
  *     # ==================================================================
  *     try:             # <<<<<<<<<<<<<<
@@ -7572,7 +7993,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
   /*try:*/ {
 
-    /* "_sparse_dp_cython.pyx":354
+    /* "_sparse_dp_cython.pyx":377
  *     # ==================================================================
  *     try:
  *         for tt in range(T + 1):             # <<<<<<<<<<<<<<
@@ -7584,7 +8005,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     for (__pyx_t_7 = 0; __pyx_t_7 < __pyx_t_18; __pyx_t_7+=1) {
       __pyx_v_tt = __pyx_t_7;
 
-      /* "_sparse_dp_cython.pyx":357
+      /* "_sparse_dp_cython.pyx":380
  * 
  *             # --- timeout ------------------------------------------------
  *             if time_limit > 0.0 and (time_module.perf_counter() - start_time) > time_limit:             # <<<<<<<<<<<<<<
@@ -7598,9 +8019,9 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         goto __pyx_L26_bool_binop_done;
       }
       __pyx_t_1 = NULL;
-      __Pyx_GetModuleGlobalName(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_time_module); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 357, __pyx_L21_error)
+      __Pyx_GetModuleGlobalName(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_time_module); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_15);
-      __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_perf_counter); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 357, __pyx_L21_error)
+      __pyx_t_4 = __Pyx_PyObject_GetAttrStr(__pyx_t_15, __pyx_mstate_global->__pyx_n_u_perf_counter); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_4);
       __Pyx_DECREF(__pyx_t_15); __pyx_t_15 = 0;
       __pyx_t_5 = 1;
@@ -7620,27 +8041,27 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_2 = __Pyx_PyObject_FastCall((PyObject*)__pyx_t_4, __pyx_callargs+__pyx_t_5, (1-__pyx_t_5) | (__pyx_t_5*__Pyx_PY_VECTORCALL_ARGUMENTS_OFFSET));
         __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
         __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 357, __pyx_L21_error)
+        if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 380, __pyx_L21_error)
         __Pyx_GOTREF(__pyx_t_2);
       }
-      __pyx_t_4 = PyFloat_FromDouble(__pyx_v_start_time); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 357, __pyx_L21_error)
+      __pyx_t_4 = PyFloat_FromDouble(__pyx_v_start_time); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_4);
-      __pyx_t_1 = PyNumber_Subtract(__pyx_t_2, __pyx_t_4); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 357, __pyx_L21_error)
+      __pyx_t_1 = PyNumber_Subtract(__pyx_t_2, __pyx_t_4); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_1);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-      __pyx_t_4 = PyFloat_FromDouble(__pyx_v_time_limit); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 357, __pyx_L21_error)
+      __pyx_t_4 = PyFloat_FromDouble(__pyx_v_time_limit); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_4);
-      __pyx_t_2 = PyObject_RichCompare(__pyx_t_1, __pyx_t_4, Py_GT); __Pyx_XGOTREF(__pyx_t_2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 357, __pyx_L21_error)
+      __pyx_t_2 = PyObject_RichCompare(__pyx_t_1, __pyx_t_4, Py_GT); __Pyx_XGOTREF(__pyx_t_2); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_DECREF(__pyx_t_1); __pyx_t_1 = 0;
       __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
-      __pyx_t_21 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely((__pyx_t_21 < 0))) __PYX_ERR(0, 357, __pyx_L21_error)
+      __pyx_t_21 = __Pyx_PyObject_IsTrue(__pyx_t_2); if (unlikely((__pyx_t_21 < 0))) __PYX_ERR(0, 380, __pyx_L21_error)
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
       __pyx_t_11 = __pyx_t_21;
       __pyx_L26_bool_binop_done:;
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":358
+        /* "_sparse_dp_cython.pyx":381
  *             # --- timeout ------------------------------------------------
  *             if time_limit > 0.0 and (time_module.perf_counter() - start_time) > time_limit:
  *                 timed_out = True             # <<<<<<<<<<<<<<
@@ -7649,7 +8070,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_timed_out = 1;
 
-        /* "_sparse_dp_cython.pyx":359
+        /* "_sparse_dp_cython.pyx":382
  *             if time_limit > 0.0 and (time_module.perf_counter() - start_time) > time_limit:
  *                 timed_out = True
  *                 break             # <<<<<<<<<<<<<<
@@ -7658,7 +8079,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         goto __pyx_L24_break;
 
-        /* "_sparse_dp_cython.pyx":357
+        /* "_sparse_dp_cython.pyx":380
  * 
  *             # --- timeout ------------------------------------------------
  *             if time_limit > 0.0 and (time_module.perf_counter() - start_time) > time_limit:             # <<<<<<<<<<<<<<
@@ -7667,7 +8088,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       }
 
-      /* "_sparse_dp_cython.pyx":361
+      /* "_sparse_dp_cython.pyx":384
  *                 break
  * 
  *             layer = layers[tt]             # <<<<<<<<<<<<<<
@@ -7676,7 +8097,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v_layer = (__pyx_v_layers[__pyx_v_tt]);
 
-      /* "_sparse_dp_cython.pyx":362
+      /* "_sparse_dp_cython.pyx":385
  * 
  *             layer = layers[tt]
  *             if layer.size == 0:             # <<<<<<<<<<<<<<
@@ -7686,7 +8107,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __pyx_t_11 = (__pyx_v_layer->size == 0);
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":363
+        /* "_sparse_dp_cython.pyx":386
  *             layer = layers[tt]
  *             if layer.size == 0:
  *                 continue             # <<<<<<<<<<<<<<
@@ -7695,7 +8116,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         goto __pyx_L23_continue;
 
-        /* "_sparse_dp_cython.pyx":362
+        /* "_sparse_dp_cython.pyx":385
  * 
  *             layer = layers[tt]
  *             if layer.size == 0:             # <<<<<<<<<<<<<<
@@ -7704,7 +8125,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       }
 
-      /* "_sparse_dp_cython.pyx":366
+      /* "_sparse_dp_cython.pyx":389
  * 
  *             # --- memory guardrail ---------------------------------------
  *             if max_states > 0 and layer.size > max_states:             # <<<<<<<<<<<<<<
@@ -7722,7 +8143,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __pyx_L30_bool_binop_done:;
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":367
+        /* "_sparse_dp_cython.pyx":390
  *             # --- memory guardrail ---------------------------------------
  *             if max_states > 0 and layer.size > max_states:
  *                 timed_out = True             # <<<<<<<<<<<<<<
@@ -7731,7 +8152,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_timed_out = 1;
 
-        /* "_sparse_dp_cython.pyx":368
+        /* "_sparse_dp_cython.pyx":391
  *             if max_states > 0 and layer.size > max_states:
  *                 timed_out = True
  *                 break             # <<<<<<<<<<<<<<
@@ -7740,7 +8161,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         goto __pyx_L24_break;
 
-        /* "_sparse_dp_cython.pyx":366
+        /* "_sparse_dp_cython.pyx":389
  * 
  *             # --- memory guardrail ---------------------------------------
  *             if max_states > 0 and layer.size > max_states:             # <<<<<<<<<<<<<<
@@ -7749,7 +8170,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       }
 
-      /* "_sparse_dp_cython.pyx":371
+      /* "_sparse_dp_cython.pyx":394
  * 
  *             # --- best-partial update ------------------------------------
  *             for pos in range(layer.capacity):             # <<<<<<<<<<<<<<
@@ -7761,7 +8182,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       for (__pyx_t_23 = 0; __pyx_t_23 < __pyx_t_22; __pyx_t_23+=1) {
         __pyx_v_pos = __pyx_t_23;
 
-        /* "_sparse_dp_cython.pyx":372
+        /* "_sparse_dp_cython.pyx":395
  *             # --- best-partial update ------------------------------------
  *             for pos in range(layer.capacity):
  *                 if layer.keys[pos] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -7771,7 +8192,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = ((__pyx_v_layer->keys[__pyx_v_pos]) == __pyx_v_17_sparse_dp_cython__EMPTY);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":373
+          /* "_sparse_dp_cython.pyx":396
  *             for pos in range(layer.capacity):
  *                 if layer.keys[pos] == _EMPTY:
  *                     continue             # <<<<<<<<<<<<<<
@@ -7780,7 +8201,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           goto __pyx_L32_continue;
 
-          /* "_sparse_dp_cython.pyx":372
+          /* "_sparse_dp_cython.pyx":395
  *             # --- best-partial update ------------------------------------
  *             for pos in range(layer.capacity):
  *                 if layer.keys[pos] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -7789,7 +8210,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         }
 
-        /* "_sparse_dp_cython.pyx":374
+        /* "_sparse_dp_cython.pyx":397
  *                 if layer.keys[pos] == _EMPTY:
  *                     continue
  *                 state = layer.keys[pos]             # <<<<<<<<<<<<<<
@@ -7798,7 +8219,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_state = (__pyx_v_layer->keys[__pyx_v_pos]);
 
-        /* "_sparse_dp_cython.pyx":375
+        /* "_sparse_dp_cython.pyx":398
  *                     continue
  *                 state = layer.keys[pos]
  *                 sv = layer.vals[pos]             # <<<<<<<<<<<<<<
@@ -7807,7 +8228,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_sv = (__pyx_v_layer->vals[__pyx_v_pos]);
 
-        /* "_sparse_dp_cython.pyx":376
+        /* "_sparse_dp_cython.pyx":399
  *                 state = layer.keys[pos]
  *                 sv = layer.vals[pos]
  *                 if sv.jd > bp_jobs or (sv.jd == bp_jobs and sv.cost < bp_cost):             # <<<<<<<<<<<<<<
@@ -7831,7 +8252,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_L36_bool_binop_done:;
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":377
+          /* "_sparse_dp_cython.pyx":400
  *                 sv = layer.vals[pos]
  *                 if sv.jd > bp_jobs or (sv.jd == bp_jobs and sv.cost < bp_cost):
  *                     bp_jobs  = sv.jd             # <<<<<<<<<<<<<<
@@ -7841,7 +8262,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_8 = __pyx_v_sv.jd;
           __pyx_v_bp_jobs = __pyx_t_8;
 
-          /* "_sparse_dp_cython.pyx":378
+          /* "_sparse_dp_cython.pyx":401
  *                 if sv.jd > bp_jobs or (sv.jd == bp_jobs and sv.cost < bp_cost):
  *                     bp_jobs  = sv.jd
  *                     bp_cost  = sv.cost             # <<<<<<<<<<<<<<
@@ -7851,7 +8272,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_6 = __pyx_v_sv.cost;
           __pyx_v_bp_cost = __pyx_t_6;
 
-          /* "_sparse_dp_cython.pyx":379
+          /* "_sparse_dp_cython.pyx":402
  *                     bp_jobs  = sv.jd
  *                     bp_cost  = sv.cost
  *                     bp_time  = tt             # <<<<<<<<<<<<<<
@@ -7860,7 +8281,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_bp_time = __pyx_v_tt;
 
-          /* "_sparse_dp_cython.pyx":380
+          /* "_sparse_dp_cython.pyx":403
  *                     bp_cost  = sv.cost
  *                     bp_time  = tt
  *                     bp_state = state             # <<<<<<<<<<<<<<
@@ -7869,7 +8290,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_bp_state = __pyx_v_state;
 
-          /* "_sparse_dp_cython.pyx":376
+          /* "_sparse_dp_cython.pyx":399
  *                 state = layer.keys[pos]
  *                 sv = layer.vals[pos]
  *                 if sv.jd > bp_jobs or (sv.jd == bp_jobs and sv.cost < bp_cost):             # <<<<<<<<<<<<<<
@@ -7880,7 +8301,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_L32_continue:;
       }
 
-      /* "_sparse_dp_cython.pyx":383
+      /* "_sparse_dp_cython.pyx":406
  * 
  *             # --- check final state --------------------------------------
  *             idx = smap_lookup(layer, final_state)             # <<<<<<<<<<<<<<
@@ -7889,7 +8310,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v_idx = __pyx_f_17_sparse_dp_cython_smap_lookup(__pyx_v_layer, __pyx_v_final_state);
 
-      /* "_sparse_dp_cython.pyx":384
+      /* "_sparse_dp_cython.pyx":407
  *             # --- check final state --------------------------------------
  *             idx = smap_lookup(layer, final_state)
  *             if idx >= 0:             # <<<<<<<<<<<<<<
@@ -7899,7 +8320,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __pyx_t_11 = (__pyx_v_idx >= 0);
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":385
+        /* "_sparse_dp_cython.pyx":408
  *             idx = smap_lookup(layer, final_state)
  *             if idx >= 0:
  *                 sv = layer.vals[idx]             # <<<<<<<<<<<<<<
@@ -7908,7 +8329,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_sv = (__pyx_v_layer->vals[__pyx_v_idx]);
 
-        /* "_sparse_dp_cython.pyx":386
+        /* "_sparse_dp_cython.pyx":409
  *             if idx >= 0:
  *                 sv = layer.vals[idx]
  *                 better = sv.cost < best_final_cost             # <<<<<<<<<<<<<<
@@ -7917,7 +8338,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_better = (__pyx_v_sv.cost < __pyx_v_best_final_cost);
 
-        /* "_sparse_dp_cython.pyx":387
+        /* "_sparse_dp_cython.pyx":410
  *                 sv = layer.vals[idx]
  *                 better = sv.cost < best_final_cost
  *                 if early and not better and fabs(sv.cost - best_final_cost) <= _EPS:             # <<<<<<<<<<<<<<
@@ -7940,7 +8361,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_L41_bool_binop_done:;
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":388
+          /* "_sparse_dp_cython.pyx":411
  *                 better = sv.cost < best_final_cost
  *                 if early and not better and fabs(sv.cost - best_final_cost) <= _EPS:
  *                     better = (sv.pen < best_final_pen or             # <<<<<<<<<<<<<<
@@ -7954,7 +8375,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
             goto __pyx_L44_bool_binop_done;
           }
 
-          /* "_sparse_dp_cython.pyx":389
+          /* "_sparse_dp_cython.pyx":412
  *                 if early and not better and fabs(sv.cost - best_final_cost) <= _EPS:
  *                     better = (sv.pen < best_final_pen or
  *                               (sv.pen == best_final_pen and tt < best_final_time))             # <<<<<<<<<<<<<<
@@ -7972,7 +8393,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_L44_bool_binop_done:;
           __pyx_v_better = __pyx_t_11;
 
-          /* "_sparse_dp_cython.pyx":387
+          /* "_sparse_dp_cython.pyx":410
  *                 sv = layer.vals[idx]
  *                 better = sv.cost < best_final_cost
  *                 if early and not better and fabs(sv.cost - best_final_cost) <= _EPS:             # <<<<<<<<<<<<<<
@@ -7981,7 +8402,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         }
 
-        /* "_sparse_dp_cython.pyx":390
+        /* "_sparse_dp_cython.pyx":413
  *                     better = (sv.pen < best_final_pen or
  *                               (sv.pen == best_final_pen and tt < best_final_time))
  *                 if better:             # <<<<<<<<<<<<<<
@@ -7990,7 +8411,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         if (__pyx_v_better) {
 
-          /* "_sparse_dp_cython.pyx":391
+          /* "_sparse_dp_cython.pyx":414
  *                               (sv.pen == best_final_pen and tt < best_final_time))
  *                 if better:
  *                     best_final_cost = sv.cost             # <<<<<<<<<<<<<<
@@ -8000,7 +8421,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_6 = __pyx_v_sv.cost;
           __pyx_v_best_final_cost = __pyx_t_6;
 
-          /* "_sparse_dp_cython.pyx":392
+          /* "_sparse_dp_cython.pyx":415
  *                 if better:
  *                     best_final_cost = sv.cost
  *                     best_final_pen  = sv.pen             # <<<<<<<<<<<<<<
@@ -8010,7 +8431,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_24 = __pyx_v_sv.pen;
           __pyx_v_best_final_pen = __pyx_t_24;
 
-          /* "_sparse_dp_cython.pyx":393
+          /* "_sparse_dp_cython.pyx":416
  *                     best_final_cost = sv.cost
  *                     best_final_pen  = sv.pen
  *                     best_final_time = tt             # <<<<<<<<<<<<<<
@@ -8019,7 +8440,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_best_final_time = __pyx_v_tt;
 
-          /* "_sparse_dp_cython.pyx":390
+          /* "_sparse_dp_cython.pyx":413
  *                     better = (sv.pen < best_final_pen or
  *                               (sv.pen == best_final_pen and tt < best_final_time))
  *                 if better:             # <<<<<<<<<<<<<<
@@ -8028,7 +8449,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         }
 
-        /* "_sparse_dp_cython.pyx":384
+        /* "_sparse_dp_cython.pyx":407
  *             # --- check final state --------------------------------------
  *             idx = smap_lookup(layer, final_state)
  *             if idx >= 0:             # <<<<<<<<<<<<<<
@@ -8037,7 +8458,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       }
 
-      /* "_sparse_dp_cython.pyx":395
+      /* "_sparse_dp_cython.pyx":418
  *                     best_final_time = tt
  * 
  *             if tt == T:             # <<<<<<<<<<<<<<
@@ -8047,7 +8468,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __pyx_t_11 = (__pyx_v_tt == __pyx_v_T);
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":396
+        /* "_sparse_dp_cython.pyx":419
  * 
  *             if tt == T:
  *                 continue             # <<<<<<<<<<<<<<
@@ -8056,7 +8477,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         goto __pyx_L23_continue;
 
-        /* "_sparse_dp_cython.pyx":395
+        /* "_sparse_dp_cython.pyx":418
  *                     best_final_time = tt
  * 
  *             if tt == T:             # <<<<<<<<<<<<<<
@@ -8065,7 +8486,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       }
 
-      /* "_sparse_dp_cython.pyx":399
+      /* "_sparse_dp_cython.pyx":422
  * 
  *             # --- transitions (merged idle + jobs, single pass) ----------
  *             nlayer    = layers[tt + 1]             # <<<<<<<<<<<<<<
@@ -8074,7 +8495,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v_nlayer = (__pyx_v_layers[(__pyx_v_tt + 1)]);
 
-      /* "_sparse_dp_cython.pyx":400
+      /* "_sparse_dp_cython.pyx":423
  *             # --- transitions (merged idle + jobs, single pass) ----------
  *             nlayer    = layers[tt + 1]
  *             remaining = T - tt             # <<<<<<<<<<<<<<
@@ -8083,7 +8504,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v_remaining = (__pyx_v_T - __pyx_v_tt);
 
-      /* "_sparse_dp_cython.pyx":401
+      /* "_sparse_dp_cython.pyx":424
  *             nlayer    = layers[tt + 1]
  *             remaining = T - tt
  *             _lb_b   = (tt // _LB_BLOCK) * _LB_BLOCK             # <<<<<<<<<<<<<<
@@ -8092,16 +8513,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v__lb_b = ((__pyx_v_tt / __pyx_v__LB_BLOCK) * __pyx_v__LB_BLOCK);
 
-      /* "_sparse_dp_cython.pyx":402
+      /* "_sparse_dp_cython.pyx":425
  *             remaining = T - tt
  *             _lb_b   = (tt // _LB_BLOCK) * _LB_BLOCK
  *             _lb_arr = <cnp.ndarray[cnp.float64_t, ndim=1]>_lb_py[_lb_b]             # <<<<<<<<<<<<<<
  *             _lb_len = <int>len(_lb_arr)
  * 
 */
-      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v__lb_b); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 402, __pyx_L21_error)
+      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v__lb_b); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 425, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_2);
-      __pyx_t_4 = __Pyx_PyDict_GetItem(__pyx_v__lb_py, __pyx_t_2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 402, __pyx_L21_error)
+      __pyx_t_4 = __Pyx_PyDict_GetItem(__pyx_v__lb_py, __pyx_t_2); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 425, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_4);
       __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
       __pyx_t_2 = __pyx_t_4;
@@ -8122,22 +8543,22 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_25 = __pyx_t_26 = __pyx_t_27 = 0;
         }
         __pyx_pybuffernd__lb_arr.diminfo[0].strides = __pyx_pybuffernd__lb_arr.rcbuffer->pybuffer.strides[0]; __pyx_pybuffernd__lb_arr.diminfo[0].shape = __pyx_pybuffernd__lb_arr.rcbuffer->pybuffer.shape[0];
-        if (unlikely((__pyx_t_8 < 0))) __PYX_ERR(0, 402, __pyx_L21_error)
+        if (unlikely((__pyx_t_8 < 0))) __PYX_ERR(0, 425, __pyx_L21_error)
       }
       __Pyx_XDECREF_SET(__pyx_v__lb_arr, ((PyArrayObject *)__pyx_t_2));
       __pyx_t_2 = 0;
 
-      /* "_sparse_dp_cython.pyx":403
+      /* "_sparse_dp_cython.pyx":426
  *             _lb_b   = (tt // _LB_BLOCK) * _LB_BLOCK
  *             _lb_arr = <cnp.ndarray[cnp.float64_t, ndim=1]>_lb_py[_lb_b]
  *             _lb_len = <int>len(_lb_arr)             # <<<<<<<<<<<<<<
  * 
  *             for pos in range(layer.capacity):
 */
-      __pyx_t_14 = PyObject_Length(((PyObject *)__pyx_v__lb_arr)); if (unlikely(__pyx_t_14 == ((Py_ssize_t)-1))) __PYX_ERR(0, 403, __pyx_L21_error)
+      __pyx_t_14 = PyObject_Length(((PyObject *)__pyx_v__lb_arr)); if (unlikely(__pyx_t_14 == ((Py_ssize_t)-1))) __PYX_ERR(0, 426, __pyx_L21_error)
       __pyx_v__lb_len = ((int)__pyx_t_14);
 
-      /* "_sparse_dp_cython.pyx":405
+      /* "_sparse_dp_cython.pyx":428
  *             _lb_len = <int>len(_lb_arr)
  * 
  *             for pos in range(layer.capacity):             # <<<<<<<<<<<<<<
@@ -8149,7 +8570,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       for (__pyx_t_23 = 0; __pyx_t_23 < __pyx_t_22; __pyx_t_23+=1) {
         __pyx_v_pos = __pyx_t_23;
 
-        /* "_sparse_dp_cython.pyx":406
+        /* "_sparse_dp_cython.pyx":429
  * 
  *             for pos in range(layer.capacity):
  *                 if layer.keys[pos] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -8159,7 +8580,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = ((__pyx_v_layer->keys[__pyx_v_pos]) == __pyx_v_17_sparse_dp_cython__EMPTY);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":407
+          /* "_sparse_dp_cython.pyx":430
  *             for pos in range(layer.capacity):
  *                 if layer.keys[pos] == _EMPTY:
  *                     continue             # <<<<<<<<<<<<<<
@@ -8168,7 +8589,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           goto __pyx_L49_continue;
 
-          /* "_sparse_dp_cython.pyx":406
+          /* "_sparse_dp_cython.pyx":429
  * 
  *             for pos in range(layer.capacity):
  *                 if layer.keys[pos] == _EMPTY:             # <<<<<<<<<<<<<<
@@ -8177,7 +8598,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         }
 
-        /* "_sparse_dp_cython.pyx":408
+        /* "_sparse_dp_cython.pyx":431
  *                 if layer.keys[pos] == _EMPTY:
  *                     continue
  *                 state = layer.keys[pos]             # <<<<<<<<<<<<<<
@@ -8186,7 +8607,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_state = (__pyx_v_layer->keys[__pyx_v_pos]);
 
-        /* "_sparse_dp_cython.pyx":409
+        /* "_sparse_dp_cython.pyx":432
  *                     continue
  *                 state = layer.keys[pos]
  *                 sv    = layer.vals[pos]             # <<<<<<<<<<<<<<
@@ -8195,7 +8616,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_sv = (__pyx_v_layer->vals[__pyx_v_pos]);
 
-        /* "_sparse_dp_cython.pyx":410
+        /* "_sparse_dp_cython.pyx":433
  *                 state = layer.keys[pos]
  *                 sv    = layer.vals[pos]
  *                 c0 = sv.cost;  p0 = sv.pen;  rw = sv.rw;  jd = sv.jd             # <<<<<<<<<<<<<<
@@ -8211,7 +8632,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_8 = __pyx_v_sv.jd;
         __pyx_v_jd = __pyx_t_8;
 
-        /* "_sparse_dp_cython.pyx":413
+        /* "_sparse_dp_cython.pyx":436
  * 
  *                 # feasibility
  *                 if rw > remaining:             # <<<<<<<<<<<<<<
@@ -8221,7 +8642,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = (__pyx_v_rw > __pyx_v_remaining);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":414
+          /* "_sparse_dp_cython.pyx":437
  *                 # feasibility
  *                 if rw > remaining:
  *                     continue             # <<<<<<<<<<<<<<
@@ -8230,7 +8651,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           goto __pyx_L49_continue;
 
-          /* "_sparse_dp_cython.pyx":413
+          /* "_sparse_dp_cython.pyx":436
  * 
  *                 # feasibility
  *                 if rw > remaining:             # <<<<<<<<<<<<<<
@@ -8239,7 +8660,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         }
 
-        /* "_sparse_dp_cython.pyx":417
+        /* "_sparse_dp_cython.pyx":440
  * 
  *                 # LB pruning (inlined)
  *                 if rw < _lb_len:             # <<<<<<<<<<<<<<
@@ -8249,7 +8670,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = (__pyx_v_rw < __pyx_v__lb_len);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":418
+          /* "_sparse_dp_cython.pyx":441
  *                 # LB pruning (inlined)
  *                 if rw < _lb_len:
  *                     lb_val = _lb_arr[rw]             # <<<<<<<<<<<<<<
@@ -8259,7 +8680,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_10 = __pyx_v_rw;
           __pyx_v_lb_val = (*__Pyx_BufPtrStrided1d(__pyx_t_5numpy_float64_t *, __pyx_pybuffernd__lb_arr.rcbuffer->pybuffer.buf, __pyx_t_10, __pyx_pybuffernd__lb_arr.diminfo[0].strides));
 
-          /* "_sparse_dp_cython.pyx":419
+          /* "_sparse_dp_cython.pyx":442
  *                 if rw < _lb_len:
  *                     lb_val = _lb_arr[rw]
  *                     if c0 + lb_val > best_final_cost:             # <<<<<<<<<<<<<<
@@ -8269,7 +8690,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_11 = ((__pyx_v_c0 + __pyx_v_lb_val) > __pyx_v_best_final_cost);
           if (__pyx_t_11) {
 
-            /* "_sparse_dp_cython.pyx":420
+            /* "_sparse_dp_cython.pyx":443
  *                     lb_val = _lb_arr[rw]
  *                     if c0 + lb_val > best_final_cost:
  *                         continue             # <<<<<<<<<<<<<<
@@ -8278,7 +8699,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             goto __pyx_L49_continue;
 
-            /* "_sparse_dp_cython.pyx":419
+            /* "_sparse_dp_cython.pyx":442
  *                 if rw < _lb_len:
  *                     lb_val = _lb_arr[rw]
  *                     if c0 + lb_val > best_final_cost:             # <<<<<<<<<<<<<<
@@ -8287,7 +8708,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           }
 
-          /* "_sparse_dp_cython.pyx":417
+          /* "_sparse_dp_cython.pyx":440
  * 
  *                 # LB pruning (inlined)
  *                 if rw < _lb_len:             # <<<<<<<<<<<<<<
@@ -8297,7 +8718,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           goto __pyx_L53;
         }
 
-        /* "_sparse_dp_cython.pyx":422
+        /* "_sparse_dp_cython.pyx":445
  *                         continue
  *                 else:
  *                     continue   # infeasible             # <<<<<<<<<<<<<<
@@ -8309,7 +8730,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         }
         __pyx_L53:;
 
-        /* "_sparse_dp_cython.pyx":425
+        /* "_sparse_dp_cython.pyx":448
  * 
  *                 # -- idle ------------------------------------------------
  *                 idx = smap_lookup(nlayer, state)             # <<<<<<<<<<<<<<
@@ -8318,7 +8739,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_idx = __pyx_f_17_sparse_dp_cython_smap_lookup(__pyx_v_nlayer, __pyx_v_state);
 
-        /* "_sparse_dp_cython.pyx":426
+        /* "_sparse_dp_cython.pyx":449
  *                 # -- idle ------------------------------------------------
  *                 idx = smap_lookup(nlayer, state)
  *                 if idx < 0:             # <<<<<<<<<<<<<<
@@ -8328,7 +8749,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = (__pyx_v_idx < 0);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":427
+          /* "_sparse_dp_cython.pyx":450
  *                 idx = smap_lookup(nlayer, state)
  *                 if idx < 0:
  *                     nsv.cost = c0;  nsv.pen = p0;  nsv.rw = rw;  nsv.jd = jd             # <<<<<<<<<<<<<<
@@ -8340,16 +8761,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_v_nsv.rw = __pyx_v_rw;
           __pyx_v_nsv.jd = __pyx_v_jd;
 
-          /* "_sparse_dp_cython.pyx":428
+          /* "_sparse_dp_cython.pyx":451
  *                 if idx < 0:
  *                     nsv.cost = c0;  nsv.pen = p0;  nsv.rw = rw;  nsv.jd = jd
  *                     smap_put(nlayer, state, nsv)             # <<<<<<<<<<<<<<
  *                     if track_schedule:
  *                         pmap_set(c_parent, (tt + 1) * state_bound + state, 0)
 */
-          (void)(__pyx_f_17_sparse_dp_cython_smap_put(__pyx_v_nlayer, __pyx_v_state, __pyx_v_nsv));
+          __pyx_t_28 = __pyx_f_17_sparse_dp_cython_smap_put(__pyx_v_nlayer, __pyx_v_state, __pyx_v_nsv); if (unlikely(__pyx_t_28 == ((Py_ssize_t)-2L))) __PYX_ERR(0, 451, __pyx_L21_error)
 
-          /* "_sparse_dp_cython.pyx":429
+          /* "_sparse_dp_cython.pyx":452
  *                     nsv.cost = c0;  nsv.pen = p0;  nsv.rw = rw;  nsv.jd = jd
  *                     smap_put(nlayer, state, nsv)
  *                     if track_schedule:             # <<<<<<<<<<<<<<
@@ -8358,16 +8779,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           if (__pyx_v_track_schedule) {
 
-            /* "_sparse_dp_cython.pyx":430
+            /* "_sparse_dp_cython.pyx":453
  *                     smap_put(nlayer, state, nsv)
  *                     if track_schedule:
  *                         pmap_set(c_parent, (tt + 1) * state_bound + state, 0)             # <<<<<<<<<<<<<<
  *                 else:
  *                     better = c0 < nlayer.vals[idx].cost
 */
-            __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, (((__pyx_v_tt + 1) * __pyx_v_state_bound) + __pyx_v_state), 0);
+            __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, (((__pyx_v_tt + 1) * __pyx_v_state_bound) + __pyx_v_state), 0); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 453, __pyx_L21_error)
 
-            /* "_sparse_dp_cython.pyx":429
+            /* "_sparse_dp_cython.pyx":452
  *                     nsv.cost = c0;  nsv.pen = p0;  nsv.rw = rw;  nsv.jd = jd
  *                     smap_put(nlayer, state, nsv)
  *                     if track_schedule:             # <<<<<<<<<<<<<<
@@ -8376,7 +8797,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           }
 
-          /* "_sparse_dp_cython.pyx":426
+          /* "_sparse_dp_cython.pyx":449
  *                 # -- idle ------------------------------------------------
  *                 idx = smap_lookup(nlayer, state)
  *                 if idx < 0:             # <<<<<<<<<<<<<<
@@ -8386,7 +8807,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           goto __pyx_L55;
         }
 
-        /* "_sparse_dp_cython.pyx":432
+        /* "_sparse_dp_cython.pyx":455
  *                         pmap_set(c_parent, (tt + 1) * state_bound + state, 0)
  *                 else:
  *                     better = c0 < nlayer.vals[idx].cost             # <<<<<<<<<<<<<<
@@ -8396,7 +8817,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         /*else*/ {
           __pyx_v_better = (__pyx_v_c0 < (__pyx_v_nlayer->vals[__pyx_v_idx]).cost);
 
-          /* "_sparse_dp_cython.pyx":433
+          /* "_sparse_dp_cython.pyx":456
  *                 else:
  *                     better = c0 < nlayer.vals[idx].cost
  *                     if early and not better and fabs(c0 - nlayer.vals[idx].cost) <= _EPS:             # <<<<<<<<<<<<<<
@@ -8419,7 +8840,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_L58_bool_binop_done:;
           if (__pyx_t_11) {
 
-            /* "_sparse_dp_cython.pyx":434
+            /* "_sparse_dp_cython.pyx":457
  *                     better = c0 < nlayer.vals[idx].cost
  *                     if early and not better and fabs(c0 - nlayer.vals[idx].cost) <= _EPS:
  *                         better = p0 < nlayer.vals[idx].pen             # <<<<<<<<<<<<<<
@@ -8428,7 +8849,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             __pyx_v_better = (__pyx_v_p0 < (__pyx_v_nlayer->vals[__pyx_v_idx]).pen);
 
-            /* "_sparse_dp_cython.pyx":433
+            /* "_sparse_dp_cython.pyx":456
  *                 else:
  *                     better = c0 < nlayer.vals[idx].cost
  *                     if early and not better and fabs(c0 - nlayer.vals[idx].cost) <= _EPS:             # <<<<<<<<<<<<<<
@@ -8437,7 +8858,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           }
 
-          /* "_sparse_dp_cython.pyx":435
+          /* "_sparse_dp_cython.pyx":458
  *                     if early and not better and fabs(c0 - nlayer.vals[idx].cost) <= _EPS:
  *                         better = p0 < nlayer.vals[idx].pen
  *                     if better:             # <<<<<<<<<<<<<<
@@ -8446,7 +8867,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           if (__pyx_v_better) {
 
-            /* "_sparse_dp_cython.pyx":436
+            /* "_sparse_dp_cython.pyx":459
  *                         better = p0 < nlayer.vals[idx].pen
  *                     if better:
  *                         nlayer.vals[idx].cost = c0             # <<<<<<<<<<<<<<
@@ -8455,7 +8876,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             (__pyx_v_nlayer->vals[__pyx_v_idx]).cost = __pyx_v_c0;
 
-            /* "_sparse_dp_cython.pyx":437
+            /* "_sparse_dp_cython.pyx":460
  *                     if better:
  *                         nlayer.vals[idx].cost = c0
  *                         nlayer.vals[idx].pen  = p0             # <<<<<<<<<<<<<<
@@ -8464,7 +8885,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             (__pyx_v_nlayer->vals[__pyx_v_idx]).pen = __pyx_v_p0;
 
-            /* "_sparse_dp_cython.pyx":438
+            /* "_sparse_dp_cython.pyx":461
  *                         nlayer.vals[idx].cost = c0
  *                         nlayer.vals[idx].pen  = p0
  *                         nlayer.vals[idx].rw   = rw             # <<<<<<<<<<<<<<
@@ -8473,7 +8894,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             (__pyx_v_nlayer->vals[__pyx_v_idx]).rw = __pyx_v_rw;
 
-            /* "_sparse_dp_cython.pyx":439
+            /* "_sparse_dp_cython.pyx":462
  *                         nlayer.vals[idx].pen  = p0
  *                         nlayer.vals[idx].rw   = rw
  *                         nlayer.vals[idx].jd   = jd             # <<<<<<<<<<<<<<
@@ -8482,7 +8903,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             (__pyx_v_nlayer->vals[__pyx_v_idx]).jd = __pyx_v_jd;
 
-            /* "_sparse_dp_cython.pyx":440
+            /* "_sparse_dp_cython.pyx":463
  *                         nlayer.vals[idx].rw   = rw
  *                         nlayer.vals[idx].jd   = jd
  *                         if track_schedule:             # <<<<<<<<<<<<<<
@@ -8491,16 +8912,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             if (__pyx_v_track_schedule) {
 
-              /* "_sparse_dp_cython.pyx":441
+              /* "_sparse_dp_cython.pyx":464
  *                         nlayer.vals[idx].jd   = jd
  *                         if track_schedule:
  *                             pmap_set(c_parent, (tt + 1) * state_bound + state, 0)             # <<<<<<<<<<<<<<
  * 
  *                 # -- jobs (inline decode) --------------------------------
 */
-              __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, (((__pyx_v_tt + 1) * __pyx_v_state_bound) + __pyx_v_state), 0);
+              __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, (((__pyx_v_tt + 1) * __pyx_v_state_bound) + __pyx_v_state), 0); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 464, __pyx_L21_error)
 
-              /* "_sparse_dp_cython.pyx":440
+              /* "_sparse_dp_cython.pyx":463
  *                         nlayer.vals[idx].rw   = rw
  *                         nlayer.vals[idx].jd   = jd
  *                         if track_schedule:             # <<<<<<<<<<<<<<
@@ -8509,7 +8930,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             }
 
-            /* "_sparse_dp_cython.pyx":435
+            /* "_sparse_dp_cython.pyx":458
  *                     if early and not better and fabs(c0 - nlayer.vals[idx].cost) <= _EPS:
  *                         better = p0 < nlayer.vals[idx].pen
  *                     if better:             # <<<<<<<<<<<<<<
@@ -8520,7 +8941,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         }
         __pyx_L55:;
 
-        /* "_sparse_dp_cython.pyx":444
+        /* "_sparse_dp_cython.pyx":467
  * 
  *                 # -- jobs (inline decode) --------------------------------
  *                 x = state             # <<<<<<<<<<<<<<
@@ -8529,7 +8950,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_v_x = __pyx_v_state;
 
-        /* "_sparse_dp_cython.pyx":445
+        /* "_sparse_dp_cython.pyx":468
  *                 # -- jobs (inline decode) --------------------------------
  *                 x = state
  *                 for i in range(K):             # <<<<<<<<<<<<<<
@@ -8541,7 +8962,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         for (__pyx_t_19 = 0; __pyx_t_19 < __pyx_t_9; __pyx_t_19+=1) {
           __pyx_v_i = __pyx_t_19;
 
-          /* "_sparse_dp_cython.pyx":446
+          /* "_sparse_dp_cython.pyx":469
  *                 x = state
  *                 for i in range(K):
  *                     ui = <int>(x % c_rad[i])             # <<<<<<<<<<<<<<
@@ -8550,7 +8971,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_ui = ((int)(__pyx_v_x % (__pyx_v_c_rad[__pyx_v_i])));
 
-          /* "_sparse_dp_cython.pyx":447
+          /* "_sparse_dp_cython.pyx":470
  *                 for i in range(K):
  *                     ui = <int>(x % c_rad[i])
  *                     x  = x // c_rad[i]             # <<<<<<<<<<<<<<
@@ -8559,7 +8980,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_x = (__pyx_v_x / (__pyx_v_c_rad[__pyx_v_i]));
 
-          /* "_sparse_dp_cython.pyx":449
+          /* "_sparse_dp_cython.pyx":472
  *                     x  = x // c_rad[i]
  * 
  *                     if ui >= c_tot[i]:             # <<<<<<<<<<<<<<
@@ -8569,7 +8990,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_11 = (__pyx_v_ui >= (__pyx_v_c_tot[__pyx_v_i]));
           if (__pyx_t_11) {
 
-            /* "_sparse_dp_cython.pyx":450
+            /* "_sparse_dp_cython.pyx":473
  * 
  *                     if ui >= c_tot[i]:
  *                         continue             # <<<<<<<<<<<<<<
@@ -8578,7 +8999,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             goto __pyx_L63_continue;
 
-            /* "_sparse_dp_cython.pyx":449
+            /* "_sparse_dp_cython.pyx":472
  *                     x  = x // c_rad[i]
  * 
  *                     if ui >= c_tot[i]:             # <<<<<<<<<<<<<<
@@ -8587,7 +9008,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           }
 
-          /* "_sparse_dp_cython.pyx":451
+          /* "_sparse_dp_cython.pyx":474
  *                     if ui >= c_tot[i]:
  *                         continue
  *                     L   = c_len[i]             # <<<<<<<<<<<<<<
@@ -8596,7 +9017,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_L = (__pyx_v_c_len[__pyx_v_i]);
 
-          /* "_sparse_dp_cython.pyx":452
+          /* "_sparse_dp_cython.pyx":475
  *                         continue
  *                     L   = c_len[i]
  *                     end = tt + L             # <<<<<<<<<<<<<<
@@ -8605,7 +9026,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_end = (__pyx_v_tt + __pyx_v_L);
 
-          /* "_sparse_dp_cython.pyx":453
+          /* "_sparse_dp_cython.pyx":476
  *                     L   = c_len[i]
  *                     end = tt + L
  *                     if end > T:             # <<<<<<<<<<<<<<
@@ -8615,7 +9036,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_11 = (__pyx_v_end > __pyx_v_T);
           if (__pyx_t_11) {
 
-            /* "_sparse_dp_cython.pyx":454
+            /* "_sparse_dp_cython.pyx":477
  *                     end = tt + L
  *                     if end > T:
  *                         continue             # <<<<<<<<<<<<<<
@@ -8624,7 +9045,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             goto __pyx_L63_continue;
 
-            /* "_sparse_dp_cython.pyx":453
+            /* "_sparse_dp_cython.pyx":476
  *                     L   = c_len[i]
  *                     end = tt + L
  *                     if end > T:             # <<<<<<<<<<<<<<
@@ -8633,7 +9054,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           }
 
-          /* "_sparse_dp_cython.pyx":456
+          /* "_sparse_dp_cython.pyx":479
  *                         continue
  * 
  *                     ns  = state + c_inc[i]             # <<<<<<<<<<<<<<
@@ -8642,7 +9063,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_ns = (__pyx_v_state + (__pyx_v_c_inc[__pyx_v_i]));
 
-          /* "_sparse_dp_cython.pyx":457
+          /* "_sparse_dp_cython.pyx":480
  * 
  *                     ns  = state + c_inc[i]
  *                     nrw = rw - L             # <<<<<<<<<<<<<<
@@ -8651,7 +9072,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_nrw = (__pyx_v_rw - __pyx_v_L);
 
-          /* "_sparse_dp_cython.pyx":458
+          /* "_sparse_dp_cython.pyx":481
  *                     ns  = state + c_inc[i]
  *                     nrw = rw - L
  *                     njd = jd + 1             # <<<<<<<<<<<<<<
@@ -8660,7 +9081,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_njd = (__pyx_v_jd + 1);
 
-          /* "_sparse_dp_cython.pyx":459
+          /* "_sparse_dp_cython.pyx":482
  *                     nrw = rw - L
  *                     njd = jd + 1
  *                     cc  = c0 + (pprefix[end] - pprefix[tt])             # <<<<<<<<<<<<<<
@@ -8669,7 +9090,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_cc = (__pyx_v_c0 + ((__pyx_v_pprefix[__pyx_v_end]) - (__pyx_v_pprefix[__pyx_v_tt])));
 
-          /* "_sparse_dp_cython.pyx":460
+          /* "_sparse_dp_cython.pyx":483
  *                     njd = jd + 1
  *                     cc  = c0 + (pprefix[end] - pprefix[tt])
  *                     cp  = p0 + tt if early else p0             # <<<<<<<<<<<<<<
@@ -8683,7 +9104,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           }
           __pyx_v_cp = __pyx_t_24;
 
-          /* "_sparse_dp_cython.pyx":462
+          /* "_sparse_dp_cython.pyx":485
  *                     cp  = p0 + tt if early else p0
  * 
  *                     tlayer = layers[end]             # <<<<<<<<<<<<<<
@@ -8692,7 +9113,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_tlayer = (__pyx_v_layers[__pyx_v_end]);
 
-          /* "_sparse_dp_cython.pyx":463
+          /* "_sparse_dp_cython.pyx":486
  * 
  *                     tlayer = layers[end]
  *                     idx = smap_lookup(tlayer, ns)             # <<<<<<<<<<<<<<
@@ -8701,7 +9122,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_v_idx = __pyx_f_17_sparse_dp_cython_smap_lookup(__pyx_v_tlayer, __pyx_v_ns);
 
-          /* "_sparse_dp_cython.pyx":464
+          /* "_sparse_dp_cython.pyx":487
  *                     tlayer = layers[end]
  *                     idx = smap_lookup(tlayer, ns)
  *                     if idx < 0:             # <<<<<<<<<<<<<<
@@ -8711,7 +9132,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_11 = (__pyx_v_idx < 0);
           if (__pyx_t_11) {
 
-            /* "_sparse_dp_cython.pyx":465
+            /* "_sparse_dp_cython.pyx":488
  *                     idx = smap_lookup(tlayer, ns)
  *                     if idx < 0:
  *                         nsv.cost = cc;  nsv.pen = cp             # <<<<<<<<<<<<<<
@@ -8721,7 +9142,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
             __pyx_v_nsv.cost = __pyx_v_cc;
             __pyx_v_nsv.pen = __pyx_v_cp;
 
-            /* "_sparse_dp_cython.pyx":466
+            /* "_sparse_dp_cython.pyx":489
  *                     if idx < 0:
  *                         nsv.cost = cc;  nsv.pen = cp
  *                         nsv.rw = nrw;   nsv.jd  = njd             # <<<<<<<<<<<<<<
@@ -8731,16 +9152,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
             __pyx_v_nsv.rw = __pyx_v_nrw;
             __pyx_v_nsv.jd = __pyx_v_njd;
 
-            /* "_sparse_dp_cython.pyx":467
+            /* "_sparse_dp_cython.pyx":490
  *                         nsv.cost = cc;  nsv.pen = cp
  *                         nsv.rw = nrw;   nsv.jd  = njd
  *                         smap_put(tlayer, ns, nsv)             # <<<<<<<<<<<<<<
  *                         if track_schedule:
  *                             pmap_set(c_parent, end * state_bound + ns, L)
 */
-            (void)(__pyx_f_17_sparse_dp_cython_smap_put(__pyx_v_tlayer, __pyx_v_ns, __pyx_v_nsv));
+            __pyx_t_28 = __pyx_f_17_sparse_dp_cython_smap_put(__pyx_v_tlayer, __pyx_v_ns, __pyx_v_nsv); if (unlikely(__pyx_t_28 == ((Py_ssize_t)-2L))) __PYX_ERR(0, 490, __pyx_L21_error)
 
-            /* "_sparse_dp_cython.pyx":468
+            /* "_sparse_dp_cython.pyx":491
  *                         nsv.rw = nrw;   nsv.jd  = njd
  *                         smap_put(tlayer, ns, nsv)
  *                         if track_schedule:             # <<<<<<<<<<<<<<
@@ -8749,16 +9170,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             if (__pyx_v_track_schedule) {
 
-              /* "_sparse_dp_cython.pyx":469
+              /* "_sparse_dp_cython.pyx":492
  *                         smap_put(tlayer, ns, nsv)
  *                         if track_schedule:
  *                             pmap_set(c_parent, end * state_bound + ns, L)             # <<<<<<<<<<<<<<
  *                     else:
  *                         better = cc < tlayer.vals[idx].cost
 */
-              __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, ((__pyx_v_end * __pyx_v_state_bound) + __pyx_v_ns), __pyx_v_L);
+              __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, ((__pyx_v_end * __pyx_v_state_bound) + __pyx_v_ns), __pyx_v_L); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 492, __pyx_L21_error)
 
-              /* "_sparse_dp_cython.pyx":468
+              /* "_sparse_dp_cython.pyx":491
  *                         nsv.rw = nrw;   nsv.jd  = njd
  *                         smap_put(tlayer, ns, nsv)
  *                         if track_schedule:             # <<<<<<<<<<<<<<
@@ -8767,7 +9188,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             }
 
-            /* "_sparse_dp_cython.pyx":464
+            /* "_sparse_dp_cython.pyx":487
  *                     tlayer = layers[end]
  *                     idx = smap_lookup(tlayer, ns)
  *                     if idx < 0:             # <<<<<<<<<<<<<<
@@ -8777,7 +9198,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
             goto __pyx_L67;
           }
 
-          /* "_sparse_dp_cython.pyx":471
+          /* "_sparse_dp_cython.pyx":494
  *                             pmap_set(c_parent, end * state_bound + ns, L)
  *                     else:
  *                         better = cc < tlayer.vals[idx].cost             # <<<<<<<<<<<<<<
@@ -8787,7 +9208,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           /*else*/ {
             __pyx_v_better = (__pyx_v_cc < (__pyx_v_tlayer->vals[__pyx_v_idx]).cost);
 
-            /* "_sparse_dp_cython.pyx":472
+            /* "_sparse_dp_cython.pyx":495
  *                     else:
  *                         better = cc < tlayer.vals[idx].cost
  *                         if early and not better and fabs(cc - tlayer.vals[idx].cost) <= _EPS:             # <<<<<<<<<<<<<<
@@ -8810,7 +9231,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
             __pyx_L70_bool_binop_done:;
             if (__pyx_t_11) {
 
-              /* "_sparse_dp_cython.pyx":473
+              /* "_sparse_dp_cython.pyx":496
  *                         better = cc < tlayer.vals[idx].cost
  *                         if early and not better and fabs(cc - tlayer.vals[idx].cost) <= _EPS:
  *                             better = cp < tlayer.vals[idx].pen             # <<<<<<<<<<<<<<
@@ -8819,7 +9240,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               __pyx_v_better = (__pyx_v_cp < (__pyx_v_tlayer->vals[__pyx_v_idx]).pen);
 
-              /* "_sparse_dp_cython.pyx":472
+              /* "_sparse_dp_cython.pyx":495
  *                     else:
  *                         better = cc < tlayer.vals[idx].cost
  *                         if early and not better and fabs(cc - tlayer.vals[idx].cost) <= _EPS:             # <<<<<<<<<<<<<<
@@ -8828,7 +9249,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             }
 
-            /* "_sparse_dp_cython.pyx":474
+            /* "_sparse_dp_cython.pyx":497
  *                         if early and not better and fabs(cc - tlayer.vals[idx].cost) <= _EPS:
  *                             better = cp < tlayer.vals[idx].pen
  *                         if better:             # <<<<<<<<<<<<<<
@@ -8837,7 +9258,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             if (__pyx_v_better) {
 
-              /* "_sparse_dp_cython.pyx":475
+              /* "_sparse_dp_cython.pyx":498
  *                             better = cp < tlayer.vals[idx].pen
  *                         if better:
  *                             tlayer.vals[idx].cost = cc             # <<<<<<<<<<<<<<
@@ -8846,7 +9267,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               (__pyx_v_tlayer->vals[__pyx_v_idx]).cost = __pyx_v_cc;
 
-              /* "_sparse_dp_cython.pyx":476
+              /* "_sparse_dp_cython.pyx":499
  *                         if better:
  *                             tlayer.vals[idx].cost = cc
  *                             tlayer.vals[idx].pen  = cp             # <<<<<<<<<<<<<<
@@ -8855,7 +9276,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               (__pyx_v_tlayer->vals[__pyx_v_idx]).pen = __pyx_v_cp;
 
-              /* "_sparse_dp_cython.pyx":477
+              /* "_sparse_dp_cython.pyx":500
  *                             tlayer.vals[idx].cost = cc
  *                             tlayer.vals[idx].pen  = cp
  *                             tlayer.vals[idx].rw   = nrw             # <<<<<<<<<<<<<<
@@ -8864,7 +9285,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               (__pyx_v_tlayer->vals[__pyx_v_idx]).rw = __pyx_v_nrw;
 
-              /* "_sparse_dp_cython.pyx":478
+              /* "_sparse_dp_cython.pyx":501
  *                             tlayer.vals[idx].pen  = cp
  *                             tlayer.vals[idx].rw   = nrw
  *                             tlayer.vals[idx].jd   = njd             # <<<<<<<<<<<<<<
@@ -8873,7 +9294,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               (__pyx_v_tlayer->vals[__pyx_v_idx]).jd = __pyx_v_njd;
 
-              /* "_sparse_dp_cython.pyx":479
+              /* "_sparse_dp_cython.pyx":502
  *                             tlayer.vals[idx].rw   = nrw
  *                             tlayer.vals[idx].jd   = njd
  *                             if track_schedule:             # <<<<<<<<<<<<<<
@@ -8882,16 +9303,16 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               if (__pyx_v_track_schedule) {
 
-                /* "_sparse_dp_cython.pyx":480
+                /* "_sparse_dp_cython.pyx":503
  *                             tlayer.vals[idx].jd   = njd
  *                             if track_schedule:
  *                                 pmap_set(c_parent, end * state_bound + ns, L)             # <<<<<<<<<<<<<<
  * 
  *             # -- free old layer (destroy to actually release memory) -----
 */
-                __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, ((__pyx_v_end * __pyx_v_state_bound) + __pyx_v_ns), __pyx_v_L);
+                __pyx_f_17_sparse_dp_cython_pmap_set(__pyx_v_c_parent, ((__pyx_v_end * __pyx_v_state_bound) + __pyx_v_ns), __pyx_v_L); if (unlikely(PyErr_Occurred())) __PYX_ERR(0, 503, __pyx_L21_error)
 
-                /* "_sparse_dp_cython.pyx":479
+                /* "_sparse_dp_cython.pyx":502
  *                             tlayer.vals[idx].rw   = nrw
  *                             tlayer.vals[idx].jd   = njd
  *                             if track_schedule:             # <<<<<<<<<<<<<<
@@ -8900,7 +9321,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
               }
 
-              /* "_sparse_dp_cython.pyx":474
+              /* "_sparse_dp_cython.pyx":497
  *                         if early and not better and fabs(cc - tlayer.vals[idx].cost) <= _EPS:
  *                             better = cp < tlayer.vals[idx].pen
  *                         if better:             # <<<<<<<<<<<<<<
@@ -8915,7 +9336,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_L49_continue:;
       }
 
-      /* "_sparse_dp_cython.pyx":483
+      /* "_sparse_dp_cython.pyx":506
  * 
  *             # -- free old layer (destroy to actually release memory) -----
  *             freed_t = tt - max_job_len             # <<<<<<<<<<<<<<
@@ -8924,7 +9345,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       __pyx_v_freed_t = (__pyx_v_tt - __pyx_v_max_job_len);
 
-      /* "_sparse_dp_cython.pyx":484
+      /* "_sparse_dp_cython.pyx":507
  *             # -- free old layer (destroy to actually release memory) -----
  *             freed_t = tt - max_job_len
  *             if freed_t >= 0 and layers[freed_t] != NULL:             # <<<<<<<<<<<<<<
@@ -8942,7 +9363,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __pyx_L76_bool_binop_done:;
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":485
+        /* "_sparse_dp_cython.pyx":508
  *             freed_t = tt - max_job_len
  *             if freed_t >= 0 and layers[freed_t] != NULL:
  *                 smap_destroy(layers[freed_t])             # <<<<<<<<<<<<<<
@@ -8951,7 +9372,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         __pyx_f_17_sparse_dp_cython_smap_destroy((__pyx_v_layers[__pyx_v_freed_t]));
 
-        /* "_sparse_dp_cython.pyx":486
+        /* "_sparse_dp_cython.pyx":509
  *             if freed_t >= 0 and layers[freed_t] != NULL:
  *                 smap_destroy(layers[freed_t])
  *                 layers[freed_t] = NULL             # <<<<<<<<<<<<<<
@@ -8960,7 +9381,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         (__pyx_v_layers[__pyx_v_freed_t]) = NULL;
 
-        /* "_sparse_dp_cython.pyx":484
+        /* "_sparse_dp_cython.pyx":507
  *             # -- free old layer (destroy to actually release memory) -----
  *             freed_t = tt - max_job_len
  *             if freed_t >= 0 and layers[freed_t] != NULL:             # <<<<<<<<<<<<<<
@@ -8972,7 +9393,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     }
     __pyx_L24_break:;
 
-    /* "_sparse_dp_cython.pyx":491
+    /* "_sparse_dp_cython.pyx":514
  *         #  Build return values
  *         # ==============================================================
  *         ret_cost = best_final_cost             # <<<<<<<<<<<<<<
@@ -8981,7 +9402,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     __pyx_v_ret_cost = __pyx_v_best_final_cost;
 
-    /* "_sparse_dp_cython.pyx":492
+    /* "_sparse_dp_cython.pyx":515
  *         # ==============================================================
  *         ret_cost = best_final_cost
  *         if ret_cost >= _C_INF:             # <<<<<<<<<<<<<<
@@ -8991,17 +9412,17 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_t_11 = (__pyx_v_ret_cost >= __pyx_v_17_sparse_dp_cython__C_INF);
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":493
+      /* "_sparse_dp_cython.pyx":516
  *         ret_cost = best_final_cost
  *         if ret_cost >= _C_INF:
  *             ret_cost = float("inf")             # <<<<<<<<<<<<<<
  * 
  *         py_parent = {}
 */
-      __pyx_t_6 = __Pyx_PyUnicode_AsDouble(__pyx_mstate_global->__pyx_n_u_inf); if (unlikely(__PYX_CHECK_FLOAT_EXCEPTION(__pyx_t_6, ((double)((double)-1))) && PyErr_Occurred())) __PYX_ERR(0, 493, __pyx_L21_error)
+      __pyx_t_6 = __Pyx_PyUnicode_AsDouble(__pyx_mstate_global->__pyx_n_u_inf); if (unlikely(__PYX_CHECK_FLOAT_EXCEPTION(__pyx_t_6, ((double)((double)-1))) && PyErr_Occurred())) __PYX_ERR(0, 516, __pyx_L21_error)
       __pyx_v_ret_cost = __pyx_t_6;
 
-      /* "_sparse_dp_cython.pyx":492
+      /* "_sparse_dp_cython.pyx":515
  *         # ==============================================================
  *         ret_cost = best_final_cost
  *         if ret_cost >= _C_INF:             # <<<<<<<<<<<<<<
@@ -9010,19 +9431,19 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     }
 
-    /* "_sparse_dp_cython.pyx":495
+    /* "_sparse_dp_cython.pyx":518
  *             ret_cost = float("inf")
  * 
  *         py_parent = {}             # <<<<<<<<<<<<<<
  *         if track_schedule and c_parent != NULL:
  *             py_parent = pmap_to_pydict(c_parent)
 */
-    __pyx_t_2 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 495, __pyx_L21_error)
+    __pyx_t_2 = __Pyx_PyDict_NewPresized(0); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 518, __pyx_L21_error)
     __Pyx_GOTREF(__pyx_t_2);
     __pyx_v_py_parent = ((PyObject*)__pyx_t_2);
     __pyx_t_2 = 0;
 
-    /* "_sparse_dp_cython.pyx":496
+    /* "_sparse_dp_cython.pyx":519
  * 
  *         py_parent = {}
  *         if track_schedule and c_parent != NULL:             # <<<<<<<<<<<<<<
@@ -9039,19 +9460,19 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_L80_bool_binop_done:;
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":497
+      /* "_sparse_dp_cython.pyx":520
  *         py_parent = {}
  *         if track_schedule and c_parent != NULL:
  *             py_parent = pmap_to_pydict(c_parent)             # <<<<<<<<<<<<<<
  * 
  *         best_partial = None
 */
-      __pyx_t_2 = __pyx_f_17_sparse_dp_cython_pmap_to_pydict(__pyx_v_c_parent); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 497, __pyx_L21_error)
+      __pyx_t_2 = __pyx_f_17_sparse_dp_cython_pmap_to_pydict(__pyx_v_c_parent); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 520, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_2);
       __Pyx_DECREF_SET(__pyx_v_py_parent, ((PyObject*)__pyx_t_2));
       __pyx_t_2 = 0;
 
-      /* "_sparse_dp_cython.pyx":496
+      /* "_sparse_dp_cython.pyx":519
  * 
  *         py_parent = {}
  *         if track_schedule and c_parent != NULL:             # <<<<<<<<<<<<<<
@@ -9060,7 +9481,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     }
 
-    /* "_sparse_dp_cython.pyx":499
+    /* "_sparse_dp_cython.pyx":522
  *             py_parent = pmap_to_pydict(c_parent)
  * 
  *         best_partial = None             # <<<<<<<<<<<<<<
@@ -9070,7 +9491,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __Pyx_INCREF(Py_None);
     __pyx_v_best_partial = Py_None;
 
-    /* "_sparse_dp_cython.pyx":500
+    /* "_sparse_dp_cython.pyx":523
  * 
  *         best_partial = None
  *         if timed_out and best_final_time < 0 and bp_jobs > 0:             # <<<<<<<<<<<<<<
@@ -9093,34 +9514,34 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     __pyx_L83_bool_binop_done:;
     if (__pyx_t_11) {
 
-      /* "_sparse_dp_cython.pyx":501
+      /* "_sparse_dp_cython.pyx":524
  *         best_partial = None
  *         if timed_out and best_final_time < 0 and bp_jobs > 0:
  *             best_partial = (bp_time, bp_state, bp_cost)             # <<<<<<<<<<<<<<
  * 
  *         return ret_cost, best_final_time, py_parent, timed_out, best_partial
 */
-      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_bp_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 501, __pyx_L21_error)
+      __pyx_t_2 = __Pyx_PyLong_From_int(__pyx_v_bp_time); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 524, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_2);
-      __pyx_t_4 = __Pyx_PyLong_From_PY_LONG_LONG(__pyx_v_bp_state); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 501, __pyx_L21_error)
+      __pyx_t_4 = __Pyx_PyLong_From_PY_LONG_LONG(__pyx_v_bp_state); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 524, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_4);
-      __pyx_t_1 = PyFloat_FromDouble(__pyx_v_bp_cost); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 501, __pyx_L21_error)
+      __pyx_t_1 = PyFloat_FromDouble(__pyx_v_bp_cost); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 524, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_1);
-      __pyx_t_15 = PyTuple_New(3); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 501, __pyx_L21_error)
+      __pyx_t_15 = PyTuple_New(3); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 524, __pyx_L21_error)
       __Pyx_GOTREF(__pyx_t_15);
       __Pyx_GIVEREF(__pyx_t_2);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_15, 0, __pyx_t_2) != (0)) __PYX_ERR(0, 501, __pyx_L21_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_15, 0, __pyx_t_2) != (0)) __PYX_ERR(0, 524, __pyx_L21_error);
       __Pyx_GIVEREF(__pyx_t_4);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_15, 1, __pyx_t_4) != (0)) __PYX_ERR(0, 501, __pyx_L21_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_15, 1, __pyx_t_4) != (0)) __PYX_ERR(0, 524, __pyx_L21_error);
       __Pyx_GIVEREF(__pyx_t_1);
-      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_15, 2, __pyx_t_1) != (0)) __PYX_ERR(0, 501, __pyx_L21_error);
+      if (__Pyx_PyTuple_SET_ITEM(__pyx_t_15, 2, __pyx_t_1) != (0)) __PYX_ERR(0, 524, __pyx_L21_error);
       __pyx_t_2 = 0;
       __pyx_t_4 = 0;
       __pyx_t_1 = 0;
       __Pyx_DECREF_SET(__pyx_v_best_partial, __pyx_t_15);
       __pyx_t_15 = 0;
 
-      /* "_sparse_dp_cython.pyx":500
+      /* "_sparse_dp_cython.pyx":523
  * 
  *         best_partial = None
  *         if timed_out and best_final_time < 0 and bp_jobs > 0:             # <<<<<<<<<<<<<<
@@ -9129,7 +9550,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
     }
 
-    /* "_sparse_dp_cython.pyx":503
+    /* "_sparse_dp_cython.pyx":526
  *             best_partial = (bp_time, bp_state, bp_cost)
  * 
  *         return ret_cost, best_final_time, py_parent, timed_out, best_partial             # <<<<<<<<<<<<<<
@@ -9137,26 +9558,26 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
  *     finally:
 */
     __Pyx_XDECREF(__pyx_r);
-    __pyx_t_15 = PyFloat_FromDouble(__pyx_v_ret_cost); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 503, __pyx_L21_error)
+    __pyx_t_15 = PyFloat_FromDouble(__pyx_v_ret_cost); if (unlikely(!__pyx_t_15)) __PYX_ERR(0, 526, __pyx_L21_error)
     __Pyx_GOTREF(__pyx_t_15);
-    __pyx_t_1 = __Pyx_PyLong_From_int(__pyx_v_best_final_time); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 503, __pyx_L21_error)
+    __pyx_t_1 = __Pyx_PyLong_From_int(__pyx_v_best_final_time); if (unlikely(!__pyx_t_1)) __PYX_ERR(0, 526, __pyx_L21_error)
     __Pyx_GOTREF(__pyx_t_1);
-    __pyx_t_4 = __Pyx_PyBool_FromLong(__pyx_v_timed_out); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 503, __pyx_L21_error)
+    __pyx_t_4 = __Pyx_PyBool_FromLong(__pyx_v_timed_out); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 526, __pyx_L21_error)
     __Pyx_GOTREF(__pyx_t_4);
-    __pyx_t_2 = PyTuple_New(5); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 503, __pyx_L21_error)
+    __pyx_t_2 = PyTuple_New(5); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 526, __pyx_L21_error)
     __Pyx_GOTREF(__pyx_t_2);
     __Pyx_GIVEREF(__pyx_t_15);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_15) != (0)) __PYX_ERR(0, 503, __pyx_L21_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 0, __pyx_t_15) != (0)) __PYX_ERR(0, 526, __pyx_L21_error);
     __Pyx_GIVEREF(__pyx_t_1);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, __pyx_t_1) != (0)) __PYX_ERR(0, 503, __pyx_L21_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 1, __pyx_t_1) != (0)) __PYX_ERR(0, 526, __pyx_L21_error);
     __Pyx_INCREF(__pyx_v_py_parent);
     __Pyx_GIVEREF(__pyx_v_py_parent);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 2, __pyx_v_py_parent) != (0)) __PYX_ERR(0, 503, __pyx_L21_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 2, __pyx_v_py_parent) != (0)) __PYX_ERR(0, 526, __pyx_L21_error);
     __Pyx_GIVEREF(__pyx_t_4);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 3, __pyx_t_4) != (0)) __PYX_ERR(0, 503, __pyx_L21_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 3, __pyx_t_4) != (0)) __PYX_ERR(0, 526, __pyx_L21_error);
     __Pyx_INCREF(__pyx_v_best_partial);
     __Pyx_GIVEREF(__pyx_v_best_partial);
-    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 4, __pyx_v_best_partial) != (0)) __PYX_ERR(0, 503, __pyx_L21_error);
+    if (__Pyx_PyTuple_SET_ITEM(__pyx_t_2, 4, __pyx_v_best_partial) != (0)) __PYX_ERR(0, 526, __pyx_L21_error);
     __pyx_t_15 = 0;
     __pyx_t_1 = 0;
     __pyx_t_4 = 0;
@@ -9165,7 +9586,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     goto __pyx_L20_return;
   }
 
-  /* "_sparse_dp_cython.pyx":507
+  /* "_sparse_dp_cython.pyx":530
  *     finally:
  *         # -- always release native memory --------------------------------
  *         for tt in range(T + 1):             # <<<<<<<<<<<<<<
@@ -9177,7 +9598,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
     /*exception exit:*/{
       __Pyx_PyThreadState_declare
       __Pyx_PyThreadState_assign
-      __pyx_t_27 = 0; __pyx_t_26 = 0; __pyx_t_25 = 0; __pyx_t_29 = 0; __pyx_t_30 = 0; __pyx_t_31 = 0;
+      __pyx_t_27 = 0; __pyx_t_26 = 0; __pyx_t_25 = 0; __pyx_t_30 = 0; __pyx_t_31 = 0; __pyx_t_32 = 0;
       __Pyx_XDECREF(__pyx_t_1); __pyx_t_1 = 0;
       __Pyx_XDECREF(__pyx_t_13); __pyx_t_13 = 0;
       __Pyx_XDECREF(__pyx_t_15); __pyx_t_15 = 0;
@@ -9185,22 +9606,22 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __Pyx_XDECREF(__pyx_t_2); __pyx_t_2 = 0;
       __Pyx_XDECREF(__pyx_t_3); __pyx_t_3 = 0;
       __Pyx_XDECREF(__pyx_t_4); __pyx_t_4 = 0;
-       __Pyx_ExceptionSwap(&__pyx_t_29, &__pyx_t_30, &__pyx_t_31);
+       __Pyx_ExceptionSwap(&__pyx_t_30, &__pyx_t_31, &__pyx_t_32);
       if ( unlikely(__Pyx_GetException(&__pyx_t_27, &__pyx_t_26, &__pyx_t_25) < 0)) __Pyx_ErrFetch(&__pyx_t_27, &__pyx_t_26, &__pyx_t_25);
       __Pyx_XGOTREF(__pyx_t_27);
       __Pyx_XGOTREF(__pyx_t_26);
       __Pyx_XGOTREF(__pyx_t_25);
-      __Pyx_XGOTREF(__pyx_t_29);
       __Pyx_XGOTREF(__pyx_t_30);
       __Pyx_XGOTREF(__pyx_t_31);
-      __pyx_t_7 = __pyx_lineno; __pyx_t_8 = __pyx_clineno; __pyx_t_28 = __pyx_filename;
+      __Pyx_XGOTREF(__pyx_t_32);
+      __pyx_t_7 = __pyx_lineno; __pyx_t_8 = __pyx_clineno; __pyx_t_29 = __pyx_filename;
       {
         __pyx_t_17 = (__pyx_v_T + 1);
         __pyx_t_18 = __pyx_t_17;
         for (__pyx_t_9 = 0; __pyx_t_9 < __pyx_t_18; __pyx_t_9+=1) {
           __pyx_v_tt = __pyx_t_9;
 
-          /* "_sparse_dp_cython.pyx":508
+          /* "_sparse_dp_cython.pyx":531
  *         # -- always release native memory --------------------------------
  *         for tt in range(T + 1):
  *             if layers[tt] != NULL:             # <<<<<<<<<<<<<<
@@ -9210,7 +9631,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           __pyx_t_11 = ((__pyx_v_layers[__pyx_v_tt]) != NULL);
           if (__pyx_t_11) {
 
-            /* "_sparse_dp_cython.pyx":509
+            /* "_sparse_dp_cython.pyx":532
  *         for tt in range(T + 1):
  *             if layers[tt] != NULL:
  *                 smap_destroy(layers[tt])             # <<<<<<<<<<<<<<
@@ -9219,7 +9640,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
             __pyx_f_17_sparse_dp_cython_smap_destroy((__pyx_v_layers[__pyx_v_tt]));
 
-            /* "_sparse_dp_cython.pyx":508
+            /* "_sparse_dp_cython.pyx":531
  *         # -- always release native memory --------------------------------
  *         for tt in range(T + 1):
  *             if layers[tt] != NULL:             # <<<<<<<<<<<<<<
@@ -9229,7 +9650,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
           }
         }
 
-        /* "_sparse_dp_cython.pyx":510
+        /* "_sparse_dp_cython.pyx":533
  *             if layers[tt] != NULL:
  *                 smap_destroy(layers[tt])
  *         free(layers)             # <<<<<<<<<<<<<<
@@ -9238,7 +9659,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         free(__pyx_v_layers);
 
-        /* "_sparse_dp_cython.pyx":511
+        /* "_sparse_dp_cython.pyx":534
  *                 smap_destroy(layers[tt])
  *         free(layers)
  *         if c_parent != NULL:             # <<<<<<<<<<<<<<
@@ -9247,14 +9668,14 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = (__pyx_v_c_parent != NULL);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":512
+          /* "_sparse_dp_cython.pyx":535
  *         free(layers)
  *         if c_parent != NULL:
  *             pmap_destroy(c_parent)             # <<<<<<<<<<<<<<
 */
           __pyx_f_17_sparse_dp_cython_pmap_destroy(__pyx_v_c_parent);
 
-          /* "_sparse_dp_cython.pyx":511
+          /* "_sparse_dp_cython.pyx":534
  *                 smap_destroy(layers[tt])
  *         free(layers)
  *         if c_parent != NULL:             # <<<<<<<<<<<<<<
@@ -9262,23 +9683,23 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
         }
       }
-      __Pyx_XGIVEREF(__pyx_t_29);
       __Pyx_XGIVEREF(__pyx_t_30);
       __Pyx_XGIVEREF(__pyx_t_31);
-      __Pyx_ExceptionReset(__pyx_t_29, __pyx_t_30, __pyx_t_31);
+      __Pyx_XGIVEREF(__pyx_t_32);
+      __Pyx_ExceptionReset(__pyx_t_30, __pyx_t_31, __pyx_t_32);
       __Pyx_XGIVEREF(__pyx_t_27);
       __Pyx_XGIVEREF(__pyx_t_26);
       __Pyx_XGIVEREF(__pyx_t_25);
       __Pyx_ErrRestore(__pyx_t_27, __pyx_t_26, __pyx_t_25);
-      __pyx_t_27 = 0; __pyx_t_26 = 0; __pyx_t_25 = 0; __pyx_t_29 = 0; __pyx_t_30 = 0; __pyx_t_31 = 0;
-      __pyx_lineno = __pyx_t_7; __pyx_clineno = __pyx_t_8; __pyx_filename = __pyx_t_28;
+      __pyx_t_27 = 0; __pyx_t_26 = 0; __pyx_t_25 = 0; __pyx_t_30 = 0; __pyx_t_31 = 0; __pyx_t_32 = 0;
+      __pyx_lineno = __pyx_t_7; __pyx_clineno = __pyx_t_8; __pyx_filename = __pyx_t_29;
       goto __pyx_L1_error;
     }
     __pyx_L20_return: {
-      __pyx_t_31 = __pyx_r;
+      __pyx_t_32 = __pyx_r;
       __pyx_r = 0;
 
-      /* "_sparse_dp_cython.pyx":507
+      /* "_sparse_dp_cython.pyx":530
  *     finally:
  *         # -- always release native memory --------------------------------
  *         for tt in range(T + 1):             # <<<<<<<<<<<<<<
@@ -9290,7 +9711,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       for (__pyx_t_8 = 0; __pyx_t_8 < __pyx_t_18; __pyx_t_8+=1) {
         __pyx_v_tt = __pyx_t_8;
 
-        /* "_sparse_dp_cython.pyx":508
+        /* "_sparse_dp_cython.pyx":531
  *         # -- always release native memory --------------------------------
  *         for tt in range(T + 1):
  *             if layers[tt] != NULL:             # <<<<<<<<<<<<<<
@@ -9300,7 +9721,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         __pyx_t_11 = ((__pyx_v_layers[__pyx_v_tt]) != NULL);
         if (__pyx_t_11) {
 
-          /* "_sparse_dp_cython.pyx":509
+          /* "_sparse_dp_cython.pyx":532
  *         for tt in range(T + 1):
  *             if layers[tt] != NULL:
  *                 smap_destroy(layers[tt])             # <<<<<<<<<<<<<<
@@ -9309,7 +9730,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
           __pyx_f_17_sparse_dp_cython_smap_destroy((__pyx_v_layers[__pyx_v_tt]));
 
-          /* "_sparse_dp_cython.pyx":508
+          /* "_sparse_dp_cython.pyx":531
  *         # -- always release native memory --------------------------------
  *         for tt in range(T + 1):
  *             if layers[tt] != NULL:             # <<<<<<<<<<<<<<
@@ -9319,7 +9740,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
         }
       }
 
-      /* "_sparse_dp_cython.pyx":510
+      /* "_sparse_dp_cython.pyx":533
  *             if layers[tt] != NULL:
  *                 smap_destroy(layers[tt])
  *         free(layers)             # <<<<<<<<<<<<<<
@@ -9328,7 +9749,7 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
 */
       free(__pyx_v_layers);
 
-      /* "_sparse_dp_cython.pyx":511
+      /* "_sparse_dp_cython.pyx":534
  *                 smap_destroy(layers[tt])
  *         free(layers)
  *         if c_parent != NULL:             # <<<<<<<<<<<<<<
@@ -9337,27 +9758,27 @@ static PyObject *__pyx_pf_17_sparse_dp_cython_solve_sparse_dp_cython(CYTHON_UNUS
       __pyx_t_11 = (__pyx_v_c_parent != NULL);
       if (__pyx_t_11) {
 
-        /* "_sparse_dp_cython.pyx":512
+        /* "_sparse_dp_cython.pyx":535
  *         free(layers)
  *         if c_parent != NULL:
  *             pmap_destroy(c_parent)             # <<<<<<<<<<<<<<
 */
         __pyx_f_17_sparse_dp_cython_pmap_destroy(__pyx_v_c_parent);
 
-        /* "_sparse_dp_cython.pyx":511
+        /* "_sparse_dp_cython.pyx":534
  *                 smap_destroy(layers[tt])
  *         free(layers)
  *         if c_parent != NULL:             # <<<<<<<<<<<<<<
  *             pmap_destroy(c_parent)
 */
       }
-      __pyx_r = __pyx_t_31;
-      __pyx_t_31 = 0;
+      __pyx_r = __pyx_t_32;
+      __pyx_t_32 = 0;
       goto __pyx_L0;
     }
   }
 
-  /* "_sparse_dp_cython.pyx":236
+  /* "_sparse_dp_cython.pyx":259
  * #  Main DP function  native storage, same interface as Python version
  * # ===================================================================
  * def solve_sparse_dp_cython(             # <<<<<<<<<<<<<<
@@ -9980,56 +10401,56 @@ __Pyx_RefNannySetupContext("PyInit__sparse_dp_cython", 0);
 */
   __pyx_v_17_sparse_dp_cython__EMPTY = -1LL;
 
-  /* "_sparse_dp_cython.pyx":245
+  /* "_sparse_dp_cython.pyx":268
  *     int K,
  *     long long final_state,
  *     double time_limit = -1.0,             # <<<<<<<<<<<<<<
  *     str tie_break = "early",
  *     bint track_schedule = True,
 */
-  __pyx_t_2 = PyFloat_FromDouble(((double)-1.0)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 245, __pyx_L1_error)
+  __pyx_t_2 = PyFloat_FromDouble(((double)-1.0)); if (unlikely(!__pyx_t_2)) __PYX_ERR(0, 268, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_2);
 
-  /* "_sparse_dp_cython.pyx":247
+  /* "_sparse_dp_cython.pyx":270
  *     double time_limit = -1.0,
  *     str tie_break = "early",
  *     bint track_schedule = True,             # <<<<<<<<<<<<<<
  *     long long max_states = 0,
  * ):
 */
-  __pyx_t_4 = __Pyx_PyBool_FromLong(((int)1)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 247, __pyx_L1_error)
+  __pyx_t_4 = __Pyx_PyBool_FromLong(((int)1)); if (unlikely(!__pyx_t_4)) __PYX_ERR(0, 270, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_4);
 
-  /* "_sparse_dp_cython.pyx":248
+  /* "_sparse_dp_cython.pyx":271
  *     str tie_break = "early",
  *     bint track_schedule = True,
  *     long long max_states = 0,             # <<<<<<<<<<<<<<
  * ):
  *     """
 */
-  __pyx_t_5 = __Pyx_PyLong_From_PY_LONG_LONG(((PY_LONG_LONG)0)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 248, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_PyLong_From_PY_LONG_LONG(((PY_LONG_LONG)0)); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 271, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
 
-  /* "_sparse_dp_cython.pyx":236
+  /* "_sparse_dp_cython.pyx":259
  * #  Main DP function  native storage, same interface as Python version
  * # ===================================================================
  * def solve_sparse_dp_cython(             # <<<<<<<<<<<<<<
  *     cnp.ndarray[cnp.int64_t, ndim=1] lengths,
  *     cnp.ndarray[cnp.int64_t, ndim=1] totals,
 */
-  __pyx_t_6 = PyTuple_Pack(4, __pyx_t_2, ((PyObject*)__pyx_mstate_global->__pyx_n_u_early), __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_6 = PyTuple_Pack(4, __pyx_t_2, ((PyObject*)__pyx_mstate_global->__pyx_n_u_early), __pyx_t_4, __pyx_t_5); if (unlikely(!__pyx_t_6)) __PYX_ERR(0, 259, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_6);
   __Pyx_DECREF(__pyx_t_2); __pyx_t_2 = 0;
   __Pyx_DECREF(__pyx_t_4); __pyx_t_4 = 0;
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
-  __pyx_t_5 = __Pyx_CyFunction_New(&__pyx_mdef_17_sparse_dp_cython_1solve_sparse_dp_cython, 0, __pyx_mstate_global->__pyx_n_u_solve_sparse_dp_cython, NULL, __pyx_mstate_global->__pyx_n_u_sparse_dp_cython, __pyx_mstate_global->__pyx_d, ((PyObject *)__pyx_mstate_global->__pyx_codeobj_tab[0])); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 236, __pyx_L1_error)
+  __pyx_t_5 = __Pyx_CyFunction_New(&__pyx_mdef_17_sparse_dp_cython_1solve_sparse_dp_cython, 0, __pyx_mstate_global->__pyx_n_u_solve_sparse_dp_cython, NULL, __pyx_mstate_global->__pyx_n_u_sparse_dp_cython, __pyx_mstate_global->__pyx_d, ((PyObject *)__pyx_mstate_global->__pyx_codeobj_tab[0])); if (unlikely(!__pyx_t_5)) __PYX_ERR(0, 259, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_t_5);
   #if CYTHON_COMPILING_IN_CPYTHON && PY_VERSION_HEX >= 0x030E0000
   PyUnstable_Object_EnableDeferredRefcount(__pyx_t_5);
   #endif
   __Pyx_CyFunction_SetDefaultsTuple(__pyx_t_5, __pyx_t_6);
   __Pyx_DECREF(__pyx_t_6); __pyx_t_6 = 0;
-  if (PyDict_SetItem(__pyx_mstate_global->__pyx_d, __pyx_mstate_global->__pyx_n_u_solve_sparse_dp_cython, __pyx_t_5) < (0)) __PYX_ERR(0, 236, __pyx_L1_error)
+  if (PyDict_SetItem(__pyx_mstate_global->__pyx_d, __pyx_mstate_global->__pyx_n_u_solve_sparse_dp_cython, __pyx_t_5) < (0)) __PYX_ERR(0, 259, __pyx_L1_error)
   __Pyx_DECREF(__pyx_t_5); __pyx_t_5 = 0;
 
   /* "_sparse_dp_cython.pyx":1
@@ -10098,14 +10519,14 @@ static int __Pyx_InitCachedConstants(__pyx_mstatetype *__pyx_mstate) {
   CYTHON_UNUSED_VAR(__pyx_mstate);
   __Pyx_RefNannySetupContext("__Pyx_InitCachedConstants", 0);
 
-  /* "_sparse_dp_cython.pyx":285
+  /* "_sparse_dp_cython.pyx":308
  *             cs = np.empty(len(sp) + 1, dtype=np.float64)
  *             cs[0] = 0.0
  *             cs[1:] = np.cumsum(sp)             # <<<<<<<<<<<<<<
  *             _lb_py[b] = cs
  *         else:
 */
-  __pyx_mstate_global->__pyx_slice[0] = PySlice_New(__pyx_mstate_global->__pyx_int_1, Py_None, Py_None); if (unlikely(!__pyx_mstate_global->__pyx_slice[0])) __PYX_ERR(0, 285, __pyx_L1_error)
+  __pyx_mstate_global->__pyx_slice[0] = PySlice_New(__pyx_mstate_global->__pyx_int_1, Py_None, Py_None); if (unlikely(!__pyx_mstate_global->__pyx_slice[0])) __PYX_ERR(0, 308, __pyx_L1_error)
   __Pyx_GOTREF(__pyx_mstate_global->__pyx_slice[0]);
   __Pyx_GIVEREF(__pyx_mstate_global->__pyx_slice[0]);
   #if CYTHON_IMMORTAL_CONSTANTS
@@ -10138,34 +10559,34 @@ static int __Pyx_InitCachedConstants(__pyx_mstatetype *__pyx_mstate) {
 static int __Pyx_InitConstants(__pyx_mstatetype *__pyx_mstate) {
   CYTHON_UNUSED_VAR(__pyx_mstate);
   {
-    const struct { const unsigned int length: 11; } index[] = {{1},{27},{179},{28},{27},{8},{38},{33},{21},{1},{1},{9},{20},{1},{18},{1},{15},{14},{15},{12},{6},{7},{7},{8},{7},{2},{5},{5},{8},{5},{5},{2},{18},{2},{2},{6},{4},{5},{5},{5},{3},{11},{7},{7},{8},{1},{3},{3},{13},{5},{2},{5},{6},{7},{5},{7},{6},{6},{7},{8},{11},{10},{10},{4},{8},{3},{6},{2},{3},{2},{3},{5},{2},{12},{3},{3},{7},{6},{10},{9},{12},{7},{9},{8},{2},{12},{10},{22},{4},{2},{17},{10},{5},{11},{2},{3},{8},{9},{4},{10},{11},{9},{6},{8},{6},{14},{2},{2},{6},{1},{5},{1999}};
-    #if (CYTHON_COMPRESS_STRINGS) == 2 /* compression: bz2 (1907 bytes) */
-const char* const cstring = "BZh91AY&SYu<\205\205\000\001\220\377\377\377\377\377\377\377\377\177\370\277\355\377\374\277\377\377\370\300@@@@@@@@@@@@\000@\000`\006\335\360\036\275\315\273\256\343\243\220*\361\320\0371\303M\022J\000\000\0006\214\247\352\206M6S\364\332j$i\215Lb&\232\r2\036\243F\21546\243L\236\223F\232\003B\023@jz4\024\3622\023\3256\250\310b\000\304\001\221\220d\003&F\236\241\211\240\000d1\000\3212\236\200\222e\036\247\244\362#\324hd\321\241\240\003@\000\000d\006M\032\r4\000\000h\000\323@\212h\240\3044\304\000\032\017\024\320\000\000\000\000\000\032\000\000\r4d\001T\365\023 \302m\021\221\215L\323 \t\232A\202d\300\021\200\230\0010&#\021\211\246&\000\tD\0014\024\305\032\006\232z\232\031\000\000\000\000\000\000\000\000\000\006\200\014\2307\354\264\306\341eP\203)>\340e\204\374\017\316fk\222 \200L)\020\002\227\314d\036<\200\3674\201\376C1\024UAUUU\2504\201p\037\322\222B\242$j\316&j\t)JX\244\007\016vdK\000-UU\224\222\260\256\302%\360$I@UEQU\001\221W\211\240`JZ!\245\214A\222@La\250H\036\331\270\271\311t\313\232\215G1K\303+q\244\007b\023\010\244B\004f`\222\327P\227NA\030F\344\274\250\252\010\252(\250\027\260\223*\266\332\026\220z9\331\001\232\350\274\\H\340*\220\305\036\242\250\310\023*\254\002\310\224E~%\205\224\202\345&-\203P\232\245\226@G\322\300&\021RN\276\344\252,\220I\303u\212\225z\237\370\313\340\345\375\376\243\235\356N7\303\366\362\210=\t\327\247\026\370\276\n4\337\004s\023ST.\r\210\030a\007\025p\200vy\212\212a\312\321\260x\345D\306\006\020s\362i\020L|\206\266dJ\250\361\340\372\005*\206\262T\353/\337\323\224\331\347\211JH\343\321\252\353\260\032Sx\370\335\357\3437\007<\210 @\345\000\270n\314\230D\336v\017\203(\3408tn\307K\2571\314\235\025\220\022\006\255\230X\226\350F;\010Bx\232\212d:@\002\300-`\031b\352\204\220\253ap\025K\257\327\317!\307$\"[\350\303\024\201T3\275\334x\024\"\021)\205\3504\235t\270y\"O\232\310\032\257\007\n\351\341\372\370U\310\263\351\372\247\277\314hH\001\007\202\206\210Aq1\";\024\021\246\206\334Z\320\244*`\032\026Y\2033\013\223\335=\341\357OCL!0*\275j\200\236""\031\336\317z\2108T\27010\3601\264\030\255\217z\351\272\344\237\331\345\266\\\027\013\233~1U!\031.\005\267\031\311\256T\2537\234\"FbG\254\030\254\265\275\224\323\362\341T(*\256L\021Z\023\022\2403\201\332\207\360\256\004\224\375\355rS\201\357\203\240\234(p\3525W\212\360X\255J)\200\324Sv\360\276\245,$\202\202\343!\270\263\314\206c5\004\t\341q\2200,\332)7\030\206\315\"\314j\302&\311K$b\345\302\220(\016\017\361\343\243~\344\243\\\344\245/\275\000\366(@3\306\025\031\201\236R\007\tXXV!DD\036d\341\242\306+J\273\342bf5\2114Q\2741\307\014\2367\354\304e\002e\310L\373\212S;\214\365/\205`\222\035V\336%\224\312\321\250\261\325\231u\313J\324\271\020\220260\177\212BxZ\264Lh\320\r\333\355\224\302\246\210\373\232\357\027\221_\207r\331\337\221\005c\247!y\254\271\210\3406\226\317$LO^\353\300\300\301(\305\264\273\313G\261n\342\020\324\262(\353\010\266V\001\261c\305\312\226\350`\023K%\270\321\025\002\031N\330\304\302{\265!\005\0075\320\242@/\303\002\331\005\026\315\005\207Q\210Zbp`\363v\034'zIXzXt\n \005\006\031H\3151\255\264\300g\270\334n0\032\206\2605\300z*\314\310!\265\244j-\213\233j\005\261\224\347^\352P\007S\270\031^*\225\205\300\014\303\267\2000\263B|\242\243\315-\342E\020\262\320\306\\G1\206\004#tq+\212\202Y^\035t\251\220Y2D\3011\027\020\330\t\002\037\275\2716\255\002\220\266\036f\260f\266\253\212\244f\3124\211\302\224u\r\354s\254an\242\365\244d\350\263\022\203\231D\200\311F\r\rw\321\007\224*\257p\236\251\346z\r\206\026\304\256\214\266\260\243\0260j\252s5\024&\254\214\203\rdk\022\306\206#\315\273[#u\\\005\327Z\"\2224\327\007\276*\232dg\000\340\235\323 \206\030\214\225\014\013R[\"d\306,\003h\032\253\260\324\213\203\217!qD\200\243\3410\017\032\"\3114j\235\231\272W\356\322wn\213\267\3610\177\232\201N\267PZ\305\274\r\322Wg9\nE%I6\253\203\324\"\002(\266\013\313\201j\267!H\204\342\365#I\007\327xn\r\330*A!\204\345,\253\204\220\265\211:\021\244\263FX\031\300\016\270\3133\002\356\276h[i\036\2060\r\017X\347\020y\005Fx\033\004Y9\234\373a\310rE\261\315up\303J\206\336~\253\205\006\014\323""\202\205\nC?M\266.\244\2138*\031\330\232\307zo6\247\270;\317\235t\224\321\371_P\234\337`R\232\024\315\242\2410A\214\021\036\234~#]\017\201\305\231\30494\254\256\307\233w\275\356q\177\220m\016\325(\030\211\275\221kh}\251\375\033`\355<\231G\"\006J\324\032\021%:f\342\\\250\"\2108\0220\223Q\006\270 \324 -\321%0\252\222\016\362\240\3272?x\215\020H\201_\276\246,&\226'\210*\253\230\006Hk\n\265@\220JHpR\216W\272`w`6| V\002\261h5`\260\356$\003\317\277\264\034\3502\253\006\244\007T\207\311,\230\000*\313\216\222\221\"\t8 ~\230Kr#\270\376\260x\034B\231\010\346,\006C\246\366I\002\374\031\276\207V*\306v\\\317\027\351\010\0063p\220T\227'B\304E\323X\332{\305W\305TD\007\034\300\t\322~mU\231\326\254T\177\031\233o\013N\310\245\356\245ke\331\301@=|\013\361\230\315\333\302\370\3662\350\r\323\032\255\346\210\023\375\245\250\321\215\336Ab\372\215\034\215\301c(O\2768\365\362\235>\247\360\014V\216\367\321{\210q\212x@\336\241\333\267'T\377(\034\n\246\371\020A\003\267mL\253p&\027\261(|R\241\001/\030\001\202\002\247\217\003{\033\202\010p\007DT\320M\303\2143\363\210\311\026I9\214\255\027\322\223I\345\372\271\363\027\363\223\037\254\0033\017D\320\206)`\361\026G\001\372\314\260+\002\222V\024\304\302\222!\302\225J3\002\273xi&i)\020D\252\364\304Q\224\255d9\227v\245CH)\223Hw\202e\205ED\226vfIc\303\250\024O\365a\314\206\025bT\326\325\2246\236\003\264)fQm\215&\021uq\377\213\271\"\234(H:\236B\302\200";
-    PyObject *data = __Pyx_DecompressString(cstring, 1907, 2);
+    const struct { const unsigned int length: 11; } index[] = {{2},{36},{35},{27},{4},{179},{28},{27},{1},{8},{38},{33},{21},{1},{1},{9},{20},{1},{18},{1},{15},{14},{15},{12},{6},{7},{7},{8},{7},{2},{5},{5},{8},{5},{5},{2},{18},{2},{2},{6},{4},{5},{5},{5},{3},{11},{7},{7},{8},{1},{3},{3},{13},{5},{2},{5},{6},{7},{5},{7},{6},{6},{7},{8},{11},{10},{10},{4},{8},{3},{6},{2},{3},{2},{3},{5},{2},{12},{3},{3},{7},{6},{10},{9},{12},{7},{9},{8},{2},{12},{10},{22},{4},{2},{17},{10},{5},{11},{2},{3},{8},{9},{4},{10},{11},{9},{6},{8},{6},{14},{2},{2},{6},{1},{5},{1999}};
+    #if (CYTHON_COMPRESS_STRINGS) == 2 /* compression: bz2 (1953 bytes) */
+const char* const cstring = "BZh91AY&SY\n*\245_\000\001\020\177\377\377\377\377\377\377\377\177\370\277\357\377\374\277\377\377\370\300@@@@@@@@@@@@\000@\000`\006\377\014\235\236\3562\334t:h\323\275\361\000\370\rLI(\0142\201\241\2653\032h\246\231\246\232\217\3656\232J\036\246\236\243\321\352\236\220\000z@z\215\031\r\036\241\265=F\2314\320J \232h\002h\322\237\240\320FTz\206\200\006@\000\000\000\000\000\000\001\352\006\20052\031$\362\232\236\246\243\365\032\2314d\311\210hh\0324d2\031\000d4\0314a4\323CA\211\246\214FA\246\201\024\320\220\36542i\223\322h\320\000\000\000\00044\032\000\000\000\000\000\000\323Ti\244@\000\000\000z\200\323OQ\246C@2\000\000\003@h\000=@\000\001)\250#S\032\246\223\36554h\000i\221\240\000\006\200\320\000\003@\000\000\000\03224\311n\326\253\217V'\271\303\037\226\312\017\320\337\263/3\371\004\210\240J.DA\312\031\217b$J\010\301\345\007\371\214\346BL$\222Oa\345\005\3203J\344\305E%5^l\366\032R\224\260J\010\020\206u$\300/\222JRk\002\311\224\226\201\"H\004\231!&\007R\2426\023\202R\322\217&\346\035&\006\323\017b@\366\305\305nJ\342V\324j9\212Z2\207\033\001\326\021\010$\002B\021.\225h\230J\343(BHV\226\252*\202*\212*\005\273H\223UT\345D\217G;xg\302\230\212\376\234\002\251\016DP\220\352\013\205V\000N\222\266Q\277\231:\350X\215\2031\354\\M9\3204k\230\027\002\224J\026\301\252\245\322\t@~2j\275\266\321\233\226\266q5v\177\233C\275\370\310\020\017\305]x\230\220@z\024;nd\235`\341\267\0104\367B\261g\2568G\020\3304\357\335\210;C\025\024\344\346\332\301\343\225\023`0\221\317\352\347\200&\356\rlH\023N\361\340\371\304\231\246\364m\016O\327\301\231G\373=\361:M\030\331\216\030j5\263\005\350\3659\362p\006\006q\020(Q\200\300.\023\263&\t;\027`\367\245\034\007\016\215\325\350u&2\247?dF\211\206\367\2255t\243\031\344Y]\035\221\253\226\276\r@\025\205V\252\036\240\346I\006q'\000fN?\207\347MC\303\330\260\024jy\256D\030\242K]\374T\021\n\002\210\334=\201\242iM@x\200\203\346(\000\255\376\350:\307\217\251\237\013[\224\365Y\373\364\227\207\203<\003i\002\232\301\224\326\246\227#\315\n\315\240\324\214\226\262\250s""\003\320\004\205\264\225B\252\212\362\350*\205V\364M\300\311!#\326\354\022\202W\331\357qW\n\227\006\213\n\366.{\025\265Z\375q\321\271'pym\365\202\341\177:\270\320\252B2\\\013n.\315w\226]45\264\204\213\0160\323\313\335\244\271m\303\017\204\203\352\324@\327$\"*I\340\214\276e`\301\272*\250\230\206\346\005\3531>\310\344gi.\231\025\233\241\346\310\264\276\275u=\246\213\306$\370Qb\362'c:\363\310I\214V\303\303c\201\301\243\006stX<r\300\265jR\355\372\214\330\344\323$#k\342\367M\246\320\244\250\263\264\226\236\\\354\247t\341B9\317\376\256,{B\341\375\211\221T8c\022\262g\246\214\306W\322\250Z\245Ev\275\272[\324'G\353\312F\272z\006\275z1\260\344\315\254n7#(zX\342\020\253K\324\276v\304\222\035m\341\331O\236\022\213\035Y\227P\264\262\245\310\200 c\030\201\374eL\330\346\327:\262\000\265o\204\3126y\027\237f\006\010\230h\347\276\2131A\272\364\342`\256N\361\225\006\344\333\333\023\223\213c\370\340\032\024F\251}\265\367,\265\356\257\225\rND\226\241\216~PW\270\353\361\266\025\274'\2327\353\220\246\024\227cD\261%(\317\251\2104\252\025]LCd\265\345A\306UiS(\221\013dF\022\020Vj\226}\0236\222\r\251\222\244@p\244\216E&\336pR \"\231\031\031\000\222'@\235`\255s\242L\r$\261j2Lt\366\\\332\242\312P\241r\361\265\202Uo\021S\003$\317N\002\251W@\024r\261,\310N*\3622\376Y$3)x\365\037\235\026u\032H5\026\251`\336f\023MaVy\231\210\344|Y\241\232\315\002\013\341\024)\314\311\\wP\312\227\316ApK\321\265,\261~\356 \270\031\215\341\207\213\221\202h\277Hx\221}\014r\223\017\031;\221\202\243\224V+\360\246\353\022\354\231x\224d\242{\030mQ\317fZq\334\364\224\314\363VJ\025Z\227O\225\025\007\253\221\\M+\024\227\222\033\241\030j\316\031\363\336I!\031Z\315\227Yc\262AQV\342#?aPb\217c\346b\241{&\245\037\022\024\201p\005\255Y\322S\0302\276u\330\250\004\226\021\014+\311\205\014I\237\032\"u\032l\302\211\360\300\303f\374\377\346B\335\225\322\233\013\370CJg\344\241\013KR\324\206L\305\215$\t$\332J`\234\036\353\361-.\244\321Li\230\314K^\203\260V9\3106],rwW\243e\267|\3662}^\023$<@v\014\224\203+\355\326\035\345l_\007$\037\300""\363\030HX\t\307x?\010y\313\275\314\274\026\242\220^\031\013\354\204\032\324v\356\354\254Q@\211(\0300d\021\272\351\203\364\246\032\303\010W\204\361|j\344\326(+oS\320\224\221\327]^\266|\001GP\246\205\203\001 \002\340!\316W4Ld1\324YeD)$\345\261g\225m#\265B\004b\374k\266\330d\205\333\301\177p{\023\364:\024\312\343\255\024CCq\207\300\266E\333\256\227\221\350A\246\202\201\"\nt \361\004\030D\003\302\031\321\006j`\352\232\206\3211\274\005#\301O\002<\033\032.\212\027\232\034fk@\021N\276#\214\006\010H\202\301\222\226m\\@\267\2340\367\000\260\005\202G%\200n\351)\301\245\255P-nC4\tX\014\262\rd,\316\000\316\033J\204\203\024\031\305\003\370\202\037\263\305\272\332A\240c\022\255\251hH\005\265\305\353c\211\271\361l\226\303\326\nV\244M\031\252s\202\024X\212\025\341\322\363H\361.)/\265\2426\275\030x\t\204\340%2\375\310\342]\311+\266Z&\336\207\273\264+{k\\\300\276\3700\013\237\235\232;h\225t5\3635(\215\342\246g:\350\023\357\022A\0055\370D\217\301\005\275\321&\230\236\371Z\354i\256}\177\350\032)N\206\255\013%\327)\366\306\375\0336zx\360mQ\240)x\243}\367\350:-Sp\313\233\316\312&er\205^\265AS\222s&\r\374\377|\271x\243\036](e\377\250N\235k\027\233Vov\256\036&d\335+\260\371\036\310\306\303\033\354\276n\030\307\333\034\034\302r\230\273b@~\213,\n\300\244\225\20510\244\210p\245R\214\300\256\322\032I\232JD\021*\271b(\312V\262\034\313\273R\241\244\024\356\322\035\340\231aQQ%\235\231\222X\360*\005\023\375Xs!\205X\2255\265e\r\247\200\355\nY\224[cI\255\245\273k\376.\344\212p\241 \024UJ\276";
+    PyObject *data = __Pyx_DecompressString(cstring, 1953, 2);
     if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
     const char* const bytes = __Pyx_PyBytes_AsString(data);
     #if !CYTHON_ASSUME_SAFE_MACROS
     if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
     #endif
-    #elif (CYTHON_COMPRESS_STRINGS) != 0 /* compression: zlib (1860 bytes) */
-const char* const cstring = "x\332\215UKS\033I\022\266\260\004\232\035\341\221\204\000\201Y\323\302\200g\327\263\204\301\230\235\307aB\3421;a\307,\3421\343]6\242\242\324]\2026\255V\253\253$$\317a}\324\261\216u\254c\037\373\250\243\216:\352\330G\375\004~\302fuc#\202\235\010G@WeU>\276\3742+\365\343\336\241f\341\016q\251\206-\253\256cf\326m\255\212M\213\030\277\324\031\321\330\005f\332n\207]\300\261I5\203Xf\205\270\230\021\253\243Q\346\232:#\256R\262\265\303\375\303\277m\177\273\255a\333\320\\\362\216\350\214j\264Y\321-L)\241Z\275\252U\232\246\305L[c\035\207\320\r\355\347\252\326\25175\233\020Ccu\315\001\275q\003vAl\215\022\2466\3323l\333u\026\242C`n\332\347\3174\303t!\210\331\"\312\372\000[\224l\034b\227\330L\253a\347~:\307`N\376\377\0256\014\004\356\211\335\2549\235\r\275\356\222\215Z\023\240b\327\305\235\033\035\025\304\2549u\227\215i5k\230]\334S@\324\301.%\310p\220\0362\267\341t\332\257\337\2407%Tz\363\317\335\327\010\035v\332\360\277\007\354\241_H\233\035\221\352\t\246\035[7\353\312o\275\t,\021Z\251\020\312P\325\264\261\205\364:ec\242C\3541\211\2315\022\212\020\026@[\025\302\240*\025'\262r\320\273z\205\302B\025\001\260*u\375\205\216L[\327\221El]\331\001m:r\261\241#Vg\272\256[\200\0004\020s\261N*X\277\324\035\235\352\315\032m\326\014\263Z5T\r\tv\255\016\2519\254Cl#\202\022\306\250Zu\314v\266\253.T\0261\204\252M\210\201L\323h\233v\025\231\024}\312\321d\244F\337\031a\007Fm\210\254\n\002\332\325RQ\037\300\247\026\247\003\237\026\024\216\330\347\354\202\"T\303\000\016\276m\225\235\322R\3330\272\272\254\033M\213\300\nED\310\3065\330\333\357\014;\014a;\266{eS\233\266\302B:/\034\342V\001R\323\006\322\234\272\343\324\251\343\270\244j\266?~M\035\234\002(\247s\303\024B\215&\266\"\277\300\231\272w\211B\004}\351\022\026\362\356^!\004\335{\023\035v\006\251b\300C\353V\213\334\353\020\nmC\235\373\307\014*\032\026,JM}P\005\240\032\264E[/\020Rg\3605\341\324%\370Ri\252\177d\2315\223\205\273\210\013\2655\020\220\316B\016\240\306P,\367*\\\251\252\361%\242\372\005\tUY\323\004\246\233\204\266\337\023\267N?\304\256""\263\017\022\223A<\021\375)\351\2118\363\246\375\362\365\237\036$\226\205\355\025G\361d7\321=\345\005\276\031$\247\273\345n\225\357\213y\031\223\231[qN4d\354\017n\367DL\200\360e\367\025\217\361\031^\3428H-\212\265\310\"\007\332\031\361T\034\211\246,\312\362(^\220K\336\221\327\270\236|\220X\004\263x\206g\371\253\320C|\2367n\261\274\344\0251\001\206e\345y\253{\324m\004\251\217\272\213rS\026#q'\364^\026\206\\\221\273\262\245\\\007\251G]\334m\362b\264i\361#~%\260\200\363,\370\005\373\321\315fB\254C\0363\362\300[\361\212\n\320\262\250y;~\326\337\362\217|\332[\351\025\203\370\324\207\253\256\316!\275G\335K\010UP\000'\273\204oB\236\025\021S\347*\304YD\310\227\335\035\236\341\253\\\207tRi\236\340\247\242 6\203\364\222(\212_#\320i )\243\240<\007\324x\024\327\200%\210\322\010\2223\374\207\020&x\371\216\357\362\206\322\235\344Dl\212\222\250\200\326\037{\271N>H$?\264\001\307\261\230\022L\276\224U\3575d\260\336\007\337\251n\261\373+\340\335\023\017\305\246\312\362\251,\004\361\325\341\352\266\017\371\205\341\027U^\300~\270\013\242\335\023\005\356\261\370\016\330\t\217\336\003Q\305\353\027\252\231\222\251\356\001_\343\r pE(\342\246\323\335\337a\273'\023\362\314\237\356\035\367'\372\337\014*\303\303r\2109HgF\251\034?\010\251H}\005\2259\010\353\232\316\334\232\226\240\200k7\345\273\261Q\227\031>\305\233\220\365)@N\317@\311\022\220.\201\374p\220\233\r\322y\220\341J\002\303\263@u\324r\240\267\305ODV|+\267\245\353\345\274c?\331\213\367J\275j\277\324\007\273e\341B\251n\227F\370Q\321fB6\317eY\241d\320\201\370\216\337\005\360\271#\263*\332\014\364]N\234\310y/\356\355\3711h\231\235^v\370\303\233\301\356\000\334=\201r%\344\221\374\257\217\203\345\202\234\225\272\267\014\010v{n?\243l7\203\334\272\254x\261\261\005\217 $\345O\371GZ\026\304$4\003\205\256\206j\347#\246\203\324<\247@\335\2317\0015I\315\r\347\276W%\006\247\2519\350\223\227\252{F\320\032\237\313\331\035\372\216x\033\236hI\236{\247\376\212\177\320[Sh\001I&\027>E@9{G\372\263\370M=\350 \2470\255\210\237\344\026\010\371\205Q\2446\317/""eF~\355\205\020\266\271\013\357\001\024U\204]y\345\021\377\245_\355\355\367g\372\007\203B\220S}\375V\376\346\025\225N#\310CO\312\307\336\256\347\3723~\311\267\372+\375\237\006\233#\210x,'\344\272\227\360\312\236\341\027\224r\013j\220\003\313=?\356\027\375\343\336\004\360\221\350\227\373\306\340\331\260|2<9\r\362\005\350\333\022\274\207}?\343\257BA\242\020O\200\221M\271\347%\375\330g\013\217\241}\227V!\3513\377!\214\010\025\355\233~e05P\315\223\231\205y\223V\323n6|\304\271\005\230\231.t\313+/\346e\224\230\205\002)o\305Q.*cD}~!\310}\234\226\260Q\223\262\241@2\261%\"B\027aLM\300\353hx\343\032w6\307r\n\256\023\360|\256|\354\177\272m\001\324\230\".\232\032p\372\\\226\345\205\207\307\002<\206w\362\312{\350\375\035\030\005a\007z\372FPe\310\303\373)\217\245\376o\217A\352\377\351g\373\333\375\306\350\036\271\241\203\234<\361\346\241 {\275Xo&|w\373\203\314`up><};|\373\257`iM\036C\007\257\373\t\277\354\033\275\302\215\373\2250\305\270\367\017\030K\237+\250\327\253}\r\014/\372\333\276\333[\352\037\365\331@\r\271\351y\230\301\331h\336\264\303\006\335\223\223\022\313\016\224\356\316<N\317q\314\177\227\005\3705\374\"\247~\000?\r\337\371\360\025\225G\360\023VT\307?\212UaJ\252^^^<\002_\215QR\365\022\\}\317O\206\013\177\361\262\336\226w\342\347{\331\036\304]\022?\003[\240\363U\367\375p\341\257\336s\377\254\037\203A\375\305\364\370\360T\370Z\274\314\215h\"\336\342J\252\261]\036\203\223W\277\221\377\003\275:\271\214";
-    PyObject *data = __Pyx_DecompressString(cstring, 1860, 1);
+    #elif (CYTHON_COMPRESS_STRINGS) != 0 /* compression: zlib (1895 bytes) */
+const char* const cstring = "x\332\215U\317S\033G\026\266\260\004\312F8\222\020 0kF\030\260\263\316R\006c6q\016)\t\231l\312N\026\361#\361.[5\325\232i\301\230\321\314h\272%$\347\260>\352\330\307>\366q\216s\324QG\035u\234\243\376\004\376\204}=\003F\024\233-WI\335\375\272_\277\367\275\357\275~\243<\335\335G.\266\350\317\310y\245h\310\262l\252\234\272\366\205Bm\020\035\244\031\264\243\354\036RD\361\377U)\357+&\352`\227(\3104m\rQ\303\266\224\0322L\254+?\227\276\376\305\246X\241g\210*\273\035z\006G\006Qtl\032U\354\202e\263\243\020\352\032\032\305\256T\262\224\375\327\373\177\335\376v[A\226\256\270\370=\326(QH\263\252\231\210\020L\024\273\246T\233\206I\rK\241\035\007\223\r\345\247\232\322\261\233\212\205\301\035\300r@o\374\002=\303\226B0\225\013\345I\030B\210P\205\353\206u\372D\321\r\027\234\030-,o\357!\223\340\215\210\027\245\216\234\273!\205|\374\357\243\037\220\256\253`\037[\315\272\323\331\320l\027o\324\233\200\025\271.\352\\S\002^\214\272c\273tL\253YG\364\354\216\202J\034\344\022\254\352\216\252\205\324m8\235\366\233\267\352\333\222Zz\373\217\3357\252\272\337i\303\277\014\364\251\277\3406=\300\265#D:\226f\330\322\256\335\004\2320\251V1\241j\315\260\220\251j6\241c\242\203\2551\211\032u\034\212\340\026@\233UL!-U'\272\345\250\357\355*\201\211H\006`\226\352\332sM5,MSMli\362\036\360\246\251.\3225\225\332T\3234\023\020\200\206J]\244\341*\322\3165G#Z\263N\232u\335\250\325t\231D\214\\\263\203\353\016\355`K\217\240\204>j\246\215\350\316v\315\205\324\252TUkM\360\241\032\206\3366\254\232j\020\365S\214\006\305u\362^\017\3130\252E\325\254\252@\273\234\252r\000|rr:0\264 s\330:\245gDU\353\010\300\301\330\226\321I-\271\014\275\313C[o\232\030fH\242\252Z\250\016k\353\275n\205.,\307r/,b\221V\230H\347\271\203\335\032@jZ@\232c;\216M\034\307\3055\243}=\032\032\030\005PN\347\212)Um4\221\031\331\005\316\344\271\213%\"(L\027\323\220w\367BU\241|\257\274\303J\3075\004x\210m\266\360\235\n!P6\304\271\273M!\243a\302\242\320\344\240V\001\252NZ\244\365\\U\345\036\214\006\354\272\030\235KM\371WM\243n\320p\025q!\227\272\n\244""\323\220\003\3101$\313\275\010g\"s|\256\022\355\014\207\252\264i\000\323ML\332\037\260k\223\217\261\313\354\275\304d\020OD?)=\342'\336\264_\271\374\323\275\3042\267\274\342(\236\354&\272\307\254\3006\203\344t\267\322\255\261\327|^\304D\346F\234\343\r\021\373\203\3232\217q\020\276\354\276d16\303J\014\005\251E\276\026\335\310\201v\206?\346\007\274)\212\2422\212\027\304\222w\3405.'\357%\026\341Z<\303\262\354eh!>\317\0327X^\260*\237\200\213\025iy\253{\320m\004\251k\335E\261)\212\221\270\023Z\257p]\254\210]\321\222\246\203\324\203.\3526Y1Z\264\330\001\273\340\210\303~\026\354\302\375\321\325b\202\257C\0343b\317[\361\212\022\3202\257{;~\326\337\362\017|\322[\351\025\203\370\324\307\213\256\306 \274\007\335spU\220\000'\273\230mB\234U\036\223\373\322\305ID\310\227\335\035\226a\253L\203pRi\226`\307\274\3007\203\364\022/\362_#\320i )#\241<\003\324h\024W\200%\360\322\010\2223\354\373\020&X\371\216\355\262\206\324\235d\230o\362\022\257\202\326\037[\271L\336K$?\266\001\307!\237\342T\274\0205\357\rD\260\336\007\333\251n\261\373+\340-\363\373|SF\371X\024\202\370\352pu\333\207\370B\367\2132.`?\\\005\321\352\221\004\367\220\177\007\354\204[\037\200\250\342\345sYL\311Tw\217\255\261\006\020\270\302%q\323\351\356\357\260,\213\2048\361\247{\207\375\211\3767\203\352p\277\022b\016\322\231Q*\307\366B*R_Af\366\302\274\24637WK\220\300\265\253\364]\335\221\207\0316\305\232\020\3651@N\317@\312\022\020.\206\370P\220\233\r\322y\220\341H\000\303\263@uTr\240\267\305\216x\226\177+\266\205\353\345\274C?\331\213\367J\275Z\277\324\207{\313\334\205T\335L\215p\220\336fB6OEE\242\244P\201\350\226\335\005\260\271#\262\322\333\014\324]\216\037\211y/\356\225\375\030\224\314N/;\374\376\355`w\000\346\036A\272\022\342@\374\307G\301rA\314\n\315[\006\004\273=\267\237\221w7\203\334\272\250z\261\261\t\215\300%a\217\3315-\013|\022\212\201@UC\266\363\021\323Aj\236\021\240\356\304\233\200\234\244\346\206s\257d\212\301hj\016\352\344\205\254\236\021\224\306\347rv\213\276\003\326\206'Z\022\247\336\261\277\342\357\365""\326$Z@\222\311\205O\021P\316\336\222\376\314\177\223\017:\310IL+\374G\261\005B~a\024\251\315\263s\221\021O\275\020\3026s\341=\200\242\364\260+.<\354\277\360k\275\327\375\231\376\336\240\020\344d]\277\023\277yE\251\323\010\362P\223\342\241\267\353\271\376\214_\362\315\376J\377\307\301\346\010<\036\212\t\261\356%\274\212\247\373\005\251\334\202\034\344\340f\331\217\373E\377\2607\001|$\372\225\276>x2\254\034\r\217\216\203|\001\352\266\004\357\341\265\237\361W!!\221\213G\300\310\246({I?\366\331\302C(\337\245U\010\372\304\277\017-Bz\373\246_\035L\rd\361df\241\337\244e\267\233\r\037qn\001z\246\013\325\362\322\213y\031)f!A\322Zq\224\213\322\030Q\237_\010r\327\335\022\026\262S6$H\312\267xD\350\"\264\251\tx\035\ro\\\343\326\342PL\301q\002\236\317\205\217\374O\247-\200\032\223\304E]\003v\237\211\2128\363\320\230\203\207\360N^z\367\275\277\001\243 \354@M_\t2\ryx?\225\261\320\377\345Q\010\375\337\375l\177\273\337\030\335!74\220\023G\336<$\244\334\213\365f\302w\367z\220\031\254\016N\207\307\357\206\357\376\031,\255\211C\250\340u?\341W|\275W\2702\277\022\206\030\367\376\016m\351s\005\371z\225\247\300\360\242\277\355\273\275\245\376A\237\016d\223\233\236\207\036\234\215\372M;,\320\262\230\024Ht u\267\372qz\216!\366\273(\300\327\360\213\234\374\000~j\276\363\341+\252\214\340\023V\224\333?\360Un\010\"_^\236?\000[\215QR\326\022\034\275bG\303\205\257\275\254\267\345\035\371\371^\266\007~\227\370O\300\026\350|\325\3750\\\370\213\367\314?\351\307\240Q\1771=\336<%\276\026\2530=\352\2107\270\222\262mW\306\340\344\3457\362\277z\332\324s";
+    PyObject *data = __Pyx_DecompressString(cstring, 1895, 1);
     if (unlikely(!data)) __PYX_ERR(0, 1, __pyx_L1_error)
     const char* const bytes = __Pyx_PyBytes_AsString(data);
     #if !CYTHON_ASSUME_SAFE_MACROS
     if (likely(bytes)); else { Py_DECREF(data); __PYX_ERR(0, 1, __pyx_L1_error) }
     #endif
-    #else /* compression: none (3058 bytes) */
-const char* const bytes = "?DP layers allocation failedNote that Cython is deliberately stricter than PEP-484 and rejects subclasses of builtin types. If you need to pass subclasses then set the 'annotation_typing' directive to False.Parent map allocation failedState map allocation failedadd_notenumpy.core.multiarray failed to importnumpy.core.umath failed to import_sparse_dp_cython.pyxKL_LB_BLOCK__Pyx_PyDict_NextRefTasyncio.coroutinesbbest_final_costbest_final_penbest_final_timebest_partialbetterbp_costbp_jobsbp_statebp_timec0c_incc_lenc_parentc_radc_totcccline_in_tracebackcpcscumsumdiffdtypeearlyemptyendfinal_statefloat64freed_t__func__iidxinf_is_coroutineitemsjdlayerlayers_lb_arr_lb_b_lb_len_lb_pylb_vallengths__main__max_job_lenmax_states__module__mult__name__njdnlayernpnrwnsnsvnumpyp0perf_counterpoppospprefixprefixprices_arrpy_parent__qualname__radicesremainingret_costrw__set_name__setdefaultsolve_sparse_dp_cythonsortsp_sparse_dp_cythonstart_timestatestate_boundsvsv0__test__tie_breaktimetime_limittime_moduletimed_outtlayertotal_rwtotalstrack_schedulettuivaluesxzeros\200\001\360\022\000\005\006\330\004\005\330\004\005\330\004\005\360\022\000\005\036\230[\250\r\260Q\360\n\000\005\037\230n\250A\340\004\010\210\005\210U\220!\2201\330\010\r\210Q\210f\220E\230\027\240\001\240\021\330\010\r\210Q\210f\220E\230\026\230q\240\001\330\010\r\210Q\210f\220E\230\027\240\001\240\021\330\010\r\210Q\210f\220D\230\001\230\021\330\010\013\2105\220\001\220\023\220B\220a\330\014\032\230%\230q\240\001\330\010\024\220E\230\021\230#\230R\230u\240A\240Q\340\004!\240\034\250R\250q\360\006\000\005\032\230\021\330\004\021\220\022\2205\230\001\230\021\330\004\027\220q\340\004\010\210\005\210U\220!\2203\220b\230\002\230#\230Q\330\010\013\2102\210R\210q\330\014\021\220\022\2205\230\001\230\032\2401\240A\330\014\021\220\022\2206\230\021\230#\230Q\230d\240\"\240C\240v\250R\250q\330\014\016\210a\210u\220A\330\014\016\210a\210v\220R\220w\230a\230q\330\014\022\220!\2205\230\001\340\014\022\220!\2205\230\002\230&\240\001\240""\023\240F\250\"\250A\360\006\000\005\037\230m\2506\260\022\2602\260R\260s\270\"\270A\330\004\007\200w\210c\220\021\330\010\016\210k\230\021\230!\340\004\010\210\006\210e\2201\220B\220b\230\001\330\010\016\210a\210v\220[\240\001\240\021\330\010\013\2106\220\021\220$\220c\230\021\330\014\020\220\005\220U\230!\2301\330\020\034\230A\230V\2401\240A\330\014\020\220\001\220\021\330\014\022\220+\230Q\230a\340\004 \240\001\330\004\007\200q\330\010\023\220;\230a\230q\330\010\013\2109\220C\220q\330\014\020\220\006\220e\2301\230B\230b\240\001\330\020\034\230A\230V\2401\240A\330\014\020\220\001\220\021\330\014\022\220+\230Q\230a\360\010\000\005\010\200x\210v\220S\230\007\230t\2403\240f\250K\260s\270&\300\001\330\004\014\210A\210V\2201\220D\230\003\2301\360\006\000\005#\240!\330\004$\320$4\260A\330\004 \240\001\330\004\032\230!\340\004\027\220q\330\004\032\230!\330\004\027\220q\330\004\036\230a\340\004\033\2309\240F\250!\330\004\027\220z\240\023\240A\3600\000\005\006\330\010\014\210F\220%\220q\230\002\230\"\230A\360\006\000\r\020\210{\230\"\230D\240\005\240[\260\r\270S\300\002\300,\310b\320PQ\330\020\034\230A\330\020\021\340\014\024\220F\230!\2301\330\014\017\210u\220F\230#\230Q\330\020\021\360\006\000\r\020\210{\230\"\230B\230d\240%\240v\250R\250q\330\020\034\230A\330\020\021\360\006\000\r\021\220\007\220u\230A\230U\240!\330\020\023\2205\230\005\230Q\230e\2403\240a\330\024\025\330\020\030\230\005\230U\240!\2401\330\020\025\220U\230%\230q\240\001\330\020\023\2202\220T\230\022\2308\2404\240r\250\024\250S\260\010\270\004\270B\270f\300B\300a\330\024\037\230r\240\021\330\024\037\230r\240\021\330\024\037\230q\330\024\037\230q\360\006\000\r\023\220+\230Q\230g\240Q\330\014\017\210t\2203\220a\330\020\025\220U\230%\230q\240\001\330\020\031\230\022\2306\240\022\2401\330\020\023\2206\230\024\230T\240\027\250\004\250D\260\001\260\022\2606\270\022\320;L\310C\310q\330\024\036\230b\240\005\240R\240\177\260a\330\037!\240\025\240c\250\037\270\004\270C\270r\300\021\330\020\023\2201\330\024&\240b""\250\001\330\024&\240b\250\001\330\024&\240a\340\014\017\210s\220#\220Q\330\020\021\360\006\000\r\031\230\006\230a\230s\240\"\240A\330\014\030\230\002\230\"\230A\330\014\027\220s\230#\230[\250\002\250!\330\014\026\320\026:\270&\300\001\300\021\330\014\026\220e\2303\230a\230q\340\014\020\220\007\220u\230A\230U\240!\330\020\023\2205\230\005\230Q\230e\2403\240a\330\024\025\330\020\030\230\005\230U\240!\2401\330\020\030\230\005\230U\240!\2401\330\020\025\220R\220x\230u\240B\240g\250U\260\"\260F\270%\270r\300\021\360\006\000\021\024\2203\220b\230\001\330\024\025\360\006\000\021\024\2203\220b\230\001\330\024\035\230W\240A\240Q\330\024\027\220s\230\"\230G\2402\240Q\330\030\031\340\024\025\360\006\000\021\027\220k\240\021\240(\250!\330\020\023\2204\220r\230\021\330\024\027\220x\230u\240C\240w\250e\2603\260f\270E\300\023\300F\310!\330\024\034\230A\230X\240W\250A\330\024\027\220q\330\030 \240\001\240\033\250C\250r\260\023\260B\260l\300\"\300G\3101\340\024\035\230S\240\002\240&\250\005\250Q\250d\260!\330\024\027\220v\230T\240\024\240W\250D\260\004\260A\260S\270\002\270&\300\005\300Q\300d\310'\320QT\320TU\330\030!\240\023\240B\240f\250E\260\021\260$\260a\330\024\027\220q\330\030\036\230e\2401\240D\250\010\260\001\330\030\036\230e\2401\240D\250\010\260\001\330\030\036\230e\2401\240D\250\010\260\001\330\030\036\230e\2401\240D\250\010\260\001\330\030\033\2301\330\034$\240A\240[\260\003\2602\260S\270\002\270,\300b\310\007\310q\360\006\000\021\025\220A\330\020\024\220E\230\025\230a\230q\330\024\031\230\026\230r\240\022\2405\250\001\250\021\330\024\031\230\022\2303\230e\2401\240A\340\024\027\220s\230#\230U\240!\2401\330\030\031\330\024\032\230%\230q\240\001\330\024\032\230#\230R\230q\330\024\027\220t\2302\230Q\330\030\031\340\024\032\230&\240\002\240%\240q\250\001\330\024\032\230#\230R\230q\330\024\032\230#\230R\230q\330\024\032\230#\230S\240\007\240q\250\005\250R\250w\260a\260q\330\024\032\230#\230R\230v\240[\260\001\340\024\035\230V\2401\240A\330\024\032\230+\240Q\240h\250a\330""\024\027\220t\2302\230Q\330\030\033\2308\2405\250\003\2507\260!\330\030\033\2306\240\027\250\003\2507\260!\330\030 \240\001\240\030\250\024\250Q\330\030\033\2301\330\034$\240A\240Z\250t\2602\260\\\300\022\3004\300q\340\030!\240\023\240B\240f\250E\260\021\260$\260a\330\030\033\2306\240\024\240T\250\027\260\004\260D\270\001\270\023\270B\270f\300E\310\021\310$\310g\320UX\320XY\330\034%\240S\250\002\250&\260\005\260Q\260d\270!\330\030\033\2301\330\034\"\240%\240q\250\004\250H\260A\330\034\"\240%\240q\250\004\250H\260A\330\034\"\240%\240q\250\004\250H\260A\330\034\"\240%\240q\250\004\250H\260A\330\034\037\230q\330 (\250\001\250\032\2604\260r\270\034\300R\300t\3101\360\006\000\r\027\220c\230\022\2301\330\014\017\210x\220s\230\"\230D\240\006\240a\240y\260\003\2601\330\020\034\230A\230V\2401\240A\330\020\026\220a\220{\240!\360\n\000\t\024\2201\330\010\013\2109\220C\220q\330\014\027\220u\230A\230Q\340\010\024\220A\330\010\013\210?\230$\230i\240s\250!\330\014\030\230\016\240a\240q\340\010\027\220q\330\010\013\210:\220T\320\031)\250\022\2502\250T\260\030\270\022\2701\330\014\034\230I\240Z\250q\340\010\017\210z\320\031*\250+\260[\300\001\360\010\000\t\r\210F\220%\220q\230\002\230\"\230A\330\014\017\210v\220Q\220d\230#\230Q\330\020\034\230A\230V\2401\240A\330\010\014\210A\210Q\330\010\013\2109\220C\220q\330\014\030\230\001\230\021";
+    #else /* compression: none (3135 bytes) */
+const char* const bytes = " (CParentMap: cannot grow to capacity CStateMap: cannot grow to capacity DP layers allocation failed MB)Note that Cython is deliberately stricter than PEP-484 and rejects subclasses of builtin types. If you need to pass subclasses then set the 'annotation_typing' directive to False.Parent map allocation failedState map allocation failed?add_notenumpy.core.multiarray failed to importnumpy.core.umath failed to import_sparse_dp_cython.pyxKL_LB_BLOCK__Pyx_PyDict_NextRefTasyncio.coroutinesbbest_final_costbest_final_penbest_final_timebest_partialbetterbp_costbp_jobsbp_statebp_timec0c_incc_lenc_parentc_radc_totcccline_in_tracebackcpcscumsumdiffdtypeearlyemptyendfinal_statefloat64freed_t__func__iidxinf_is_coroutineitemsjdlayerlayers_lb_arr_lb_b_lb_len_lb_pylb_vallengths__main__max_job_lenmax_states__module__mult__name__njdnlayernpnrwnsnsvnumpyp0perf_counterpoppospprefixprefixprices_arrpy_parent__qualname__radicesremainingret_costrw__set_name__setdefaultsolve_sparse_dp_cythonsortsp_sparse_dp_cythonstart_timestatestate_boundsvsv0__test__tie_breaktimetime_limittime_moduletimed_outtlayertotal_rwtotalstrack_schedulettuivaluesxzeros\200\001\360\022\000\005\006\330\004\005\330\004\005\330\004\005\360\022\000\005\036\230[\250\r\260Q\360\n\000\005\037\230n\250A\340\004\010\210\005\210U\220!\2201\330\010\r\210Q\210f\220E\230\027\240\001\240\021\330\010\r\210Q\210f\220E\230\026\230q\240\001\330\010\r\210Q\210f\220E\230\027\240\001\240\021\330\010\r\210Q\210f\220D\230\001\230\021\330\010\013\2105\220\001\220\023\220B\220a\330\014\032\230%\230q\240\001\330\010\024\220E\230\021\230#\230R\230u\240A\240Q\340\004!\240\034\250R\250q\360\006\000\005\032\230\021\330\004\021\220\022\2205\230\001\230\021\330\004\027\220q\340\004\010\210\005\210U\220!\2203\220b\230\002\230#\230Q\330\010\013\2102\210R\210q\330\014\021\220\022\2205\230\001\230\032\2401\240A\330\014\021\220\022\2206\230\021\230#\230Q\230d\240\"\240C\240v\250R\250q\330\014\016\210a\210u\220A\330\014\016\210a\210v\220R\220w\230a\230q""\330\014\022\220!\2205\230\001\340\014\022\220!\2205\230\002\230&\240\001\240\023\240F\250\"\250A\360\006\000\005\037\230m\2506\260\022\2602\260R\260s\270\"\270A\330\004\007\200w\210c\220\021\330\010\016\210k\230\021\230!\340\004\010\210\006\210e\2201\220B\220b\230\001\330\010\016\210a\210v\220[\240\001\240\021\330\010\013\2106\220\021\220$\220c\230\021\330\014\020\220\005\220U\230!\2301\330\020\034\230A\230V\2401\240A\330\014\020\220\001\220\021\330\014\022\220+\230Q\230a\340\004 \240\001\330\004\007\200q\330\010\023\220;\230a\230q\330\010\013\2109\220C\220q\330\014\020\220\006\220e\2301\230B\230b\240\001\330\020\034\230A\230V\2401\240A\330\014\020\220\001\220\021\330\014\022\220+\230Q\230a\360\010\000\005\010\200x\210v\220S\230\007\230t\2403\240f\250K\260s\270&\300\001\330\004\014\210A\210V\2201\220D\230\003\2301\360\006\000\005#\240!\330\004$\320$4\260A\330\004 \240\001\330\004\032\230!\340\004\027\220q\330\004\032\230!\330\004\027\220q\330\004\036\230a\340\004\033\2309\240F\250!\330\004\027\220z\240\023\240A\3600\000\005\006\330\010\014\210F\220%\220q\230\002\230\"\230A\360\006\000\r\020\210{\230\"\230D\240\005\240[\260\r\270S\300\002\300,\310b\320PQ\330\020\034\230A\330\020\021\340\014\024\220F\230!\2301\330\014\017\210u\220F\230#\230Q\330\020\021\360\006\000\r\020\210{\230\"\230B\230d\240%\240v\250R\250q\330\020\034\230A\330\020\021\360\006\000\r\021\220\007\220u\230A\230U\240!\330\020\023\2205\230\005\230Q\230e\2403\240a\330\024\025\330\020\030\230\005\230U\240!\2401\330\020\025\220U\230%\230q\240\001\330\020\023\2202\220T\230\022\2308\2404\240r\250\024\250S\260\010\270\004\270B\270f\300B\300a\330\024\037\230r\240\021\330\024\037\230r\240\021\330\024\037\230q\330\024\037\230q\360\006\000\r\023\220+\230Q\230g\240Q\330\014\017\210t\2203\220a\330\020\025\220U\230%\230q\240\001\330\020\031\230\022\2306\240\022\2401\330\020\023\2206\230\024\230T\240\027\250\004\250D\260\001\260\022\2606\270\022\320;L\310C\310q\330\024\036\230b\240\005\240R\240\177\260a\330\037!""\240\025\240c\250\037\270\004\270C\270r\300\021\330\020\023\2201\330\024&\240b\250\001\330\024&\240b\250\001\330\024&\240a\340\014\017\210s\220#\220Q\330\020\021\360\006\000\r\031\230\006\230a\230s\240\"\240A\330\014\030\230\002\230\"\230A\330\014\027\220s\230#\230[\250\002\250!\330\014\026\320\026:\270&\300\001\300\021\330\014\026\220e\2303\230a\230q\340\014\020\220\007\220u\230A\230U\240!\330\020\023\2205\230\005\230Q\230e\2403\240a\330\024\025\330\020\030\230\005\230U\240!\2401\330\020\030\230\005\230U\240!\2401\330\020\025\220R\220x\230u\240B\240g\250U\260\"\260F\270%\270r\300\021\360\006\000\021\024\2203\220b\230\001\330\024\025\360\006\000\021\024\2203\220b\230\001\330\024\035\230W\240A\240Q\330\024\027\220s\230\"\230G\2402\240Q\330\030\031\340\024\025\360\006\000\021\027\220k\240\021\240(\250!\330\020\023\2204\220r\230\021\330\024\027\220x\230u\240C\240w\250e\2603\260f\270E\300\023\300F\310!\330\024\034\230A\230X\240W\250A\330\024\027\220q\330\030 \240\001\240\033\250C\250r\260\023\260B\260l\300\"\300G\3101\340\024\035\230S\240\002\240&\250\005\250Q\250d\260!\330\024\027\220v\230T\240\024\240W\250D\260\004\260A\260S\270\002\270&\300\005\300Q\300d\310'\320QT\320TU\330\030!\240\023\240B\240f\250E\260\021\260$\260a\330\024\027\220q\330\030\036\230e\2401\240D\250\010\260\001\330\030\036\230e\2401\240D\250\010\260\001\330\030\036\230e\2401\240D\250\010\260\001\330\030\036\230e\2401\240D\250\010\260\001\330\030\033\2301\330\034$\240A\240[\260\003\2602\260S\270\002\270,\300b\310\007\310q\360\006\000\021\025\220A\330\020\024\220E\230\025\230a\230q\330\024\031\230\026\230r\240\022\2405\250\001\250\021\330\024\031\230\022\2303\230e\2401\240A\340\024\027\220s\230#\230U\240!\2401\330\030\031\330\024\032\230%\230q\240\001\330\024\032\230#\230R\230q\330\024\027\220t\2302\230Q\330\030\031\340\024\032\230&\240\002\240%\240q\250\001\330\024\032\230#\230R\230q\330\024\032\230#\230R\230q\330\024\032\230#\230S\240\007\240q\250\005\250R\250w\260a\260q\330\024\032\230#\230R\230v""\240[\260\001\340\024\035\230V\2401\240A\330\024\032\230+\240Q\240h\250a\330\024\027\220t\2302\230Q\330\030\033\2308\2405\250\003\2507\260!\330\030\033\2306\240\027\250\003\2507\260!\330\030 \240\001\240\030\250\024\250Q\330\030\033\2301\330\034$\240A\240Z\250t\2602\260\\\300\022\3004\300q\340\030!\240\023\240B\240f\250E\260\021\260$\260a\330\030\033\2306\240\024\240T\250\027\260\004\260D\270\001\270\023\270B\270f\300E\310\021\310$\310g\320UX\320XY\330\034%\240S\250\002\250&\260\005\260Q\260d\270!\330\030\033\2301\330\034\"\240%\240q\250\004\250H\260A\330\034\"\240%\240q\250\004\250H\260A\330\034\"\240%\240q\250\004\250H\260A\330\034\"\240%\240q\250\004\250H\260A\330\034\037\230q\330 (\250\001\250\032\2604\260r\270\034\300R\300t\3101\360\006\000\r\027\220c\230\022\2301\330\014\017\210x\220s\230\"\230D\240\006\240a\240y\260\003\2601\330\020\034\230A\230V\2401\240A\330\020\026\220a\220{\240!\360\n\000\t\024\2201\330\010\013\2109\220C\220q\330\014\027\220u\230A\230Q\340\010\024\220A\330\010\013\210?\230$\230i\240s\250!\330\014\030\230\016\240a\240q\340\010\027\220q\330\010\013\210:\220T\320\031)\250\022\2502\250T\260\030\270\022\2701\330\014\034\230I\240Z\250q\340\010\017\210z\320\031*\250+\260[\300\001\360\010\000\t\r\210F\220%\220q\230\002\230\"\230A\330\014\017\210v\220Q\220d\230#\230Q\330\020\034\230A\230V\2401\240A\330\010\014\210A\210Q\330\010\013\2109\220C\220q\330\014\030\230\001\230\021";
     PyObject *data = NULL;
     CYTHON_UNUSED_VAR(__Pyx_DecompressString);
     #endif
     PyObject **stringtab = __pyx_mstate->__pyx_string_tab;
     Py_ssize_t pos = 0;
-    for (int i = 0; i < 111; i++) {
+    for (int i = 0; i < 115; i++) {
       Py_ssize_t bytes_length = index[i].length;
       PyObject *string = PyUnicode_DecodeUTF8(bytes + pos, bytes_length, NULL);
-      if (likely(string) && i >= 9) PyUnicode_InternInPlace(&string);
+      if (likely(string) && i >= 13) PyUnicode_InternInPlace(&string);
       if (unlikely(!string)) {
         Py_XDECREF(data);
         __PYX_ERR(0, 1, __pyx_L1_error)
@@ -10173,7 +10594,7 @@ const char* const bytes = "?DP layers allocation failedNote that Cython is delib
       stringtab[i] = string;
       pos += bytes_length;
     }
-    for (int i = 111; i < 112; i++) {
+    for (int i = 115; i < 116; i++) {
       Py_ssize_t bytes_length = index[i].length;
       PyObject *string = PyBytes_FromStringAndSize(bytes + pos, bytes_length);
       stringtab[i] = string;
@@ -10184,14 +10605,14 @@ const char* const bytes = "?DP layers allocation failedNote that Cython is delib
       }
     }
     Py_XDECREF(data);
-    for (Py_ssize_t i = 0; i < 112; i++) {
+    for (Py_ssize_t i = 0; i < 116; i++) {
       if (unlikely(PyObject_Hash(stringtab[i]) == -1)) {
         __PYX_ERR(0, 1, __pyx_L1_error)
       }
     }
     #if CYTHON_IMMORTAL_CONSTANTS
     {
-      PyObject **table = stringtab + 111;
+      PyObject **table = stringtab + 115;
       for (Py_ssize_t i=0; i<1; ++i) {
         #if CYTHON_COMPILING_IN_CPYTHON_FREETHREADING
         #if PY_VERSION_HEX < 0x030E0000
@@ -10255,7 +10676,7 @@ typedef struct {
     unsigned int num_kwonly_args : 1;
     unsigned int nlocals : 7;
     unsigned int flags : 10;
-    unsigned int first_line : 8;
+    unsigned int first_line : 9;
 } __Pyx_PyCode_New_function_description;
 /* NewCodeObj.proto */
 static PyObject* __Pyx_PyCode_New(
@@ -10272,7 +10693,7 @@ static int __Pyx_CreateCodeObjects(__pyx_mstatetype *__pyx_mstate) {
   PyObject* tuple_dedup_map = PyDict_New();
   if (unlikely(!tuple_dedup_map)) return -1;
   {
-    const __Pyx_PyCode_New_function_description descr = {12, 0, 0, 72, (unsigned int)(CO_OPTIMIZED|CO_NEWLOCALS), 236};
+    const __Pyx_PyCode_New_function_description descr = {12, 0, 0, 72, (unsigned int)(CO_OPTIMIZED|CO_NEWLOCALS), 259};
     PyObject* const varnames[] = {__pyx_mstate->__pyx_n_u_lengths, __pyx_mstate->__pyx_n_u_totals, __pyx_mstate->__pyx_n_u_prefix, __pyx_mstate->__pyx_n_u_T, __pyx_mstate->__pyx_n_u_radices, __pyx_mstate->__pyx_n_u_mult, __pyx_mstate->__pyx_n_u_K, __pyx_mstate->__pyx_n_u_final_state, __pyx_mstate->__pyx_n_u_time_limit, __pyx_mstate->__pyx_n_u_tie_break, __pyx_mstate->__pyx_n_u_track_schedule, __pyx_mstate->__pyx_n_u_max_states, __pyx_mstate->__pyx_n_u_start_time, __pyx_mstate->__pyx_n_u_c_len, __pyx_mstate->__pyx_n_u_c_tot, __pyx_mstate->__pyx_n_u_c_rad, __pyx_mstate->__pyx_n_u_c_inc, __pyx_mstate->__pyx_n_u_i, __pyx_mstate->__pyx_n_u_max_job_len, __pyx_mstate->__pyx_n_u_total_rw, __pyx_mstate->__pyx_n_u_state_bound, __pyx_mstate->__pyx_n_u_LB_BLOCK, __pyx_mstate->__pyx_n_u_prices_arr, __pyx_mstate->__pyx_n_u_lb_py, __pyx_mstate->__pyx_n_u_b, __pyx_mstate->__pyx_n_u_sp, __pyx_mstate->__pyx_n_u_cs, __pyx_mstate->__pyx_n_u_layers, __pyx_mstate->__pyx_n_u_tt, __pyx_mstate->__pyx_n_u_c_parent, __pyx_mstate->__pyx_n_u_sv0, __pyx_mstate->__pyx_n_u_best_final_cost, __pyx_mstate->__pyx_n_u_best_final_pen, __pyx_mstate->__pyx_n_u_best_final_time, __pyx_mstate->__pyx_n_u_timed_out, __pyx_mstate->__pyx_n_u_bp_jobs, __pyx_mstate->__pyx_n_u_bp_cost, __pyx_mstate->__pyx_n_u_bp_time, __pyx_mstate->__pyx_n_u_bp_state, __pyx_mstate->__pyx_n_u_pprefix, __pyx_mstate->__pyx_n_u_early, __pyx_mstate->__pyx_n_u_layer, __pyx_mstate->__pyx_n_u_nlayer, __pyx_mstate->__pyx_n_u_tlayer, __pyx_mstate->__pyx_n_u_pos, __pyx_mstate->__pyx_n_u_idx, __pyx_mstate->__pyx_n_u_state, __pyx_mstate->__pyx_n_u_ns, __pyx_mstate->__pyx_n_u_x, __pyx_mstate->__pyx_n_u_sv, __pyx_mstate->__pyx_n_u_nsv, __pyx_mstate->__pyx_n_u_remaining, __pyx_mstate->__pyx_n_u_freed_t, __pyx_mstate->__pyx_n_u_end, __pyx_mstate->__pyx_n_u_L, __pyx_mstate->__pyx_n_u_ui, __pyx_mstate->__pyx_n_u_nrw, __pyx_mstate->__pyx_n_u_njd, __pyx_mstate->__pyx_n_u_rw, __pyx_mstate->__pyx_n_u_jd, __pyx_mstate->__pyx_n_u_c0, __pyx_mstate->__pyx_n_u_cc, __pyx_mstate->__pyx_n_u_lb_val, __pyx_mstate->__pyx_n_u_p0, __pyx_mstate->__pyx_n_u_cp, __pyx_mstate->__pyx_n_u_better, __pyx_mstate->__pyx_n_u_lb_b, __pyx_mstate->__pyx_n_u_lb_len, __pyx_mstate->__pyx_n_u_lb_arr, __pyx_mstate->__pyx_n_u_ret_cost, __pyx_mstate->__pyx_n_u_py_parent, __pyx_mstate->__pyx_n_u_best_partial};
     __pyx_mstate_global->__pyx_codeobj_tab[0] = __Pyx_PyCode_New(descr, varnames, __pyx_mstate->__pyx_kp_u_sparse_dp_cython_pyx, __pyx_mstate->__pyx_n_u_solve_sparse_dp_cython, __pyx_mstate->__pyx_kp_b_iso88591_Q_nA_U_1_QfE_QfE_q_QfE_QfD_5_Ba, tuple_dedup_map); if (unlikely(!__pyx_mstate_global->__pyx_codeobj_tab[0])) goto bad;
   }
@@ -10861,6 +11282,421 @@ static void __Pyx_Raise(PyObject *type, PyObject *value, PyObject *tb, PyObject 
 bad:
     Py_XDECREF(owned_instance);
     return;
+}
+
+/* CIntToDigits (used by CIntToPyUnicode) */
+static const char DIGIT_PAIRS_10[2*10*10+1] = {
+    "00010203040506070809"
+    "10111213141516171819"
+    "20212223242526272829"
+    "30313233343536373839"
+    "40414243444546474849"
+    "50515253545556575859"
+    "60616263646566676869"
+    "70717273747576777879"
+    "80818283848586878889"
+    "90919293949596979899"
+};
+static const char DIGIT_PAIRS_8[2*8*8+1] = {
+    "0001020304050607"
+    "1011121314151617"
+    "2021222324252627"
+    "3031323334353637"
+    "4041424344454647"
+    "5051525354555657"
+    "6061626364656667"
+    "7071727374757677"
+};
+static const char DIGITS_HEX[2*16+1] = {
+    "0123456789abcdef"
+    "0123456789ABCDEF"
+};
+
+/* BuildPyUnicode (used by COrdinalToPyUnicode) */
+static PyObject* __Pyx_PyUnicode_BuildFromAscii(Py_ssize_t ulength, const char* chars, int clength,
+                                                int prepend_sign, char padding_char) {
+    PyObject *uval;
+    Py_ssize_t uoffset = ulength - clength;
+#if CYTHON_USE_UNICODE_INTERNALS
+    Py_ssize_t i;
+    void *udata;
+    uval = PyUnicode_New(ulength, 127);
+    if (unlikely(!uval)) return NULL;
+    udata = PyUnicode_DATA(uval);
+    if (uoffset > 0) {
+        i = 0;
+        if (prepend_sign) {
+            __Pyx_PyUnicode_WRITE(PyUnicode_1BYTE_KIND, udata, 0, '-');
+            i++;
+        }
+        for (; i < uoffset; i++) {
+            __Pyx_PyUnicode_WRITE(PyUnicode_1BYTE_KIND, udata, i, padding_char);
+        }
+    }
+    for (i=0; i < clength; i++) {
+        __Pyx_PyUnicode_WRITE(PyUnicode_1BYTE_KIND, udata, uoffset+i, chars[i]);
+    }
+#else
+    {
+        PyObject *sign = NULL, *padding = NULL;
+        uval = NULL;
+        if (uoffset > 0) {
+            prepend_sign = !!prepend_sign;
+            if (uoffset > prepend_sign) {
+                padding = PyUnicode_FromOrdinal(padding_char);
+                if (likely(padding) && uoffset > prepend_sign + 1) {
+                    PyObject *tmp = PySequence_Repeat(padding, uoffset - prepend_sign);
+                    Py_DECREF(padding);
+                    padding = tmp;
+                }
+                if (unlikely(!padding)) goto done_or_error;
+            }
+            if (prepend_sign) {
+                sign = PyUnicode_FromOrdinal('-');
+                if (unlikely(!sign)) goto done_or_error;
+            }
+        }
+        uval = PyUnicode_DecodeASCII(chars, clength, NULL);
+        if (likely(uval) && padding) {
+            PyObject *tmp = PyUnicode_Concat(padding, uval);
+            Py_DECREF(uval);
+            uval = tmp;
+        }
+        if (likely(uval) && sign) {
+            PyObject *tmp = PyUnicode_Concat(sign, uval);
+            Py_DECREF(uval);
+            uval = tmp;
+        }
+done_or_error:
+        Py_XDECREF(padding);
+        Py_XDECREF(sign);
+    }
+#endif
+    return uval;
+}
+
+/* COrdinalToPyUnicode (used by CIntToPyUnicode) */
+static CYTHON_INLINE int __Pyx_CheckUnicodeValue(int value) {
+    return value <= 1114111;
+}
+static PyObject* __Pyx_PyUnicode_FromOrdinal_Padded(int value, Py_ssize_t ulength, char padding_char) {
+    Py_ssize_t padding_length = ulength - 1;
+    if (likely((padding_length <= 250) && (value < 0xD800 || value > 0xDFFF))) {
+        char chars[256];
+        if (value <= 255) {
+            memset(chars, padding_char, (size_t) padding_length);
+            chars[ulength-1] = (char) value;
+            return PyUnicode_DecodeLatin1(chars, ulength, NULL);
+        }
+        char *cpos = chars + sizeof(chars);
+        if (value < 0x800) {
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0xc0 | (value & 0x1f));
+        } else if (value < 0x10000) {
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0xe0 | (value & 0x0f));
+        } else {
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0x80 | (value & 0x3f));
+            value >>= 6;
+            *--cpos = (char) (0xf0 | (value & 0x07));
+        }
+        cpos -= padding_length;
+        memset(cpos, padding_char, (size_t) padding_length);
+        return PyUnicode_DecodeUTF8(cpos, chars + sizeof(chars) - cpos, NULL);
+    }
+    if (value <= 127 && CYTHON_USE_UNICODE_INTERNALS) {
+        const char chars[1] = {(char) value};
+        return __Pyx_PyUnicode_BuildFromAscii(ulength, chars, 1, 0, padding_char);
+    }
+    {
+        PyObject *uchar, *padding_uchar, *padding, *result;
+        padding_uchar = PyUnicode_FromOrdinal(padding_char);
+        if (unlikely(!padding_uchar)) return NULL;
+        padding = PySequence_Repeat(padding_uchar, padding_length);
+        Py_DECREF(padding_uchar);
+        if (unlikely(!padding)) return NULL;
+        uchar = PyUnicode_FromOrdinal(value);
+        if (unlikely(!uchar)) {
+            Py_DECREF(padding);
+            return NULL;
+        }
+        result = PyUnicode_Concat(padding, uchar);
+        Py_DECREF(padding);
+        Py_DECREF(uchar);
+        return result;
+    }
+}
+
+/* CIntToPyUnicode */
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_Py_ssize_t(Py_ssize_t value, Py_ssize_t width, char padding_char) {
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const Py_ssize_t neg_one = (Py_ssize_t) -1, const_zero = (Py_ssize_t) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (unlikely(!(is_unsigned || value == 0 || value > 0) ||
+                    !(sizeof(value) <= 2 || value & ~ (Py_ssize_t) 0x01fffff || __Pyx_CheckUnicodeValue((int) value)))) {
+        PyErr_SetString(PyExc_OverflowError, "%c arg not in range(0x110000)");
+        return NULL;
+    }
+    if (width <= 1) {
+        return PyUnicode_FromOrdinal((int) value);
+    }
+    return __Pyx_PyUnicode_FromOrdinal_Padded((int) value, width, padding_char);
+}
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_Py_ssize_t(Py_ssize_t value, Py_ssize_t width, char padding_char, char format_char) {
+    char digits[sizeof(Py_ssize_t)*3+2];
+    char *dpos, *end = digits + sizeof(Py_ssize_t)*3+2;
+    const char *hex_digits = DIGITS_HEX;
+    Py_ssize_t length, ulength;
+    int prepend_sign, last_one_off;
+    Py_ssize_t remaining;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const Py_ssize_t neg_one = (Py_ssize_t) -1, const_zero = (Py_ssize_t) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (format_char == 'X') {
+        hex_digits += 16;
+        format_char = 'x';
+    }
+    remaining = value;
+    last_one_off = 0;
+    dpos = end;
+    do {
+        int digit_pos;
+        switch (format_char) {
+        case 'o':
+            digit_pos = abs((int)(remaining % (8*8)));
+            remaining = (Py_ssize_t) (remaining / (8*8));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_8 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 8);
+            break;
+        case 'd':
+            digit_pos = abs((int)(remaining % (10*10)));
+            remaining = (Py_ssize_t) (remaining / (10*10));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_10 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 10);
+            break;
+        case 'x':
+            *(--dpos) = hex_digits[abs((int)(remaining % 16))];
+            remaining = (Py_ssize_t) (remaining / 16);
+            break;
+        default:
+            assert(0);
+            break;
+        }
+    } while (unlikely(remaining != 0));
+    assert(!last_one_off || *dpos == '0');
+    dpos += last_one_off;
+    length = end - dpos;
+    ulength = length;
+    prepend_sign = 0;
+    if (!is_unsigned && value <= neg_one) {
+        if (padding_char == ' ' || width <= length + 1) {
+            *(--dpos) = '-';
+            ++length;
+        } else {
+            prepend_sign = 1;
+        }
+        ++ulength;
+    }
+    if (width > ulength) {
+        ulength = width;
+    }
+    if (ulength == 1) {
+        return PyUnicode_FromOrdinal(*dpos);
+    }
+    return __Pyx_PyUnicode_BuildFromAscii(ulength, dpos, (int) length, prepend_sign, padding_char);
+}
+
+/* CIntToPyUnicode */
+static CYTHON_INLINE PyObject* __Pyx_uchar___Pyx_PyUnicode_From_size_t(size_t value, Py_ssize_t width, char padding_char) {
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const size_t neg_one = (size_t) -1, const_zero = (size_t) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (unlikely(!(is_unsigned || value == 0 || value > 0) ||
+                    !(sizeof(value) <= 2 || value & ~ (size_t) 0x01fffff || __Pyx_CheckUnicodeValue((int) value)))) {
+        PyErr_SetString(PyExc_OverflowError, "%c arg not in range(0x110000)");
+        return NULL;
+    }
+    if (width <= 1) {
+        return PyUnicode_FromOrdinal((int) value);
+    }
+    return __Pyx_PyUnicode_FromOrdinal_Padded((int) value, width, padding_char);
+}
+static CYTHON_INLINE PyObject* __Pyx____Pyx_PyUnicode_From_size_t(size_t value, Py_ssize_t width, char padding_char, char format_char) {
+    char digits[sizeof(size_t)*3+2];
+    char *dpos, *end = digits + sizeof(size_t)*3+2;
+    const char *hex_digits = DIGITS_HEX;
+    Py_ssize_t length, ulength;
+    int prepend_sign, last_one_off;
+    size_t remaining;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#endif
+    const size_t neg_one = (size_t) -1, const_zero = (size_t) 0;
+#ifdef __Pyx_HAS_GCC_DIAGNOSTIC
+#pragma GCC diagnostic pop
+#endif
+    const int is_unsigned = neg_one > const_zero;
+    if (format_char == 'X') {
+        hex_digits += 16;
+        format_char = 'x';
+    }
+    remaining = value;
+    last_one_off = 0;
+    dpos = end;
+    do {
+        int digit_pos;
+        switch (format_char) {
+        case 'o':
+            digit_pos = abs((int)(remaining % (8*8)));
+            remaining = (size_t) (remaining / (8*8));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_8 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 8);
+            break;
+        case 'd':
+            digit_pos = abs((int)(remaining % (10*10)));
+            remaining = (size_t) (remaining / (10*10));
+            dpos -= 2;
+            memcpy(dpos, DIGIT_PAIRS_10 + digit_pos * 2, 2);
+            last_one_off = (digit_pos < 10);
+            break;
+        case 'x':
+            *(--dpos) = hex_digits[abs((int)(remaining % 16))];
+            remaining = (size_t) (remaining / 16);
+            break;
+        default:
+            assert(0);
+            break;
+        }
+    } while (unlikely(remaining != 0));
+    assert(!last_one_off || *dpos == '0');
+    dpos += last_one_off;
+    length = end - dpos;
+    ulength = length;
+    prepend_sign = 0;
+    if (!is_unsigned && value <= neg_one) {
+        if (padding_char == ' ' || width <= length + 1) {
+            *(--dpos) = '-';
+            ++length;
+        } else {
+            prepend_sign = 1;
+        }
+        ++ulength;
+    }
+    if (width > ulength) {
+        ulength = width;
+    }
+    if (ulength == 1) {
+        return PyUnicode_FromOrdinal(*dpos);
+    }
+    return __Pyx_PyUnicode_BuildFromAscii(ulength, dpos, (int) length, prepend_sign, padding_char);
+}
+
+/* JoinPyUnicode */
+static PyObject* __Pyx_PyUnicode_Join(PyObject** values, Py_ssize_t value_count, Py_ssize_t result_ulength,
+                                      Py_UCS4 max_char) {
+#if CYTHON_USE_UNICODE_INTERNALS && CYTHON_ASSUME_SAFE_MACROS && !CYTHON_AVOID_BORROWED_REFS
+    PyObject *result_uval;
+    int result_ukind, kind_shift;
+    Py_ssize_t i, char_pos;
+    void *result_udata;
+    if (max_char > 1114111) max_char = 1114111;
+    result_uval = PyUnicode_New(result_ulength, max_char);
+    if (unlikely(!result_uval)) return NULL;
+    result_ukind = (max_char <= 255) ? PyUnicode_1BYTE_KIND : (max_char <= 65535) ? PyUnicode_2BYTE_KIND : PyUnicode_4BYTE_KIND;
+    kind_shift = (result_ukind == PyUnicode_4BYTE_KIND) ? 2 : result_ukind - 1;
+    result_udata = PyUnicode_DATA(result_uval);
+    assert(kind_shift == 2 || kind_shift == 1 || kind_shift == 0);
+    if (unlikely((PY_SSIZE_T_MAX >> kind_shift) - result_ulength < 0))
+        goto overflow;
+    char_pos = 0;
+    for (i=0; i < value_count; i++) {
+        int ukind;
+        Py_ssize_t ulength;
+        void *udata;
+        PyObject *uval = values[i];
+        #if !CYTHON_COMPILING_IN_LIMITED_API
+        if (__Pyx_PyUnicode_READY(uval) == (-1))
+            goto bad;
+        #endif
+        ulength = __Pyx_PyUnicode_GET_LENGTH(uval);
+        #if !CYTHON_ASSUME_SAFE_SIZE
+        if (unlikely(ulength < 0)) goto bad;
+        #endif
+        if (unlikely(!ulength))
+            continue;
+        if (unlikely((PY_SSIZE_T_MAX >> kind_shift) - ulength < char_pos))
+            goto overflow;
+        ukind = __Pyx_PyUnicode_KIND(uval);
+        udata = __Pyx_PyUnicode_DATA(uval);
+        if (ukind == result_ukind) {
+            memcpy((char *)result_udata + (char_pos << kind_shift), udata, (size_t) (ulength << kind_shift));
+        } else {
+            #if PY_VERSION_HEX >= 0x030d0000
+            if (unlikely(PyUnicode_CopyCharacters(result_uval, char_pos, uval, 0, ulength) < 0)) goto bad;
+            #elif CYTHON_COMPILING_IN_CPYTHON || defined(_PyUnicode_FastCopyCharacters)
+            _PyUnicode_FastCopyCharacters(result_uval, char_pos, uval, 0, ulength);
+            #else
+            Py_ssize_t j;
+            for (j=0; j < ulength; j++) {
+                Py_UCS4 uchar = __Pyx_PyUnicode_READ(ukind, udata, j);
+                __Pyx_PyUnicode_WRITE(result_ukind, result_udata, char_pos+j, uchar);
+            }
+            #endif
+        }
+        char_pos += ulength;
+    }
+    return result_uval;
+overflow:
+    PyErr_SetString(PyExc_OverflowError, "join() result is too long for a Python string");
+bad:
+    Py_DECREF(result_uval);
+    return NULL;
+#else
+    Py_ssize_t i;
+    PyObject *result = NULL;
+    PyObject *value_tuple = PyTuple_New(value_count);
+    if (unlikely(!value_tuple)) return NULL;
+    CYTHON_UNUSED_VAR(max_char);
+    CYTHON_UNUSED_VAR(result_ulength);
+    for (i=0; i<value_count; i++) {
+        if (__Pyx_PyTuple_SET_ITEM(value_tuple, i, values[i]) != (0)) goto bad;
+        Py_INCREF(values[i]);
+    }
+    result = PyUnicode_Join(__pyx_mstate_global->__pyx_empty_unicode, value_tuple);
+bad:
+    Py_DECREF(value_tuple);
+    return result;
+#endif
 }
 
 /* TupleAndListFromArray (used by fastcall) */
@@ -16025,7 +16861,7 @@ static const char* __Pyx_BufFmt_CheckString(__Pyx_BufFmt_Context* ctx, const cha
           result = name;
           name = NULL;
       } else {
-          result = __Pyx_NewRef(__pyx_mstate_global->__pyx_kp_u_);
+          result = __Pyx_NewRef(__pyx_mstate_global->__pyx_kp_u__2);
       }
       goto done;
   }

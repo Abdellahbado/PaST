@@ -39,6 +39,11 @@ _REPO_PARENT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_PARENT))
 
 from PaST.solvers.optimal_benchmark_dp import solve_optimal_benchmark_dp
+
+try:
+    from PaST.solvers.optimal_benchmark_dp import _CYTHON_AVAILABLE as _HAS_CYTHON_DP
+except ImportError:
+    _HAS_CYTHON_DP = False
 from PaST.solvers.vhat_linear import (
     FeatureSpec,
     LinearRidgeValueModel,
@@ -67,6 +72,90 @@ from PaST.solvers.vhat_models import (
 ValueModel = Union[
     LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, LGBMValueModel
 ]
+
+
+# ---------------------------------------------------------------------------
+#  RAM detection & DP memory auto-tuning
+# ---------------------------------------------------------------------------
+
+
+def _get_system_ram_gb() -> float:
+    """Return total system RAM in GB (0 if unknown)."""
+    try:
+        import psutil
+
+        return psutil.virtual_memory().total / (1024**3)
+    except ImportError:
+        pass
+    # Linux fallback
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return int(line.split()[1]) / (1024**2)
+    except (OSError, ValueError):
+        pass
+    # macOS fallback
+    try:
+        import subprocess
+
+        out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True)
+        return int(out.strip()) / (1024**3)
+    except Exception:
+        pass
+    return 0.0
+
+
+def _auto_dp_max_states(
+    n_workers: int,
+    user_max_states: int,
+    ram_gb: float = 0.0,
+    track_schedule: bool = True,
+    T_estimate: int = 300,
+    use_cython: bool = False,
+) -> int:
+    """Auto-compute dp_max_states to prevent OOM.
+
+    Memory model (per state per layer):
+      Cython CStateMap :  ~46 bytes effective (32-byte slot at 70% load).
+      Python dict      : ~260 bytes per entry.
+      CParentMap       :  ~17 bytes/entry, accumulates over T steps
+                          (only when track_schedule=True).
+      Active layers    :  max_job_len+1 ~= 20 simultaneously.
+
+    With track_schedule=False the parent map is eliminated entirely,
+    reducing per-state memory by ~60-80%.
+    """
+    if ram_gb <= 0:
+        ram_gb = _get_system_ram_gb()
+    if ram_gb <= 0:
+        ram_gb = 16.0  # conservative fallback
+
+    # Reserve 30% for Python overhead, OS, feature arrays, GC headroom.
+    usable_bytes = ram_gb * (1024**3) * 0.70
+    per_worker_bytes = usable_bytes / max(n_workers, 1)
+
+    # Bytes per state per active layer.
+    ACTIVE_LAYERS = 20
+    bytes_per_state = 46.0 if use_cython else 260.0
+    state_map_bytes = ACTIVE_LAYERS * bytes_per_state
+
+    # Parent map: accumulates over ~T/3 dense layers × 17 B/entry.
+    parent_bytes = 0.0
+    if track_schedule:
+        parent_layers = max(T_estimate // 3, 10)
+        parent_per = 17.0 if use_cython else 106.0
+        parent_bytes = parent_layers * parent_per
+
+    total_per_max_state = state_map_bytes + parent_bytes
+    auto_max = int(per_worker_bytes / total_per_max_state)
+    auto_max = max(auto_max, 10_000)  # absolute floor
+
+    if user_max_states > 0:
+        return min(user_max_states, auto_max)
+    if user_max_states < 0:
+        return 0  # user explicitly disabled the guardrail
+    return auto_max
 
 
 def _make_generate_data_daily_prices(
@@ -174,6 +263,7 @@ def _collect_state_labels(
                         float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0
                     ),
                     max_states=int(dp_max_states),
+                    track_schedule=False,  # only need .cost
                 )
                 if not sub.feasible:
                     continue
@@ -1040,8 +1130,21 @@ def main() -> None:
         type=int,
         default=0,
         help=(
-            "Memory guardrail for DP: if >0, abort DP (like timeout) when any single DP layer exceeds this number of states. "
-            "Use this to prevent OOM during pooled label collection and evaluation."
+            "Memory guardrail for DP.  0 = AUTO (compute from RAM & workers, recommended). "
+            "-1 = disabled (no limit, risk OOM).  N>0 = use N (capped to safe auto-limit). "
+            "When auto, the limit is derived from total system RAM, worker count, and "
+            "whether schedule tracking is needed (label_mode)."
+        ),
+    )
+
+    ap.add_argument(
+        "--ram-budget-gb",
+        type=float,
+        default=0.0,
+        help=(
+            "Total RAM budget in GB for auto dp_max_states computation. "
+            "0 = auto-detect system RAM (default). Set manually on shared HPC nodes "
+            "where only a fraction of total RAM is available to your job."
         ),
     )
 
@@ -1423,6 +1526,40 @@ def main() -> None:
     # Spawning more processes than there are instances wastes RAM (each process
     # imports numpy, solver modules, etc.). Cap at number of training seeds.
     n_workers = min(int(n_workers_req), max(1, len(train_seeds)))
+
+    # =========================================================================
+    # Auto-tune dp_max_states from RAM budget + worker count
+    # =========================================================================
+    _label_mode_lc = str(args.label_mode).strip().lower()
+    _needs_schedule = _label_mode_lc == "optimal_path"
+    # Estimate T (time horizon) for memory budget calculation.
+    _D_hi = int(args.D)
+    if train_D_range is not None:
+        _D_hi = max(_D_hi, int(train_D_range[1]))
+    _T_est = 20 * _D_hi
+
+    _eff_dp_max_states = _auto_dp_max_states(
+        n_workers=n_workers,
+        user_max_states=int(args.dp_max_states),
+        ram_gb=float(args.ram_budget_gb),
+        track_schedule=_needs_schedule,
+        T_estimate=_T_est,
+        use_cython=_HAS_CYTHON_DP,
+    )
+    _detected_ram = (
+        float(args.ram_budget_gb)
+        if float(args.ram_budget_gb) > 0
+        else _get_system_ram_gb()
+    )
+    print(
+        f"[pool] DP memory auto-tune: detected_ram={_detected_ram:.1f}GB  "
+        f"workers={n_workers}  cython={'YES' if _HAS_CYTHON_DP else 'NO'}  "
+        f"track_schedule={_needs_schedule}  T_est={_T_est}\n"
+        f"[pool]   user_dp_max_states={int(args.dp_max_states)}  "
+        f"effective_dp_max_states={_eff_dp_max_states:,}"
+    )
+    # Replace args value with the effective (safe) value for all downstream use.
+    args.dp_max_states = _eff_dp_max_states
 
     # =========================================================================
     # PHASE 1: TRAINING — pool labeled states from multiple instances
@@ -2049,6 +2186,7 @@ def main() -> None:
             tie_break="early",
             time_limit=float(eval_time_limit),
             max_states=int(args.dp_max_states),
+            track_schedule=False,  # eval only needs .cost
         )
         exact_s = time.perf_counter() - t0
         if not exact.feasible:
@@ -2151,6 +2289,7 @@ def main() -> None:
                 vhat=vhat,
                 time_limit=float(eval_time_limit),
                 max_states=int(args.dp_max_states),
+                track_schedule=False,  # eval only needs .cost
             )
             guided_learned_s = time.perf_counter() - t1
 
@@ -2165,6 +2304,7 @@ def main() -> None:
                 vhat=lambda _t, _s: 0.0,
                 time_limit=float(eval_time_limit),
                 max_states=int(args.dp_max_states),
+                track_schedule=False,  # eval only needs .cost
             )
             guided_zero_s = time.perf_counter() - t2
 
@@ -2179,6 +2319,7 @@ def main() -> None:
                 vhat=vhat_price,
                 time_limit=float(eval_time_limit),
                 max_states=int(args.dp_max_states),
+                track_schedule=False,  # eval only needs .cost
             )
             guided_price_s = time.perf_counter() - t3
 

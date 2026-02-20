@@ -745,6 +745,11 @@ def solve_optimal_benchmark_dp(
             )
 
         if np.isfinite(best_final_cost) and best_final_time >= 0:
+            # Reaching final_state means ALL jobs are scheduled. The DP cost
+            # for the final state is exact even if the DP timed out *after*
+            # discovering this state (timeout only stops exploring later
+            # layers — it cannot invalidate the cost of a state already found).
+            _found_final_is_optimal = True
             if not track_schedule:
                 # No parent pointers — return cost/finish_time without schedule.
                 return DPResult(
@@ -752,7 +757,7 @@ def solve_optimal_benchmark_dp(
                     float(best_final_cost),
                     (),
                     int(best_final_time),
-                    is_optimal=not timed_out,
+                    is_optimal=_found_final_is_optimal,
                     timed_out=timed_out,
                 )
 
@@ -799,7 +804,7 @@ def solve_optimal_benchmark_dp(
                 tuple(sched),
                 finish_time,
                 is_optimal=True,
-                timed_out=False,
+                timed_out=timed_out,
             )
 
         # Handle timeout with greedy completion for sparse DP.
