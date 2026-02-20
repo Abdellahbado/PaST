@@ -68,9 +68,41 @@ REUSE_POOLED_ACROSS_MODELS="${REUSE_POOLED_ACROSS_MODELS:-1}"
 # Compiles once; subsequent runs are no-ops if .so is up to date.
 # ============================================================
 echo "[build] Compiling Cython sparse-DP extension ..."
+if ! command -v gcc &> /dev/null; then
+  echo "[build] gcc not found. Attempting to install toolchain via conda-forge..."
+  conda install -y -c conda-forge compilers || true
+  conda install -y -c conda-forge gcc_linux-64 gxx_linux-64 || true
+  conda install -y -c conda-forge c-compiler cxx-compiler || true
+fi
+
+# Some conda images provide only the wrapper compiler (x86_64-conda-linux-gnu-cc)
+# without a `gcc` symlink. Set CC/CXX so setuptools can compile extensions.
+if ! command -v gcc &> /dev/null; then
+  if command -v x86_64-conda-linux-gnu-cc &> /dev/null; then
+    export CC="$(command -v x86_64-conda-linux-gnu-cc)"
+    if command -v x86_64-conda-linux-gnu-c++ &> /dev/null; then
+      export CXX="$(command -v x86_64-conda-linux-gnu-c++)"
+    fi
+    echo "[build] Using conda wrapper compiler: CC=$CC"
+  elif command -v cc &> /dev/null; then
+    export CC="$(command -v cc)"
+    echo "[build] Using CC=$CC"
+  fi
+fi
 ( cd solvers && "$PYTHON_BIN" setup_cython.py build_ext --inplace 2>&1 \
     | grep -vE '^(running|building|copying)' || true )
-echo "[build] done"
+if "$PYTHON_BIN" - <<'PY'
+import importlib.util, sys
+sys.path.insert(0, 'solvers')
+ok = importlib.util.find_spec('_sparse_dp_cython') is not None
+print('[build] cython_sparse_dp_import=' + ('OK' if ok else 'FAIL'))
+raise SystemExit(0 if ok else 1)
+PY
+then
+  echo "[build] done"
+else
+  echo "[build] WARNING: Cython sparse-DP extension not available; falling back to slower solver."
+fi
 
 # ============================================================
 # Resume behavior
@@ -302,6 +334,7 @@ for CATEGORY in "${CATEGORIES[@]}"; do
           --optimal-path-topup-dp-time-limit "$OPT_PATH_TOPUP_TL" \
           "${REQUIRE_OPTIMAL_ARGS[@]}" \
           --dp-time-limit "$DP_TIME_LIMIT" \
+          --dp-max-states "$DP_MAX_STATES" \
           --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \

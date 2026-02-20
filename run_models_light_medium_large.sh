@@ -315,6 +315,7 @@ for CATEGORY in "medium" "large"; do
           --optimal-path-topup-dp-time-limit "$OPT_PATH_TOPUP_TL" \
           "${REQUIRE_OPTIMAL_ARGS[@]}" \
           --dp-time-limit "$DP_TIME_LIMIT" \
+          --dp-max-states "$DP_MAX_STATES" \
           --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TARGET_UTIL" \
           "${POOL_ARGS[@]}" \

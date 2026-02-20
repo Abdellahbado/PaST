@@ -124,6 +124,7 @@ def _collect_state_labels(
     normalize_labels: bool = False,
     prefix_prices: np.ndarray | None = None,
     dp_time_limit: float = -1.0,
+    dp_max_states: int = 0,
     require_optimal_labels: bool = False,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
     """Sample random (t, used) states and label them with exact DP cost-to-go.
@@ -172,6 +173,7 @@ def _collect_state_labels(
                     time_limit=(
                         float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0
                     ),
+                    max_states=int(dp_max_states),
                 )
                 if not sub.feasible:
                     continue
@@ -202,6 +204,7 @@ def _collect_state_labels_optimal_path(
     normalize_labels: bool = False,
     prefix_prices: np.ndarray | None = None,
     dp_time_limit: float = -1.0,
+    dp_max_states: int = 0,
     n_paths: int = 1,
     require_optimal_labels: bool = False,
 ) -> Tuple[List[Tuple[int, Tuple[int, ...]]], List[float], int]:
@@ -252,6 +255,7 @@ def _collect_state_labels_optimal_path(
                 time_limit=(
                     float(dp_time_limit) if float(dp_time_limit) > 0.0 else -1.0
                 ),
+                max_states=int(dp_max_states),
             )
         except MemoryError:
             # Some seeds can trigger extreme DP growth; skip rather than crashing.
@@ -686,6 +690,7 @@ def _collect_worker(
     x_dtype: str,
     label_mode: str,
     dp_time_limit: float,
+    dp_max_states: int,
     optimal_path_n_paths: int,
     optimal_path_topup_max: int,
     optimal_path_topup_dp_time_limit: float,
@@ -733,6 +738,7 @@ def _collect_worker(
                 normalize_labels=bool(normalize_labels),
                 prefix_prices=prefix_prices,
                 dp_time_limit=float(dp_time_limit),
+                dp_max_states=int(dp_max_states),
                 n_paths=int(optimal_path_n_paths),
                 require_optimal_labels=bool(require_optimal_labels),
             )
@@ -759,6 +765,7 @@ def _collect_worker(
                         normalize_labels=bool(normalize_labels),
                         prefix_prices=prefix_prices,
                         dp_time_limit=float(optimal_path_topup_dp_time_limit),
+                        dp_max_states=int(dp_max_states),
                         require_optimal_labels=bool(require_optimal_labels),
                     )
                     attempts += int(sp_attempts)
@@ -784,6 +791,7 @@ def _collect_worker(
                     normalize_labels=bool(normalize_labels),
                     prefix_prices=prefix_prices,
                     dp_time_limit=float(optimal_path_topup_dp_time_limit),
+                    dp_max_states=int(dp_max_states),
                     require_optimal_labels=bool(require_optimal_labels),
                 )
 
@@ -798,6 +806,7 @@ def _collect_worker(
                 normalize_labels=bool(normalize_labels),
                 prefix_prices=prefix_prices,
                 dp_time_limit=float(dp_time_limit),
+                dp_max_states=int(dp_max_states),
                 require_optimal_labels=bool(require_optimal_labels),
             )
         else:
@@ -1023,6 +1032,16 @@ def main() -> None:
             "Time limit (seconds) for exact DP calls during label collection. "
             "If >0, DP may return a greedy-completed solution on timeout (still feasible, but labels become approximate). "
             "Use this on HPC to prevent rare seeds from stalling the whole sweep."
+        ),
+    )
+
+    ap.add_argument(
+        "--dp-max-states",
+        type=int,
+        default=0,
+        help=(
+            "Memory guardrail for DP: if >0, abort DP (like timeout) when any single DP layer exceeds this number of states. "
+            "Use this to prevent OOM during pooled label collection and evaluation."
         ),
     )
 
@@ -1488,6 +1507,7 @@ def main() -> None:
             f"\n[pool] Features: spec={spec}"
             f"\n[pool] normalize_labels={use_normalize_labels}"
             f"\n[pool] label_mode={str(args.label_mode).strip()}  dp_time_limit={float(args.dp_time_limit)}  "
+            f"dp_max_states={int(args.dp_max_states)}  "
             f"optimal_path_n_paths={int(args.optimal_path_n_paths)}  "
             f"optimal_path_topup_max={int(args.optimal_path_topup_max)}  "
             f"optimal_path_topup_dp_time_limit={float(args.optimal_path_topup_dp_time_limit)}  "
@@ -1526,6 +1546,7 @@ def main() -> None:
                 x_dtype=str(args.pool_dtype),
                 label_mode=str(args.label_mode),
                 dp_time_limit=float(args.dp_time_limit),
+                dp_max_states=int(args.dp_max_states),
                 optimal_path_n_paths=int(args.optimal_path_n_paths),
                 optimal_path_topup_max=int(args.optimal_path_topup_max),
                 optimal_path_topup_dp_time_limit=float(
@@ -2023,7 +2044,11 @@ def main() -> None:
 
         t0 = time.perf_counter()
         exact = solve_optimal_benchmark_dp(
-            p, prices, tie_break="early", time_limit=float(eval_time_limit)
+            p,
+            prices,
+            tie_break="early",
+            time_limit=float(eval_time_limit),
+            max_states=int(args.dp_max_states),
         )
         exact_s = time.perf_counter() - t0
         if not exact.feasible:
@@ -2125,6 +2150,7 @@ def main() -> None:
                 prune_factor=float(args.prune_factor),
                 vhat=vhat,
                 time_limit=float(eval_time_limit),
+                max_states=int(args.dp_max_states),
             )
             guided_learned_s = time.perf_counter() - t1
 
@@ -2138,6 +2164,7 @@ def main() -> None:
                 prune_factor=float(args.prune_factor),
                 vhat=lambda _t, _s: 0.0,
                 time_limit=float(eval_time_limit),
+                max_states=int(args.dp_max_states),
             )
             guided_zero_s = time.perf_counter() - t2
 
@@ -2151,6 +2178,7 @@ def main() -> None:
                 prune_factor=float(args.prune_factor),
                 vhat=vhat_price,
                 time_limit=float(eval_time_limit),
+                max_states=int(args.dp_max_states),
             )
             guided_price_s = time.perf_counter() - t3
 
