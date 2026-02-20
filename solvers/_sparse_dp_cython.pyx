@@ -269,6 +269,7 @@ def solve_sparse_dp_cython(
     str tie_break = "early",
     bint track_schedule = True,
     long long max_states = 0,
+    double known_upper_bound = -1.0,
 ):
     """
     Cython sparse DP with C hash maps.  Drop-in for solve_sparse_dp_python.
@@ -339,6 +340,8 @@ def solve_sparse_dp_cython(
 
     # -- Tracking variables ---------------------------------------------
     cdef double best_final_cost = _C_INF
+    if known_upper_bound > 0:
+        best_final_cost = known_upper_bound + 1e-8
     cdef long long best_final_pen = <long long>(1LL << 62)
     cdef int best_final_time = -1
     cdef bint timed_out = False

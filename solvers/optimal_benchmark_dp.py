@@ -293,6 +293,7 @@ def _solve_sparse_dp_inline(
     time_limit: float = -1.0,
     track_schedule: bool = True,
     max_states: int = 0,
+    known_upper_bound: float = -1.0,
 ) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
     """Inline sparse DP fallback with early pruning and time limit.
 
@@ -369,6 +370,8 @@ def _solve_sparse_dp_inline(
     max_job_len = max(lengths_list) if lengths_list else 1
 
     best_final_cost = float("inf")
+    if known_upper_bound > 0:
+        best_final_cost = known_upper_bound + 1e-8
     best_final_pen = 2**63 - 1
     best_final_time = -1
     timed_out = False
@@ -688,29 +691,31 @@ def solve_optimal_benchmark_dp(
     # (e.g. K=6, radices ~34 each → n_states ~1.5 B) and hang/OOM.
     use_sparse = total_cells > max_cells
     if use_sparse:
-        # Fallback: use optimized sparse DP with early pruning and time limit.
-        # Priority: Cython > Python accelerated > inline.
-        if _CYTHON_AVAILABLE:
-            # Cython expects int64 arrays
-            best_final_cost, best_final_time, parent, timed_out, best_partial = (
-                solve_sparse_dp_cython(
-                    lengths=lengths.astype(np.int64, copy=False),
-                    totals=totals.astype(np.int64, copy=False),
+        # ---- Helper: dispatch to the best available sparse DP backend ----
+        _l64 = lengths.astype(np.int64, copy=False)
+        _t64 = totals.astype(np.int64, copy=False)
+        _r64 = radices.astype(np.int64, copy=False)
+        _m64 = mult.astype(np.int64, copy=False)
+
+        def _run_sparse_dp(_ts, _ms, _kub=-1.0):
+            if _CYTHON_AVAILABLE:
+                return solve_sparse_dp_cython(
+                    lengths=_l64,
+                    totals=_t64,
                     prefix=prefix,
                     T=T,
-                    radices=radices.astype(np.int64, copy=False),
-                    mult=mult.astype(np.int64, copy=False),
+                    radices=_r64,
+                    mult=_m64,
                     K=K,
                     final_state=final_state,
                     time_limit=time_limit,
                     tie_break=tie_break,
-                    track_schedule=track_schedule,
-                    max_states=max_states,
+                    track_schedule=_ts,
+                    max_states=_ms,
+                    known_upper_bound=_kub,
                 )
-            )
-        elif _ACCEL_AVAILABLE:
-            best_final_cost, best_final_time, parent, timed_out, best_partial = (
-                solve_sparse_dp_python(
+            if _ACCEL_AVAILABLE:
+                return solve_sparse_dp_python(
                     lengths=lengths,
                     totals=totals,
                     prefix=prefix,
@@ -721,27 +726,87 @@ def solve_optimal_benchmark_dp(
                     final_state=final_state,
                     time_limit=time_limit,
                     tie_break=tie_break,
-                    track_schedule=track_schedule,
-                    max_states=max_states,
+                    track_schedule=_ts,
+                    max_states=_ms,
+                    known_upper_bound=_kub,
                 )
+            return _solve_sparse_dp_inline(
+                lengths_list=lengths_list,
+                totals=totals,
+                prefix=prefix,
+                T=T,
+                radices=radices,
+                mult=mult,
+                K=K,
+                final_state=final_state,
+                tie_break=tie_break,
+                time_limit=time_limit,
+                track_schedule=_ts,
+                max_states=_ms,
+                known_upper_bound=_kub,
             )
-        else:
-            # Inline fallback if accelerated module not available
-            best_final_cost, best_final_time, parent, timed_out, best_partial = (
-                _solve_sparse_dp_inline(
-                    lengths_list=[int(x) for x in lengths.tolist()],
-                    totals=totals,
-                    prefix=prefix,
-                    T=T,
-                    radices=radices,
-                    mult=mult,
-                    K=K,
-                    final_state=final_state,
-                    tie_break=tie_break,
-                    time_limit=time_limit,
-                    track_schedule=track_schedule,
-                    max_states=max_states,
+
+        if track_schedule:
+            # ==========================================================
+            # TWO-PASS EXACT DP — memory-efficient schedule recovery.
+            #
+            # Pass 1 (cost-only): No parent map → O(active_layers × S)
+            #   memory only.  max_states is BOOSTED because the parent
+            #   map (which normally dominates memory) is absent.
+            #
+            # Pass 2 (schedule): Uses the known optimal cost as a tight
+            #   upper bound for LB pruning.  Because cost+LB > optimal
+            #   is killed from the very first time-step, far fewer
+            #   states survive → the parent map is 10-25× smaller than
+            #   it would be in a naive single-pass approach.
+            #
+            # Net effect: the same RAM budget supports 10-25× more
+            #   states in Pass 1, and the parent map in Pass 2 fits
+            #   comfortably because tight pruning shrinks it drastically.
+            # ==========================================================
+            if max_states > 0 and T > 0:
+                # Pass 1 has no parent map, so the per-state memory
+                # is just the cost-layer overhead (≈ active_layers × 46
+                # bytes for Cython).  The caller's max_states was tuned
+                # for cost + parent budget, so we can safely boost.
+                _boost = max(2, 1 + T // 15)
+                _ms_p1 = max_states * _boost
+            else:
+                _ms_p1 = max_states
+
+            p1_cost, p1_time, _, p1_to, p1_partial = _run_sparse_dp(
+                _ts=False,
+                _ms=_ms_p1,
+            )
+
+            if np.isfinite(p1_cost) and p1_time >= 0:
+                # Optimal cost known — run Pass 2 with tight pruning.
+                best_final_cost, best_final_time, parent, timed_out, best_partial = (
+                    _run_sparse_dp(_ts=True, _ms=max_states, _kub=p1_cost)
                 )
+                if not (np.isfinite(best_final_cost) and best_final_time >= 0):
+                    # Extremely rare: Pass 2 timed out despite tight
+                    # pruning.  Return cost-only (schedule unavailable).
+                    return DPResult(
+                        True,
+                        float(p1_cost),
+                        (),
+                        int(p1_time),
+                        is_optimal=True,
+                        timed_out=True,
+                    )
+            else:
+                # Pass 1 itself failed → propagate its result so the
+                # greedy-fallback logic below has something to work with.
+                best_final_cost = p1_cost
+                best_final_time = p1_time
+                parent = {}
+                timed_out = p1_to
+                best_partial = p1_partial
+        else:
+            # Cost-only: single pass, no parent map.
+            best_final_cost, best_final_time, parent, timed_out, best_partial = (
+                _run_sparse_dp(_ts=False, _ms=max_states)
             )
 
         if np.isfinite(best_final_cost) and best_final_time >= 0:

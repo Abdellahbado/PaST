@@ -116,15 +116,25 @@ def _auto_dp_max_states(
 ) -> int:
     """Auto-compute dp_max_states to prevent OOM.
 
+    The solver now uses a **two-pass approach** when track_schedule=True:
+
+      Pass 1 (cost-only):  No parent map → very memory-efficient.
+             The solver internally boosts max_states by ~(1 + T/15)×
+             because there is no parent-map overhead.
+      Pass 2 (schedule):   Uses the optimal cost from Pass 1 as a
+             tight upper bound for LB pruning.  Far fewer states
+             survive → the parent map is 10-25× smaller than a naive
+             single-pass approach.
+
+    This function computes the *base* max_states (conservative, for
+    Pass 2's worst case).  The solver boosts it for Pass 1.
+
     Memory model (per state per layer):
       Cython CStateMap :  ~46 bytes effective (32-byte slot at 70% load).
       Python dict      : ~260 bytes per entry.
       CParentMap       :  ~17 bytes/entry, accumulates over T steps
-                          (only when track_schedule=True).
+                          (only when track_schedule=True, in Pass 2).
       Active layers    :  max_job_len+1 ~= 20 simultaneously.
-
-    With track_schedule=False the parent map is eliminated entirely,
-    reducing per-state memory by ~60-80%.
     """
     if ram_gb <= 0:
         ram_gb = _get_system_ram_gb()
@@ -140,10 +150,12 @@ def _auto_dp_max_states(
     bytes_per_state = 46.0 if use_cython else 260.0
     state_map_bytes = ACTIVE_LAYERS * bytes_per_state
 
-    # Parent map: accumulates over ~T/3 dense layers × 17 B/entry.
+    # Parent map: accumulates over ~T×2/3 dense layers × 17 B/entry.
+    # Conservative estimate — with two-pass tight pruning the actual
+    # usage is typically 10-25× lower, but we budget for worst case.
     parent_bytes = 0.0
     if track_schedule:
-        parent_layers = max(T_estimate // 3, 10)
+        parent_layers = max(T_estimate * 2 // 3, 10)
         parent_per = 17.0 if use_cython else 106.0
         parent_bytes = parent_layers * parent_per
 

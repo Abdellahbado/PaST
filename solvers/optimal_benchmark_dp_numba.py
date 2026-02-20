@@ -411,6 +411,7 @@ def solve_sparse_dp_python(
     tie_break: str = "early",
     track_schedule: bool = True,
     max_states: int = 0,
+    known_upper_bound: float = -1.0,
 ) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
     """
     Pure Python sparse DP with time limit and early pruning.
