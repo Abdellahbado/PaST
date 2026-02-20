@@ -70,6 +70,10 @@ mkdir -p "$POOL_DIR"
 # Most efficient available solver — compiles once, cached after.
 # ============================================================
 echo "[build] Compiling Cython sparse-DP extension ..."
+if ! command -v gcc &> /dev/null; then
+  echo "[build] gcc not found! Attempting to install C compiler via conda-forge..."
+  conda install -y -c conda-forge c-compiler cxx-compiler || true
+fi
 ( cd solvers && "$PYTHON_BIN" setup_cython.py build_ext --inplace 2>&1 \
     | grep -vE '^(running|building|copying)' || true )
 echo "[build] done"

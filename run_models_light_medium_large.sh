@@ -64,6 +64,10 @@ mkdir -p "$POOL_DIR"
 # Most efficient available solver — compiles once, cached after.
 # ============================================================
 echo "[build] Compiling Cython sparse-DP extension ..."
+if ! command -v gcc &> /dev/null; then
+  echo "[build] gcc not found! Attempting to install C compiler via conda-forge..."
+  conda install -y -c conda-forge c-compiler cxx-compiler || true
+fi
 ( cd solvers && "$PYTHON_BIN" setup_cython.py build_ext --inplace 2>&1 \
     | grep -vE '^(running|building|copying)' || true )
 echo "[build] done"
@@ -81,20 +85,38 @@ PROFILE_ARGS=(--daily-price-profile daily_tou)
 MODELS=("linear" "poly" "mlp" "lgbm")
 
 # ============================================================
+# Feature set
+#
+# Default: enriched (hist + price shape + meta) while still using
+# --transferable-features (fixed dimension). This makes it much harder for the
+# learning to fail purely due to missing state signal.
+#
+# Disable:
+#   USE_ENHANCED_FEATURES=0 bash run_models_light_medium_large.sh
+# ============================================================
+USE_ENHANCED_FEATURES="${USE_ENHANCED_FEATURES:-1}"
+FEATURE_ARGS=()
+FEATURE_TAG="base"
+if [[ "$USE_ENHANCED_FEATURES" == "1" ]]; then
+  FEATURE_ARGS=(--feat-len-hist --feat-price-shape --feat-meta)
+  FEATURE_TAG="all"
+fi
+
+# ============================================================
 # DATA: enough seeds × samples to distinguish model quality.
 #   medium: 100 train seeds × 400 samples ≈ 40,000 labeled states
 #   large:   60 train seeds × 600 samples ≈ 36,000 labeled states
 #   (Many large seeds will be discarded by the DP time limit;
 #   starting with 60 means we expect ~30-50 usable ones.)
 # ============================================================
-TRAIN_SEEDS_MEDIUM="0-99"
-TRAIN_SEEDS_LARGE="0-59"
+TRAIN_SEEDS_MEDIUM="${TRAIN_SEEDS_MEDIUM:-0-99}"
+TRAIN_SEEDS_LARGE="${TRAIN_SEEDS_LARGE:-0-59}"
 
-EVAL_SEEDS_MEDIUM="400-424"    # 25 held-out eval seeds
-EVAL_SEEDS_LARGE="500-514"     # 15 held-out eval seeds
+EVAL_SEEDS_MEDIUM="${EVAL_SEEDS_MEDIUM:-400-424}"    # 25 held-out eval seeds
+EVAL_SEEDS_LARGE="${EVAL_SEEDS_LARGE:-500-514}"     # 15 held-out eval seeds
 
-SAMPLES_MEDIUM=400
-SAMPLES_LARGE=600
+SAMPLES_MEDIUM="${SAMPLES_MEDIUM:-400}"
+SAMPLES_LARGE="${SAMPLES_LARGE:-600}"
 
 # ============================================================
 # DP TIME LIMITS: moderate — easy instances finish, hard ones
@@ -104,18 +126,18 @@ SAMPLES_LARGE=600
 #   large:  300 s  (large instances range from a few seconds to
 #           thousands; 300 s keeps the easy majority usable)
 # ============================================================
-DP_TIME_LIMIT_MEDIUM="120"
-DP_TIME_LIMIT_LARGE="300"
+DP_TIME_LIMIT_MEDIUM="${DP_TIME_LIMIT_MEDIUM:-300}"
+DP_TIME_LIMIT_LARGE="${DP_TIME_LIMIT_LARGE:-300}"
 
 # Epsilon-sim DP time limits (per-machine subproblem; machines
 # are smaller than the full instance, so limits are tighter).
-EPS_DP_TIME_LIMIT_MEDIUM="60"
-EPS_DP_TIME_LIMIT_LARGE="120"
+EPS_DP_TIME_LIMIT_MEDIUM="${EPS_DP_TIME_LIMIT_MEDIUM:-60}"
+EPS_DP_TIME_LIMIT_LARGE="${EPS_DP_TIME_LIMIT_LARGE:-120}"
 
 # Memory guardrail: abort if any single DP layer exceeds this.
 # Much lighter than the full script (25M / 50M) to avoid OOM.
-DP_MAX_STATES_MEDIUM="8000000"
-DP_MAX_STATES_LARGE="15000000"
+DP_MAX_STATES_MEDIUM="${DP_MAX_STATES_MEDIUM:-8000000}"
+DP_MAX_STATES_LARGE="${DP_MAX_STATES_LARGE:-15000000}"
 
 # Model training knobs
 MLP_MAX_EPOCHS=500
@@ -137,7 +159,7 @@ PRUNE_FACTOR=2.0
 ASSIGN_ALPHA=1.2
 ASSIGN_UNIFORM_MIX=0.15
 
-PMAX=12
+PMAX="${PMAX:-12}"
 
 LOG_DIR="ADP/logs/models_light_medium_large"
 MODEL_DIR="ADP/models/models_light_medium_large"
@@ -170,8 +192,8 @@ for CATEGORY in "medium" "large"; do
       EPS_DP_TIME_LIMIT="$EPS_DP_TIME_LIMIT_MEDIUM"
       DP_MAX_STATES="$DP_MAX_STATES_MEDIUM"
       OPT_PATH_N_PATHS="2"
-      OPT_PATH_TOPUP_MAX="0"
-      OPT_PATH_TOPUP_TL="-1"
+      OPT_PATH_TOPUP_MAX="1000"
+      OPT_PATH_TOPUP_TL="120.0"
       # --require-optimal-labels: discard any instance where DP
       # timed out; only well-solved instances contribute labels.
       REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
@@ -189,8 +211,8 @@ for CATEGORY in "medium" "large"; do
       EPS_DP_TIME_LIMIT="$EPS_DP_TIME_LIMIT_LARGE"
       DP_MAX_STATES="$DP_MAX_STATES_LARGE"
       OPT_PATH_N_PATHS="2"
-      OPT_PATH_TOPUP_MAX="0"
-      OPT_PATH_TOPUP_TL="-1"
+      OPT_PATH_TOPUP_MAX="1000"
+      OPT_PATH_TOPUP_TL="120.0"
       REQUIRE_OPTIMAL_ARGS=(--require-optimal-labels)
       EVAL_TIME_LIMIT="60.0"
       ;;
@@ -219,7 +241,7 @@ for CATEGORY in "medium" "large"; do
 
       # Cache is per (CATEGORY, PROFILE) AND per data-generation knobs,
       # so changing seeds/ranges/samples won't accidentally reuse stale data.
-      POOLED_DATA_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_${LABEL_MODE}_p${PMAX}_s${SAMPLES}_train${TRAIN_SEEDS}_N${N_RANGE}_D${D_RANGE}_tu${TARGET_UTIL}.npz"
+      POOLED_DATA_CACHE="$POOLED_CACHE_DIR/pooled_${CATEGORY}_${PROFILE}_${LABEL_MODE}_feat${FEATURE_TAG}_p${PMAX}_s${SAMPLES}_train${TRAIN_SEEDS}_N${N_RANGE}_D${D_RANGE}_tu${TARGET_UTIL}.npz"
       if [[ "$FORCE_TRAIN" == "1" ]]; then
         rm -f "$POOLED_DATA_CACHE"
       fi
@@ -258,6 +280,7 @@ for CATEGORY in "medium" "large"; do
           --eval-seeds "$EVAL_SEEDS" \
           --eval-N-range "$N_RANGE" --eval-D-range "$D_RANGE" --eval-pmax "$PMAX" \
           --transferable-features --normalize --normalize-labels \
+          "${FEATURE_ARGS[@]}" \
           --label-mode "$LABEL_MODE" \
           --optimal-path-n-paths "$OPT_PATH_N_PATHS" \
           --optimal-path-topup-max "$OPT_PATH_TOPUP_MAX" \

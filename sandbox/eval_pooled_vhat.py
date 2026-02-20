@@ -1175,6 +1175,31 @@ def main() -> None:
         "Essential for cross-size transfer: makes weights independent of instance scale.",
     )
 
+    # Optional feature enrichments (still cheap, fixed-dimension under --transferable-features).
+    # These allow using the richer MLP-variant feature sets (hist/price/meta) with
+    # *any* model type (linear/poly/mlp/lgbm) while keeping one shared pooled cache.
+    ap.add_argument(
+        "--feat-len-hist",
+        action="store_true",
+        help="Include fixed-length histogram of remaining job lengths (1..pmax).",
+    )
+    ap.add_argument(
+        "--feat-price-shape",
+        action="store_true",
+        help="Include daily price-shape features (stats + low-order Fourier).",
+    )
+    ap.add_argument(
+        "--feat-meta",
+        action="store_true",
+        help="Include extra meta/log-scale features (log1p(T/N/W), util, slack_ratio).",
+    )
+    ap.add_argument(
+        "--feat-pmax-for-hist",
+        type=int,
+        default=0,
+        help="Override pmax_for_hist used by --feat-len-hist (0 = use --pmax).",
+    )
+
     # Model I/O
     ap.add_argument(
         "--load-model",
@@ -1278,6 +1303,26 @@ def main() -> None:
             include_per_class_now_cost=True,
             include_bins=True,
             normalize=use_normalize,
+        )
+
+    # Apply optional feature enrichments for any model type.
+    pmax_for_hist = (
+        int(args.feat_pmax_for_hist)
+        if int(args.feat_pmax_for_hist) > 0
+        else int(args.pmax)
+    )
+    if bool(args.feat_len_hist) or bool(args.feat_price_shape) or bool(args.feat_meta):
+        spec = FeatureSpec(
+            include_per_class_counts=spec.include_per_class_counts,
+            include_per_class_now_cost=spec.include_per_class_now_cost,
+            include_bins=spec.include_bins,
+            normalize=spec.normalize,
+            include_len_hist=(spec.include_len_hist or bool(args.feat_len_hist)),
+            pmax_for_hist=pmax_for_hist,
+            include_price_shape=(
+                spec.include_price_shape or bool(args.feat_price_shape)
+            ),
+            include_meta=(spec.include_meta or bool(args.feat_meta)),
         )
 
     # Eval instance parameters (possibly different from training)
@@ -1883,6 +1928,10 @@ def main() -> None:
                     include_per_class_now_cost=int(spec.include_per_class_now_cost),
                     include_bins=int(spec.include_bins),
                     normalize=int(spec.normalize),
+                    include_len_hist=int(spec.include_len_hist),
+                    pmax_for_hist=int(spec.pmax_for_hist),
+                    include_price_shape=int(spec.include_price_shape),
+                    include_meta=int(spec.include_meta),
                     normalize_labels=int(use_normalize_labels),
                     model_type="linear",
                 )
