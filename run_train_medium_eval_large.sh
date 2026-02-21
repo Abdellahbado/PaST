@@ -100,6 +100,13 @@ MAX_WORKERS="${MAX_WORKERS:-32}"
 POOL_DIR="${POOL_DIR:-ADP/tmp/pool}"
 mkdir -p "$POOL_DIR"
 
+# --- Pre-built pooled dataset (skips ALL data collection) -------------------
+# Set this to reuse an existing pooled .npz file for ALL models.
+# Example (from HPC):
+#   PREBUILT_POOLED_NPZ="ADP/Data/Pooled Medium Daily Optimal Path Training Data.npz" \
+#     bash run_train_medium_eval_large.sh
+PREBUILT_POOLED_NPZ="${PREBUILT_POOLED_NPZ:-}"
+
 # --- Reuse pooled data across models (avoids repeated DP labeling) ----------
 REUSE_POOLED_ACROSS_MODELS="${REUSE_POOLED_ACROSS_MODELS:-1}"
 
@@ -202,6 +209,9 @@ echo "  MODELS:     ${MODEL_LIST_CSV}"
 echo "  PROFILES:   ${PROFILE_LIST_CSV}"
 echo "  WORKERS:    ${WORKERS}  (max ${MAX_WORKERS})"
 echo "  DP_MAX_STATES: ${DP_MAX_STATES} (0=auto)"
+if [[ -n "$PREBUILT_POOLED_NPZ" ]]; then
+  echo "  PREBUILT_DATA: ${PREBUILT_POOLED_NPZ} (data collection skipped)"
+fi
 echo "  LOG_DIR:    ${LOG_DIR}"
 echo "  MODEL_DIR:  ${MODEL_DIR}"
 echo ""
@@ -263,7 +273,11 @@ for PROFILE in "${PROFILES[@]}"; do
 
         # Pooled data reuse
         POOLED_DATA_ARGS=()
-        if [[ "$REUSE_POOLED_ACROSS_MODELS" == "1" ]]; then
+        if [[ -n "$PREBUILT_POOLED_NPZ" ]]; then
+          # Use the user-supplied pre-built dataset; skip all data collection
+          echo "[pool] Using pre-built pooled data: $PREBUILT_POOLED_NPZ"
+          POOLED_DATA_ARGS=(--load-pooled-data "$PREBUILT_POOLED_NPZ")
+        elif [[ "$REUSE_POOLED_ACROSS_MODELS" == "1" ]]; then
           if [[ -s "$SHARED_POOLED_NPZ" ]]; then
             POOLED_DATA_ARGS=(--load-pooled-data "$SHARED_POOLED_NPZ")
           else

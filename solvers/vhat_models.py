@@ -492,11 +492,16 @@ class PolyMLPValueModel:
         lengths: Sequence[int],
         ctx: TOUFeatureContext,
     ) -> float:
-        x = phi_for_state(t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec)
+        x = phi_for_state(
+            t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec
+        )
         x_poly = _poly_expand_batch(x[None, :], self.powers)[0]
-        h1 = np.maximum(0.0, np.dot(self.W1.T, x_poly) + self.b1)
-        h2 = np.maximum(0.0, np.dot(self.W2.T, h1) + self.b2)
-        return float(np.dot(self.W3.T, h2) + self.b3[0])
+        # Forward pass with numpy (no PyTorch overhead)
+        h1 = np.maximum(0, x_poly @ self.W1 + self.b1)  # ReLU
+        h2 = np.maximum(0, h1 @ self.W2 + self.b2)  # ReLU
+        y = (h2 @ self.W3) + self.b3
+        y = np.asarray(y, dtype=np.float64).reshape(-1)
+        return float(y[0])
 
     def save(self, path: str) -> None:
         np.savez(

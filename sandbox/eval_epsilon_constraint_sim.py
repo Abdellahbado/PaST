@@ -54,7 +54,13 @@ sys.path.append(str(_REPO_PARENT))
 # Local imports
 from PaST.solvers.optimal_benchmark_dp import solve_optimal_benchmark_dp
 from PaST.solvers.vhat_linear import FeatureSpec, LinearRidgeValueModel
-from PaST.solvers.vhat_models import PolyRidgeValueModel, MLPValueModel, PolyMLPValueModel, FactoredMLPValueModel, LGBMValueModel
+from PaST.solvers.vhat_models import (
+    PolyRidgeValueModel,
+    MLPValueModel,
+    PolyMLPValueModel,
+    FactoredMLPValueModel,
+    LGBMValueModel,
+)
 from PaST.solvers.vhat_tou_features import build_tou_feature_context
 
 
@@ -914,12 +920,15 @@ def main() -> None:
 
                 total_energy_exact = 0.0
                 total_energy_guided = 0.0
+                total_energy_price = 0.0
                 makespan_exact = 0
                 makespan_guided = 0
+                makespan_price = 0
 
                 # Solve per machine
                 exact_solve_s = 0.0
                 guided_solve_s = 0.0
+                price_solve_s = 0.0
 
                 for m, job_indices in enumerate(assignments):
                     p_m = _machine_job_p(inst.p, job_indices)
@@ -966,6 +975,50 @@ def main() -> None:
                     # guided DP requires a callable vhat; for empty machines, use 0.
                     if bool(args.guided) and vhat_fn is None:
                         vhat_fn = lambda _t, _s: 0.0
+
+                    # Price-Vhat heuristic: remaining_work × mean_remaining_price × u_m
+                    # (same idea as in eval_pooled_vhat.py; no trained model needed)
+                    vhat_price_fn = None
+                    if bool(args.guided):
+                        if len(p_m) > 0:
+                            # lengths/totals/radices already computed above (model is not None when guided)
+                            _price_cache: Dict[int, Tuple[int, ...]] = {
+                                0: tuple([0] * len(lengths))
+                            }
+                            _T_ep = int(prices_base.shape[0])
+
+                            def _make_price_vhat(tot, lns, rad, cache, T_ep, pp, um):
+                                def _fn(t: int, state: int) -> float:
+                                    s = int(state)
+                                    us = cache.get(s)
+                                    if us is None:
+                                        us = decode_state(s, rad)
+                                        cache[s] = us
+                                    rem = tot.astype(np.int32) - np.asarray(
+                                        us, dtype=np.int32
+                                    )
+                                    W = int(np.sum(rem * lns.astype(np.int32)))
+                                    if W <= 0:
+                                        return 0.0
+                                    tt = max(0, min(int(t), T_ep))
+                                    mean_p = float(
+                                        (pp[T_ep] - pp[tt]) / max(1, T_ep - tt)
+                                    )
+                                    return float(um) * float(W) * mean_p
+
+                                return _fn
+
+                            vhat_price_fn = _make_price_vhat(
+                                totals,
+                                lengths,
+                                radices,
+                                _price_cache,
+                                _T_ep,
+                                prefix_prices,
+                                u_m,
+                            )
+                        else:
+                            vhat_price_fn = lambda _t, _s: 0.0
 
                     _eps_tl = float(args.eps_dp_time_limit)
                     _eps_ms = int(args.dp_max_states)
@@ -1014,6 +1067,27 @@ def main() -> None:
                                 f"[epsilon] slow guided: inst_seed={inst.seed} eps={eps} "
                                 f"m={m} jobs={n_jobs_m} wall={m_wall:.2f}s"
                             )
+                        if vhat_price_fn is not None:
+                            m_t0 = time.perf_counter()
+                            cost_p, ft_p, wall_p = _solve_machine(
+                                p_m=p_m,
+                                prices_scaled=prices_scaled,
+                                guided=True,
+                                beam=int(args.beam),
+                                prune_factor=float(args.prune_factor),
+                                vhat_fn=vhat_price_fn,
+                                time_limit=_eps_tl,
+                                max_states=_eps_ms,
+                            )
+                            m_wall_p = float(time.perf_counter() - m_t0)
+                            total_energy_price += float(cost_p)
+                            makespan_price = max(makespan_price, int(ft_p))
+                            price_solve_s += float(wall_p)
+                            if m_wall_p >= 2.0:
+                                print(
+                                    f"[epsilon] slow price: inst_seed={inst.seed} eps={eps} "
+                                    f"m={m} jobs={n_jobs_m} wall={m_wall_p:.2f}s"
+                                )
                     else:
                         # Both methods: exact baseline and guided
                         m_t0 = time.perf_counter()
@@ -1059,6 +1133,28 @@ def main() -> None:
                                 f"[epsilon] slow guided: inst_seed={inst.seed} eps={eps} "
                                 f"m={m} jobs={n_jobs_m} wall={m_wall_g:.2f}s"
                             )
+
+                        if vhat_price_fn is not None:
+                            m_t0 = time.perf_counter()
+                            cost_p, ft_p, wall_p = _solve_machine(
+                                p_m=p_m,
+                                prices_scaled=prices_scaled,
+                                guided=True,
+                                beam=int(args.beam),
+                                prune_factor=float(args.prune_factor),
+                                vhat_fn=vhat_price_fn,
+                                time_limit=_eps_tl,
+                                max_states=_eps_ms,
+                            )
+                            m_wall_p = float(time.perf_counter() - m_t0)
+                            total_energy_price += float(cost_p)
+                            makespan_price = max(makespan_price, int(ft_p))
+                            price_solve_s += float(wall_p)
+                            if m_wall_p >= 2.0:
+                                print(
+                                    f"[epsilon] slow price: inst_seed={inst.seed} eps={eps} "
+                                    f"m={m} jobs={n_jobs_m} wall={m_wall_p:.2f}s"
+                                )
 
                 loads_str = ";".join(str(x) for x in loads)
                 u_str = ";".join(str(x) for x in inst.u)
@@ -1110,7 +1206,7 @@ def main() -> None:
                     )
                     cur_mk = int(makespan_guided)
                 else:
-                    # wrote nothing yet; write both
+                    # wrote nothing yet; write exact + guided + guided_price
                     w.writerow(
                         {
                             "instance_seed": float(inst.seed),
@@ -1153,6 +1249,28 @@ def main() -> None:
                             "prune_factor": float(args.prune_factor),
                         }
                     )
+                    if total_energy_price > 0.0 or price_solve_s > 0.0:
+                        w.writerow(
+                            {
+                                "instance_seed": float(inst.seed),
+                                "category": inst.category,
+                                "N": float(inst.N),
+                                "M": float(inst.M),
+                                "D": float(inst.D),
+                                "K": float(inst.K),
+                                "assign_alpha": float(args.assign_alpha),
+                                "assign_uniform_mix": float(args.assign_uniform_mix),
+                                "epsilon": float(eps),
+                                "loads": loads_str,
+                                "u": u_str,
+                                "total_energy": float(total_energy_price),
+                                "makespan": float(makespan_price),
+                                "solve_s": float(price_solve_s),
+                                "method": "guided_price",
+                                "beam": float(args.beam),
+                                "prune_factor": float(args.prune_factor),
+                            }
+                        )
                     cur_mk = int(makespan_exact)
 
                 print(
@@ -1164,8 +1282,13 @@ def main() -> None:
                         else ""
                     )
                     + (
-                        f"guided(E={total_energy_guided:.2f},mk={makespan_guided},t={guided_solve_s:.2f}s)"
+                        f"guided(E={total_energy_guided:.2f},mk={makespan_guided},t={guided_solve_s:.2f}s) "
                         if bool(args.guided)
+                        else ""
+                    )
+                    + (
+                        f"price(E={total_energy_price:.2f},mk={makespan_price},t={price_solve_s:.2f}s)"
+                        if (total_energy_price > 0.0 or price_solve_s > 0.0)
                         else ""
                     )
                     + f" wall={float(time.perf_counter() - eps_t0):.2f}s"
