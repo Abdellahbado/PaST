@@ -459,6 +459,358 @@ def fit_mlp(
 
 
 # ============================================================================
+#  2b. Factored-Interaction MLP (numpy inference)
+# ============================================================================
+
+# Default feature group indices for the standard 18-feature phi_for_state
+# with spec=(bins=True, normalize=True, per_class_counts=False,
+#            per_class_now_cost=False, include_len_hist=False,
+#            include_price_shape=False, include_meta=False).
+#
+# Features layout (0-indexed):
+#   0: bias (1.0)
+#   1-3: regime one-hot (off, shoulder, peak)
+#   4: dist_to_next_off
+#   5: dist_to_next_cheap
+#   6: N/T
+#   7: W/T
+#   8: R/T
+#   9: S_pos/T
+#  10: S_pos * reg_off   (slack × regime interaction)
+#  11: S_pos * reg_peak   (slack × regime interaction)
+#  12: c_off/T
+#  13: c_peak/T
+#  14: pressure_off
+#  15: pressure_cheap
+#  16: short/T
+#  17: long/T
+
+_DEFAULT_WORK_IDX = np.array([6, 7, 8, 9, 10, 11, 16, 17], dtype=np.int32)
+_DEFAULT_PRICE_IDX = np.array([1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15], dtype=np.int32)
+
+
+@dataclass
+class FactoredMLPValueModel:
+    """Factored-interaction MLP for value function approximation.
+
+    Splits features into workload and price-regime groups, encodes each
+    through a small dense layer, then combines via:
+        combined = [h_work ; h_price ; h_work ⊙ h_price]
+    where ⊙ is element-wise (Hadamard) product.
+
+    This explicitly encodes the multiplicative work × price structure
+    of the cost-to-go without extra learnable parameters for the
+    interaction, while still allowing nonlinear within-group encodings.
+
+    Inference: ~2-3μs per call (numpy only, no PyTorch).
+    """
+
+    # Work encoder: x_work → h_work
+    W_work: np.ndarray   # (d_work, h_dim)
+    b_work: np.ndarray   # (h_dim,)
+    # Price encoder: x_price → h_price
+    W_price: np.ndarray  # (d_price, h_dim)
+    b_price: np.ndarray  # (h_dim,)
+    # Final layers: combined → output
+    W_final1: np.ndarray  # (3 * h_dim, d_final)
+    b_final1: np.ndarray  # (d_final,)
+    W_final2: np.ndarray  # (d_final, 1)
+    b_final2: np.ndarray  # (1,)
+    # Feature group indices
+    work_idx: np.ndarray   # indices into phi vector for work features
+    price_idx: np.ndarray  # indices into phi vector for price features
+
+    spec: FeatureSpec
+    H: int = 20
+
+    def predict_from_used(
+        self,
+        *,
+        t: int,
+        used: Sequence[int],
+        totals: np.ndarray,
+        lengths: Sequence[int],
+        ctx: TOUFeatureContext,
+    ) -> float:
+        x = phi_for_state(
+            t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec
+        )
+        # Split into groups
+        x_work = x[self.work_idx]
+        x_price = x[self.price_idx]
+
+        # Encode each group
+        h_work = np.maximum(0, x_work @ self.W_work + self.b_work)
+        h_price = np.maximum(0, x_price @ self.W_price + self.b_price)
+
+        # Combine: concat + Hadamard product
+        combined = np.concatenate([h_work, h_price, h_work * h_price])
+
+        # Final prediction
+        h = np.maximum(0, combined @ self.W_final1 + self.b_final1)
+        y = (h @ self.W_final2) + self.b_final2
+        return float(np.asarray(y, dtype=np.float64).reshape(-1)[0])
+
+    def save(self, path: str) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            p,
+            W_work=self.W_work, b_work=self.b_work,
+            W_price=self.W_price, b_price=self.b_price,
+            W_final1=self.W_final1, b_final1=self.b_final1,
+            W_final2=self.W_final2, b_final2=self.b_final2,
+            work_idx=self.work_idx, price_idx=self.price_idx,
+            include_per_class_counts=int(self.spec.include_per_class_counts),
+            include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
+            include_bins=int(self.spec.include_bins),
+            normalize=int(self.spec.normalize),
+            include_len_hist=int(self.spec.include_len_hist),
+            pmax_for_hist=int(self.spec.pmax_for_hist),
+            include_price_shape=int(self.spec.include_price_shape),
+            include_meta=int(self.spec.include_meta),
+            model_type="factored_mlp",
+        )
+
+    @staticmethod
+    def load(path: str) -> "FactoredMLPValueModel":
+        ckpt = np.load(path, allow_pickle=True)
+        spec = FeatureSpec(
+            include_per_class_counts=bool(int(ckpt["include_per_class_counts"])),
+            include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
+            include_bins=bool(int(ckpt["include_bins"])),
+            normalize=bool(int(ckpt["normalize"])),
+            include_len_hist=bool(int(ckpt["include_len_hist"]))
+            if "include_len_hist" in ckpt.files
+            else False,
+            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
+            include_price_shape=bool(int(ckpt["include_price_shape"]))
+            if "include_price_shape" in ckpt.files
+            else False,
+            include_meta=bool(int(ckpt["include_meta"]))
+            if "include_meta" in ckpt.files
+            else False,
+        )
+        W_final2 = np.asarray(ckpt["W_final2"], dtype=np.float64)
+        b_final2 = np.asarray(ckpt["b_final2"], dtype=np.float64)
+        if W_final2.ndim == 1:
+            W_final2 = W_final2.reshape(-1, 1)
+        b_final2 = b_final2.reshape(-1)
+        if b_final2.size == 0:
+            b_final2 = np.asarray([0.0], dtype=np.float64)
+
+        return FactoredMLPValueModel(
+            W_work=np.asarray(ckpt["W_work"], dtype=np.float64),
+            b_work=np.asarray(ckpt["b_work"], dtype=np.float64),
+            W_price=np.asarray(ckpt["W_price"], dtype=np.float64),
+            b_price=np.asarray(ckpt["b_price"], dtype=np.float64),
+            W_final1=np.asarray(ckpt["W_final1"], dtype=np.float64),
+            b_final1=np.asarray(ckpt["b_final1"], dtype=np.float64),
+            W_final2=W_final2,
+            b_final2=b_final2,
+            work_idx=np.asarray(ckpt["work_idx"], dtype=np.int32),
+            price_idx=np.asarray(ckpt["price_idx"], dtype=np.int32),
+            spec=spec,
+        )
+
+
+def fit_factored_mlp(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    *,
+    work_idx: np.ndarray | None = None,
+    price_idx: np.ndarray | None = None,
+    h_dim: int = 16,
+    d_final: int = 24,
+    lr: float = 1e-3,
+    batch_size: int = 2048,
+    max_epochs: int = 600,
+    patience: int = 20,
+    device: str = "auto",
+) -> FactoredMLPValueModel:
+    """Train factored-interaction MLP with PyTorch, return numpy-inference model.
+
+    The architecture splits input features into workload and price-regime groups,
+    encodes each through a dense layer, then combines via Hadamard interaction:
+        h_work = ReLU(x_work @ W_work + b_work)
+        h_price = ReLU(x_price @ W_price + b_price)
+        combined = [h_work ; h_price ; h_work ⊙ h_price]
+        output = W_final2 @ ReLU(W_final1 @ combined + b1) + b2
+    """
+    import torch
+    import torch.nn as nn
+
+    if work_idx is None:
+        work_idx = _DEFAULT_WORK_IDX.copy()
+    if price_idx is None:
+        price_idx = _DEFAULT_PRICE_IDX.copy()
+
+    work_idx = np.asarray(work_idx, dtype=np.int32)
+    price_idx = np.asarray(price_idx, dtype=np.int32)
+
+    if device == "auto":
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+    print(f"  [factored_mlp] Training on device={device}")
+
+    d_work = len(work_idx)
+    d_price = len(price_idx)
+    d_combined = 3 * h_dim  # [h_work ; h_price ; h_work ⊙ h_price]
+
+    # Extract feature groups
+    X_work_train = X_train[:, work_idx]
+    X_price_train = X_train[:, price_idx]
+    X_work_val = X_val[:, work_idx]
+    X_price_val = X_val[:, price_idx]
+
+    # Per-group standardization
+    work_mean = X_work_train.mean(axis=0)
+    work_std = X_work_train.std(axis=0) + 1e-8
+    price_mean = X_price_train.mean(axis=0)
+    price_std = X_price_train.std(axis=0) + 1e-8
+
+    X_work_train_n = (X_work_train - work_mean) / work_std
+    X_price_train_n = (X_price_train - price_mean) / price_std
+    X_work_val_n = (X_work_val - work_mean) / work_std
+    X_price_val_n = (X_price_val - price_mean) / price_std
+
+    # Convert to tensors
+    Xw_t = torch.tensor(X_work_train_n, dtype=torch.float32, device=device)
+    Xp_t = torch.tensor(X_price_train_n, dtype=torch.float32, device=device)
+    y_t = torch.tensor(y_train, dtype=torch.float32, device=device).unsqueeze(1)
+    Xw_v = torch.tensor(X_work_val_n, dtype=torch.float32, device=device)
+    Xp_v = torch.tensor(X_price_val_n, dtype=torch.float32, device=device)
+    y_v = torch.tensor(y_val, dtype=torch.float32, device=device).unsqueeze(1)
+
+    # Build model using nn.Module for clarity
+    class FactoredNet(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.work_enc = nn.Linear(d_work, h_dim)
+            self.price_enc = nn.Linear(d_price, h_dim)
+            self.final1 = nn.Linear(d_combined, d_final)
+            self.final2 = nn.Linear(d_final, 1)
+
+        def forward(self, x_work, x_price):
+            h_work = torch.relu(self.work_enc(x_work))
+            h_price = torch.relu(self.price_enc(x_price))
+            combined = torch.cat([h_work, h_price, h_work * h_price], dim=-1)
+            h = torch.relu(self.final1(combined))
+            return self.final2(h)
+
+    model = FactoredNet().to(device)
+
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"  [factored_mlp] Parameters: {n_params}")
+    print(f"  [factored_mlp] d_work={d_work} d_price={d_price} h_dim={h_dim} d_final={d_final}")
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
+    )
+
+    best_val_loss = float("inf")
+    best_state = None
+    wait = 0
+
+    N = Xw_t.shape[0]
+    n_batches = max(1, N // batch_size)
+
+    for epoch in range(max_epochs):
+        perm = torch.randperm(N, device=device)
+        epoch_loss = 0.0
+
+        model.train()
+        for bi in range(n_batches):
+            idx = perm[bi * batch_size : (bi + 1) * batch_size]
+            pred = model(Xw_t[idx], Xp_t[idx])
+            loss = nn.functional.mse_loss(pred, y_t[idx])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        epoch_loss /= n_batches
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(Xw_v, Xp_v)
+            val_loss = nn.functional.mse_loss(val_pred, y_v).item()
+
+        scheduler.step(val_loss)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            wait = 0
+        else:
+            wait += 1
+
+        if (epoch + 1) % 20 == 0 or wait == 0:
+            print(
+                f"  [factored_mlp] epoch={epoch+1:3d}  train_loss={epoch_loss:.6f}  "
+                f"val_loss={val_loss:.6f}  best={best_val_loss:.6f}  "
+                f"lr={optimizer.param_groups[0]['lr']:.1e}"
+            )
+
+        if wait >= patience:
+            print(f"  [factored_mlp] Early stopping at epoch {epoch+1}")
+            break
+
+    # Load best weights
+    model.load_state_dict(best_state)
+    model.eval()
+
+    # Extract to numpy — bake input standardization into encoder layers
+    with torch.no_grad():
+        sd = model.state_dict()
+        # Work encoder
+        Ww_raw = sd["work_enc.weight"].cpu().numpy().astype(np.float64)   # (h_dim, d_work)
+        bw_raw = sd["work_enc.bias"].cpu().numpy().astype(np.float64)    # (h_dim,)
+        # Price encoder
+        Wp_raw = sd["price_enc.weight"].cpu().numpy().astype(np.float64)  # (h_dim, d_price)
+        bp_raw = sd["price_enc.bias"].cpu().numpy().astype(np.float64)   # (h_dim,)
+        # Final layers
+        Wf1_raw = sd["final1.weight"].cpu().numpy().astype(np.float64)   # (d_final, d_combined)
+        bf1_raw = sd["final1.bias"].cpu().numpy().astype(np.float64)     # (d_final,)
+        Wf2_raw = sd["final2.weight"].cpu().numpy().astype(np.float64)   # (1, d_final)
+        bf2_raw = sd["final2.bias"].cpu().numpy().astype(np.float64)     # (1,)
+
+    # Bake standardization into encoder weights:
+    #   h = W_raw @ ((x - mean) / std) + b_raw
+    #     = (W_raw / std) @ x + (b_raw - W_raw @ (mean / std))
+    work_std_64 = work_std.astype(np.float64)
+    work_mean_64 = work_mean.astype(np.float64)
+    Ww_baked = Ww_raw / work_std_64[None, :]                     # (h_dim, d_work)
+    bw_baked = bw_raw - Ww_raw @ (work_mean_64 / work_std_64)   # (h_dim,)
+
+    price_std_64 = price_std.astype(np.float64)
+    price_mean_64 = price_mean.astype(np.float64)
+    Wp_baked = Wp_raw / price_std_64[None, :]                      # (h_dim, d_price)
+    bp_baked = bp_raw - Wp_raw @ (price_mean_64 / price_std_64)  # (h_dim,)
+
+    # Transpose for x @ W format
+    return FactoredMLPValueModel(
+        W_work=Ww_baked.T,      # (d_work, h_dim)
+        b_work=bw_baked,         # (h_dim,)
+        W_price=Wp_baked.T,     # (d_price, h_dim)
+        b_price=bp_baked,        # (h_dim,)
+        W_final1=Wf1_raw.T,    # (d_combined, d_final)
+        b_final1=bf1_raw,        # (d_final,)
+        W_final2=Wf2_raw.T,    # (d_final, 1)
+        b_final2=bf2_raw,        # (1,)
+        work_idx=work_idx,
+        price_idx=price_idx,
+        spec=FeatureSpec(),      # will be set by caller
+    )
+
+
+# ============================================================================
 #  3. LightGBM
 # ============================================================================
 

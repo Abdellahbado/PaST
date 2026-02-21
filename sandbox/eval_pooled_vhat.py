@@ -61,16 +61,18 @@ from PaST.sandbox.train_eval_vhat_beam_dp import (
 from PaST.solvers.vhat_models import (
     PolyRidgeValueModel,
     MLPValueModel,
+    FactoredMLPValueModel,
     LGBMValueModel,
     fit_poly_ridge,
     fit_mlp,
+    fit_factored_mlp,
     fit_lgbm,
     _poly_expand_batch,
 )
 
 # Union type for all model types
 ValueModel = Union[
-    LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, LGBMValueModel
+    LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, FactoredMLPValueModel, LGBMValueModel
 ]
 
 
@@ -1204,6 +1206,7 @@ def main() -> None:
             "linear",
             "poly",
             "mlp",
+            "factored_mlp",
             "lgbm",
             # Fast-inference MLP variants (feature-spec toggles)
             "mlp_hist",
@@ -1212,7 +1215,7 @@ def main() -> None:
             "mlp_all",
         ],
         help="Model type: linear (Ridge), poly (degree-2 polynomial Ridge), "
-        "mlp (small neural net), lgbm (gradient boosted trees).",
+        "mlp (small neural net), factored_mlp (factored-interaction MLP), lgbm (gradient boosted trees).",
     )
     ap.add_argument(
         "--workers",
@@ -1628,6 +1631,9 @@ def main() -> None:
         elif _mt == "mlp":
             model = MLPValueModel.load(loaded_model_path)
             model_type = "mlp"
+        elif _mt == "factored_mlp":
+            model = FactoredMLPValueModel.load(loaded_model_path)
+            model_type = "factored_mlp"
         elif _mt == "lgbm":
             model = LGBMValueModel.load(loaded_model_path)
             model_type = "lgbm"
@@ -2038,6 +2044,44 @@ def main() -> None:
             y_hat_test = (h2 @ model.W3 + model.b3).ravel()
             feat_dim = int(X_pool.shape[1])
 
+        elif model_type == "factored_mlp":
+            # Train/test split (same seed as others for consistency)
+            idx = np.arange(len(y_pool))
+            np.random.default_rng(42).shuffle(idx)
+            split = int(0.85 * len(idx))
+            X_train, y_train = X_pool[idx[:split]], y_pool[idx[:split]]
+            X_test, y_test = X_pool[idx[split:]], y_pool[idx[split:]]
+
+            fmlp_model = fit_factored_mlp(
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                lr=float(args.mlp_lr),
+                batch_size=int(args.mlp_batch_size),
+                max_epochs=int(args.mlp_max_epochs),
+                patience=int(args.mlp_patience),
+            )
+            fmlp_model.spec = spec
+            model = fmlp_model
+            # Compute predictions with numpy inference (batch)
+            x_work_tr = X_train[:, model.work_idx]
+            x_price_tr = X_train[:, model.price_idx]
+            h_work = np.maximum(0, x_work_tr @ model.W_work + model.b_work)
+            h_price = np.maximum(0, x_price_tr @ model.W_price + model.b_price)
+            combined = np.concatenate([h_work, h_price, h_work * h_price], axis=1)
+            h = np.maximum(0, combined @ model.W_final1 + model.b_final1)
+            y_hat_train = (h @ model.W_final2 + model.b_final2).ravel()
+
+            x_work_te = X_test[:, model.work_idx]
+            x_price_te = X_test[:, model.price_idx]
+            h_work = np.maximum(0, x_work_te @ model.W_work + model.b_work)
+            h_price = np.maximum(0, x_price_te @ model.W_price + model.b_price)
+            combined = np.concatenate([h_work, h_price, h_work * h_price], axis=1)
+            h = np.maximum(0, combined @ model.W_final1 + model.b_final1)
+            y_hat_test = (h @ model.W_final2 + model.b_final2).ravel()
+            feat_dim = int(X_pool.shape[1])
+
         elif model_type == "lgbm":
             # Train/test split (same seed as linear/poly for consistency)
             idx = np.arange(len(y_pool))
@@ -2105,7 +2149,7 @@ def main() -> None:
                     normalize_labels=int(use_normalize_labels),
                     model_type="linear",
                 )
-            elif model_type in ("poly", "mlp"):
+            elif model_type in ("poly", "mlp", "factored_mlp"):
                 model.save(str(save_p))
                 # Also save normalize_labels in a sidecar (stable filename)
                 np.savez(
