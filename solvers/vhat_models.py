@@ -458,9 +458,244 @@ def fit_mlp(
     )
 
 
+
 # ============================================================================
-#  2b. Factored-Interaction MLP (numpy inference)
+#  2b. Poly-MLP (numpy inference)
 # ============================================================================
+
+
+@dataclass
+class PolyMLPValueModel:
+    """Poly-MLP value function. Trained with PyTorch, inference with numpy.
+
+    Expands inputs to standard O(D^2) polynomial cross-terms, then feeds to MLP.
+    Combines explicit interaction inductive bias with universal approximation.
+    Architecture: input → poly_expand → 64 → 32 → 1 (ReLU activations).
+    """
+
+    powers: np.ndarray  # shape (d_poly, d_in)
+    W1: np.ndarray  # (d_poly, 64)
+    b1: np.ndarray  # (64,)
+    W2: np.ndarray  # (64, 32)
+    b2: np.ndarray  # (32,)
+    W3: np.ndarray  # (32, 1)
+    b3: np.ndarray  # (1,)
+    spec: FeatureSpec
+    H: int = 20
+
+    def predict_from_used(
+        self,
+        *,
+        t: int,
+        used: Sequence[int],
+        totals: np.ndarray,
+        lengths: Sequence[int],
+        ctx: TOUFeatureContext,
+    ) -> float:
+        x = phi_for_state(t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec)
+        x_poly = _poly_expand_batch(x[None, :], self.powers)[0]
+        h1 = np.maximum(0.0, np.dot(self.W1.T, x_poly) + self.b1)
+        h2 = np.maximum(0.0, np.dot(self.W2.T, h1) + self.b2)
+        return float(np.dot(self.W3.T, h2) + self.b3[0])
+
+    def save(self, path: str) -> None:
+        np.savez(
+            path,
+            powers=self.powers,
+            W1=self.W1,
+            b1=self.b1,
+            W2=self.W2,
+            b2=self.b2,
+            W3=self.W3,
+            b3=self.b3,
+            include_per_class_counts=int(self.spec.include_per_class_counts),
+            include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
+            include_bins=int(self.spec.include_bins),
+            normalize=int(self.spec.normalize),
+            include_len_hist=int(self.spec.include_len_hist),
+            pmax_for_hist=int(self.spec.pmax_for_hist),
+            include_price_shape=int(self.spec.include_price_shape),
+            include_meta=int(self.spec.include_meta),
+            model_type="poly_mlp",
+        )
+
+    @staticmethod
+    def load(path: str) -> "PolyMLPValueModel":
+        ckpt = np.load(path, allow_pickle=True)
+        spec = FeatureSpec(
+            include_per_class_counts=bool(int(ckpt["include_per_class_counts"])),
+            include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
+            include_bins=bool(int(ckpt["include_bins"])),
+            normalize=bool(int(ckpt["normalize"])),
+            include_len_hist=bool(int(ckpt["include_len_hist"]))
+            if "include_len_hist" in ckpt.files
+            else False,
+            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
+            include_price_shape=bool(int(ckpt["include_price_shape"]))
+            if "include_price_shape" in ckpt.files
+            else False,
+            include_meta=bool(int(ckpt["include_meta"]))
+            if "include_meta" in ckpt.files
+            else False,
+        )
+        W3 = np.asarray(ckpt["W3"], dtype=np.float64)
+        b3 = np.asarray(ckpt["b3"], dtype=np.float64)
+        if W3.ndim == 1:
+            W3 = W3.reshape(-1, 1)
+        b3 = b3.reshape(-1)
+        if b3.size == 0:
+            b3 = np.asarray([0.0], dtype=np.float64)
+
+        return PolyMLPValueModel(
+            powers=np.asarray(ckpt["powers"], dtype=np.int32),
+            W1=np.asarray(ckpt["W1"], dtype=np.float64),
+            b1=np.asarray(ckpt["b1"], dtype=np.float64),
+            W2=np.asarray(ckpt["W2"], dtype=np.float64),
+            b2=np.asarray(ckpt["b2"], dtype=np.float64),
+            W3=W3,
+            b3=b3,
+            spec=spec,
+        )
+
+
+def fit_poly_mlp(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    *,
+    hidden1: int = 64,
+    hidden2: int = 32,
+    lr: float = 1e-3,
+    batch_size: int = 2048,
+    max_epochs: int = 200,
+    patience: int = 15,
+    device: str = "auto",
+) -> PolyMLPValueModel:
+    """Train a Poly-MLP model with PyTorch, return numpy-inference model."""
+    import torch
+    import torch.nn as nn
+
+    if device == "auto":
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+
+    d_in_raw = X_train.shape[1]
+    powers = _poly_powers_degree2(d_in_raw)
+    
+    print(f"  [poly_mlp] Expanding features ...")
+    X_train_poly = _poly_expand_batch(X_train, powers)
+    X_val_poly = _poly_expand_batch(X_val, powers)
+
+    print(f"  [poly_mlp] Training on device={device}, {d_in_raw} -> {X_train_poly.shape[1]} dims")
+
+    d_in = X_train_poly.shape[1]
+
+    # Standardize features for better training
+    X_mean = X_train_poly.mean(axis=0)
+    X_std = X_train_poly.std(axis=0) + 1e-8
+    
+    X_train_norm = (X_train_poly - X_mean) / X_std
+    X_val_norm = (X_val_poly - X_mean) / X_std
+
+    X_t = torch.tensor(X_train_norm, dtype=torch.float32, device=device)
+    y_t = torch.tensor(y_train, dtype=torch.float32, device=device).unsqueeze(1)
+    X_v = torch.tensor(X_val_norm, dtype=torch.float32, device=device)
+    y_v = torch.tensor(y_val, dtype=torch.float32, device=device).unsqueeze(1)
+
+    model = nn.Sequential(
+        nn.Linear(d_in, hidden1),
+        nn.ReLU(),
+        nn.Linear(hidden1, hidden2),
+        nn.ReLU(),
+        nn.Linear(hidden2, 1),
+    ).to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
+    )
+
+    best_val_loss = float("inf")
+    best_state = None
+    wait = 0
+
+    N = X_t.shape[0]
+    n_batches = max(1, N // batch_size)
+
+    for epoch in range(max_epochs):
+        perm = torch.randperm(N, device=device)
+        epoch_loss = 0.0
+
+        model.train()
+        for bi in range(n_batches):
+            idx = perm[bi * batch_size : (bi + 1) * batch_size]
+            pred = model(X_t[idx])
+            loss = nn.functional.mse_loss(pred, y_t[idx])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item()
+        epoch_loss /= n_batches
+
+        model.eval()
+        with torch.no_grad():
+            val_pred = model(X_v)
+            val_loss = nn.functional.mse_loss(val_pred, y_v).item()
+
+        scheduler.step(val_loss)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            wait = 0
+            if epoch % 5 == 0 or epoch == max_epochs - 1:
+                print(
+                    f"  [poly_mlp] epoch={epoch+1:3d}  train_loss={epoch_loss:.6f}  "
+                    f"val_loss={val_loss:.6f}  best={best_val_loss:.6f}  "
+                    f"lr={optimizer.param_groups[0]['lr']:.1e}"
+                )
+        else:
+            wait += 1
+            if wait >= patience:
+                print(f"  [poly_mlp] Early stopping at epoch {epoch+1}")
+                break
+
+    model.load_state_dict(best_state)
+
+    W1_raw = model[0].weight.detach().cpu().numpy()
+    b1_raw = model[0].bias.detach().cpu().numpy()
+    W2_raw = model[2].weight.detach().cpu().numpy()
+    b2_raw = model[2].bias.detach().cpu().numpy()
+    W3_raw = model[4].weight.detach().cpu().numpy()
+    b3_raw = model[4].bias.detach().cpu().numpy()
+
+    # Bake standardization into W1, b1
+    X_std_64 = X_std.astype(np.float64)
+    X_mean_64 = X_mean.astype(np.float64)
+    W1_baked = W1_raw / X_std_64[None, :]
+    b1_baked = b1_raw - W1_raw @ (X_mean_64 / X_std_64)
+
+    return PolyMLPValueModel(
+        powers=powers,
+        W1=W1_baked.T,
+        b1=b1_baked,
+        W2=W2_raw.T,
+        b2=b2_raw,
+        W3=W3_raw.T,
+        b3=b3_raw,
+        spec=FeatureSpec(),
+    )
+
+
+# ============================================================================
+#  2c. Factored-Interaction MLP (numpy inference)
+# ============================================================================
+
 
 # Default feature group indices for the standard 18-feature phi_for_state
 # with spec=(bins=True, normalize=True, per_class_counts=False,

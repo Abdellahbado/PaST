@@ -54,7 +54,7 @@ sys.path.append(str(_REPO_PARENT))
 # Local imports
 from PaST.solvers.optimal_benchmark_dp import solve_optimal_benchmark_dp
 from PaST.solvers.vhat_linear import FeatureSpec, LinearRidgeValueModel
-from PaST.solvers.vhat_models import PolyRidgeValueModel, MLPValueModel, LGBMValueModel
+from PaST.solvers.vhat_models import PolyRidgeValueModel, MLPValueModel, PolyMLPValueModel, FactoredMLPValueModel, LGBMValueModel
 from PaST.solvers.vhat_tou_features import build_tou_feature_context
 
 
@@ -346,6 +346,10 @@ def _load_vhat_checkpoint(path: str, fallback_spec: FeatureSpec) -> _ValueModelL
             return PolyRidgeValueModel.load(path)
         if mt == "mlp":
             return MLPValueModel.load(path)
+        if mt == "poly_mlp":
+            return PolyMLPValueModel.load(path)
+        if mt == "factored_mlp":
+            return FactoredMLPValueModel.load(path)
         if mt == "lgbm":
             return LGBMValueModel.load(path)
         if mt == "linear":

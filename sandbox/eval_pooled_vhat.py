@@ -61,10 +61,12 @@ from PaST.sandbox.train_eval_vhat_beam_dp import (
 from PaST.solvers.vhat_models import (
     PolyRidgeValueModel,
     MLPValueModel,
+    PolyMLPValueModel,
     FactoredMLPValueModel,
     LGBMValueModel,
     fit_poly_ridge,
     fit_mlp,
+    fit_poly_mlp,
     fit_factored_mlp,
     fit_lgbm,
     _poly_expand_batch,
@@ -72,7 +74,7 @@ from PaST.solvers.vhat_models import (
 
 # Union type for all model types
 ValueModel = Union[
-    LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, FactoredMLPValueModel, LGBMValueModel
+    LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, PolyMLPValueModel, FactoredMLPValueModel, LGBMValueModel
 ]
 
 
@@ -1206,6 +1208,7 @@ def main() -> None:
             "linear",
             "poly",
             "mlp",
+            "poly_mlp",
             "factored_mlp",
             "lgbm",
             # Fast-inference MLP variants (feature-spec toggles)
@@ -1214,8 +1217,8 @@ def main() -> None:
             "mlp_meta",
             "mlp_all",
         ],
-        help="Model type: linear (Ridge), poly (degree-2 polynomial Ridge), "
-        "mlp (small neural net), factored_mlp (factored-interaction MLP), lgbm (gradient boosted trees).",
+        help="Base algorithm to train: linear (ridge), poly (deg=2 ridge), "
+        "mlp (small neural net), poly_mlp (expand then MLP), factored_mlp (factored-interaction MLP), lgbm (gradient boosted trees).",
     )
     ap.add_argument(
         "--workers",
@@ -1625,9 +1628,12 @@ def main() -> None:
                 ),
             )
 
-        if _mt == "poly":
+        elif _mt == "poly":
             model = PolyRidgeValueModel.load(loaded_model_path)
             model_type = "poly"
+        elif _mt == "poly_mlp":
+            model = PolyMLPValueModel.load(loaded_model_path)
+            model_type = "poly_mlp"
         elif _mt == "mlp":
             model = MLPValueModel.load(loaded_model_path)
             model_type = "mlp"
@@ -2044,6 +2050,23 @@ def main() -> None:
             y_hat_test = (h2 @ model.W3 + model.b3).ravel()
             feat_dim = int(X_pool.shape[1])
 
+        elif model_type == "poly_mlp":
+            model = fit_poly_mlp(
+                X_train,
+                y_train,
+                X_val,
+                y_val,
+                hidden1=64,
+                hidden2=32,
+                lr=args.mlp_lr,
+                batch_size=args.mlp_batch_size,
+                max_epochs=args.mlp_max_epochs,
+                patience=args.mlp_patience,
+            )
+            model.spec = spec
+            model.save(args.save_model)
+            print(f"[pool] Model saved to {args.save_model} (type={model_type})")
+        
         elif model_type == "factored_mlp":
             # Train/test split (same seed as others for consistency)
             idx = np.arange(len(y_pool))
@@ -2149,7 +2172,7 @@ def main() -> None:
                     normalize_labels=int(use_normalize_labels),
                     model_type="linear",
                 )
-            elif model_type in ("poly", "mlp", "factored_mlp"):
+            elif model_type in ("poly", "mlp", "poly_mlp", "factored_mlp"):
                 model.save(str(save_p))
                 # Also save normalize_labels in a sidecar (stable filename)
                 np.savez(
