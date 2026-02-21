@@ -2051,21 +2051,39 @@ def main() -> None:
             feat_dim = int(X_pool.shape[1])
 
         elif model_type == "poly_mlp":
-            model = fit_poly_mlp(
+            # Train/test split (same seed as others for consistency)
+            idx = np.arange(len(y_pool))
+            np.random.default_rng(42).shuffle(idx)
+            split = int(0.85 * len(idx))
+            X_train, y_train = X_pool[idx[:split]], y_pool[idx[:split]]
+            X_test, y_test = X_pool[idx[split:]], y_pool[idx[split:]]
+
+            poly_mlp_model = fit_poly_mlp(
                 X_train,
                 y_train,
-                X_val,
-                y_val,
+                X_test,
+                y_test,
                 hidden1=64,
                 hidden2=32,
-                lr=args.mlp_lr,
-                batch_size=args.mlp_batch_size,
-                max_epochs=args.mlp_max_epochs,
-                patience=args.mlp_patience,
+                lr=float(args.mlp_lr),
+                batch_size=int(args.mlp_batch_size),
+                max_epochs=int(args.mlp_max_epochs),
+                patience=int(args.mlp_patience),
             )
-            model.spec = spec
-            model.save(args.save_model)
-            print(f"[pool] Model saved to {args.save_model} (type={model_type})")
+            poly_mlp_model.spec = spec
+            model = poly_mlp_model
+            
+            # Compute predictions for metrics using numpy inference
+            x_train_poly = _poly_expand_batch(X_train, model.powers)
+            h1 = np.maximum(0, np.dot(x_train_poly, model.W1) + model.b1)
+            h2 = np.maximum(0, np.dot(h1, model.W2) + model.b2)
+            y_hat_train = np.dot(h2, model.W3).ravel() + model.b3[0]
+            
+            x_test_poly = _poly_expand_batch(X_test, model.powers)
+            h1 = np.maximum(0, np.dot(x_test_poly, model.W1) + model.b1)
+            h2 = np.maximum(0, np.dot(h1, model.W2) + model.b2)
+            y_hat_test = np.dot(h2, model.W3).ravel() + model.b3[0]
+            feat_dim = int(X_pool.shape[1])
         
         elif model_type == "factored_mlp":
             # Train/test split (same seed as others for consistency)

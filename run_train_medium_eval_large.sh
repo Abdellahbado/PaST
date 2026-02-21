@@ -291,12 +291,12 @@ for PROFILE in "${PROFILES[@]}"; do
           --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$TRAIN_TARGET_UTIL" \
           --pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR" \
-          "${STREAM_FIT_ARGS[@]}" \
-          "${POOLED_DATA_ARGS[@]}" \
+          ${STREAM_FIT_ARGS[@]+"${STREAM_FIT_ARGS[@]}"} \
+          ${POOLED_DATA_ARGS[@]+"${POOLED_DATA_ARGS[@]}"} \
           --mlp-max-epochs "$MLP_MAX_EPOCHS" --mlp-patience "$MLP_PATIENCE" \
           --mlp-batch-size "$MLP_BATCH_SIZE" --mlp-lr "$MLP_LR" \
           --lgbm-n-estimators "$LGBM_N_ESTIMATORS" --lgbm-max-depth "$LGBM_MAX_DEPTH" --lgbm-learning-rate "$LGBM_LR" \
-          "${PROFILE_ARGS[@]}" \
+          ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} \
           --model-type "$MODEL" --beams "$EVAL_BEAMS" \
           --save-model "$CKPT" \
           --out-csv "$TRAIN_CSV"
@@ -338,7 +338,7 @@ for PROFILE in "${PROFILES[@]}"; do
           --dp-max-states "$DP_MAX_STATES" \
           --eval-time-limit "$EVAL_TIME_LIMIT" \
           --target-util "$EVAL_TARGET_UTIL" \
-          "${PROFILE_ARGS[@]}" \
+          ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} \
           --beams "$EVAL_BEAMS" \
           --out-csv "$EVAL_CSV"
 
@@ -366,7 +366,7 @@ for PROFILE in "${PROFILES[@]}"; do
           --replicates "$EPS_REPLICATES" --seed "$EPS_SEED" \
           --pmax "$PMAX" --target-util "$EVAL_TARGET_UTIL" \
           --price-mode daily_tou \
-          "${PROFILE_ARGS[@]}" \
+          ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} \
           --assign-alpha "$EPS_ASSIGN_ALPHA" --assign-uniform-mix "$EPS_ASSIGN_UNIFORM_MIX" \
           --guided --beam "$EPS_BEAM" --prune-factor "$EPS_PRUNE_FACTOR" \
           --load-model "$CKPT" --transferable-features --normalize \
