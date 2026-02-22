@@ -107,6 +107,15 @@ mkdir -p "$POOL_DIR"
 #     bash run_train_medium_eval_large.sh
 PREBUILT_POOLED_NPZ="${PREBUILT_POOLED_NPZ:-}"
 
+# Auto-detect a commonly used pooled dataset if the user didn't explicitly set one.
+# This prevents unnecessary regeneration when the file already exists.
+if [[ -z "$PREBUILT_POOLED_NPZ" ]]; then
+  DEFAULT_POOLED_NPZ="ADP/Data/Pooled Medium Daily Optimal Path Training Data.npz"
+  if [[ -s "$DEFAULT_POOLED_NPZ" ]]; then
+    PREBUILT_POOLED_NPZ="$DEFAULT_POOLED_NPZ"
+  fi
+fi
+
 # --- Reuse pooled data across models (avoids repeated DP labeling) ----------
 REUSE_POOLED_ACROSS_MODELS="${REUSE_POOLED_ACROSS_MODELS:-1}"
 

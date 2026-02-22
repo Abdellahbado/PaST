@@ -165,6 +165,54 @@ def _make_generate_data_daily_prices(
     return ct
 
 
+def _make_realized_prices_from_forecast(
+    forecast_prices: np.ndarray,
+    *,
+    seed: int,
+    sigma: float,
+    rho: float,
+    spike_prob: float,
+    spike_mag: float,
+    spike_dur: int,
+    clip_low: float,
+    clip_high: float,
+) -> np.ndarray:
+    """Generate a realized price vector from a forecast vector.
+
+    The forecast is assumed known (e.g., day-ahead) and repeating.
+    The realized adds correlated deviations plus occasional spike blocks.
+    """
+    fc = np.asarray(forecast_prices, dtype=np.float64)
+    T = int(fc.shape[0])
+    if T <= 0:
+        raise ValueError("forecast_prices must be non-empty")
+
+    rng = np.random.default_rng(int(seed))
+
+    sig = float(sigma)
+    r = float(rho)
+    r = max(-0.999, min(0.999, r))
+
+    eps = np.zeros(T, dtype=np.float64)
+    if sig > 0.0:
+        z = rng.standard_normal(T).astype(np.float64)
+        for t in range(1, T):
+            eps[t] = r * eps[t - 1] + sig * z[t]
+
+    spikes = np.zeros(T, dtype=np.float64)
+    p = float(spike_prob)
+    if p > 0.0 and float(spike_mag) != 0.0 and int(spike_dur) > 0:
+        dur = int(spike_dur)
+        for t in range(T):
+            if float(rng.random()) < p:
+                end = min(T, t + dur)
+                spikes[t:end] += float(spike_mag)
+
+    realized = fc + eps + spikes
+    realized = np.clip(realized, float(clip_low), float(clip_high))
+    return realized.astype(np.float64)
+
+
 def _parse_int_range(s: str) -> Tuple[int, int]:
     """Parse 'a-b' into (a,b), inclusive."""
     s = str(s).strip()
@@ -684,6 +732,62 @@ def parse_args() -> argparse.Namespace:
         help="Max interval price for --daily-price-profile=generate_data.",
     )
 
+    # --- Forecast vs realized (noisy) prices --------------------------------
+    ap.add_argument(
+        "--eval-price-mode",
+        type=str,
+        default="deterministic",
+        choices=["deterministic", "forecast_realized"],
+        help=(
+            "Price regime for evaluation. 'deterministic' uses the same repeating "
+            "profile for both guidance and true costs. 'forecast_realized' uses a "
+            "repeating forecast price vector for features/guidance, but evaluates "
+            "true costs on a noisy realized price vector."
+        ),
+    )
+    ap.add_argument(
+        "--eval-price-noise-sigma",
+        type=float,
+        default=0.0,
+        help="Stddev of AR(1) deviation added to realized prices (0 disables).",
+    )
+    ap.add_argument(
+        "--eval-price-noise-rho",
+        type=float,
+        default=0.9,
+        help="AR(1) correlation coefficient for realized price deviation.",
+    )
+    ap.add_argument(
+        "--eval-price-spike-prob",
+        type=float,
+        default=0.0,
+        help="Per-hour probability of an upward price spike block.",
+    )
+    ap.add_argument(
+        "--eval-price-spike-mag",
+        type=float,
+        default=0.0,
+        help="Magnitude added during a spike block.",
+    )
+    ap.add_argument(
+        "--eval-price-spike-dur",
+        type=int,
+        default=2,
+        help="Duration (hours) of a spike block.",
+    )
+    ap.add_argument(
+        "--eval-price-clip-low",
+        type=float,
+        default=0.0,
+        help="Lower clip for realized prices.",
+    )
+    ap.add_argument(
+        "--eval-price-clip-high",
+        type=float,
+        default=1e9,
+        help="Upper clip for realized prices.",
+    )
+
     ap.add_argument(
         "--assign-alpha",
         type=float,
@@ -858,6 +962,19 @@ def main() -> None:
         "prune_factor",
     ]
 
+    _pm = str(args.eval_price_mode).strip().lower()
+    if _pm == "forecast_realized":
+        _pm_desc = (
+            f"forecast_realized sigma={float(args.eval_price_noise_sigma):.4g} "
+            f"rho={float(args.eval_price_noise_rho):.4g} "
+            f"spike_prob={float(args.eval_price_spike_prob):.4g} "
+            f"spike_mag={float(args.eval_price_spike_mag):.4g} "
+            f"spike_dur={int(args.eval_price_spike_dur)} "
+            f"clip=[{float(args.eval_price_clip_low):.4g},{float(args.eval_price_clip_high):.4g}]"
+        )
+    else:
+        _pm_desc = "deterministic (forecast==realized)"
+
     print(
         "[epsilon] === RUN CONFIG ===\n"
         f"[epsilon] out_csv={out_csv}\n"
@@ -866,6 +983,7 @@ def main() -> None:
         f"[epsilon] pmax={args.pmax} target_util={args.target_util}\n"
         f"[epsilon] price_mode={args.price_mode} low={args.price_low} high={args.price_high} "
         f"freeze={bool(args.price_freeze)} freeze_scope={args.price_freeze_scope} price_seed={args.price_seed}\n"
+        f"[epsilon] eval_price_mode={_pm_desc}\n"
         f"[epsilon] assign_alpha={args.assign_alpha} assign_uniform_mix={args.assign_uniform_mix}\n"
         f"[epsilon] guided={bool(args.guided)} skip_exact={bool(args.skip_exact)} beam={args.beam} prune_factor={args.prune_factor}\n"
         f"[epsilon] eps_dp_time_limit={args.eps_dp_time_limit}\n"
@@ -905,17 +1023,38 @@ def main() -> None:
             while eps >= min_eps:
                 eps_iter += 1
                 eps_t0 = time.perf_counter()
-                prices_base = np.asarray(inst.c[:eps], dtype=np.float64)
+                forecast_prices_base = np.asarray(inst.c[:eps], dtype=np.float64)
+
+                pm = str(args.eval_price_mode).strip().lower()
+                if pm not in ("deterministic", "forecast_realized"):
+                    raise ValueError(f"Unknown --eval-price-mode: {args.eval_price_mode!r}")
+                if pm == "forecast_realized":
+                    realized_prices_base = _make_realized_prices_from_forecast(
+                        forecast_prices_base,
+                        seed=int(inst.seed) + 1009 * int(eps),
+                        sigma=float(args.eval_price_noise_sigma),
+                        rho=float(args.eval_price_noise_rho),
+                        spike_prob=float(args.eval_price_spike_prob),
+                        spike_mag=float(args.eval_price_spike_mag),
+                        spike_dur=int(args.eval_price_spike_dur),
+                        clip_low=float(args.eval_price_clip_low),
+                        clip_high=float(args.eval_price_clip_high),
+                    )
+                else:
+                    realized_prices_base = forecast_prices_base
+
+                # Context/features are computed from forecast prices (repeating),
+                # while objective costs use realized prices.
                 ctx = build_tou_feature_context(
-                    prices_base,
+                    forecast_prices_base,
                     H=20,
-                    validate_repeating=_is_repeating(prices_base, H=20),
+                    validate_repeating=_is_repeating(forecast_prices_base, H=20),
                 )
 
                 # If the model was trained with label normalization, it predicts
                 # (cost_to_go / remaining_budget). Denormalize by remaining budget.
                 prefix_prices = np.concatenate(
-                    [[0.0], np.cumsum(prices_base, dtype=np.float64)]
+                    [[0.0], np.cumsum(forecast_prices_base, dtype=np.float64)]
                 )
 
                 total_energy_exact = 0.0
@@ -933,7 +1072,7 @@ def main() -> None:
                 for m, job_indices in enumerate(assignments):
                     p_m = _machine_job_p(inst.p, job_indices)
                     u_m = float(inst.u[m])
-                    prices_scaled = (prices_base * u_m).astype(np.float64)
+                    prices_scaled = (realized_prices_base * u_m).astype(np.float64)
 
                     n_jobs_m = int(len(p_m))
 
@@ -961,9 +1100,9 @@ def main() -> None:
                             )
 
                             if bool(model_meta.get("normalize_labels", False)):
-                                tt = max(0, min(int(t), int(prices_base.shape[0])))
+                                tt = max(0, min(int(t), int(forecast_prices_base.shape[0])))
                                 rem_budget = float(
-                                    prefix_prices[int(prices_base.shape[0])]
+                                    prefix_prices[int(forecast_prices_base.shape[0])]
                                     - prefix_prices[tt]
                                 )
                                 val = float(val) * rem_budget
@@ -985,7 +1124,7 @@ def main() -> None:
                             _price_cache: Dict[int, Tuple[int, ...]] = {
                                 0: tuple([0] * len(lengths))
                             }
-                            _T_ep = int(prices_base.shape[0])
+                            _T_ep = int(forecast_prices_base.shape[0])
 
                             def _make_price_vhat(tot, lns, rad, cache, T_ep, pp, um):
                                 def _fn(t: int, state: int) -> float:

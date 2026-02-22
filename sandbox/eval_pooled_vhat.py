@@ -218,6 +218,54 @@ def _make_generate_data_daily_prices(
     return ct
 
 
+def _make_realized_prices_from_forecast(
+    forecast_prices: np.ndarray,
+    *,
+    seed: int,
+    sigma: float,
+    rho: float,
+    spike_prob: float,
+    spike_mag: float,
+    spike_dur: int,
+    clip_low: float,
+    clip_high: float,
+) -> np.ndarray:
+    """Generate a realized price vector from a forecast vector.
+
+    The forecast is assumed to be known day-ahead (repeating profile).
+    The realized price adds correlated deviations plus occasional spikes.
+    """
+    fc = np.asarray(forecast_prices, dtype=np.float64)
+    T = int(fc.shape[0])
+    if T <= 0:
+        raise ValueError("forecast_prices must be non-empty")
+
+    rng = np.random.default_rng(int(seed))
+
+    sig = float(sigma)
+    r = float(rho)
+    r = max(-0.999, min(0.999, r))
+
+    eps = np.zeros(T, dtype=np.float64)
+    if sig > 0.0:
+        z = rng.standard_normal(T).astype(np.float64)
+        for t in range(1, T):
+            eps[t] = r * eps[t - 1] + sig * z[t]
+
+    spikes = np.zeros(T, dtype=np.float64)
+    p = float(spike_prob)
+    if p > 0.0 and float(spike_mag) != 0.0 and int(spike_dur) > 0:
+        dur = int(spike_dur)
+        for t in range(T):
+            if float(rng.random()) < p:
+                end = min(T, t + dur)
+                spikes[t:end] += float(spike_mag)
+
+    realized = fc + eps + spikes
+    realized = np.clip(realized, float(clip_low), float(clip_high))
+    return realized.astype(np.float64)
+
+
 def _collect_state_labels(
     *,
     rng: np.random.Generator,
@@ -478,6 +526,9 @@ def _stream_fit_ridge(
     *,
     l2: float,
     chunk_size: int,
+    x_noise_sigma: float = 0.0,
+    feature_dropout: float = 0.0,
+    augment_seed: int = 0,
     train_frac: float = 0.85,
     split_seed: int = 42,
 ) -> Tuple[np.ndarray, Dict[str, float]]:
@@ -499,6 +550,21 @@ def _stream_fit_ridge(
         yc = np.asarray(y[start:end], dtype=np.float64)
         Xt = Xc[train_mask]
         yt = yc[train_mask]
+
+        # Training-time augmentation for robustness (does not change labels)
+        if float(x_noise_sigma) > 0.0 or float(feature_dropout) > 0.0:
+            rng = np.random.default_rng(
+                int(augment_seed)
+                + int(start)
+                + 10_000 * int(split_seed)
+            )
+            if float(feature_dropout) > 0.0:
+                keep_p = 1.0 - float(feature_dropout)
+                mask = (rng.random(Xt.shape) < keep_p).astype(np.float64)
+                Xt = Xt * mask
+            if float(x_noise_sigma) > 0.0:
+                Xt = Xt + float(x_noise_sigma) * rng.standard_normal(Xt.shape)
+
         A += Xt.T @ Xt
         b += Xt.T @ yt
 
@@ -587,6 +653,9 @@ def _stream_fit_poly_ridge(
     *,
     l2: float,
     chunk_size: int,
+    x_noise_sigma: float = 0.0,
+    feature_dropout: float = 0.0,
+    augment_seed: int = 0,
     train_frac: float = 0.85,
     split_seed: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, float]]:
@@ -610,6 +679,21 @@ def _stream_fit_poly_ridge(
         yc = np.asarray(y[start:end], dtype=np.float64)
         Xt = Xc[train_mask]
         yt = yc[train_mask]
+
+        # Training-time augmentation for robustness (before poly expansion)
+        if float(x_noise_sigma) > 0.0 or float(feature_dropout) > 0.0:
+            rng = np.random.default_rng(
+                int(augment_seed)
+                + int(start)
+                + 10_000 * int(split_seed)
+            )
+            if float(feature_dropout) > 0.0:
+                keep_p = 1.0 - float(feature_dropout)
+                mask = (rng.random(Xt.shape) < keep_p).astype(np.float64)
+                Xt = Xt * mask
+            if float(x_noise_sigma) > 0.0:
+                Xt = Xt + float(x_noise_sigma) * rng.standard_normal(Xt.shape)
+
         Xt_poly = _poly_expand_batch(Xt, powers)
         A += Xt_poly.T @ Xt_poly
         b += Xt_poly.T @ yt
@@ -1050,6 +1134,62 @@ def main() -> None:
     ap.add_argument("--gd-ck-low", type=int, default=1)
     ap.add_argument("--gd-ck-high", type=int, default=8)
 
+    # --- Forecast vs realized (noisy) evaluation ----------------------------
+    ap.add_argument(
+        "--eval-price-mode",
+        type=str,
+        default="deterministic",
+        choices=["deterministic", "forecast_realized"],
+        help=(
+            "Price regime for evaluation. 'deterministic' uses the same repeating "
+            "profile for both guidance and true costs. 'forecast_realized' uses a "
+            "repeating forecast price vector for features/guidance, but evaluates "
+            "true costs on a noisy realized price vector."
+        ),
+    )
+    ap.add_argument(
+        "--eval-price-noise-sigma",
+        type=float,
+        default=0.0,
+        help="Stddev of AR(1) deviation added to realized prices (0 disables).",
+    )
+    ap.add_argument(
+        "--eval-price-noise-rho",
+        type=float,
+        default=0.9,
+        help="AR(1) correlation coefficient for realized price deviation.",
+    )
+    ap.add_argument(
+        "--eval-price-spike-prob",
+        type=float,
+        default=0.0,
+        help="Per-hour probability of an upward price spike block.",
+    )
+    ap.add_argument(
+        "--eval-price-spike-mag",
+        type=float,
+        default=0.0,
+        help="Magnitude added during a spike block.",
+    )
+    ap.add_argument(
+        "--eval-price-spike-dur",
+        type=int,
+        default=2,
+        help="Duration (hours) of a spike block.",
+    )
+    ap.add_argument(
+        "--eval-price-clip-low",
+        type=float,
+        default=0.0,
+        help="Lower clip for realized prices.",
+    )
+    ap.add_argument(
+        "--eval-price-clip-high",
+        type=float,
+        default=1e9,
+        help="Upper clip for realized prices.",
+    )
+
     ap.add_argument(
         "--target-util",
         type=float,
@@ -1188,6 +1328,32 @@ def main() -> None:
         help="Optional inclusive range 'a-b'. If set, sample N per training seed.",
     )
     ap.add_argument("--l2", type=float, default=1e-3)
+    ap.add_argument(
+        "--poly-l2",
+        type=float,
+        default=-1.0,
+        help="Override ridge L2 for model-type=poly only (<=0 uses --l2).",
+    )
+
+    # Robustification knobs (applied during fitting only; pooled data is unchanged)
+    ap.add_argument(
+        "--train-x-noise-sigma",
+        type=float,
+        default=0.0,
+        help="Stddev of Gaussian noise added to X during training fit (0 disables).",
+    )
+    ap.add_argument(
+        "--train-feature-dropout",
+        type=float,
+        default=0.0,
+        help="Probability of zeroing each feature in X during training fit (0 disables).",
+    )
+    ap.add_argument(
+        "--train-augment-seed",
+        type=int,
+        default=0,
+        help="Seed for training augmentation noise/dropout.",
+    )
 
     # Model training knobs (defaults match previous behavior)
     ap.add_argument("--mlp-lr", type=float, default=1e-3)
@@ -1627,6 +1793,26 @@ def main() -> None:
                     else False
                 ),
             )
+            # Also load the actual model object (spec was just restored above)
+            if _mt == "poly":
+                model = PolyRidgeValueModel.load(loaded_model_path)
+                model_type = "poly"
+            elif _mt == "poly_mlp":
+                model = PolyMLPValueModel.load(loaded_model_path)
+                model_type = "poly_mlp"
+            elif _mt == "mlp":
+                model = MLPValueModel.load(loaded_model_path)
+                model_type = "mlp"
+            elif _mt == "factored_mlp":
+                model = FactoredMLPValueModel.load(loaded_model_path)
+                model_type = "factored_mlp"
+            elif _mt == "lgbm":
+                model = LGBMValueModel.load(loaded_model_path)
+                model_type = "lgbm"
+            else:
+                w = np.asarray(ckpt["weights"], dtype=np.float64)
+                model = LinearRidgeValueModel(weights=w, spec=spec)
+                model_type = "linear"
 
         elif _mt == "poly":
             model = PolyRidgeValueModel.load(loaded_model_path)
@@ -1940,6 +2126,9 @@ def main() -> None:
                     y_pool,
                     l2=float(args.l2),
                     chunk_size=chunk_size,
+                    x_noise_sigma=float(args.train_x_noise_sigma),
+                    feature_dropout=float(args.train_feature_dropout),
+                    augment_seed=int(args.train_augment_seed),
                     train_frac=0.85,
                     split_seed=42,
                 )
@@ -1959,6 +2148,20 @@ def main() -> None:
 
                 X_train, y_train = X_pool[train_idx], y_pool[train_idx]
                 X_test, y_test = X_pool[test_idx], y_pool[test_idx]
+
+                # Apply robustness augmentation to the training design matrix only.
+                if float(args.train_x_noise_sigma) > 0.0 or float(args.train_feature_dropout) > 0.0:
+                    rng_aug = np.random.default_rng(int(args.train_augment_seed))
+                    X_train = np.asarray(X_train, dtype=np.float64)
+                    if float(args.train_feature_dropout) > 0.0:
+                        keep_p = 1.0 - float(args.train_feature_dropout)
+                        mask = (rng_aug.random(X_train.shape) < keep_p).astype(np.float64)
+                        X_train = X_train * mask
+                    if float(args.train_x_noise_sigma) > 0.0:
+                        X_train = X_train + float(args.train_x_noise_sigma) * rng_aug.standard_normal(
+                            X_train.shape
+                        )
+
                 w = fit_ridge(X_train, y_train, l2=float(args.l2))
                 model = LinearRidgeValueModel(weights=w, spec=spec)
                 y_hat_train = X_train @ w
@@ -1977,12 +2180,16 @@ def main() -> None:
                 print(f"    #{rank+1} feat[{fi}] w={w[fi]:.6f}")
 
         elif model_type == "poly":
+            poly_l2 = float(args.poly_l2) if float(args.poly_l2) > 0.0 else float(args.l2)
             if stream_fit:
                 w, powers, m = _stream_fit_poly_ridge(
                     X_pool,
                     y_pool,
-                    l2=float(args.l2),
+                    l2=float(poly_l2),
                     chunk_size=chunk_size,
+                    x_noise_sigma=float(args.train_x_noise_sigma),
+                    feature_dropout=float(args.train_feature_dropout),
+                    augment_seed=int(args.train_augment_seed),
                     train_frac=0.85,
                     split_seed=42,
                 )
@@ -2001,8 +2208,21 @@ def main() -> None:
 
                 X_train, y_train = X_pool[train_idx], y_pool[train_idx]
                 X_test, y_test = X_pool[test_idx], y_pool[test_idx]
+                # Apply robustness augmentation to the training design matrix only.
+                if float(args.train_x_noise_sigma) > 0.0 or float(args.train_feature_dropout) > 0.0:
+                    rng_aug = np.random.default_rng(int(args.train_augment_seed))
+                    X_train = np.asarray(X_train, dtype=np.float64)
+                    if float(args.train_feature_dropout) > 0.0:
+                        keep_p = 1.0 - float(args.train_feature_dropout)
+                        mask = (rng_aug.random(X_train.shape) < keep_p).astype(np.float64)
+                        X_train = X_train * mask
+                    if float(args.train_x_noise_sigma) > 0.0:
+                        X_train = X_train + float(args.train_x_noise_sigma) * rng_aug.standard_normal(
+                            X_train.shape
+                        )
+
                 w, powers = fit_poly_ridge(
-                    X_train, y_train, l2=float(args.l2), degree=2
+                    X_train, y_train, l2=float(poly_l2), degree=2
                 )
                 model = PolyRidgeValueModel(weights=w, spec=spec, powers_=powers)
                 X_train_poly = _poly_expand_batch(X_train, powers)
@@ -2215,6 +2435,17 @@ def main() -> None:
         f"\n[pool] Beams: {beams}"
     )
 
+    _pm = str(args.eval_price_mode).strip().lower()
+    if _pm == "forecast_realized":
+        print(
+            "[pool] Eval prices: forecast_realized "
+            f"(sigma={float(args.eval_price_noise_sigma):.4g}, rho={float(args.eval_price_noise_rho):.4g}, "
+            f"spike_prob={float(args.eval_price_spike_prob):.4g}, spike_mag={float(args.eval_price_spike_mag):.4g}, "
+            f"spike_dur={int(args.eval_price_spike_dur)}, clip=[{float(args.eval_price_clip_low):.4g}, {float(args.eval_price_clip_high):.4g}])"
+        )
+    else:
+        print("[pool] Eval prices: deterministic (forecast==realized)")
+
     eval_time_limit = float(args.eval_time_limit)
     eval_time_limit = eval_time_limit if eval_time_limit > 0.0 else -1.0
 
@@ -2265,7 +2496,7 @@ def main() -> None:
             H=20,
         )
         tu = float(args.target_util)
-        p, prices = build_instance(
+        p, forecast_prices = build_instance(
             rng=rng,
             D=D_use,
             N=N_use,
@@ -2274,6 +2505,28 @@ def main() -> None:
             target_util=(tu if tu > 0.0 else None),
             M_for_cap=1,
         )
+        forecast_prices = np.asarray(forecast_prices, dtype=np.float64)
+
+        price_mode = str(args.eval_price_mode).strip().lower()
+        if price_mode not in ("deterministic", "forecast_realized"):
+            raise ValueError(f"Unknown --eval-price-mode: {args.eval_price_mode!r}")
+
+        if price_mode == "forecast_realized":
+            realized_prices = _make_realized_prices_from_forecast(
+                forecast_prices,
+                seed=int(eval_seed),
+                sigma=float(args.eval_price_noise_sigma),
+                rho=float(args.eval_price_noise_rho),
+                spike_prob=float(args.eval_price_spike_prob),
+                spike_mag=float(args.eval_price_spike_mag),
+                spike_dur=int(args.eval_price_spike_dur),
+                clip_low=float(args.eval_price_clip_low),
+                clip_high=float(args.eval_price_clip_high),
+            )
+        else:
+            realized_prices = forecast_prices
+
+        prices = realized_prices
         T = int(len(prices))
 
         t0 = time.perf_counter()
@@ -2300,13 +2553,16 @@ def main() -> None:
             )
 
         lengths, totals, radices, _mult = encode_setup(p)
-        ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
+        ctx_prices = prices
+        if price_mode == "forecast_realized":
+            ctx_prices = forecast_prices
+        ctx = build_tou_feature_context(ctx_prices, H=20, validate_repeating=True)
 
         # Build vhat closure for this instance using the SHARED model
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
 
         # Precompute prefix prices for label denormalization
-        prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
+        prefix_prices = np.concatenate([[0.0], np.cumsum(ctx_prices, dtype=np.float64)])
 
         def _make_vhat(
             model_ref,
