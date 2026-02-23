@@ -71,6 +71,7 @@ def _parse_api_keys(api_key: Optional[str]) -> List[str]:
     single = os.environ.get("GROQ_API_KEY", "").strip()
     return [single] if single else []
 
+
 # ---------------------------------------------------------------------------
 # Constant system prompt — never changes across calls (prompt-cache friendly)
 # ---------------------------------------------------------------------------
@@ -249,9 +250,9 @@ class GroqOperatorClient:
         else:
             raise GroqRateLimitError(
                 message=str(last_exc) if last_exc else "Groq rate-limited",
-                retry_after_sec=_parse_retry_after_seconds(str(last_exc))
-                if last_exc
-                else 0.0,
+                retry_after_sec=(
+                    _parse_retry_after_seconds(str(last_exc)) if last_exc else 0.0
+                ),
             )
 
         self._last_call_ts = time.monotonic()
@@ -347,11 +348,7 @@ class GroqOperatorClient:
                     if "parent_idea" in a
                     else ""
                 )
-                + (
-                    f"Parent code:\n{a['parent_code']}\n"
-                    if "parent_code" in a
-                    else ""
-                )
+                + (f"Parent code:\n{a['parent_code']}\n" if "parent_code" in a else "")
                 + (
                     f"Second parent idea: {a.get('parent2_idea', 'N/A')}\n"
                     if "parent2_idea" in a
