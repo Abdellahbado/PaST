@@ -24,7 +24,11 @@ fi
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
-WORKERS="${WORKERS:-4}"
+# Worker counts:
+# - TRAIN_WORKERS: used for pooled small data generation and model fitting
+# - EVAL_WORKERS: used for medium/large evaluation (kept smaller by default)
+TRAIN_WORKERS="${TRAIN_WORKERS:-}"
+EVAL_WORKERS="${EVAL_WORKERS:-4}"
 MAX_WORKERS="${MAX_WORKERS:-32}"
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -60,8 +64,9 @@ TRAIN_CATEGORY="small"
 TRAIN_N_RANGE="${TRAIN_N_RANGE:-20-60}"
 TRAIN_D_RANGE="${TRAIN_D_RANGE:-2-4}"
 TRAIN_TARGET_UTIL="${TRAIN_TARGET_UTIL:-0.80}"
-TRAIN_SEEDS="${TRAIN_SEEDS:-0-199}"
-TRAIN_SAMPLES="${TRAIN_SAMPLES:-12000}"
+# Make SMALL pooled training data much larger by default (still fast on your machine)
+TRAIN_SEEDS="${TRAIN_SEEDS:-0-999}"
+TRAIN_SAMPLES="${TRAIN_SAMPLES:-50000}"
 TRAIN_LABEL_MODE="${TRAIN_LABEL_MODE:-optimal_path}"
 TRAIN_DP_TIME_LIMIT="${TRAIN_DP_TIME_LIMIT:-300}"
 TRAIN_OPT_PATH_N_PATHS="${TRAIN_OPT_PATH_N_PATHS:-2}"
@@ -113,8 +118,16 @@ run_cmd() {
   fi
 }
 
-WORKERS_EFF="$WORKERS"
-[[ "$WORKERS_EFF" -gt "$MAX_WORKERS" ]] && WORKERS_EFF="$MAX_WORKERS"
+# Default TRAIN_WORKERS to all cores if not specified
+if [[ -z "${TRAIN_WORKERS}" ]]; then
+  TRAIN_WORKERS_EFF="$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+else
+  TRAIN_WORKERS_EFF="$TRAIN_WORKERS"
+fi
+[[ "$TRAIN_WORKERS_EFF" -gt "$MAX_WORKERS" ]] && TRAIN_WORKERS_EFF="$MAX_WORKERS"
+
+EVAL_WORKERS_EFF="$EVAL_WORKERS"
+[[ "$EVAL_WORKERS_EFF" -gt "$MAX_WORKERS" ]] && EVAL_WORKERS_EFF="$MAX_WORKERS"
 
 PROFILE_ARGS=(--daily-price-profile "$DAILY_PROFILE_MODE")
 
@@ -163,7 +176,7 @@ train_poly_variant() {
 
   run_cmd "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
     --D 3 --N 40 --pmax "$PMAX" \
-    --workers "$WORKERS_EFF" \
+    --workers "$TRAIN_WORKERS_EFF" \
     --maxtasksperchild 1 \
     --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$TRAIN_SAMPLES" \
     --train-N-range "$TRAIN_N_RANGE" --train-D-range "$TRAIN_D_RANGE" \
@@ -187,7 +200,7 @@ train_poly_variant() {
     --beams "$EVAL_BEAMS" \
     --save-model "$ckpt" \
     --out-csv "$train_csv" \
-    2>&1 | tee "$train_log"
+    2>&1 | tee "$train_log" >&2
 
   echo "$ckpt"
 }
@@ -209,7 +222,7 @@ eval_single_machine() {
 
   run_cmd "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
     --D 3 --N 40 --pmax "$PMAX" \
-    --workers "$WORKERS_EFF" \
+    --workers "$EVAL_WORKERS_EFF" \
     --maxtasksperchild 1 \
     --load-model "$ckpt" \
     --eval-seeds "$seeds" \
@@ -265,6 +278,7 @@ echo "[exp] TRAIN small -> EVAL medium & large (poly standard vs poly generaliza
 echo "[exp] LOG_DIR=$LOG_DIR"
 echo "[exp] MODEL_DIR=$MODEL_DIR"
 echo "[exp] POOLED_SMALL_NPZ=$POOLED_SMALL_NPZ"
+echo "[exp] TRAIN_WORKERS_EFF=$TRAIN_WORKERS_EFF  EVAL_WORKERS_EFF=$EVAL_WORKERS_EFF"
 
 CKPT_STD="$(train_poly_variant std "$POLY_STD_L2" 0.0 0.0 0)"
 CKPT_GEN="$(train_poly_variant gen "$POLY_GEN_L2" "$POLY_GEN_X_NOISE" "$POLY_GEN_DROPOUT" "$POLY_GEN_AUG_SEED")"
