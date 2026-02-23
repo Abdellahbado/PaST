@@ -101,7 +101,7 @@ class SandboxConfig(BaseModel):
         "auto",
         description=(
             "Multiprocessing start method for sandbox workers. "
-            "'auto' picks 'fork' on Unix/macOS and 'spawn' on Windows. "
+            "'auto' picks 'fork' on macOS and 'spawn' on Linux/Windows. "
             "Use 'spawn' for maximum isolation; use 'fork' for speed on macOS."
         ),
     )

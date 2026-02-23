@@ -25,9 +25,13 @@ logger = logging.getLogger(__name__)
 def _resolve_start_method(cfg: SandboxConfig) -> str:
     method = str(getattr(cfg, "start_method", "spawn")).strip().lower()
     if method == "auto":
-        # macOS/Linux: fork is dramatically faster than spawn for short-lived workers.
+        # macOS: fork is dramatically faster than spawn for short-lived workers.
+        # Linux/HPC: prefer spawn to avoid fork-related virtual-memory accounting
+        # surprises in cgroup/ulimit environments.
         # Windows: only spawn is supported.
-        return "spawn" if sys.platform.startswith("win") else "fork"
+        if sys.platform == "darwin":
+            return "fork"
+        return "spawn"
     if method in {"spawn", "fork", "forkserver"}:
         return method
     logger.warning("Unknown sandbox start_method=%r; falling back to 'spawn'", method)
@@ -44,12 +48,15 @@ def _worker(
     fn_name: str,
     args: tuple,
     mem_limit_bytes: int,
+    apply_mem_limit: bool,
     result_queue: mp.Queue,
 ) -> None:
     """Execute *fn_name* (compiled from *fn_code*) with *args* in isolation."""
     try:
-        # Memory limit (best-effort on macOS).
-        if mem_limit_bytes > 0:
+        # Memory limit: RLIMIT_AS caps *virtual memory*.
+        # This is generally OK with 'spawn'. With 'fork' on Linux containers,
+        # RLIMIT_AS can trip due to inherited address space even with COW.
+        if apply_mem_limit and mem_limit_bytes > 0:
             try:
                 soft, hard = resource.getrlimit(resource.RLIMIT_AS)
                 resource.setrlimit(resource.RLIMIT_AS, (mem_limit_bytes, hard))
@@ -96,9 +103,12 @@ def run_operator_sandboxed(
         )
         ctx = mp.get_context("spawn")
     q: mp.Queue = ctx.Queue(maxsize=1)
+
+    # See comment in _worker: RLIMIT_AS is safest with spawn.
+    apply_mem_limit = (start_method == "spawn") or (sys.platform == "darwin")
     proc = ctx.Process(
         target=_worker,
-        args=(fn_code, fn_name, args, mem_bytes, q),
+        args=(fn_code, fn_name, args, mem_bytes, apply_mem_limit, q),
         daemon=True,
     )
     proc.start()
