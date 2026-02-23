@@ -24,5 +24,9 @@ matplotlib>=3.7
 Cython>=3.0
 numba>=0.58
 
+# ── G-LNS (LLM-driven evolutionary ALNS) ─────────────────
+groq>=0.28.0
+pydantic>=2.0
+
 # ── Dev / testing ─────────────────────────────────────────
 pytest>=7.0

@@ -50,6 +50,9 @@ EVAL_PRICE_SPIKE_DUR="${EVAL_PRICE_SPIKE_DUR:-2}"
 EVAL_BEAMS="${EVAL_BEAMS:-2,5}"
 EVAL_PRUNE_FACTOR="${EVAL_PRUNE_FACTOR:-2.0}"
 
+RUN_DET_EVAL="${RUN_DET_EVAL:-1}"
+RUN_DET_EPS="${RUN_DET_EPS:-1}"
+
 POOL_DIR="${POOL_DIR:-ADP/tmp/pool}"
 mkdir -p "$POOL_DIR"
 
@@ -58,6 +61,10 @@ LOG_DIR="ADP/logs/${EXPERIMENT_TAG}"
 MODEL_DIR="ADP/models/${EXPERIMENT_TAG}"
 POOLED_CACHE_DIR="${POOLED_CACHE_DIR:-$LOG_DIR/pooled_cache}"
 mkdir -p "$LOG_DIR" "$MODEL_DIR" "$POOLED_CACHE_DIR"
+
+SAVE_POOLED_DATA="${SAVE_POOLED_DATA:-1}"
+LOG_TO_FILE="${LOG_TO_FILE:-1}"
+CLEAN_POOL_TMP="${CLEAN_POOL_TMP:-0}"
 
 # Small training config
 TRAIN_CATEGORY="small"
@@ -68,6 +75,12 @@ TRAIN_TARGET_UTIL="${TRAIN_TARGET_UTIL:-0.80}"
 TRAIN_SEEDS="${TRAIN_SEEDS:-0-999}"
 TRAIN_SAMPLES="${TRAIN_SAMPLES:-50000}"
 TRAIN_LABEL_MODE="${TRAIN_LABEL_MODE:-optimal_path}"
+TRAIN_NORMALIZE_LABELS="${TRAIN_NORMALIZE_LABELS:-0}"
+
+FEAT_LEN_HIST="${FEAT_LEN_HIST:-0}"
+FEAT_PRICE_SHAPE="${FEAT_PRICE_SHAPE:-0}"
+FEAT_META="${FEAT_META:-0}"
+FEAT_PMAX_FOR_HIST="${FEAT_PMAX_FOR_HIST:-0}"
 TRAIN_DP_TIME_LIMIT="${TRAIN_DP_TIME_LIMIT:-300}"
 TRAIN_OPT_PATH_N_PATHS="${TRAIN_OPT_PATH_N_PATHS:-2}"
 TRAIN_OPT_PATH_TOPUP_MAX="${TRAIN_OPT_PATH_TOPUP_MAX:-0}"
@@ -145,7 +158,11 @@ if [[ "$EVAL_PRICE_MODE_SECOND" == "forecast_realized" ]]; then
 fi
 
 # Shared pooled cache for SMALL training data (reused across variants)
-POOLED_SMALL_NPZ="$POOLED_CACHE_DIR/pooled_${TRAIN_CATEGORY}_${PROFILE}_${TRAIN_LABEL_MODE}_p${PMAX}_s${TRAIN_SAMPLES}_train${TRAIN_SEEDS}_N${TRAIN_N_RANGE}_D${TRAIN_D_RANGE}_tu${TRAIN_TARGET_UTIL}.npz"
+# Include label-normalization mode in filename to avoid accidental reuse.
+POOLED_SMALL_NPZ="$POOLED_CACHE_DIR/pooled_${TRAIN_CATEGORY}_${PROFILE}_${TRAIN_LABEL_MODE}_nl${TRAIN_NORMALIZE_LABELS}_p${PMAX}_s${TRAIN_SAMPLES}_train${TRAIN_SEEDS}_N${TRAIN_N_RANGE}_D${TRAIN_D_RANGE}_tu${TRAIN_TARGET_UTIL}.npz"
+
+FEAT_TAG="lh${FEAT_LEN_HIST}_ps${FEAT_PRICE_SHAPE}_m${FEAT_META}_ph${FEAT_PMAX_FOR_HIST}"
+POOLED_SMALL_NPZ="$POOLED_CACHE_DIR/pooled_${TRAIN_CATEGORY}_${PROFILE}_${TRAIN_LABEL_MODE}_nl${TRAIN_NORMALIZE_LABELS}_${FEAT_TAG}_p${PMAX}_s${TRAIN_SAMPLES}_train${TRAIN_SEEDS}_N${TRAIN_N_RANGE}_D${TRAIN_D_RANGE}_tu${TRAIN_TARGET_UTIL}.npz"
 
 train_poly_variant() {
   local tag="$1"; shift
@@ -167,20 +184,52 @@ train_poly_variant() {
   fi
   robust_args+=(--train-augment-seed "$aug_seed")
 
+  local feat_args=()
+  if [[ "${FEAT_LEN_HIST}" == "1" ]]; then
+    feat_args+=(--feat-len-hist)
+  fi
+  if [[ "${FEAT_PRICE_SHAPE}" == "1" ]]; then
+    feat_args+=(--feat-price-shape)
+  fi
+  if [[ "${FEAT_META}" == "1" ]]; then
+    feat_args+=(--feat-meta)
+  fi
+  if [[ "${FEAT_PMAX_FOR_HIST}" != "0" ]]; then
+    feat_args+=(--feat-pmax-for-hist "${FEAT_PMAX_FOR_HIST}")
+  fi
+
   local pooled_args=()
   if [[ -s "$POOLED_SMALL_NPZ" ]]; then
-    pooled_args=(--load-pooled-data "$POOLED_SMALL_NPZ")
-  else
+    # Validate the npz before trusting it (disk-full can leave a corrupted file).
+    if "$PYTHON_BIN" -c "import numpy as np; np.load('$POOLED_SMALL_NPZ'); print('ok')" >/dev/null 2>&1; then
+      pooled_args=(--load-pooled-data "$POOLED_SMALL_NPZ")
+    else
+      echo "[warn] pooled cache is corrupted; deleting: $POOLED_SMALL_NPZ" >&2
+      rm -f "$POOLED_SMALL_NPZ"
+    fi
+  fi
+  if [[ ${#pooled_args[@]} -eq 0 && "$SAVE_POOLED_DATA" == "1" ]]; then
     pooled_args=(--save-pooled-data "$POOLED_SMALL_NPZ")
   fi
 
-  run_cmd "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+  local label_norm_args=()
+  if [[ "${TRAIN_NORMALIZE_LABELS}" == "1" ]]; then
+    label_norm_args=(--normalize-labels)
+  fi
+
+  if [[ "$CLEAN_POOL_TMP" == "1" ]]; then
+    rm -rf "${POOL_DIR%/}/pooled_vhat_"* >/dev/null 2>&1 || true
+  fi
+
+  if [[ "$LOG_TO_FILE" == "1" ]]; then
+    run_cmd "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
     --D 3 --N 40 --pmax "$PMAX" \
     --workers "$TRAIN_WORKERS_EFF" \
     --maxtasksperchild 1 \
     --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$TRAIN_SAMPLES" \
     --train-N-range "$TRAIN_N_RANGE" --train-D-range "$TRAIN_D_RANGE" \
-    --transferable-features --normalize --normalize-labels \
+    --transferable-features --normalize \
+    "${label_norm_args[@]}" \
     --label-mode "$TRAIN_LABEL_MODE" \
     --optimal-path-n-paths "$TRAIN_OPT_PATH_N_PATHS" \
     --optimal-path-topup-max "$TRAIN_OPT_PATH_TOPUP_MAX" \
@@ -195,12 +244,44 @@ train_poly_variant() {
     "${EVAL_PRICE_ARGS_DET[@]}" \
     "${pooled_args[@]}" \
     "${robust_args[@]}" \
+    "${feat_args[@]}" \
     --model-type poly \
     --poly-l2 "$poly_l2" \
     --beams "$EVAL_BEAMS" \
     --save-model "$ckpt" \
     --out-csv "$train_csv" \
     2>&1 | tee "$train_log" >&2
+  else
+    run_cmd "$PYTHON_BIN" sandbox/eval_pooled_vhat.py \
+    --D 3 --N 40 --pmax "$PMAX" \
+    --workers "$TRAIN_WORKERS_EFF" \
+    --maxtasksperchild 1 \
+    --train-seeds "$TRAIN_SEEDS" --samples-per-instance "$TRAIN_SAMPLES" \
+    --train-N-range "$TRAIN_N_RANGE" --train-D-range "$TRAIN_D_RANGE" \
+    --transferable-features --normalize \
+    "${label_norm_args[@]}" \
+    --label-mode "$TRAIN_LABEL_MODE" \
+    --optimal-path-n-paths "$TRAIN_OPT_PATH_N_PATHS" \
+    --optimal-path-topup-max "$TRAIN_OPT_PATH_TOPUP_MAX" \
+    --optimal-path-topup-dp-time-limit "$TRAIN_OPT_PATH_TOPUP_TL" \
+    --require-optimal-labels \
+    --dp-time-limit "$TRAIN_DP_TIME_LIMIT" \
+    --dp-max-states "$DP_MAX_STATES" \
+    --prune-factor "$EVAL_PRUNE_FACTOR" \
+    --pool-on-disk --pool-dtype float32 --pool-dir "$POOL_DIR" \
+    --stream-fit --fit-chunk-size 200000 \
+    "${PROFILE_ARGS[@]}" \
+    "${EVAL_PRICE_ARGS_DET[@]}" \
+    "${pooled_args[@]}" \
+    "${robust_args[@]}" \
+    "${feat_args[@]}" \
+    --model-type poly \
+    --poly-l2 "$poly_l2" \
+    --beams "$EVAL_BEAMS" \
+    --save-model "$ckpt" \
+    --out-csv "$train_csv" \
+    1>&2 2>&2
+  fi
 
   echo "$ckpt"
 }
@@ -234,6 +315,10 @@ eval_single_machine() {
     --prune-factor "$EVAL_PRUNE_FACTOR" \
     "${PROFILE_ARGS[@]}" \
     "${price_args[@]}" \
+    $( [[ "${FEAT_LEN_HIST}" == "1" ]] && echo --feat-len-hist ) \
+    $( [[ "${FEAT_PRICE_SHAPE}" == "1" ]] && echo --feat-price-shape ) \
+    $( [[ "${FEAT_META}" == "1" ]] && echo --feat-meta ) \
+    $( [[ "${FEAT_PMAX_FOR_HIST}" != "0" ]] && echo --feat-pmax-for-hist "${FEAT_PMAX_FOR_HIST}" ) \
     --beams "$EVAL_BEAMS" \
     --out-csv "$out_csv" \
     2>&1 | tee "$out_log"
@@ -288,8 +373,10 @@ for TAG in std gen; do
   CKPT_VAR="$CKPT_STD"; [[ "$TAG" == "gen" ]] && CKPT_VAR="$CKPT_GEN"
 
   # 1) Deterministic evaluation (standard)
-  eval_single_machine "$TAG" "$CKPT_VAR" "$MED_CATEGORY" "$MED_N_RANGE" "$MED_D_RANGE" "$MED_SEEDS" "$MED_TARGET_UTIL" "$MED_EVAL_TIME_LIMIT" det "${EVAL_PRICE_ARGS_DET[@]}"
-  eval_single_machine "$TAG" "$CKPT_VAR" "$LARGE_CATEGORY" "$LARGE_N_RANGE" "$LARGE_D_RANGE" "$LARGE_SEEDS" "$LARGE_TARGET_UTIL" "$LARGE_EVAL_TIME_LIMIT" det "${EVAL_PRICE_ARGS_DET[@]}"
+  if [[ "$RUN_DET_EVAL" == "1" ]]; then
+    eval_single_machine "$TAG" "$CKPT_VAR" "$MED_CATEGORY" "$MED_N_RANGE" "$MED_D_RANGE" "$MED_SEEDS" "$MED_TARGET_UTIL" "$MED_EVAL_TIME_LIMIT" det "${EVAL_PRICE_ARGS_DET[@]}"
+    eval_single_machine "$TAG" "$CKPT_VAR" "$LARGE_CATEGORY" "$LARGE_N_RANGE" "$LARGE_D_RANGE" "$LARGE_SEEDS" "$LARGE_TARGET_UTIL" "$LARGE_EVAL_TIME_LIMIT" det "${EVAL_PRICE_ARGS_DET[@]}"
+  fi
 
   # 2) Second evaluation pass with forecast_realized (noisy realized costs)
   if [[ "$EVAL_PRICE_MODE_SECOND" != "deterministic" ]]; then
@@ -304,8 +391,10 @@ for TAG in std gen; do
   CKPT_VAR="$CKPT_STD"; [[ "$TAG" == "gen" ]] && CKPT_VAR="$CKPT_GEN"
 
   # 1) Deterministic evaluation (standard)
-  eval_epsilon "$TAG" "$CKPT_VAR" "$MED_CATEGORY" "$MED_N_RANGE" "$MED_D_RANGE" "$MED_M_RANGE" "$MED_TARGET_UTIL" "$EPS_REPLICATES_MED" "$EPS_DP_TIME_LIMIT_MED" det "${EVAL_PRICE_ARGS_DET[@]}"
-  eval_epsilon "$TAG" "$CKPT_VAR" "$LARGE_CATEGORY" "$LARGE_N_RANGE" "$LARGE_D_RANGE" "$LARGE_M_RANGE" "$LARGE_TARGET_UTIL" "$EPS_REPLICATES_LARGE" "$EPS_DP_TIME_LIMIT_LARGE" det "${EVAL_PRICE_ARGS_DET[@]}"
+  if [[ "$RUN_DET_EPS" == "1" ]]; then
+    eval_epsilon "$TAG" "$CKPT_VAR" "$MED_CATEGORY" "$MED_N_RANGE" "$MED_D_RANGE" "$MED_M_RANGE" "$MED_TARGET_UTIL" "$EPS_REPLICATES_MED" "$EPS_DP_TIME_LIMIT_MED" det "${EVAL_PRICE_ARGS_DET[@]}"
+    eval_epsilon "$TAG" "$CKPT_VAR" "$LARGE_CATEGORY" "$LARGE_N_RANGE" "$LARGE_D_RANGE" "$LARGE_M_RANGE" "$LARGE_TARGET_UTIL" "$EPS_REPLICATES_LARGE" "$EPS_DP_TIME_LIMIT_LARGE" det "${EVAL_PRICE_ARGS_DET[@]}"
+  fi
 
   # 2) Second evaluation pass with forecast_realized
   if [[ "$EVAL_PRICE_MODE_SECOND" != "deterministic" ]]; then
