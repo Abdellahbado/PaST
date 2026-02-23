@@ -72,6 +72,22 @@ def _parse_api_keys(api_key: Optional[str]) -> List[str]:
     return [single] if single else []
 
 
+def _truncate_code(code: str, *, max_lines: int, max_chars: int) -> str:
+    if not code:
+        return code
+    lines = code.splitlines()
+    if max_lines > 0 and len(lines) > max_lines:
+        lines = lines[:max_lines] + [
+            f"# ... truncated ({len(code.splitlines())-max_lines} more lines) ..."
+        ]
+    out = "\n".join(lines)
+    if max_chars > 0 and len(out) > max_chars:
+        out = (
+            out[:max_chars] + f"\n# ... truncated ({len(out)-max_chars} more chars) ..."
+        )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Constant system prompt — never changes across calls (prompt-cache friendly)
 # ---------------------------------------------------------------------------
@@ -212,17 +228,19 @@ class GroqOperatorClient:
             time.sleep(wait)
 
         logger.info(
-            "LLM call: model=%s temp=%.2f max_tokens=%d user_chars=%d",
+            "LLM call: model=%s temp=%.2f max_tokens=%d user_chars=%d keys=%d",
             self.cfg.model,
             self.cfg.temperature,
             self.cfg.max_tokens,
             len(user_message),
+            len(self._clients),
         )
         last_exc: Optional[Exception] = None
         # Try each key at most once.
         for _attempt in range(len(self._clients)):
             idx = self._pick_client_index()
             try:
+                logger.debug("LLM using key[%d]", idx)
                 resp = self._clients[idx].chat.completions.create(
                     model=self.cfg.model,
                     messages=[
@@ -326,19 +344,42 @@ class GroqOperatorClient:
             reference_ops: top-performing operators shown as in-context examples
                 (max 3 to stay within token budget).
         """
-        # Build reference block (only top 3).
+        # Build reference block (top performers; truncated for prompt budget).
         ref_block_parts: list[str] = []
-        for i, op in enumerate(reference_ops[:3]):
+        n_ref = max(0, int(getattr(self.cfg, "n_reference_ops", 2)))
+        for i, op in enumerate(reference_ops[:n_ref]):
+            code = _truncate_code(
+                op.code,
+                max_lines=int(getattr(self.cfg, "prompt_max_code_lines", 120)),
+                max_chars=int(getattr(self.cfg, "prompt_max_code_chars", 3500)),
+            )
             ref_block_parts.append(
                 f"### Reference operator {i+1} ({op.op_type})\n"
                 f"Idea: {op.idea}\n"
-                f"Code:\n{op.code}"
+                f"Code:\n{code}"
             )
         ref_block = "\n\n".join(ref_block_parts) if ref_block_parts else "None."
 
         # Build per-slot action descriptions.
         slot_parts: list[str] = []
+        max_lines = int(getattr(self.cfg, "prompt_max_code_lines", 120))
+        max_chars = int(getattr(self.cfg, "prompt_max_code_chars", 3500))
+
         for idx, a in enumerate(actions):
+            parent_code = (
+                _truncate_code(
+                    a["parent_code"], max_lines=max_lines, max_chars=max_chars
+                )
+                if "parent_code" in a and isinstance(a.get("parent_code"), str)
+                else None
+            )
+            parent2_code = (
+                _truncate_code(
+                    a["parent2_code"], max_lines=max_lines, max_chars=max_chars
+                )
+                if "parent2_code" in a and isinstance(a.get("parent2_code"), str)
+                else None
+            )
             slot_parts.append(
                 f"--- Slot {idx+1} ---\n"
                 f"Action: {a['action']}\n"
@@ -348,17 +389,13 @@ class GroqOperatorClient:
                     if "parent_idea" in a
                     else ""
                 )
-                + (f"Parent code:\n{a['parent_code']}\n" if "parent_code" in a else "")
+                + (f"Parent code:\n{parent_code}\n" if parent_code else "")
                 + (
                     f"Second parent idea: {a.get('parent2_idea', 'N/A')}\n"
                     if "parent2_idea" in a
                     else ""
                 )
-                + (
-                    f"Second parent code:\n{a['parent2_code']}\n"
-                    if "parent2_code" in a
-                    else ""
-                )
+                + (f"Second parent code:\n{parent2_code}\n" if parent2_code else "")
                 + (
                     f"Synergy score: {a.get('synergy_score', 'N/A')}\n"
                     if "synergy_score" in a
@@ -384,11 +421,16 @@ class GroqOperatorClient:
         self, failed_spec: OperatorSpec, error_msg: str
     ) -> OperatorBatch:
         """Retry a single operator that failed sanity check."""
+        code = _truncate_code(
+            failed_spec.code,
+            max_lines=int(getattr(self.cfg, "prompt_max_code_lines", 120)),
+            max_chars=int(getattr(self.cfg, "prompt_max_code_chars", 3500)),
+        )
         user_msg = (
             f"Action: FIX OPERATOR (retry after failure)\n\n"
             f"The following {failed_spec.type} operator failed validation:\n"
             f"Idea: {failed_spec.idea}\n"
-            f"Code:\n{failed_spec.code}\n\n"
+            f"Code:\n{code}\n\n"
             f"Error: {error_msg}\n\n"
             f"Fix the operator and return a JSON list with exactly 1 corrected operator dict:\n"
             f'[{{"type": "{failed_spec.type}", "idea": "...", "code": "def {failed_spec.type}(...): ..."}}]\n'

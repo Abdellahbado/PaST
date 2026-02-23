@@ -158,29 +158,33 @@ def _log_generation(
     ref_cmax: int,
     ref_tec: float,
     tracking_instance_id: int,
+    prev_hv: Optional[float],
 ) -> Dict:
     hv = archive.hypervolume(ref_cmax, ref_tec, instance_id=tracking_instance_id)
     front = archive.front(instance_id=tracking_instance_id)
     size_total = archive.size()
     size_inst = archive.size(tracking_instance_id)
+    hv_delta = (hv - prev_hv) if prev_hv is not None else None
     entry = {
-        "generation": gen,
+        "generation": gen + 1,
         "tracking_instance_id": tracking_instance_id,
         "archive_size": size_inst,
         "archive_size_total": size_total,
         "hypervolume": hv,
+        "hypervolume_delta": hv_delta,
         "front": front,
         "n_destroy": len(pop.destroy_pool),
         "n_repair": len(pop.repair_pool),
         "elapsed_sec": round(elapsed_sec, 2),
     }
     logger.info(
-        "Gen %3d | inst %d | archive %d (total %d) | HV %.2f | front[0]=%s | front[-1]=%s | %.1fs",
-        gen,
+        "Gen %3d | inst %d | archive %d (total %d) | HV %.2f%s | front[0]=%s | front[-1]=%s | %.1fs",
+        gen + 1,
         tracking_instance_id,
         size_inst,
         size_total,
         hv,
+        f" (Δ{hv_delta:+.2f})" if hv_delta is not None else "",
         front[0] if front else "?",
         front[-1] if front else "?",
         elapsed_sec,
@@ -366,6 +370,9 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
     )
 
     gen_log: List[Dict] = []
+    prev_hv: Optional[float] = None
+    best_hv: Optional[float] = None
+    hv_stale_gens = 0
 
     # ----- Main evolutionary loop ----------------------------------------
     for gen in range(cfg.evolution.G_max):
@@ -383,7 +390,7 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
         )
 
         # Phase 1: Evaluate.
-        F_d, F_r, synergy = run_evaluation_phase(
+        F_d, F_r, synergy, eval_stats = run_evaluation_phase(
             destroy_pool=list(pop.destroy_pool),
             repair_pool=list(pop.repair_pool),
             instances=evo_instances,
@@ -392,6 +399,19 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
             sandbox_cfg=cfg.sandbox,
             rng=rng,
         )
+        sa_rate = float(eval_stats.get("sa_rate", 0.0))
+        if sa_rate >= 0.97:
+            logger.warning(
+                "Gen %d: SA acceptance is very high (%.1f%%). Consider lowering eval.sa_T0 / eval.sa_alpha.",
+                gen + 1,
+                100.0 * sa_rate,
+            )
+        elif sa_rate >= 0.92:
+            logger.info(
+                "Gen %d: SA acceptance %.1f%%",
+                gen + 1,
+                100.0 * sa_rate,
+            )
         pop.update_metrics(F_d, F_r, synergy)
 
         # Phase 2: Prune.
@@ -439,7 +459,20 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
             ref_cmax,
             ref_tec,
             tracking_instance_id,
+            prev_hv,
         )
+        prev_hv = float(entry["hypervolume"])
+        if best_hv is None or prev_hv > best_hv + 1e-9:
+            best_hv = prev_hv
+            hv_stale_gens = 0
+        else:
+            hv_stale_gens += 1
+            if hv_stale_gens in (10, 25, 50):
+                logger.warning(
+                    "HV has not improved for %d generations (tracking inst %d).",
+                    hv_stale_gens,
+                    tracking_instance_id,
+                )
         gen_log.append(entry)
 
     # ----- Test phase -----------------------------------------------------

@@ -270,7 +270,9 @@ def run_evaluation_phase(
     eval_cfg: EvalConfig,
     sandbox_cfg: SandboxConfig,
     rng: random.Random,
-) -> Tuple[Dict[str, float], Dict[str, float], Dict[Tuple[str, str], float]]:
+) -> Tuple[
+    Dict[str, float], Dict[str, float], Dict[Tuple[str, str], float], Dict[str, float]
+]:
     """Run K multi-episode evaluations. Updates archive in-place.
 
     Returns:
@@ -298,17 +300,21 @@ def run_evaluation_phase(
 
     # Phase-level statistics for logging / debugging.
     phase_archive_start = archive.size()
-    stats = {
+    stats: Dict[str, float] = {
         "sigma1": 0,
         "sigma2": 0,
         "sigma3": 0,
         "sigma4": 0,
         "sa_accept": 0,
         "sa_reject": 0,
+        "sa_worse_delta_sum": 0.0,
+        "sa_worse_delta_count": 0,
+        "sa_worse_delta_max": 0.0,
         "destroy_fail": 0,
         "repair_fail": 0,
         "invalid_candidate": 0,
         "inf_eval": 0,
+        "episodes_skipped": 0,
         "archive_entered": 0,
         "archive_dominated_removed": 0,
     }
@@ -351,6 +357,7 @@ def run_evaluation_phase(
                 err_init,
             )
             # Skip this episode rather than crashing the whole generation.
+            stats["episodes_skipped"] += 1
             continue
 
         cur_energy, cur_cmax, cur_starts = evaluate_sequences(cur_seqs, inst, T_limit)
@@ -360,6 +367,7 @@ def run_evaluation_phase(
                 inst_id,
                 strategy,
             )
+            stats["episodes_skipped"] += 1
             continue
 
         # Random scalarisation weight for this episode (no hypervolume!).
@@ -546,6 +554,11 @@ def run_evaluation_phase(
                 if accept_current:
                     stats["sigma3"] += 1
                     stats["sa_accept"] += 1
+                    stats["sa_worse_delta_sum"] += float(delta)
+                    stats["sa_worse_delta_count"] += 1
+                    stats["sa_worse_delta_max"] = max(
+                        float(stats["sa_worse_delta_max"]), float(delta)
+                    )
                 else:
                     stats["sigma4"] += 1
                     stats["sa_reject"] += 1
@@ -572,15 +585,22 @@ def run_evaluation_phase(
     phase_archive_end_total = archive.size()
     total_sa = stats["sa_accept"] + stats["sa_reject"]
     sa_rate = (stats["sa_accept"] / total_sa) if total_sa else 0.0
+    worse_cnt = float(stats["sa_worse_delta_count"])
+    worse_delta_mean = (
+        float(stats["sa_worse_delta_sum"]) / worse_cnt if worse_cnt > 0 else 0.0
+    )
     logger.info(
-        "Eval done | episodes=%d iters=%d | σ1=%d σ2=%d σ3=%d σ4=%d | SA accept=%.1f%% | archive_total %d→%d (entered=%d dom_removed=%d) | fails: d=%d r=%d invalid=%d",
+        "Eval done | episodes=%d iters=%d (skipped=%d) | σ1=%d σ2=%d σ3=%d σ4=%d | SA accept=%.1f%% (Δworse mean=%.4f max=%.4f) | archive_total %d→%d (entered=%d dom_removed=%d) | fails: d=%d r=%d invalid=%d inf=%d",
         eval_cfg.K_episodes,
         eval_cfg.T_iters,
+        int(stats["episodes_skipped"]),
         stats["sigma1"],
         stats["sigma2"],
         stats["sigma3"],
         stats["sigma4"],
         100.0 * sa_rate,
+        worse_delta_mean,
+        float(stats["sa_worse_delta_max"]),
         phase_archive_start,
         phase_archive_end_total,
         stats["archive_entered"],
@@ -588,9 +608,15 @@ def run_evaluation_phase(
         stats["destroy_fail"],
         stats["repair_fail"],
         stats["invalid_candidate"],
+        stats["inf_eval"],
     )
 
-    return F_d, F_r, synergy
+    stats_out = dict(stats)
+    stats_out["sa_rate"] = float(sa_rate)
+    stats_out["archive_start_total"] = float(phase_archive_start)
+    stats_out["archive_end_total"] = float(phase_archive_end_total)
+    stats_out["worse_delta_mean"] = float(worse_delta_mean)
+    return F_d, F_r, synergy, stats_out
 
 
 # ---------------------------------------------------------------------------

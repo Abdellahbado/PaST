@@ -52,7 +52,7 @@ def _parse_args() -> argparse.Namespace:
     # LLM.
     p.add_argument("--model", type=str, default="moonshotai/Kimi-K2-Instruct-0905")
     p.add_argument("--temperature", type=float, default=0.8)
-    p.add_argument("--max-tokens", type=int, default=8_000)
+    p.add_argument("--max-tokens", type=int, default=3_000)
 
     # Evolution.
     p.add_argument("--generations", type=int, default=200, dest="G_max")
@@ -147,7 +147,10 @@ def main() -> None:
     print(f"  K_episodes    = {cfg.eval.K_episodes}")
     print(f"  T_iters       = {cfg.eval.T_iters}")
     print(f"  T_test        = {cfg.eval.T_test}")
+    print(f"  sa_T0         = {cfg.eval.sa_T0}")
+    print(f"  sa_alpha      = {cfg.eval.sa_alpha}")
     print(f"  model         = {cfg.llm.model}")
+    print(f"  max_tokens    = {cfg.llm.max_tokens}")
     print(f"  output_dir    = {cfg.output_dir}")
     print(f"  instances     = {cfg.instances.instances_json}")
     print(f"  sandbox_start = {cfg.sandbox.start_method}")

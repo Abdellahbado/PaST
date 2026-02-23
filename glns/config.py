@@ -22,13 +22,25 @@ class LLMConfig(BaseModel):
     # Pinned model ID for reproducibility (Groq naming).
     model: str = "moonshotai/Kimi-K2-Instruct-0905"
     temperature: float = 0.8
-    max_tokens: int = 8_000
+    # Keep this conservative to reduce TPD burn; raise via config if needed.
+    max_tokens: int = 3_000
     # Built-in Groq SDK retry (covers 429/5xx). No extra tenacity layer.
     max_retries: int = 3
     # Client-side throttle: minimum seconds between consecutive API calls.
     min_call_interval_sec: float = 1.2
     # Timeout per request (seconds).
     timeout_sec: float = 120.0
+
+    # Prompt budget controls (best-effort token burn reduction).
+    n_reference_ops: int = Field(
+        2, description="Number of reference operators to include (top performers)"
+    )
+    prompt_max_code_lines: int = Field(
+        120, description="Max lines of operator code to include in prompt blocks"
+    )
+    prompt_max_code_chars: int = Field(
+        3_500, description="Max characters of operator code to include in prompt blocks"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +77,8 @@ class EvalConfig(BaseModel):
     T_test: int = Field(500, description="LNS iterations for final testing phase")
 
     # Simulated Annealing
-    sa_T0: float = Field(100.0, description="Initial SA temperature")
-    sa_alpha: float = Field(0.97, description="SA cooling rate")
+    sa_T0: float = Field(10.0, description="Initial SA temperature")
+    sa_alpha: float = Field(0.95, description="SA cooling rate")
 
     # Destruction
     destroy_ratio: float = Field(0.2, description="Fraction of jobs to remove")
