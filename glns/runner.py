@@ -399,8 +399,21 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
 
         # Phase 3+4: Evolve (one batched LLM call) + validate.
         if llm is not None and pruned > 0:
-            new_ops = evolve_generation(pop, llm, cfg.evolution, cfg.sandbox, gen, rng)
-            logger.info("Gen %d: evolved %d new operators", gen, len(new_ops))
+            outcome = evolve_generation(pop, llm, cfg.evolution, cfg.sandbox, gen, rng)
+            if outcome.llm_ok:
+                logger.info(
+                    "Gen %d: added %d new operators (LLM ok; fallback_used=%d)",
+                    gen + 1,
+                    len(outcome.inserted),
+                    outcome.used_fallback,
+                )
+            else:
+                logger.info(
+                    "Gen %d: added %d operators via fallback (rate_limited_for=%.1fs)",
+                    gen + 1,
+                    len(outcome.inserted),
+                    float(outcome.rate_limited_for_sec or 0.0),
+                )
         else:
             if pruned > 0:
                 # No LLM — fill with fallback.

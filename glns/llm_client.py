@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass
 from typing import List, Optional
 
 from groq import Groq
@@ -23,6 +24,52 @@ from glns.config import LLMConfig
 from glns.schemas import OperatorBatch, OperatorRecord, OperatorSpec
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GroqRateLimitError(RuntimeError):
+    """Raised when the Groq API rate-limits the request.
+
+    retry_after_sec is a best-effort parse from Groq's error message.
+    """
+
+    message: str
+    retry_after_sec: float = 0.0
+
+    def __str__(self) -> str:  # pragma: no cover
+        if self.retry_after_sec > 0:
+            return f"{self.message} (retry_after_sec={self.retry_after_sec:.1f})"
+        return self.message
+
+
+def _parse_retry_after_seconds(msg: str) -> float:
+    """Extract wait time from Groq's error message, if present."""
+    # Example: "Please try again in 3m48.672s"
+    m = re.search(r"Please try again in\s+(\d+)m([0-9.]+)s", msg)
+    if m:
+        return 60.0 * float(m.group(1)) + float(m.group(2))
+    m = re.search(r"Please try again in\s+([0-9.]+)s", msg)
+    if m:
+        return float(m.group(1))
+    return 0.0
+
+
+def _looks_like_rate_limit(exc: Exception) -> bool:
+    s = str(exc)
+    return ("Error code: 429" in s) or ("rate_limit" in s.lower())
+
+
+def _parse_api_keys(api_key: Optional[str]) -> List[str]:
+    if api_key:
+        return [api_key.strip()]
+    multi = os.environ.get("GROQ_API_KEYS", "").strip()
+    if multi:
+        # Allow comma / newline separation.
+        parts = re.split(r"[\s,]+", multi)
+        keys = [p.strip() for p in parts if p.strip()]
+        return keys
+    single = os.environ.get("GROQ_API_KEY", "").strip()
+    return [single] if single else []
 
 # ---------------------------------------------------------------------------
 # Constant system prompt — never changes across calls (prompt-cache friendly)
@@ -120,17 +167,38 @@ class GroqOperatorClient:
 
     def __init__(self, cfg: LLMConfig, api_key: Optional[str] = None) -> None:
         self.cfg = cfg
-        key = api_key or os.environ.get("GROQ_API_KEY", "")
-        if not key:
+        keys = _parse_api_keys(api_key)
+        keys = [k for k in keys if k]
+        if not keys:
             raise RuntimeError(
                 "GROQ_API_KEY not set.  Pass it via constructor or env var."
             )
-        self.client = Groq(
-            api_key=key,
-            max_retries=cfg.max_retries,
-            timeout=cfg.timeout_sec,
-        )
+
+        self._keys = keys
+        self._clients = [
+            Groq(api_key=k, max_retries=cfg.max_retries, timeout=cfg.timeout_sec)
+            for k in keys
+        ]
+        # Per-key cooldown when Groq tells us to wait (TPD/RPM/etc).
+        self._cooldown_until = [0.0 for _ in keys]  # monotonic timestamps
+        self._rr_idx = 0
+
         self._last_call_ts: float = 0.0
+
+    def _pick_client_index(self) -> int:
+        now = time.monotonic()
+        n = len(self._clients)
+        for k in range(n):
+            idx = (self._rr_idx + k) % n
+            if now >= self._cooldown_until[idx]:
+                self._rr_idx = (idx + 1) % n
+                return idx
+        # None available.
+        soonest = min(self._cooldown_until)
+        wait = max(0.0, soonest - now)
+        raise GroqRateLimitError(
+            "All configured Groq API keys are rate-limited", retry_after_sec=wait
+        )
 
     # ----- low-level call -------------------------------------------------
 
@@ -149,15 +217,43 @@ class GroqOperatorClient:
             self.cfg.max_tokens,
             len(user_message),
         )
-        resp = self.client.chat.completions.create(
-            model=self.cfg.model,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.cfg.temperature,
-            max_tokens=self.cfg.max_tokens,
-        )
+        last_exc: Optional[Exception] = None
+        # Try each key at most once.
+        for _attempt in range(len(self._clients)):
+            idx = self._pick_client_index()
+            try:
+                resp = self._clients[idx].chat.completions.create(
+                    model=self.cfg.model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_message},
+                    ],
+                    temperature=self.cfg.temperature,
+                    max_tokens=self.cfg.max_tokens,
+                )
+                break
+            except Exception as exc:  # SDK raises a variety of exception types
+                last_exc = exc
+                if _looks_like_rate_limit(exc):
+                    retry_after = _parse_retry_after_seconds(str(exc))
+                    if retry_after <= 0:
+                        retry_after = 60.0
+                    self._cooldown_until[idx] = time.monotonic() + retry_after
+                    logger.warning(
+                        "Groq rate-limited key[%d]; cooling down %.1fs",
+                        idx,
+                        retry_after,
+                    )
+                    continue
+                raise
+        else:
+            raise GroqRateLimitError(
+                message=str(last_exc) if last_exc else "Groq rate-limited",
+                retry_after_sec=_parse_retry_after_seconds(str(last_exc))
+                if last_exc
+                else 0.0,
+            )
+
         self._last_call_ts = time.monotonic()
         content = resp.choices[0].message.content or ""
         logger.info("LLM response: chars=%d", len(content))
@@ -234,7 +330,8 @@ class GroqOperatorClient:
         for i, op in enumerate(reference_ops[:3]):
             ref_block_parts.append(
                 f"### Reference operator {i+1} ({op.op_type})\n"
-                f"Idea: {op.idea}\n```python\n{op.code}\n```"
+                f"Idea: {op.idea}\n"
+                f"Code:\n{op.code}"
             )
         ref_block = "\n\n".join(ref_block_parts) if ref_block_parts else "None."
 
@@ -251,7 +348,7 @@ class GroqOperatorClient:
                     else ""
                 )
                 + (
-                    f"Parent code:\n```python\n{a['parent_code']}\n```\n"
+                    f"Parent code:\n{a['parent_code']}\n"
                     if "parent_code" in a
                     else ""
                 )
@@ -261,7 +358,7 @@ class GroqOperatorClient:
                     else ""
                 )
                 + (
-                    f"Second parent code:\n```python\n{a['parent2_code']}\n```\n"
+                    f"Second parent code:\n{a['parent2_code']}\n"
                     if "parent2_code" in a
                     else ""
                 )
@@ -294,7 +391,7 @@ class GroqOperatorClient:
             f"Action: FIX OPERATOR (retry after failure)\n\n"
             f"The following {failed_spec.type} operator failed validation:\n"
             f"Idea: {failed_spec.idea}\n"
-            f"```python\n{failed_spec.code}\n```\n\n"
+            f"Code:\n{failed_spec.code}\n\n"
             f"Error: {error_msg}\n\n"
             f"Fix the operator and return a JSON list with exactly 1 corrected operator dict:\n"
             f'[{{"type": "{failed_spec.type}", "idea": "...", "code": "def {failed_spec.type}(...): ..."}}]\n'

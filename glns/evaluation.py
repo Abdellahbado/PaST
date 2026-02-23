@@ -567,11 +567,13 @@ def run_evaluation_phase(
         e.stagnation += 1
 
     # Phase summary (one line at INFO; deeper detail available via DEBUG logs).
-    phase_archive_end = archive.size()
+    # Note: because episodes sample multiple instances, these archive sizes are TOTAL
+    # across all instance_id values.
+    phase_archive_end_total = archive.size()
     total_sa = stats["sa_accept"] + stats["sa_reject"]
     sa_rate = (stats["sa_accept"] / total_sa) if total_sa else 0.0
     logger.info(
-        "Eval done | episodes=%d iters=%d | σ1=%d σ2=%d σ3=%d σ4=%d | SA accept=%.1f%% | archive %d→%d (entered=%d dom_removed=%d) | fails: d=%d r=%d invalid=%d",
+        "Eval done | episodes=%d iters=%d | σ1=%d σ2=%d σ3=%d σ4=%d | SA accept=%.1f%% | archive_total %d→%d (entered=%d dom_removed=%d) | fails: d=%d r=%d invalid=%d",
         eval_cfg.K_episodes,
         eval_cfg.T_iters,
         stats["sigma1"],
@@ -580,7 +582,7 @@ def run_evaluation_phase(
         stats["sigma4"],
         100.0 * sa_rate,
         phase_archive_start,
-        phase_archive_end,
+        phase_archive_end_total,
         stats["archive_entered"],
         stats["archive_dominated_removed"],
         stats["destroy_fail"],

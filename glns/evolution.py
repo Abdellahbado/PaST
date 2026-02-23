@@ -13,10 +13,11 @@ from __future__ import annotations
 import logging
 import random
 import uuid
-from typing import List
+from dataclasses import dataclass
+from typing import List, Optional
 
 from glns.config import EvolutionConfig, SandboxConfig
-from glns.llm_client import GroqOperatorClient
+from glns.llm_client import GroqOperatorClient, GroqRateLimitError
 from glns.population import PopulationManager
 from glns.sanity import sanity_check
 from glns.schemas import OperatorRecord, OperatorSpec
@@ -33,6 +34,14 @@ STRATEGY_NAMES = [
     "homo_crossover",
     "joint_crossover",
 ]
+
+
+@dataclass
+class EvolutionOutcome:
+    inserted: List[OperatorRecord]
+    llm_ok: bool
+    used_fallback: int
+    rate_limited_for_sec: Optional[float] = None
 
 
 def _sample_strategy(weights: tuple, rng: random.Random) -> str:
@@ -127,7 +136,7 @@ def evolve_generation(
     sandbox_cfg: SandboxConfig,
     generation: int,
     rng: random.Random,
-) -> List[OperatorRecord]:
+) -> EvolutionOutcome:
     """Fill all pruned slots with ONE batched LLM call per generation.
 
     Returns the list of newly created (and sanity-checked) OperatorRecords.
@@ -136,7 +145,7 @@ def evolve_generation(
     r_slots = pop.repair_pool.empty_slots()
     total_needed = d_slots + r_slots
     if total_needed == 0:
-        return []
+        return EvolutionOutcome(inserted=[], llm_ok=True, used_fallback=0)
 
     actions: List[dict] = []
 
@@ -183,12 +192,25 @@ def evolve_generation(
     reference_ops = pop.top_reference_ops(k=3)
     try:
         batch = llm.generate_evolution_batch(actions, reference_ops)
+        llm_ok = True
+        rate_limited_for: Optional[float] = None
+    except GroqRateLimitError as exc:
+        logger.warning("LLM evolution skipped due to rate limit: %s", exc)
+        ops = _fallback_fill(pop, d_slots, r_slots, generation)
+        return EvolutionOutcome(
+            inserted=ops,
+            llm_ok=False,
+            used_fallback=len(ops),
+            rate_limited_for_sec=exc.retry_after_sec or None,
+        )
     except Exception as exc:
         logger.error("LLM evolution call failed: %s", exc)
-        return _fallback_fill(pop, d_slots, r_slots, generation)
+        ops = _fallback_fill(pop, d_slots, r_slots, generation)
+        return EvolutionOutcome(inserted=ops, llm_ok=False, used_fallback=len(ops))
 
     # ----- Sanity check each returned operator ----------------------------
     new_ops: List[OperatorRecord] = []
+    fallback_used = 0
     for idx, spec in enumerate(batch.operators):
         # Ensure type matches what we asked for.
         expected_type = actions[idx]["type"] if idx < len(actions) else spec.type
@@ -219,6 +241,15 @@ def evolve_generation(
                     fixed = True
                     break
                 err = err2
+            except GroqRateLimitError as rl_exc:
+                # Don't waste retries when the account is rate-limited.
+                logger.warning(
+                    "Retry aborted for operator %d due to rate limit: %s",
+                    idx,
+                    rl_exc,
+                )
+                err = str(rl_exc)
+                break
             except Exception as retry_exc:
                 logger.error(
                     "Retry %d failed for operator %d: %s", attempt, idx, retry_exc
@@ -229,6 +260,7 @@ def evolve_generation(
             logger.warning("All retries exhausted for slot %d; using fallback", idx)
             fb = _get_fallback(expected_type, generation)
             new_ops.append(fb)
+            fallback_used += 1
 
     # ----- Insert into pools ---------------------------------------------
     inserted: List[OperatorRecord] = []
@@ -237,7 +269,12 @@ def evolve_generation(
         if pool.add(op):
             inserted.append(op)
 
-    return inserted
+    return EvolutionOutcome(
+        inserted=inserted,
+        llm_ok=llm_ok,
+        used_fallback=fallback_used,
+        rate_limited_for_sec=rate_limited_for,
+    )
 
 
 # ---------------------------------------------------------------------------
