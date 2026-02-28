@@ -90,7 +90,7 @@ for PROFILE in "${PROFILES[@]}"; do
       echo "[$RUN_IDX/$TOTAL] SKIP (exists) $OUT_CSV"
     else
       echo "[$RUN_IDX/$TOTAL] TRAIN small → EVAL small : $TAG"
-      $PYTHON_BIN -m PaST.sandbox.eval_pooled_vhat \
+      $PYTHON_BIN sandbox/eval_pooled_vhat.py \
         --daily-price-profile "$PROFILE" \
         --model-type "$MODEL" \
         --pmax "$PMAX" \
@@ -118,7 +118,7 @@ for PROFILE in "${PROFILES[@]}"; do
       echo "[$RUN_IDX/$TOTAL] SKIP (no model) $OUT_CSV_MED"
     else
       echo "[$RUN_IDX/$TOTAL] EVAL medium (cross-size) : $TAG"
-      $PYTHON_BIN -m PaST.sandbox.eval_pooled_vhat \
+      $PYTHON_BIN sandbox/eval_pooled_vhat.py \
         --daily-price-profile "$PROFILE" \
         --model-type "$MODEL" \
         --pmax "$PMAX" \

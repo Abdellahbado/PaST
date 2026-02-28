@@ -82,7 +82,7 @@ for PROFILE in "${PROFILES[@]}"; do
           fi
 
           echo "[$RUN_IDX] $TAG"
-          $PYTHON_BIN -m PaST.sandbox.eval_pooled_vhat \
+          $PYTHON_BIN sandbox/eval_pooled_vhat.py \
             --daily-price-profile "$PROFILE" \
             --model-type "$MODEL" \
             --pmax "$PMAX" \
