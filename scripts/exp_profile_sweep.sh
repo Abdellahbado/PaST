@@ -16,6 +16,17 @@ export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 
 cd "$(dirname "$0")/.."
 
+# ── Nohup background launch (default on) ────────────────────────────────────
+if [[ "${NOHUP:-1}" == "1" && -z "${IN_NOHUP:-}" ]]; then
+  mkdir -p "ADP/logs/nohup"
+  TS="$(date +"%Y%m%d_%H%M%S")"
+  LOG_FILE="ADP/logs/nohup/$(basename "$0" .sh)_${TS}.log"
+  echo "[nohup] launching in background; log: $LOG_FILE"
+  IN_NOHUP=1 NOHUP=0 nohup bash "$0" "$@" >"$LOG_FILE" 2>&1 &
+  echo "[nohup] pid=$!"
+  exit 0
+fi
+
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
 WORKERS="${WORKERS:-2}"
@@ -37,7 +48,7 @@ FEAT_FLAGS="--feat-len-hist --feat-price-shape --feat-meta --feat-extra --normal
 
 # ── Small training ──────────────────────────────────────────────────
 TRAIN_SEEDS_SMALL="0-199"
-SAMPLES_SMALL=400
+SAMPLES_SMALL=5000
 TRAIN_D_RANGE_SMALL="2-4"
 TRAIN_N_RANGE_SMALL="20-60"
 TARGET_UTIL_SMALL="0.80"
@@ -98,7 +109,7 @@ for PROFILE in "${PROFILES[@]}"; do
         --train-D-range "$TRAIN_D_RANGE_SMALL" --train-N-range "$TRAIN_N_RANGE_SMALL" \
         --target-util "$TARGET_UTIL_SMALL" \
         --samples-per-instance "$SAMPLES_SMALL" \
-        --label-mode optimal_path \
+        --label-mode subproblem \
         --dp-time-limit "$DP_TIME_LIMIT_SMALL" --require-optimal-labels \
         --eval-seeds "$EVAL_SEEDS_SMALL" \
         --beams "$BEAMS" \
