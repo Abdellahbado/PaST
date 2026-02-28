@@ -645,6 +645,7 @@ def solve_sparse_dp_python_beam(
     final_state: int,
     *,
     vhat: Optional[callable],
+    vhat_batch: Optional[callable] = None,
     beam_width: int,
     prune_factor: float = 2.0,
     time_limit: float = -1.0,
@@ -663,6 +664,9 @@ def solve_sparse_dp_python_beam(
 
     Args:
         vhat: Callable (t:int, state:int) -> float, or None to disable heuristic.
+        vhat_batch: Optional callable (t:int, states:list[int], costs:ndarray) -> ndarray
+            returning scores for all states at once. When provided, used instead
+            of serial vhat calls during prune step (much faster for learned models).
         beam_width: Number of states to keep per time layer.
         prune_factor: Only prune when layer is at least beam_width*prune_factor.
 
@@ -744,12 +748,44 @@ def solve_sparse_dp_python_beam(
         # Beam prune this layer if it has grown too large
         if len(layer) > prune_threshold:
             items = list(layer.items())
-            best_items = heapq.nsmallest(
-                int(beam_width),
-                items,
-                key=lambda it: score_state(t, it[0], float(it[1][0]), int(it[1][1])),
-            )
-            layer = {s: (float(cp[0]), int(cp[1])) for s, cp in best_items}
+
+            if vhat_batch is not None:
+                # Batch scoring: extract states and costs, call vhat_batch once
+                states_arr = [int(it[0]) for it in items]
+                costs_arr = np.array(
+                    [float(it[1][0]) for it in items], dtype=np.float64
+                )
+                pens_arr = np.array([int(it[1][1]) for it in items], dtype=np.int64)
+
+                h_arr = vhat_batch(int(t), states_arr, costs_arr)
+                h_arr = np.asarray(h_arr, dtype=np.float64)
+                # Replace non-finite heuristic values with 0
+                h_arr = np.where(np.isfinite(h_arr), h_arr, 0.0)
+
+                scores = costs_arr + h_arr
+                if tie_break == "early":
+                    # Lexicographic sort: primary by score, secondary by penalty
+                    order = np.lexsort((pens_arr, scores))
+                else:
+                    order = np.argsort(scores)
+
+                keep_idx = order[: int(beam_width)]
+                layer = {
+                    states_arr[int(i)]: (
+                        float(costs_arr[int(i)]),
+                        int(pens_arr[int(i)]),
+                    )
+                    for i in keep_idx
+                }
+            else:
+                best_items = heapq.nsmallest(
+                    int(beam_width),
+                    items,
+                    key=lambda it: score_state(
+                        t, it[0], float(it[1][0]), int(it[1][1])
+                    ),
+                )
+                layer = {s: (float(cp[0]), int(cp[1])) for s, cp in best_items}
             dp_layers[t] = layer
 
         # Update best partial state from this layer

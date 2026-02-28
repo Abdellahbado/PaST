@@ -136,6 +136,7 @@ def evolve_generation(
     sandbox_cfg: SandboxConfig,
     generation: int,
     rng: random.Random,
+    search_context: Optional[str] = None,
 ) -> EvolutionOutcome:
     """Fill all pruned slots with ONE batched LLM call per generation.
 
@@ -191,7 +192,9 @@ def evolve_generation(
     # ----- ONE batched LLM call ------------------------------------------
     reference_ops = pop.top_reference_ops(k=3)
     try:
-        batch = llm.generate_evolution_batch(actions, reference_ops)
+        batch = llm.generate_evolution_batch(
+            actions, reference_ops, search_context=search_context
+        )
         llm_ok = True
         rate_limited_for: Optional[float] = None
     except GroqRateLimitError as exc:
@@ -212,10 +215,19 @@ def evolve_generation(
     new_ops: List[OperatorRecord] = []
     fallback_used = 0
     for idx, spec in enumerate(batch.operators):
-        # Ensure type matches what we asked for.
+        # Determine what we asked for vs what we got.
         expected_type = actions[idx]["type"] if idx < len(actions) else spec.type
         if spec.type != expected_type:
-            spec = OperatorSpec(type=expected_type, idea=spec.idea, code=spec.code)
+            # LLM returned wrong type (common after JSON truncation).
+            # Trust the operator's self-declared type (its code defines that function).
+            logger.info(
+                "Operator %d: LLM returned '%s' (expected '%s'); accepting as '%s'",
+                idx,
+                spec.type,
+                expected_type,
+                spec.type,
+            )
+            # Use the operator's actual type — forcing would crash Pydantic.
 
         passed, err = sanity_check(spec, sandbox_cfg)
         if passed:
@@ -224,16 +236,14 @@ def evolve_generation(
             continue
 
         # Retry up to max_retries_per_operator times.
+        actual_type = spec.type  # what the code actually defines
         logger.warning("Operator %d failed sanity: %s — retrying", idx, err)
         fixed = False
         for attempt in range(evo_cfg.max_retries_per_operator):
             try:
                 retry_batch = llm.regenerate_with_error(spec, err or "Unknown error")
                 retry_spec = retry_batch.operators[0]
-                if retry_spec.type != expected_type:
-                    retry_spec = OperatorSpec(
-                        type=expected_type, idea=retry_spec.idea, code=retry_spec.code
-                    )
+                # Don't force type — trust the retry's own declared type.
                 passed2, err2 = sanity_check(retry_spec, sandbox_cfg)
                 if passed2:
                     rec = OperatorRecord(spec=retry_spec, generation_born=generation)

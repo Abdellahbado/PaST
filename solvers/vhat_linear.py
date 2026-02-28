@@ -5,7 +5,11 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from PaST.solvers.vhat_tou_features import TOUFeatureContext, build_tou_feature_context, get_day_window_cost
+from PaST.solvers.vhat_tou_features import (
+    TOUFeatureContext,
+    build_tou_feature_context,
+    get_day_window_cost,
+)
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,12 @@ class FeatureSpec:
     pmax_for_hist: int = 12
     include_price_shape: bool = False  # features derived from ctx.day (length H)
     include_meta: bool = False  # extra metadata/log-scale features
+    include_extra: bool = False  # additional generalization features (see §extra block)
+
+    # When > 0, per-class features (counts & now-cost) are padded to this fixed
+    # size indexed by processing time 1..per_class_pad, avoiding variable-length
+    # feature vectors when the number of unique job lengths varies across instances.
+    per_class_pad: int = 0
 
 
 def _remaining_from_used(used: Sequence[int], totals: np.ndarray) -> np.ndarray:
@@ -124,7 +134,9 @@ def phi_for_state(
     feats.extend([(S_pos / norm) * reg_oh[0], (S_pos / norm) * reg_oh[2]])
 
     # Cheap capacity ahead (normalized) + pressure ratios (already scale-invariant)
-    feats.extend([c_off / norm, c_peak / norm, pressure_off, pressure_cheap])
+    feats.extend(
+        [c_off / norm, c_sh / norm, c_peak / norm, pressure_off, pressure_cheap]
+    )
 
     # Simple bins by length (optional, normalized)
     if spec.include_bins:
@@ -175,27 +187,130 @@ def phi_for_state(
 
     # Per-class counts (normalized)
     if spec.include_per_class_counts:
-        feats.extend([float(int(x)) / norm for x in remaining.tolist()])
+        pad = int(spec.per_class_pad)
+        if pad > 0:
+            # Fixed-length: index by processing time 1..pad
+            counts_vec = [0.0] * pad
+            for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
+                idx = int(L) - 1  # length 1 → index 0, etc.
+                if 0 <= idx < pad:
+                    counts_vec[idx] = float(int(nk)) / norm
+            feats.extend(counts_vec)
+        else:
+            feats.extend([float(int(x)) / norm for x in remaining.tolist()])
 
     # Per-class cost-if-run-now (wrap within day) and aggregate
     # Note: cost values are already price-scaled (bounded by price profile), not by T
     if spec.include_per_class_now_cost:
+        pad = int(spec.per_class_pad)
         agg = 0.0
-        for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
-            if nk <= 0:
-                feats.append(0.0)
-                continue
-            # cost of running length L starting at current hour-of-day
-            if int(L) <= ctx.H:
-                cost_now = float(ctx.day_window_cost[int(L)][h])
-            else:
-                cost_now = float(get_day_window_cost(ctx, int(L))[h])
-            v = float(int(nk)) * cost_now / norm
-            feats.append(v)
-            agg += v
+        if pad > 0:
+            # Fixed-length: index by processing time 1..pad
+            cost_vec = [0.0] * pad
+            for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
+                if nk <= 0:
+                    continue
+                if int(L) <= ctx.H:
+                    cost_now = float(ctx.day_window_cost[int(L)][h])
+                else:
+                    cost_now = float(get_day_window_cost(ctx, int(L))[h])
+                v = float(int(nk)) * cost_now / norm
+                idx = int(L) - 1
+                if 0 <= idx < pad:
+                    cost_vec[idx] = v
+                agg += v
+            feats.extend(cost_vec)
+        else:
+            for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
+                if nk <= 0:
+                    feats.append(0.0)
+                    continue
+                if int(L) <= ctx.H:
+                    cost_now = float(ctx.day_window_cost[int(L)][h])
+                else:
+                    cost_now = float(get_day_window_cost(ctx, int(L))[h])
+                v = float(int(nk)) * cost_now / norm
+                feats.append(v)
+                agg += v
         feats.append(float(agg))
 
+    # Extra generalization features (opt-in for richer signal without breaking
+    # compatibility with existing checkpoints).
+    if spec.include_extra:
+        T_remain = max(1, T - t)
+        # 1. fraction of horizon remaining (0..1, normalized by construction)
+        feats.append(float(T_remain) / float(max(1, T)))
+        # 2. workload-to-remaining-horizon ratio (congestion measure)
+        feats.append(float(W) / float(T_remain))
+        # 3. mean remaining job length ⇢ captures job-mix complexity
+        n_remaining = max(1, int(np.sum(remaining)))
+        mean_len = (
+            float(np.dot(remaining, lengths_arr)) / float(n_remaining)
+            if n_remaining > 0
+            else 0.0
+        )
+        feats.append(mean_len / float(max(1, int(np.max(lengths_arr)))))
+        # 4. variance of remaining job lengths (diversity of job sizes)
+        if n_remaining > 1:
+            # Weighted variance: expand remaining counts for each length
+            expanded = np.repeat(lengths_arr.astype(np.float64), remaining.astype(int))
+            var_len = float(np.var(expanded)) if expanded.size > 1 else 0.0
+        else:
+            var_len = 0.0
+        feats.append(var_len / float(max(1.0, float(np.max(lengths_arr)) ** 2)))
+        # 5. cheap-slot utilization opportunity: fraction of cheap slots
+        #    available vs total remaining slots
+        feats.append(float(c_off + c_sh) / float(T_remain))
+
     return np.asarray(feats, dtype=np.float64)
+
+
+def phi_for_states_batch(
+    *,
+    t: int,
+    states: List[int],
+    totals: np.ndarray,
+    lengths: List[int],
+    ctx: TOUFeatureContext,
+    spec: FeatureSpec,
+    radices: np.ndarray,
+    used_cache: Dict[int, Tuple[int, ...]],
+) -> np.ndarray:
+    """Batch feature extraction for multiple states at the same time step *t*.
+
+    Returns a (len(states), D) float64 array. Delegates to phi_for_state per
+    row — the main saving is avoiding repeated Python call overhead from the
+    caller and allowing the downstream model to do a single matrix multiply.
+    """
+    # Decode states once
+    K = len(radices)
+    useds: List[Tuple[int, ...]] = []
+    for s in states:
+        cached = used_cache.get(s)
+        if cached is None:
+            u = [0] * K
+            x = s
+            for i in range(K):
+                r = int(radices[i])
+                u[i] = x % r
+                x //= r
+            cached = tuple(u)
+            used_cache[s] = cached
+        useds.append(cached)
+
+    # Compute features for each state
+    rows = []
+    for used in useds:
+        phi = phi_for_state(
+            t=t,
+            used=used,
+            totals=totals,
+            lengths=lengths,
+            ctx=ctx,
+            spec=spec,
+        )
+        rows.append(phi)
+    return np.vstack(rows)
 
 
 @dataclass
@@ -218,8 +333,14 @@ class LinearRidgeValueModel:
         lengths: Sequence[int],
         ctx: TOUFeatureContext,
     ) -> float:
-        x = phi_for_state(t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec)
+        x = phi_for_state(
+            t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec
+        )
         return float(np.dot(self.weights, x))
+
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Batch predict. X: (N, D) -> (N,)."""
+        return X @ self.weights
 
 
 def fit_ridge(

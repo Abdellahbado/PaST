@@ -1,0 +1,6116 @@
+European Journal of Operational Research 311 (2023) 845–866
+
+Contents lists available at ScienceDirect
+
+European Journal of Operational Research
+journal homepage: www.elsevier.com/locate/ejor
+
+Discrete Optimization
+
+Exact and heuristic solution approaches for energy-eﬃcient identical
+parallel machine scheduling with time-of-use costs
+Mauro Gaggero a, Massimo Paolucci b, Roberto Ronco b,∗
+a
+b
+
+Institute of Marine Engineering, National Research Council of Italy, Via De Marini 6, Genoa, I-16149, Italy
+Department of Informatics, Bioengineering, Robotics and Systems Engineering, University of Genoa, Viale Causa 13, Genoa I-16145, Italy
+
+a r t i c l e
+
+i n f o
+
+Article history:
+Received 12 February 2022
+Accepted 31 May 2023
+Available online 2 June 2023
+Keywords:
+Scheduling
+Time-of-use prices
+Fast algorithms
+Mixed-integer programming
+Dynamic programming
+
+a b s t r a c t
+Nowadays, energy-eﬃcient scheduling has assumed a key role in ensuring the sustainability of manufacturing processes. In this context, we focus on the bi-objective problem of scheduling a set of jobs
+on identical parallel machines to simultaneously minimize the maximum completion time and the total
+energy consumption over a time horizon partitioned into a set of discrete slots. The energy costs are
+determined by a time-of-use pricing scheme, which plays a crucial role in regulating energy demand
+and ﬂattening its peaks. First, we uncover a symmetry-breaking property that characterizes the structure of the solution space of the problem. As a consequence, we provide a novel, compact mixed-integer
+linear programming formulation at the core of an eﬃcient exact solution algorithm. A thorough experimental campaign shows that the use of the novel mathematical programming formulation enables the
+solution of larger-scale instances and entails a reduction in the computational times as compared to the
+formulation already available in the literature. Furthermore, we propose a new heuristic that improves
+the state-of-the-art in terms of required computational effort and quality of solutions. Such a heuristic
+outperforms the existing heuristics for the problem and is also capable of speeding up the exact solution
+algorithm when used for its initialization. Finally, we introduce a novel dynamic programming algorithm
+that is able to compute the optimal timing of the jobs scheduled on each machine to further improve the
+performance of the new heuristic.
+© 2023 The Authors. Published by Elsevier B.V.
+This is an open access article under the CC BY license (http://creativecommons.org/licenses/by/4.0/)
+
+1. Introduction
+In the last years, the compelling challenges in environmental
+sustainability have led to the development of a new paradigm for
+manufacturing that allows planning the production while restraining the resulting energetic expenditure. Such a paradigm, called
+energy-eﬃcient scheduling or green scheduling (Gao et al., 2020),
+enables an energy-conscious approach to job scheduling in production. Among the demand-response strategies to regulate energy
+generation, provisioning, and consumption, time-of-use (TOU) pricing schemes have proven useful to ﬂatten the peaks in customers’
+demand to limit the resulting environmental pollution (Wang & Li,
+2015). In the literature, one of the most considered energy-aware
+goals is the minimization of the total energy cost (TEC), that is the
+sum of the costs associated with the time slots where some job is
+processed.
+
+∗
+
+Corresponding author.
+E-mail addresses: mauro.gaggero@cnr.it (M. Gaggero), massimo.paolucci@unige.it
+(M. Paolucci), roberto.ronco@edu.unige.it (R. Ronco).
+
+In many applications, the need of minimizing energy costs may
+conﬂict with other typical goals of scheduling problems, such as
+the minimization of the makespan (Jia et al., 2017; Jiang & Wang,
+2020) or the minimization of the total weighted tardiness (Fang
+& Lin, 2013; Zhang & Chiong, 2016). In this paper, we consider a
+bi-objective scheduling problem with TOU costs, where N independent, non-preemptable jobs with no release time have to be
+scheduled on M identical, parallel, and single-server machines over
+a time horizon of K time slots to simultaneously minimize the
+makespan and the TEC. From now on, we refer to such a problem
+as Bi-objective identical parallel machine scheduling with Time-of-Use
+costs problem (BPMSTP).
+The BPMSTP was ﬁrst investigated by Wang et al. (2018), who
+proposed a constructive heuristic endowed with local search capabilities and presented the ﬁrst mixed-integer linear programming (MILP) formulation for the problem. Subsequently, Anghinolﬁ
+et al. (2021) proposed a faster and more accurate heuristic approach, by enhancing the constructive heuristic of Wang et al.
+(2018) and exploiting some intuitions on the combinatorics of the
+problem. To the best of our knowledge, the work of Anghinolﬁ
+et al. (2021) currently constitutes the state-of-the-art heuristic for
+
+https://doi.org/10.1016/j.ejor.2023.05.040
+0377-2217/© 2023 The Authors. Published by Elsevier B.V. This is an open access article under the CC BY license (http://creativecommons.org/licenses/by/4.0/)
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+the BPMSTP (Catanzaro et al., 2023). In this manuscript, we build
+upon the results of Anghinolﬁ et al. (2021) by proposing a novel
+MILP formulation and a heuristic that achieves higher computational performances. Speciﬁcally, the contribution of this paper is
+threefold. The ﬁrst contribution concerns a formal description of
+fundamental concepts regarding the combinatorics of the BPMSTP.
+In particular, we establish equivalence relations between different
+solutions by highlighting structural symmetries inherent to the solution space. The existence of such relations allows us to provide a
+compact MILP formulation for the BPMSTP. The compactness of the
+novel formulation also enables the development of a fast, exact solution algorithm. Such results constitute an important step toward
+the discovery of novel combinatorial properties of multi-objective
+TOU scheduling problems with multiple machines. These problems
+have been widely investigated in the last decade (see, e.g., Castro
+et al., 2013; Li et al., 2016; Mitra et al., 2012; Moon et al., 2013;
+Zeng et al., 2018, and the related discussion in Section 2). The
+second contribution is the development of a heuristic approach
+for the BPMSTP that vastly improves upon the one proposed by
+Anghinolﬁ et al. (2021) in terms of both required computational effort and quality of solutions, by performing several enhancements
+to the involved algorithms. Such a heuristic also exploits a novel
+exact algorithm based on dynamic programming that eﬃciently
+determines the optimal timing of jobs in a single-machine schedule to minimize its energy cost. Lastly, the third contribution regards the combination of the ﬁrst and the second ones to provide
+an initial solution to the proposed exact algorithm to further reduce the computational effort required to solve the BPMSTP optimally.
+Concerning the complexity of the BPMSTP, we remark that the
+problem of minimizing the TEC within some given deadline is
+known to be strongly N P -hard, even on a single machine (Chen &
+Zhang, 2019). As a consequence, the BPMSTP is strongly N P -hard,
+as already hinted by Wang et al. (2018). Furthermore, Fang et al.
+(2016) and Chen & Zhang (2019) both considered the problem of
+minimizing the TEC on a single machine, showing that it can be
+solved by using exact algorithms with a polynomial and pseudopolynomial running time when time slots costs satisfy some speciﬁc properties. Determining the existence of similar algorithms for
+the BPMSTP still constitutes an open problem.
+The rest of this paper is organized as follows. In Section 2, we
+report an overview of the literature on scheduling with energyeﬃciency criteria, by speciﬁcally focusing on scheduling with TOU
+costs. In Section 3, we discuss the problem statement and the
+existing state-of-the-art mathematical formulation. In Section 4,
+we analyze the combinatorial properties of the BPMSTP, and we
+present the novel MILP formulation. In Section 5, we present
+the exact algorithm for the BPMSTP and the novel heuristic approach, and in Section 6 we discuss the numerical results obtained
+on an extensive experimental campaign. We draw conclusions in
+Section 7, by also prospecting possible future developments of our
+work.
+
+their key goal. Among the most recent contributions, we mention Karimi et al. (2021) in the context of additive manufacturing,
+aimed at minimizing energy cost in response to time-varying electricity prices and demand charges, Zhou et al. (2020) for singlemachine batch processing with dynamic job arrival times, Barak
+et al. (2021) for resource-constrained ﬂexible manufacturing systems, and Zeng et al. (2022) for multi-objective ﬂow shop scheduling. In more detail, while Karimi et al. (2021) proposed a mathematical model for the problem at hand, Barak et al. (2021); Zhou
+et al. (2020) and Zeng et al. (2022) employed multi-objective metaheuristics. In particular, Zeng et al. (2022) presented an implementation of the non-dominated sorting genetic algorithm (Deb
+et al., 2002), a well-known evolutionary algorithm in the literature
+of multi-objective optimization (Absalom et al., 2021). According
+to Gao et al. (2020), evolutionary algorithms are widely used to
+solve scheduling problems that deal with several objectives and
+constraints (see, among others, Faria et al., 2019; Lei et al., 2018;
+Tang et al., 2016). Manufacturing is not the only ﬁeld that was able
+to beneﬁt from energy-aware scheduling practices. Among others,
+we mention scheduling in datacenters (Caviglione et al., 2021),
+real-time systems (Bambagini et al., 2016), and distributed systems
+(Agrawal & Rao, 2014).
+The literature on energy-eﬃcient scheduling with TOU pricing
+schemes can be classiﬁed according to the number of optimization
+objectives, the type of processing environment, and the considered
+solution approaches. We refer the reader to (Catanzaro et al., 2023)
+for a comprehensive survey of the problems, models, and algorithms in the ﬁeld. Hereinafter, we review some of the most recent
+and relevant works characterized by (i) the optimization of a single objective on parallel machines, (ii) the use of multi-objective
+models and metaheuristics for multiple machines, and (iii) the investigation of multi-objective approaches for some compelling application cases.
+First, concerning single-objective parallel machine problems,
+Ding et al. (2016) presented a time-indexed MILP model for the job
+scheduling problem of minimizing the TEC on parallel unrelated
+machines. The authors also proposed a further approach based on
+a Dantzig–Wolfe decomposition algorithm for the problem. Cheng
+et al. (2018) expanded the work of Ding et al. (2016) by providing an improved MILP formulation that uses fewer decision variables and constraints. Such a formulation was able to outperform
+the one proposed by Ding et al. (2016) on a large set of instances.
+Besides the TEC, another objective function that is often considered
+in the literature on scheduling with TOU costs is the linear combination of the TEC with the makespan, which enables the simultaneous minimization of both. Usually, the former has a unitary coeﬃcient, while the latter is weighted by a constant that represents
+a penalty, such as maintenance and overtime costs. This objective
+function is also compelling in practical applications, as it is able
+to capture productivity requirements with environmental awareness. Moon et al. (2013) proposed a time-indexed MILP formulation for the problem of minimizing such an objective on unrelated
+parallel machines. This formulation was later improved by Cheng
+et al. (2019) through a set of strengthening inequalities. Pei et al.
+(2021) generalized the problem faced by Moon et al. (2013) and
+Cheng et al. (2019) by considering the minimization of the linear
+combination of the makespan and the TEC on unrelated parallel
+machines, where both objectives are weighted by positive penalty
+factors. The authors proposed a non-linear mathematical programming formulation for the problem and then developed an approximation algorithm based on a single-objective relaxation.
+In the following, we discuss multi-objective models and metaheuristics. Cheng et al. (2017) focused on the simultaneous minimization of the makespan and the TEC for a single-machine batch
+scheduling problem. In this problem, the involved machine requires an additional amount of power to switch between idle
+
+2. Literature review
+Energy-eﬃcient scheduling has become a relevant topic in production planning due to the growing interest of the manufacturing
+industry in environmentally-sustainable production over the last
+years (see, e.g., Gahm et al., 2016; Giret et al., 2015). The shift
+toward sustainable manufacturing is the result of the worldwide
+growth of customers’ demands as well as more severe standards
+for environmental pollution, such as CO2 emissions and extensive
+land use. Haapala et al. (2013) were among the ﬁrst authors to
+stress the importance of energy eﬃciency as a part of production scheduling in modern manufacturing. In the last decade, several works in scheduling have pursued sustainable production as
+846
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+allel machine scheduling problems in green manufacturing, with
+the goal of minimizing the makespan or the total completion time,
+subject to proper constraints on the value of the cost. Finally,
+Rocholl et al. (2020) investigated a bi-objective parallel batch machine scheduling problem based on the fabrication of semiconductor wafers. In particular, the authors proposed three different
+heuristics based on a genetic algorithm that computes the start
+times of the batches to minimize energy consumption. The proposed algorithms were enhanced with a local search to further improve the solutions computed by the heuristics.
+
+Fig. 1. Example of a schedule of ﬁve jobs (named j (1) , j (2) , j (3) , j (4) , and j (5) ) on
+two machines (denoted by 1 and 2), with energy consumption rates u1 = 1 and
+u2 = 2. The K = 8 time slots are displayed as squares below the corresponding energy cost on the two machines.
+
+3. Problem statement and previous formulation
+In this section, we ﬁrst formally describe the problem considered in this paper, i.e., the BPMSTP. Subsequently, we report the
+formulation of the problem provided by Anghinolﬁ et al. (2021),
+which currently constitutes the state-of-the-art in the literature.
+Let J = {1, . . . , N} be the set of jobs, H = {1, . . . , M} the set
+of identical machines, and T = {1, . . . , K } the set of available time
+slots. Jobs are non-preemptable and are characterized by an integer processing time p j ≤ K, j ∈ J , corresponding to an integer number of distinct time slots. Machines are endowed with an energy
+consumption rate, which is denoted by uh > 0 for the generic machine h ∈ H. Moreover, a non-negative cost ct ≥ 0, t ∈ T , is associated with each time slot. The processing of a job j ∈ J during a
+subset T j ⊆ T of p j consecutive time slots on machine h ∈ H corresponds to the assignment of job j to T j on machine h. In this case,
+job j is said to be scheduled in the time slots in T j on machine h.
+If no job is processed by machine h ∈ H in the time slot t ∈ T , we
+say that t is free on h. Then, we deﬁne a schedule
+
+and operational states. Qian et al. (2020) also considered batch
+scheduling. In particular, the authors investigated the problem of
+minimizing the makespan and the TEC on uniform batch machines
+and proposed a multi-objective evolutionary algorithm exploiting
+adaptive clustering that extracts information on the solution space
+to ensure diversity in the populations of solutions. Jiang & Wang
+(2020) addressed a ﬂexible job shop scheduling problem that requires the minimization of both the makespan and the TEC. The
+authors presented a MILP model and a multi-objective evolutionary algorithm based on decomposition as a solution approach. Sin
+& Chung (2020) took into account preventive maintenance in a
+single-machine scheduling problem with the objective of simultaneously minimizing the TEC and machine unavailability. Similarly
+to Jiang & Wang (2020), the work of Sin & Chung (2020) proposed
+a MILP model together with a hybrid multi-objective genetic algorithm in order to solve large instances of the problem. Finally,
+Zeng et al. (2018) focused on a bi-objective scheduling problem on
+uniform parallel machines, which requires minimizing the TEC and
+the number of used machines. The latter objective is also signiﬁcant for applications, where higher machine uptime conﬂicts with
+maintenance shifts and increases the overall power consumption.
+The authors developed an iterative search framework based on an
+insertion algorithm for the single-objective problem that consists
+in minimizing the TEC with a ﬁxed number of machines.
+Finally, we consider application cases. We observe that TOU
+pricing schemes can be interpreted as a possible way to implement
+the general concept of demand side management, which consists
+of either reducing energy consumption or rescheduling and shifting energy demand to off-peak hours (see, e.g., Golmohamadi,
+2022; Panda et al., 2022 and the references therein). More specifically, Mitra et al. (2012) provided a MILP formulation for optimal operational production planning for power-intensive processes
+in continuous manufacturing, using non-dispatchable demand response programs based on a discrete-time representation. Castro
+et al. (2013) presented resource-task network MILP formulations
+of a steel plant, by investigating the impact of ﬂuctuating energy prices on the scheduling of operations that can be obtained
+through the participation in price- and incentive-based industrial
+demand side management programs. Subsequently, Castro et al.
+(2020) presented another MILP formulation for optimal scheduling under TOU electricity pricing to model processing tasks with
+variable electrode mass depletion and replacement tasks that regenerate the mass. Among other studies on practical applications
+available in the literature on TOU pricing schemes, Forghani et al.
+(2021) investigated the interaction among TOU electricity prices,
+production scheduling, and preventive maintenance of continuous
+slurry ball mills by proposing a mixed-integer energy-cost-aware
+hierarchical formulation modeling approach. Furthermore, Sharma
+et al. (2015) focused on a ﬂexible ﬂow shop scheduling problem
+with speed-scaling machines that require the minimization of the
+carbon footprint, which is affected by the time-varying availability of renewables, as well as the optimization of the TEC under
+TOU costs. Li et al. (2016) proposed heuristic approaches for par-
+
+
+
+S = ( j, h j , T j ) : h j ∈ H, T j ⊆ T , ∀ j ∈ J
+
+
+
+(1)
+
+as the set of the assignments of the jobs in J such that each job
+j ∈ J is scheduled on one and only one machine h j ∈ H, and at
+most a single job in J is assigned to each time slot in T on each
+machine in H. If T j is a set of p j consecutive time slots for each
+j ∈ J , then schedule S is feasible. Fig. 1 sketches an example of a
+schedule with ﬁve jobs on two machines over eight time slots. The
+completion time C j (S ) of a job j ∈ J in schedule S is the largest
+time slot in T j , that is, C j (S ) = maxt∈T j t, j ∈ J . Furthermore, the
+makespan C max of a schedule S is the largest among the completion
+times of the jobs in J , i.e.,
+
+C max (S ) = max{C j (S ) : j ∈ J }.
+
+(2)
+
+Let h j ∈ H be the machine where job j ∈ J is processed. The
+energy cost associated with the processing of job j in S is
+
+uh j t∈T ct . As a consequence, the TEC of S is given by
+j
+
+E (S ) =
+
+
+
+uh j
+
+j∈J
+
+
+
+ct .
+
+(3)
+
+t∈T j
+
+Then, the BPMSTP consists in ﬁnding a feasible schedule S that
+simultaneously minimizes (2) and (3). Hereinafter, since S is a
+feasible solution to the BPMSTP, we use the expressions “feasible
+schedule” and “feasible solution” interchangeably. Moreover, we
+omit the dependence of C j , C max , and E on S to avoid burdening
+the notation. We also refer to the ordered tuple I = (J , { p j , j ∈
+J }, H, {uh , h ∈ H}, T , {ct , t ∈ T } ) as an instance of the BPMSTP.
+In the remainder of the section, we describe the MILP formulation of the BPMSTP provided by Anghinolﬁ et al. (2021), referred
+to as “Formulation 1”. Toward this end, we denote by
+
+X j,h,t ∈ {0, 1},
+
+∀ j ∈ J , h ∈ H, t ∈ T ,
+
+a binary decision variable that is equal to 1 if t is the start time
+slot of job j on machine h, and 0 otherwise. Moreover, we express
+the makespan in (2 ) and the TEC in (3 ) with the decision variables
+C max ≥ 0 and E ≥ 0, respectively.
+847
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Formulation 1.
+
+min C max ,
+
+(4)
+
+min E,
+
+(5)
+
+subject to
+
+E=
+
+
+
+uh
+
+h∈H
+
+j +1
+ K−p
+
+
+j∈J
+
+t+ p −1 
+X j,h,t
+
+j
+
+
+ci ,
+
+(6)
+
+i=t
+
+t=1
+
+Fig. 2. Example of a schedule of seven jobs (named j (1) , j (2) , j (3) , j (4) , j (5) , j (6) , and
+j (7) ) on three machines (denoted by 1, 2, and 3) with energy consumption rates
+u1 = 1, u2 = 2, and u3 = 3. The arrows showcase possible swaps of jobs resulting in
+different, equivalent feasible solutions.
+
+K−p j +1
+
+ 
+h∈H
+
+X j,h,t = 1,
+
+∀j ∈ J,
+
+(7)
+
+t=1
+
+
+
+t
+
+
+X j,h,i ≤ 1,
+
+∀h ∈ H, t ∈ T ,
+
+4.1. Insights on the combinatorics of the solution space
+
+(8)
+
+j∈J i=max{1,t−p j +1}
+j +1
+ K−p
+
+
+h∈H
+
+(t + p j − 1 )X j,h,t ≤ C max ,
+
+∀j ∈ J,
+
+The solution space of the BPMSTP is characterized by a
+symmetry-breaking combinatorial property that enables the identiﬁcation of equivalence classes of solutions for a given BPMSTP
+instance that are different in structure, but that are identical in
+terms of makespan and TEC. Such a property is based on the intuition that, given a schedule S, if two jobs scheduled in S have
+the same processing time, then exchanging them in S does not alter the makespan nor the TEC of S.
+Hereinafter, we formalize this property. Toward this end, we
+ﬁrst deﬁne
+
+(9)
+
+t=1
+
+C max ≤ K,
+C max ≥ 0,
+
+(10)
+E ≥ 0,
+
+X j,h,t ∈ {0, 1},
+
+∀ j ∈ J , h ∈ H, t ∈ T .
+
+(11)
+
+
+
+The objectives (4) and (5) minimize the makespan and the
+TEC, respectively, consistently with deﬁnitions (2) and (6). Constraints (7) impose that each job j ∈ J starts in a single slot on
+a single machine. Constraints (8) avoid more than one job being
+processed in the same time slot on the same machine. The lefthand side of (9) deﬁnes the completion time of each job in J ,
+which must not exceed the makespan C max . In turn, the makespan
+cannot be greater than the number of time slots K owing to (10).
+Finally, (11) deﬁnes the decision variables. Formulation 1 employs
+NMK + 2 decision variables and 2N + MK + 2 constraints. The former number is due to the NMK variables X j,h,t , j ∈ J , h ∈ H, t ∈ T ,
+together with C max and E, while the latter one is due to constraints
+(6)–(10).
+Observe that Formulation 1 exploits a discrete-time representation, i.e., the time horizon is partitioned into a ﬁnite set of time
+slots consistently with the statement of the problem, and the processing of each job starts at the beginning of a single time slot.
+To the best of our knowledge, the formulations for identical or unrelated parallel machines available in the literature on scheduling
+with TOU costs always employ such discrete-time representations,
+in contrast to the continuous-time and sequence-based formulations that are often used in classical scheduling. In fact, time-based
+representations enable directly expressing the TEC as a linear combination of the TOU costs.
+The main drawback of Formulation 1 lies in the number of decision variables, which may become very large as the size of the
+BPMSTP instances increases. We overcome this limitation in the
+following section, by presenting a novel formulation that builds
+upon a combinatorial property to enable a compact representation
+of the solution space.
+
+P := d : ∃ j ∈ J , p j = d
+
+
+
+as the set of distinct processing times of the jobs in J . We also
+deﬁne
+
+Jd :=
+
+
+
+
+
+j : j ∈ J , pj = d ,
+
+d ∈ P,
+
+(12)
+
+as the subset of jobs with processing time equal to d. We say that
+two feasible solutions S and S to the BPMSTP are equivalent if
+they have the same value for C max and E. Then, the following property holds.
+Property 1. For each feasible solution S to the BPMSTP, there are at
+
+least d∈P |Jd | − 1 other different, equivalent feasible solutions.
+Proof. Let the schedule S be given as in (1). Let also Z =
+{{h j , T j }, j ∈ J } be the set of all distinct unordered pairs of machines and consecutive time slots such that there is a job j ∈ J
+scheduled in the time slots in T j on machine h j in the schedule S. We observe that Z can be rewritten as
+d∈P Zd , where
+Zd = {{h j , T j }, j ∈ Jd }. Since all the jobs in Jd require the same
+number d of time slots, all the possible assignments of the jobs in
+Jd to the elements of Zd , for each d ∈ P, generate schedules that
+are equivalent to S. As the number of distinct assignments of the
+jobs in Jd to Zd corresponds to the number |Jd |! of permutations
+of the jobs in Jd , the distinct number of assignments of the jobs in
+J to Z is the product of |Jd |! for each d ∈ P. The observation that
+schedule S is one of such assignments concludes the proof. 
+In the following, we illustrate Property 1 through a numerical
+example.
+Example 1. Let us consider Fig. 2, which depicts a possible schedule for jobs j (1 ) , j (2 ) , j (3 ) , j (4 ) , j (5 ) , j (6 ) , and j (7 ) with processing times p j (1) = 4, p j (2) = p j (4) = 3, p j (3) = p j (5) = p j (6) = 2, and
+p j (7) = 1, on three machines with energy consumption rates u1 =
+1, u2 = 2, and u3 = 3, over a time horizon that consists of K = 10
+time slots. We observe that assigning j (2 ) in place of j (4 ) , and viceversa, does not affect the makespan nor the TEC of the schedule,
+since the two jobs j (2 ) and j (4 ) have the same processing time.
+A similar argument applies to the three jobs j (3 ) , j (5 ) , and j (6 ) .
+
+4. New mathematical perspectives
+The purpose of this section is to describe the novel mathematical advancements in the BPMSTP proposed in this paper. Speciﬁcally, we describe a fundamental combinatorial property of the solution space of the BPMSTP in Section 4.1. As a consequence, we
+are able to provide a new compact formulation for the problem in
+Section 4.2.
+848
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Indeed, since the number of jobs |Jd | with the same processing
+time d is equal to 1, 3, 2, and 1 when d is equal to 1, 2, 3, and
+
+4, respectively, there are at least other different d∈P |Jd |! − 1 =
+1! 2! 3! 1! − 1 = 11 schedules equivalent to the one depicted in the
+ﬁgure, according to Property 1.
+
+equivalent solutions to S. Since such solutions are all equivalent,
+each of them has the same representation in terms of the decision
+variables of Formulation 2.
+Algorithm 4.1 generates a possible schedule that belongs to the
+class of equivalent schedules deﬁned by a solution to Formulation 2. In more detail, such an algorithm ﬁrst initializes the schedule S to the empty set at line 1, together with the sets Jd for each
+d ∈ P needed for subsequent computations (lines 2–4). Then, for
+each d, h, and t such that Yd,h,t = 1, a job in Jd is assigned to d
+consecutive slots on machine h starting from slot t (lines 5–9). Finally, the computed schedule S is returned (line 10). At the end of
+the algorithm, Jd = ∅ for each d ∈ P, all the jobs in J are assigned,
+and there are no slots on the same machine assigned to more than
+one job.
+
+4.2. A compact mixed-integer linear programming formulation
+We provide a novel formulation that exploits the inherent symmetries of the solution space by building upon the MILP formulation presented by Anghinolﬁ et al. (2021) and Property 1, described
+in Section 4.1. First, we denote by
+
+bd,t =
+
+t+
+d−1
+
+
+∀d ∈ P, t = 1, . . . , K − d + 1,
+
+ck ,
+
+(13)
+
+k=t
+
+Algorithm 4.1 Generate-schedule.
+
+the cumulative cost associated with the d consecutive time slots
+t, t + 1, . . . , t + d − 1. As a consequence, any job j with processing
+time p j = d assigned to machine h starting at time slot t is characterized by an energy cost equal to uh bd,t . Let also
+
+Yd,h,t ∈ {0, 1},
+
+Input: The assignment variables Yd,h,t , d ∈ P, h ∈ H, t ∈ T
+Output: A schedule S
+1: Let S ← ∅
+2: for d ∈ P do
+Let Jd ← Jd
+3:
+4: end for
+ˆ , tˆ) ∈ {(d, h, t ) : Y
+5: for (dˆ, h
+d,h,t = 1, d ∈ P, h ∈ H, t ∈ T } do
+Let j ∈ J ˆ
+6:
+
+∀d ∈ P, h ∈ H, t ∈ T ,
+
+be a binary decision variable that is equal to 1 if t is the ﬁrst slot
+of a job with processing time equal to d on machine h, and 0 otherwise.
+Formulation 2.
+
+min C max ,
+
+d
+
+S ← S ∪ ( j, hˆ , {tˆ, tˆ + 1, . . . , tˆ + dˆ − 1} )
+J ˆ ← J ˆ \ { j}
+
+7:
+8:
+
+(14)
+
+d
+
+9: end for
+
+min E,
+
+10: return S
+
+(15)
+
+subject to
+
+E=
+
+
+
+uh
+
+h∈H
+
+d∈P
+
+ K−d+1
+
+h∈H
+
+
+
+ K−d+1
+
+
+bd,t Yd,h,t ,
+
+Formulation 2 is characterized by |P |MK + 2 decision variables
+
+and |P | + MK + |P |M d∈P (K − d + 1 ) + 2 constraints. The former
+number is due to the |P |MK variables Yd,h,t , j ∈ J , h ∈ H, t ∈ T , together with C max and E, while the latter one is due to constraints
+(16)–(20). Let us now compare the number of variables needed by
+Formulation 1 and Formulation 2. The worst case for Formulation 2
+occurs when |P | = N, i.e., when all the processing times in J are
+distinct. In this case, Formulation 2 has the same number NMK + 2
+of decision variables characterizing Formulation 1. On the contrary,
+the most convenient situation for Formulation 2 occurs when the
+processing times of all the jobs in J are equal, i.e., when |P | = 1.
+In this case, Formulation 1 is still characterized by NMK + 2 decision variables, while Formulation 2 has only MK + 2 variables.
+Thus, Formulation 2 uses fewer decision variables than Formulation 1, except for the case |P | = N when the two formulations are
+equivalent in terms of number of decision variables.
+Let us now better characterize the worst case for the number of
+decision variables of Formulation 2. Toward this end, we observe
+that a necessary condition for an instance of the BPMSTP to admit
+at least a feasible solution is that the sum of all the time slots
+required by the jobs in J does not exceed the overall number MK
+of slots available for the scheduling, i.e.,
+
+(16)
+
+t=1
+
+Yd,h,t = |Jd |,
+
+∀d ∈ P,
+
+(17)
+
+t=1
+t
+
+
+Yd,h,i ≤ 1,
+
+∀h ∈ H, t ∈ T ,
+
+(18)
+
+d∈P i=max{1,t−d+1}
+
+(t +d−1 ) Yd,h,t ≤ C max ,
+
+∀d ∈ P, h ∈ H, t =1, . . . , K − d + 1,
+
+C max ≤ K,
+C max ≥ 0,
+
+(19)
+(20)
+
+E ≥ 0,
+
+Yd,h,t ∈ {0, 1},
+
+∀d ∈ P, h ∈ H, t ∈ T .
+
+d
+
+(21)
+
+The objectives (14) and (15) minimize the makespan and the
+TEC, respectively, with the TEC here given by (16). Constraints
+(17) impose that, for each distinct processing time d ∈ Jd , exactly
+|Jd | jobs with processing time d are assigned to some subsets of
+slots on the machines. Eq. (18) guarantees that, on each machine,
+at most a single job is processed in each time slot. The left-hand
+side of (19) deﬁnes the completion time of jobs, which must be
+less than or equal to the makespan C max . Similarly to Formulation 1, C max must not exceed the scheduling horizon K, owing to
+(20). Lastly, (21) deﬁnes the decision variables.
+Each feasible solution to Formulation 2 deﬁnes a class of equivalent schedules. Indeed, Formulation 2 guarantees that, for each
+Yd,h,t = 1, a job with processing time d is non-preemptively scheduled in the slots t, t + 1, . . . , t + d − 1 on machine h, but it does not
+specify which particular job j ∈ J , with processing time p j = d, is
+assigned to such slots on h. Property 1 ensures that, for each so
+lution S to Formulation 2, there are other d∈P |Jd | ! − 1 different
+
+N≤
+
+
+
+p j ≤ MK,
+
+(22)
+
+j∈J
+
+
+where the equality
+j∈J p j = N holds when p j = 1 for each j ∈ J .
+We formulate the following stronger necessary condition for feasibility by building upon (22).
+Proposition 1 (Necessary condition for the existence of a solution). For a BPMSTP instance that admits at least a feasible solution,
+the following inequality holds:
+
+|P | ≤
+
+849
+
+−1 +
+
+√
+1 + 8MK
+.
+2
+
+(23)
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Proof. First,
+
+
+
+pj =
+
+j∈J
+
+
+
+|Jd |d ≥
+
+|P |
+
+
+i=
+
+|P |(|P | + 1 )
+
+i=1
+
+d∈P
+
+2
+
+is used as a reference to assess the effectiveness of the novel
+heuristic proposed in this paper;
+(c) present the novel heuristic approach, i.e., Enhanced heuristic
+scheduler (EHS), that improves SGS-ES. We also describe all
+the “building blocks” that characterize EHS.
+
+(24)
+
+since |Jd | ≥ 1 and the elements in P are pairwise distinct positive
+integers. By combining (22) with (24), we obtain
+
+|P |(|P | + 1 )
+2
+
+Before entering into the details of the different solution
+approaches, we provide some fundamental concepts in multiobjective combinatorial optimization (Branke et al., 2008; Deb,
+2001). For the purposes of this paper, we restrict our attention
+to the bi-objective case of the BPMSTP. We refer to the feasibility region of the BPMSTP as X . Moreover, let S and S be
+two distinct solutions in X . We say that S dominates S if either Cmax (S ) ≤ Cmax (S ) and E (S ) < E (S ), or Cmax (S ) < Cmax (S )
+and E (S ) ≤ E (S ); in particular, S strictly dominates S if both
+Cmax (S ) < Cmax (S ) and E (S ) < E (S ) hold, otherwise S weakly
+dominates S . Furthermore, given a subset O ⊆ X , the set of nondominated solutions in O exactly contains each and every solution
+in O that is not dominated by another solution in O itself. A solution S is Pareto-optimal, or Pareto-eﬃcient, if no other solution in
+X dominates S . Speciﬁcally, S is strictly (weakly) Pareto-optimal if
+there is no other solution in X that weakly (strictly) dominates it.
+Finally, the Pareto front is the set of points in the space of the objectives associated with the solutions in the set of Pareto-optimal
+solutions, also called Pareto-optimal set.
+The remainder of this section is structured as follows. First,
+we describe the exact algorithm in Section 5.1 (goal (a)). Then,
+we recall the heuristic presented by Anghinolﬁ et al. (2021) in
+Section 5.2 (goal (b)). Lastly, we introduce the novel heuristic for
+the BPMSTP in Section 5.3 (goal (c)), which builds upon the algorithmic ideas presented in Section 5.2 to increase the computational eﬃciency while improving the quality of the computed solutions at the same time.
+
+≤ MK,
+
+which entails |P |2 + |P | − 2MK ≤ 0, and therefore
+
+0 ≤ |P | ≤
+
+−1 +
+
+√
+1 + 8MK
+.
+2
+
+
+We observe that, since (22) and (23) only depend on the parameters of the BPMSTP, they are valid for both Formulation 1 and
+Formulation 2. In more detail, Proposition 1 is useful to identify a
+larger class of unfeasible solutions with respect to (22), and therefore it enables avoiding solving several instances for Formulation 2
+by simply checking the validity of (23) beforehand.
+In order to illustrate how Proposition 1 provides a better description of the worst case of Formulation 2 as regards the number of decision variables, we consider an instance with K = 200
+and M = 10 as a simple example. The greatest value of N for the
+existence of at least a feasible solution corresponds to the case
+p j = 1 for all j ∈ J , and it is equal to MK = 2 × 103 , owing to
+(22). In this case, the number of decision variables of Formulation 1 is 4 · 106 + 2, whereas it is equal to 2 × 103 + 2 for Formulation 2 since |P | = 1. Observe that, for such an instance, condition
+(23) also holds. Instead, if |P | = N, the number of decision variables for Formulation 1 and Formulation 2 is the same. In particular, according to
+√ Proposition 1, a necessary condition for feasibility
+is N ≤ (−1 + 16001 ) / 2 = 62. Hence, in order for the considered instance to be possibly feasible, the number of the variables
+has to be no greater than 1.24 × 105 + 2. The necessary condition
+(22) would instead provide the higher upper bound M2 K 2 + 2 =
+4 × 106 + 2.
+To complete the comparison of Formulation 1 and Formulation 2, we also have to take into account the number and nature of
+the sets of constraints. However, as we highlight in Section 5.1, a
+discussion of such constraints is not relevant in the framework of
+the developed exact solution algorithm. In Section 6, we also report the signiﬁcantly lower computational effort required to solve
+Formulation 2 with respect to Formulation 1 in all the considered
+experimental tests.
+We conclude this section by observing that, since all the optimal solutions of the BPMSTP are equivalent from a theoretical
+standpoint, practitioners may be interested in evaluating all of
+them and then selecting the most suitable one according to their
+speciﬁc needs. Thus, instead of focusing on ﬁnding a single solution S, in the following sections we develop exact and heuristic
+approaches to compute all the different optimal solutions.
+
+5.1. The exact algorithm
+The proposed exact algorithm for the BPMSTP relies on the
+combination of MILP and the  -constraint method for multiobjective optimization, ﬁrst introduced by Haimes et al. (1971) and
+further discussed by Chankong & Haimes (2008). Speciﬁcally, the
+exact algorithm iteratively exploits either Formulation 1 or Formulation 2 to compute the set of Pareto-optimal solutions for a given
+BPMSTP instance I. Without loss of generality, in this subsection,
+we describe the algorithm by only referring to Formulation 2.
+The basic idea of the  -constraint method is to minimize (or
+maximize) one of the objectives while the other ones are constrained to be lower (or greater) than ﬁxed values. For the considered instance I of the BPMSTP, the exact algorithm ﬁrst sets an
+upper bound on the makespan and then minimizes the TEC. The
+algorithm iterates over the previous two steps and progressively
+reduces the upper bound until an unfeasible solution is found. In
+this way, the algorithm is able to ﬁnd all the points of the twodimensional Pareto front of I.
+First, we observe that, for a BPMSTP instance I, each Paretooptimal solution S  of I corresponds to a non-dominated point
+(C max (S  ), E (S  )) in the optimal Pareto front. In particular, there
+are at most K − K (I ) + 1 points in the optimal Pareto front, where
+
+5. Solution approaches
+In this section, we describe the exact algorithm and the novel
+heuristic for the BPMSTP proposed in this paper. Speciﬁcally, the
+main goals of the section are the following:
+
+K (I ) = max
+
+(a) present the proposed exact solution algorithm based on
+the  -constraint method and Formulation 2 discussed in
+Section 4.2;
+(b) summarize the current state-of-the-art heuristic algorithm
+for the BPMSTP presented in Anghinolﬁ et al. (2021), i.e.,
+Split-greedy scheduler with exchange search (SGS-ES), which
+
+
+j∈J
+
+
+
+
+
+p j /M , max{ p j } .
+j∈J
+
+(25)
+
+Indeed, since the processing times p j , j ∈ J , are integer numbers,
+C max (S  ) is an integer that ranges between the lower bound K (I )
+and the upper bound K. However, we observe that K (I ) given by
+(25) is not a tight lower bound for all the instances of the BPMSTP.
+850
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Example 2. Let us consider a BPMSTP instance with a set of N = 4
+jobs, denoted by j (1 ) , j (2 ) , j (3 ) , and j (4 ) , with processing times 2,
+9, 9, and 10, respectively, to be scheduled on M = 3 machines with
+u1 = u2 = u3 = 1, and a number K = 11 of time slots. The lower
+bound for C max given by (25) is equal to 10, but there is no feasible solution with such a makespan. In fact, jobs j (2 ) , j (3 ) , and j (4 )
+have to be scheduled on three different machines, without leaving
+two consecutive free time slots for j (1 ) .
+
+given heuristic. Toward this end, we propose the use of the heuristic schemes described later on in Section 5.3 to perform initialization. The computational advantages of such a choice are investigated in Section 6.
+5.2. Split-greedy heuristic and exchange search
+In this subsection, we summarize the Split-greedy heuristic
+(SGH) and Exchange search (ES) introduced by Anghinolﬁ et al.
+(2021) to solve the BPMSTP by describing the concepts at the foundation of the two algorithms. Toward this end, for a given BPMSTP
+instance I, we ﬁrst denote a location as a pair l = (h, A ), where
+h ∈ H and A is a subset of consecutive slots in T . In addition, l is
+a free location for job j if |A| = p j , i.e., the number of slots is equal
+to the processing time of the job, and the slots in A are free, i.e.,
+no job is assigned. Instead, l is a split-location for job j if A is a set
+of p j slots such that there is at least a pair of slots in A that are
+not consecutive, and the following condition holds: for each pair of
+slots t , t ∈ A, t = t , either t and t are consecutive, or t and t are
+not consecutive and, for each slot t ∈ T such that t < t < t , there
+is some job in J \ { j} assigned to t . If all the slots in A are free,
+then l is a free split-location. Finally, a split-schedule is a preemptive
+schedule where at least one job is assigned to a split-location.
+The core idea of SGH is to greedily assign the jobs in J to free
+locations or free split-locations with the smallest-cost. If the resulting schedule is a split-schedule, then it is converted into an
+equivalent feasible one. We recall that two schedules are equivalent if they have the same makespan and TEC. The pseudo-code
+of SGH is reported in Algorithm 5.2. Formally, the algorithm takes
+
+We now deﬁne, for a given Kˆ such that 1 ≤ Kˆ ≤ K, a downsized
+instance of the BPMSTP as
+
+
+
+D (Kˆ ) = J , { p j , j ∈ J }, H, {uh , h ∈ H},
+
+
+{1, . . . , Kˆ }, {ct , t ∈ {1, . . . , Kˆ }} .
+
+(26)
+
+A downsized instance (26) considers a subset of slots
+{1, 2, . . . , Kˆ } ⊆ T instead of the whole set of time slots T . Then, we
+deﬁne the reduced formulation of the BPMSTP as the optimization
+of (15) subject to constraints (16)–(18) and (21). In other words,
+the reduced formulation only requires the minimization of the
+TEC without considering constraints (19) and (20) that are related
+to the makespan.
+Algorithm 5.1 reports the pseudo-code of the proposed exact
+solution algorithm for the BPMSTP based on the aforementioned
+ideas. It takes a BPMSTP instance I as input and returns the set
+of the Pareto-optimal solutions for I as output. The algorithm ﬁrst
+initializes the solution set O and the parameter Kˆ at line 1. The latter is used in the downsized instances within the subsequent loop.
+Then, Algorithm 5.1 repeats lines 2–10 until either Kˆ is lower than
+the lower bound K (I ) or an unfeasible solution is obtained before
+reaching K (I ). In more detail, the reduced formulation associated
+with D (Kˆ ) is solved at line 3. Then, if no feasible solution exists,
+the loop is stopped (line 5). Otherwise, Algorithm 4.1 is called to
+obtain an optimal schedule S  for D (Kˆ ) (line 7). Afterward, S  is
+added to O (line 8). The number of slots Kˆ for the next iteration is
+updated as C max (S  ) − 1 at line 9. In fact, we observe that any solution S = S  to D (Kˆ ) such that C max (S  ) ≤ C max (S ) ≤ Kˆ is either
+equivalent to or weakly dominated by S  . Otherwise, S would be
+the solution computed at line 3, as it would achieve a better TEC
+than S  . Then, Algorithm 5.1 computes the set F of strictly Paretooptimal solutions for I by identifying the non-dominated solutions
+in O (line 11) and excluding the weakly Pareto-optimal solutions.
+Finally, Algorithm 5.1 returns the set of Pareto-optimal solutions F
+(line 12).
+
+Algorithm 5.2 Split-greedy heuristic (SGH).
+Input: A downsized BPMSTP instance D (Kˆ ) as in (26)
+Output: A schedule S for D (Kˆ )
+1: Let S be an empty schedule
+2: Let Sh ← ∅, h ∈ H
+
+3: for each d ∈ P in non-increasing order do
+4:
+5:
+6:
+7:
+
+8:
+
+Let Ld,h , h ∈ H, be the lists of the smallest-cost, free
+locations and free split-locations on h for j : p j = d
+for each j ∈ Jd do
+if Ld,h = ∅, ∀h ∈ H then return S
+Select a location lˆ = (hˆ , Aˆ ) from the smallest-cost
+locations in h∈H {l ∈ Ld,h } randomly
+Assign job j to lˆ by updating S as S ← S ∪ {( j, hˆ , Aˆ )}
+hˆ
+
+hˆ
+
+hˆ
+
+4:
+
+Update list Ld,hˆ by removing the locations affected by the
+assignment of j
+end for
+10:
+11: end for
+12: Let S ←
+h∈H Sh
+13: if S is a split-schedule then convert it into an equivalent feasible schedule
+14: return S
+
+The computational eﬃciency of solving the reduced formulation of D (Kˆ ) with MILP at line 3 in Algorithm 5.1 can be enhanced
+by providing an initial feasible solution to the MILP solver using a
+
+a BPMSTP instance D (Kˆ ) as input, with Kˆ such that 1 ≤ Kˆ ≤ K,
+and returns a schedule S as output. If S is empty, then either no
+solution exists for D (Kˆ ), or SGH is not able to compute one. In
+fact, determining whether a feasible schedule exists within a given
+makespan is already an N P -complete problem (Garey & Johnson,
+1978). First, SGH initializes S as an empty schedule (line 1) and
+Sh as an empty set for each h ∈ H (line 2). Then, it iterates over
+each d ∈ P in non-increasing order (line 3), according to the wellknown longest processing time ﬁrst (LPT) rule (Pinedo, 2016). For
+a ﬁxed d, SGH builds a list Ld,h of the free locations and free splitlocations on machine h for any job with processing time d (line 4).
+Afterward, the algorithm iterates over each j ∈ Jd (line 5). If there
+
+9:
+
+Algorithm 5.1 Exact algorithm for the BPMSTP.
+Input: A BPMSTP instance I
+Output: The set F of Pareto-optimal solutions for I
+1: Let O ← ∅ and Kˆ ← K
+2: while Kˆ ≥ K (I ) do
+
+Solve the reduced formulation of D (Kˆ ) with MILP
+if no feasible solution exists then
+break
+5:
+end if
+6:
+Let S  be the schedule computed with Algorithm 4.1 from
+7:
+the optimal solution to D (Kˆ )
+Update O ← O ∪ {S  }
+8:
+9:
+Kˆ ← C max (S  ) − 1
+10: end while
+11: Let F be the set of non-dominated solutions in O
+12: return F
+3:
+
+851
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Fig. 3. Example of conversion of a split-schedule (a) into a feasible schedule (b). The two jobs j (3) and j (2) in (a) are assigned to split-locations on machines 1 and 2,
+respectively. Instead, all the jobs in (b) are feasibly scheduled.
+
+are no free locations for j in Ld,h , h ∈ H, then SGH cannot compute
+a feasible schedule for D (Kˆ ), and it consequently returns an empty
+schedule (line 6). Otherwise, at each iteration, SGH randomly selects one of the smallest-cost locations lˆ = (hˆ , Aˆ ) from the locations in the lists Ld,h , h ∈ H (line 8). Then, j is assigned to lˆ (line 8),
+and Ld,hˆ is updated by removing locations that are not free after
+the assignment of j, and by adding the new split-locations that
+may have arisen from the assignment of j (line 9). Subsequently,
+SGH updates S as the union of the single-machine schedules Sh ,
+h ∈ H (line 12). Finally, if S is a split-schedule, SGH converts it into
+an equivalent feasible schedule (line 13). Speciﬁcally, the sequence
+of jobs on each machine is preserved in the converted schedule,
+and each job starts as soon as possible, but not earlier than its
+start time in the original split-schedule. Fig. 3 reports an example
+of such a conversion. Eventually, SGH returns the computed feasible schedule S at line 14.
+ES is a local search algorithm that takes a feasible schedule S
+for a BPMSTP instance D (Kˆ ) as input and attempts to improve the
+TEC without worsening the makespan. The improving moves performed by ES are based on the notion of exchangeable period sequence (EPS). An EPS is an ordered pair (E, h ), where E ⊆ T is a
+set of consecutive time slots on a machine h ∈ H such that, if a job
+j is assigned to a time slot in E on h, then j is scheduled on h, and
+the time slots where it is processed are in E. In particular, an EPS-J
+is an EPS that only contains slots assigned to a single job. Instead,
+an EPS-I is an EPS containing at least an idle slot. We generally
+refer to an EPS-J and an EPS-I by using the notation (E J , hJ ) and
+(E I , hI ), respectively, where hJ ∈ H is the machine associated with
+the EPS-J and hI ∈ H is the one associated with the EPS-I.
+For a given schedule S and an EPS (E, h ), we denote the set of
+the job assignments in the subset E ⊆ T of time slots on machine
+h ∈ H in the schedule S as S(E,h ) . Formally, S(E,h ) is the set of the
+assignments ( j, h j , T j ) ∈ S such that h j = h and T j ⊆ E. Then, let
+(E , h ) be another EPS such that |E | = |E |. An EPS swap is a procedure that reassigns the jobs in S(E,h ) to a subset of slots of E on
+machine h , and the jobs in S(E ,h ) to a subset of slots of E on h,
+without changing the relative assignments of the jobs. Speciﬁcally,
+if job j is assigned to the i-th slot of E on machine h before the
+EPS swap, then j is assigned to the i-th slot of E’ on machine h
+after the swap, and vice-versa. The assignments of the jobs to the
+slots of an EPS E on a machine h can be changed by using an EPS
+rearrangement, which is a procedure that reschedules the jobs in
+S(E,h ) in E on machine h with the goal of reducing the TEC. An EPS
+move combines an EPS swap with an EPS rearrangement. In particular, an EPS move involving two EPSs (E, h ) and (E , h ) such that
+|E | = |E |, respectively, ﬁrst applies an EPS swap of them, and then
+an EPS rearrangement of both, separately.
+The pseudo-code of ES is reported in Algorithm 5.3. For a given
+input schedule S, the core idea of ES is to perform all the EPS
+moves for S that improve the TEC of S, without worsening its
+makespan. Speciﬁcally, for each d ∈ P taken in non-increasing order, and for each EPS-J (E J , hJ ) with a number of time slots |E J | = d,
+ES considers every EPS-I (E I , hI ) with |E J | = |E I |, until it performs
+an improving EPS move that involves E J and E I . Afterward, ES proceeds with the next EPS-J (lines 6–10). At the end of the iterations
+(line 15), ES stops if it did not ﬁnd an improving EPS move for
+
+Algorithm 5.3 Exchange search (ES).
+A feasible schedule S for a downsized BPMSTP instance
+D (Kˆ ) as in (26)
+Output: A feasible schedule S for D (Kˆ ), withC max (S ) ≤ C max (S )
+and E (S ) ≤ E (S )
+1: repeat
+Let ι ← false
+2:
+for d ∈ P in non-increasing order do
+3:
+for each EPS-J (E J , hJ ) in S such that |E J | = d do
+4:
+5:
+for each EPS-I (E I , hI ) in S such that |E I | = d do
+Let S be the schedule resulting from the EPS
+6:
+move involving (E J , hJ ) and (E I , hI ) in S
+if E (S ) < E (S ) then
+7:
+8:
+Let S ← S
+ι ← true
+9:
+10:
+break
+end if
+11:
+12:
+end for
+end for
+13:
+14:
+end for
+15: until ι is false
+16: S ← S
+17: return S
+Input:
+
+each d ∈ J . Otherwise, it starts over with the iterations to search
+for another improving EPS move.
+Example 3. Fig. 4 provides an example of EPS move involving the
+EPS-J E J = {1, 2, 3, 4, 5} on machine 1, associated with job j (1 ) , and
+the EPS-I E I = {4, 5, 6, 7, 8} on machine 2, including jobs j (4 ) and
+j (5 ) and an idle slot (see Fig. 4(a)). The cost associated with E J and
+E I in Fig. 4(a) is 52. Fig. 4(b) shows the result of the EPS swap of E J
+and E I . After the EPS swap, the cost associated with E J and E I increases to 56. The EPS rearrangement of E J involving jobs j (4 ) and
+j (5 ) in Fig. 4(b) yields the schedule in Fig. 4(c). In such a schedule,
+the cost associated with j (1 ) , j (4 ) , and j (5 ) is equal to 49, i.e., it is
+reduced as compared to the original cost before the move (equal
+to 52).
+Lastly, we describe the Split-greedy scheduler (SGS) heuristic,
+which is used to compute a set of non-dominated solutions for
+an instance I of the BPMSTP by using SGH. Similarly to the exact
+algorithm introduced in Section 5.1, SGS exploits the  -constraint
+method for multi-objective optimization. Speciﬁcally, it ﬁrst initializes a set F of heuristic solutions to an empty set. Then, it iterates
+over Kˆ from the initial value K to the lower bound K (I ). At each iteration, SGS solves the BPMSTP instance D (Kˆ ) with SGH instead of
+using a MILP solver as in line 3 of Algorithm 5.1. If there is no feasible solution for D (Kˆ ), SGS returns an empty set. Otherwise, the
+set F is updated by adding the solution to D (Kˆ ), and then, differently from line 9 of Algorithm 5.1, Kˆ is decreased by 1. At the end
+of iterations, SGS returns the set of non-dominated solutions in F.
+SGS may be combined with ES to improve the computed solutions. Split-greedy scheduler with exchange search (SGS-ES) is the
+algorithm proposed in Anghinolﬁ et al. (2021) as the result of such
+852
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Fig. 4. Example of an EPS move: starting schedule (a); schedule after the EPS swap (b); ﬁnal schedule after the EPS rearrangements (c). The schedule involves ﬁve jobs
+(named j (1) , j (2) , j (3) , j (4) , and j (5) ) on two machines (denoted by 1 and 2) with energy consumption rate u1 = 1 and u2 = 2.
+
+Fig. 5. Sketch of the structure of EHS (a), proposed in this paper as the novel heuristic for the BPMSTP, and SGS-ES (b), introduced by Anghinolﬁ et al. (2021). Figures (a) and
+(b) highlight the algorithmic ﬂow that characterizes the different components of EHS (i.e., A-SGH, R-ES, and ESR) and SGS-ES (i.e., SGH, and ES), respectively. Both algorithms
+take a BPMSTP instance I as input and return the set of non-dominated solutions in O as output. The inner part of the bounding boxes depicts the ﬂow for a single iteration
+of the algorithms.
+
+has to be less than or equal to Kˆ . Hence, the jobs involved in such
+assignments have to be rescheduled in S.
+These observations lie at the core of Split-greedy Heuristic with
+Assignment History (A-SGH), which solves D (Kˆ ) by exploiting a
+subset of the job assignments in S and employs SGH as a subroutine to schedule the jobs whose assignment in S is unfeasible
+for D (Kˆ ). Speciﬁcally, the fundamental idea underlying A-SGH is to
+start from an initially empty schedule S, and perform the following steps for each d ∈ P considered in non-increasing order, where
+s j (S ) is the ﬁrst slot of j in the schedule S :
+
+a combination. In more detail, SGS-ES differs from SGS since it improves the solution computed by SGH by using ES before adding
+such a solution to F.
+5.3. The novel algorithms
+In this subsection we introduce the novel heuristic proposed
+in this paper for the BPMSTP, called Enhanced heuristic scheduler
+(EHS). Such a heuristic builds upon SGH and ES, and also exploits a novel exact algorithm based on dynamic programming
+that separately optimizes the cost associated with the schedule on
+each machine. Section 5.3.1 describes Split-greedy heuristic with assignment history (A-SGH), which exploits SGH as a subroutine to
+build a feasible schedule. Section 5.3.2 presents Exchange search
+with rescheduling (R-ES), which constitutes a local search that
+improves over ES to provide better computational performances.
+Section 5.3.3 introduces the novel exact algorithm based on dynamic programming called Exact single-machine rescheduler (ESR)
+that, given an input single-machine schedule, eﬃciently computes
+the minimum-cost schedule that preserves the original processing
+sequence. Such an algorithm constitutes an important component
+of EHS, as it enables to further reduce the cost of the schedule on
+each machine. Section 5.3.4 ﬁnally describes EHS. As showcased
+in Section 6, EHS is able to obtain high-quality solutions with a
+low computational burden, thus outperforming the state-of-the-art
+heuristics for the BPSMTP. Fig. 5 displays a graphical comparison of
+the structure of EHS (Fig. 5(a)) and SGS-ES (Fig. 5(b)), along with
+the algorithmic ﬂow characterizing their components.
+
+(i) update S with the set of job assignments ( j, h j , T j ) ∈ S , j ∈
+Jd , such that s j (S ) + p j −1 ≤ Kˆ and S ∪ ( j, h j , T j ) is feasible;
+
+(ii) schedule all the jobs that could not be scheduled in S during
+step (i) through SGH.
+
+Step (i) updates S with all the assignments in S for the jobs in
+Jd that are feasible in S. Then, step (ii) relies on SGH to schedule
+in S the jobs that are disregarded in step (i).
+The pseudo-code of A-SGH is reported at Algorithm 5.4. A-SGH
+takes the BPMSTP instance D (Kˆ ) and the solution S to the BPMSTP instance D (Kˆ + 1 ) as inputs and returns a schedule S for D (Kˆ ).
+Hereinafter, with a slight abuse of notation, we refer to Sh as the
+single-machine schedule obtained by considering the jobs scheduled on machine h, i.e., {( j, h j , T j ) ∈ S, h j = h}. As a practical note,
+we observe that Sh can be easily accessed by implementing S as
+a collection {Sh , h ∈ H} of single-machine schedules, one for each
+h ∈ H. A-SGH ﬁrst initializes S (line 1) as an empty schedule and
+declares Jd (line 2) according to (12). Then, A-SGH starts iterating over each d ∈ P according to the LPT rule (line 3). As the ﬁrst
+step in the loop, the set Q is initialized as an empty set (line 4).
+Such a set is used in the subsequent lines to keep track of the
+jobs involved in the assignments of S that are unfeasible for S.
+Then, A-SGH iterates over each j ∈ Jd to schedule all the jobs in
+Jd (lines 5–21). At each iteration, it veriﬁes if the assignment of
+job j in S is also feasible for S. In this case, the assignment of
+j in S is repeated in S; otherwise, j is added to Q. Then, A-SGH
+computes the sets L and R of the possible predecessors and successors of job j on h j , respectively, if the assignment of j in S was
+the same as in S (lines 7-8), where J (S ) denotes the set of jobs
+scheduled in S. If L is non-empty, A-SGH sets lˆ as the predecessor of j with the greatest start time in L (line 10). Similarly, if R
+is non-empty, A-SGH sets uˆ as the successor of j with the lowest
+start time in R (line 13). If the processing of j ends after Kˆ in S ,
+or there would exist an overlapping predecessor lˆ or successor rˆ of
+
+5.3.1. Split-greedy heuristic with assignment history
+We ﬁrst observe that, as pointed out in Section 5.2, both the exact algorithm and SGS-ES solve a sequence of downsized instances
+for distinct numbers Kˆ of time slots. As a result, for a given BPMSTP instance I and a positive number of available time slots Kˆ < K,
+the optimal solutions of the two instances D (Kˆ ) and D (Kˆ + 1 ) are
+generally unrelated. However, the heuristic solutions to D (Kˆ ) and
+D (Kˆ + 1 ) generated by SGS-ES share a similar structure. Indeed,
+many jobs in a solution to D (Kˆ + 1 ) are intuitively expected to
+have the same assignment in a solution to D (Kˆ ), as the two instances only differ for the last time slot Kˆ + 1, which is not available in D (Kˆ ). Formally, let S be a solution to D (Kˆ + 1 ). Then, the
+assignments in S involving jobs whose last slot is no greater than
+Kˆ can be exploited to compute a solution S to D (Kˆ ). Assignments
+involving slot Kˆ + 1 are instead unfeasible for S, as its makespan
+853
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Algorithm 5.4 Split-greedy heuristic with assignment history (ASGH).
+A downsized BPMSTP instance D (Kˆ )
+A schedule S = {( j, h j , T j ) : h j ∈ H, T j ⊆ T , ∀ j ∈ J } for the
+BPMSTP instance D (Kˆ + 1 )
+Output: A schedule S for D (Kˆ )
+Input:
+
+1: Let S be an empty schedule
+
+2: Let Jd ← { j ∈ J : p j = d }, d ∈ P
+
+3: for d ∈ P in non-increasing order do
+4:
+5:
+6:
+7:
+8:
+9:
+10:
+
+Let Q ← ∅
+for j ∈ Jd do
+// Compute the predecessors and the successors of job j
+in schedule S
+Let L ← {l : l ∈ J , sl (S ) ≤ s j (S ), hl = h j }
+
+Algorithm 5.5 Exchange search with rescheduling (R-ES).
+
+Let R ← {r : r ∈ J , sr (S ) > s j (S ), hr = h j }
+if L = ∅ then
+Let lˆ ← arg max{sl (S )}
+
+A feasible schedule S for the downsized BPMSTP instance
+D (Kˆ ) as in (26)
+Output: A feasible schedule S for D (Kˆ ), with C max (S ) ≤ C max (S )
+and E (S ) ≤ E (S )
+1: repeat
+2:
+Let S ← S
+Update S with ES by disregarding empty EPS-Is (at line 5 of
+3:
+Algorithm 5.3)
+for d ∈ P in non-increasing order do
+4:
+Let Ld,h , h ∈ H, be the lists of the smallest-cost free
+5:
+locations and split-locations on h for any j : p j = d
+for j ∈ Jd do
+6:
+7:
+S ← S \ ( j, h j , T j )
+Update Ld,h by adding location (h j , T j )
+8:
+Select a location lˆ = (hˆ , Aˆ ) from the smallest-cost
+9:
+locations in h∈H {l ∈ Ld,h } randomly
+Assign job j to lˆ by adding ( j, hˆ , Aˆ ) to Shˆ
+10:
+11:
+Update list Ld,hˆ by removing the locations affected by
+the assignment of j
+end for
+12:
+end for
+13:
+if S is a split-schedule then convert it into an equivalent
+14:
+feasible schedule
+15: until E (S ) < E (S )
+16: return S
+Input:
+
+l∈L
+
+11:
+12:
+13:
+
+end if
+if R = ∅ then
+Let uˆ ← arg min{sr (S )}
+r∈R
+
+14:
+15:
+16:
+
+17:
+18:
+19:
+
+end if
+// Check whether the assignment of j in S is also
+feasible in S
+if s j (S ) + p j − 1 > Kˆ or (L = ∅ and
+slˆ(S ) + plˆ − 1 ≥ s j (S )) or (R = ∅ and
+suˆ (S ) ≤ s j (S ) + p j − 1) then
+Q ← Q ∪ { j} // If not, add j to the separate set of
+jobs Q to be scheduled after the end of the loop
+else
+Sh ← Sh ∪ ( j, h j , T j ) // Otherwise, perform the
+j
+
+garding their energy cost. In this way, it considers the empty EPS-Is
+in no speciﬁc order. These observations may prospect a high computational burden, especially in the last iterations performed by ES,
+when the number of possible improving EPS moves is smaller as
+compared to the ﬁrst iterations. The core idea of R-ES is to apply a
+local search strategy that improves a feasible input schedule S, by
+ﬁrst applying ES while disregarding the empty EPS-Is and then performing the rescheduling of each job (ordered according to the LPT
+rule) to take into account all such empty EPS-Is. In particular, R-ES
+removes a job at a time from the current schedule S, and greedily
+reinserts the same job in S by assigning it to the free location or
+free split-location with the smallest-cost in S.
+The pseudo-code of R-ES is reported in Algorithm 5.5. R-ES
+
+j
+
+same assignment in S
+end if
+20:
+end for
+21:
+22:
+Sˆ ← SGH((Q, { p j , j ∈ Q}, H, {uh , h ∈ H}, {1, . . . , Kˆ },
+{ct , t ∈ {1, . . . , Kˆ }} ))
+if Sˆ = ∅ then return ∅
+23:
+24:
+S ← S ∪ Sˆ
+25: end for
+26: return S
+
+takes a feasible schedule S for the downsized BPMSTP instance
+D (Kˆ ) as input and returns a feasible schedule S for D (Kˆ ) with
+C max (S ) ≤ C max (S ) and E (S ) ≤ E (S ). In fact, the purpose of RES is to improve the TEC of S, while possibly improving also
+the makespan as a byproduct of the performed EPS moves. However, the makespan cannot be worsened by construction, as in ES.
+Speciﬁcally, R-ES iteratively improves the TEC of S until at least
+an improving move is performed (see the loop at lines 1–15). At
+the beginning of the loop, R-ES stores the current schedule in S
+(line 3). This allows checking the termination condition at the end
+of the loop (line 15). Then, it tries to improve S by applying ES
+without considering the empty EPS-Is in S (line 3). Next, similarly
+to SGH (Algorithm 5.2), R-ES iterates over the processing times of
+the jobs in J in non-increasing order (lines 4–13), by ﬁrst building
+the list of free locations and free split-locations (line 5) as in line 4
+of Algorithm 5.2. Subsequently, it iterates over each j ∈ Jd (lines 6–
+12). Inside this loop, R-ES ﬁrst removes the assignment ( j, h j , T j )
+from S (line 7) and then adds the new free location (h j , T j ) to Ld,h
+(line 8). Afterward, R-ES reassigns j in S through lines 9–11, which
+are identical to lines 7–9 of SGH (Algorithm 5.2). If the resulting
+schedule is a split-schedule, then it is converted into a feasible one
+(line 14). R-ES stops the loop if it is unable to further improve the
+TEC of S (line 15), i.e., if E (S ) = E (S ). Otherwise, it starts another
+
+j on machine h j if job j was assigned in S as in S (line 16), then
+job j is added to the set Q (line 17). Otherwise, the assignment
+of j in S is feasible in S as well, and therefore S is updated accordingly (line 19). Finally, A-SGH schedules the jobs belonging to
+the set Q by using SGH (line 22). If SGH cannot compute a feasible
+schedule for D (Kˆ ) for the jobs in Q, i.e., Sˆ is empty, then A-SGH
+returns an empty schedule as well and stops (line 23). Otherwise,
+S is properly updated at line 24. Finally, A-SGH returns the computed feasible schedule at line 26.
+5.3.2. Exchange search with rescheduling
+In this subsection, we present Exchange search with rescheduling (R-ES), which builds upon ES (Algorithm 5.3) and circumvents
+its computational drawbacks. In particular, among all possible EPS
+moves, ES also considers the moves involving EPS-Is containing
+only free slots, hereinafter referred to as empty (see line 5 of
+Algorithm 5.3). However, given two machines hJ , hI ∈ H, if an EPS
+move involving an EPS-J (E J , hJ ) and an empty EPS-I (E I , hI ) is
+found to be not improving, then the other subsequent EPS moves
+involving (E J , hJ ) and other empty EPS-Is whose cost is higher than
+the cost of (E I , hI ) cannot be improving as well within the same
+iteration over (E J , hJ ). In fact, ES iterates over the EPS-Is by disre854
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+t+q(U ) −1
+
+iteration to search for further improvements. Eventually, R-ES returns the resulting schedule (line 16).
+
+min{VU,t+1 , Bt
+
+Wi,t := s j (i) (S  (i, t )),
+
+5.3.3. Exact single-machine rescheduler
+In this subsection, we introduce a novel algorithm based on dynamic programming that is able to further improve the TEC of a
+single-machine feasible schedule Sh , for some h ∈ H over the time
+slots t = 1, 2, . . . , Kˆ , with Kˆ ≤ K. We refer to such an algorithm as
+Exact Single-machine Rescheduler (ESR). ESR computes the assignment of the jobs scheduled on machine h so as to minimize the
+energy cost of the jobs scheduled on the machine while preserving
+the processing sequence of such jobs. The design of ESR is inspired
+by the work of Chen et al. (2021), who investigated the problem
+of minimizing the TEC of a preemptive schedule on a single machine. Toward the end of describing ESR, we ﬁrst denote by U the
+set { j (1 ) , j (2 ) , . . . , j (U ) } of the U > 0 jobs scheduled on the machine,
+and, with a slight abuse of notation, we deﬁne
+
+q ( i ) = p j (i ) ,
+
+The pseudo-code of ESR is reported in Algorithm 5.6. ESR takes
+Algorithm 5.6 Exact single-machine rescheduler (ESR).
+A feasible single-machine schedule Sh on some machine
+h ∈ H for a set of U > 0 jobs U = { j (1 ) , j (2 ) , . . . , j (U ) } ⊆ J
+in the time slots t = 1, 2, . . . , Kˆ with Kˆ ≤ K
+Output: The optimal schedule Sh for the jobs in U in the time slots
+t = 1, 2, . . . , Kˆ .
+Input:
+
+1: // Parameter initialization
+2: Let li ← 0 and ri ← 0 for i = 0, 1, . . . , U
+
+3: for i ← 1 to U do
+4:
+
+i = 1, 2, . . . , U
+
+6: // Initialization of base case values
+
+i = 1, 2, . . . , U, t = 1, 2, . . . , Kˆ −
+
+U
+
+
+7: Let Vi,t ← 0, Wi,t ← 0
+
+q (u ) + 1
+
+9:
+
+16:
+
+as the energy cost of the schedule S  (i, t ). Then, ESR employs the
+following recursive relation for the value of the energy cost of the
+optimal schedule S  (i, t ):
+
+
+
+
+
+(i )
+
+q −1
+Vi,t = min Vi,t+1 , Bt+
++ Vi+1,t+q(i) ,
+t
+
+q(u ) + 1, . . . , Kˆ −
+
+u=1
+
+U
+
+
+i = 1, 2, . . . , U,
+
+q (u ) .
+
+(27)
+
+28:
+
+h
+
+a feasible single-machine schedule Sh for some machine h ∈ H as
+input and returns a feasible schedule that achieves the minimum
+energy cost on machine h while preserving the original job processing sequence in the schedule Sh . First, ESR initializes the parameters li , ri for i = 0, 1, . . . , U, so that li and ri are equal to the
+sum of the processing times of the ﬁrst and the last i jobs in
+the processing sequence, respectively, and l0 = r0 = 0 (lines 2–5).
+Subsequently, ESR declares the optimal cost Vi,t and the ﬁrst time
+slot Wi,t for job i for i = 1, 2, . . . , U, t = 1, 2, . . . , Kˆ , and it also sets
+VU+1,t = 0 for t = 1, 2, . . . , Kˆ according to condition (29) (line 7).
+Then, it iterates over each i = 1, 2, . . . , U (lines 8–12) to initialize
+
+Vi,t with t = Kˆ − Uu=i q(u ) + 1 = Kˆ − rU−i+1 + 1 according to (28).
+ESR also consistently sets the start time Wi,t of job i to t (line 11).
+Afterward, ESR enters the main loop of the algorithm (lines 14–
+22), which provides a bottom-up implementation of the recursive
+relation (27). Finally, ESR exploits the information computed at the
+previous lines to build a schedule with optimal cost given by V1,1
+(lines 24–29). Toward this end, the new schedule Sh and the auxiliary variable k are set to an empty schedule and to 0, respec-
+
+S  (i + 1, t + q(i ) ). The base case conditions for Eq. (27) are given
+by
+
+VU+1,t := 0,
+
+u=i
+
+t = 1, 2, . . . , Kˆ .
+
+Set k ← k + q(i ) − 1
+
+30: return S 
+
+Observe that the ﬁrst i − 1 jobs and the last i + 1 jobs in the proi−1 (u )
+U
+(u ) time
+cessing sequence require at least
+and
+u=i+1 q
+u=1 q
+slots for processing, respectively. Eq. (27) recursively expresses the
+cost of the optimal schedule S  (i, t ) as the minimum between (i)
+the cost Vi,t+1 of the optimal schedule S  (i, t + 1 ) (where job j (i )
+does not start on time slot t) and (ii) the cost of scheduling job
+j (i ) starting from time slot t plus the cost of optimally scheduling
+the last i + 1 jobs in the processing sequence in the time slots after t + q(i ) − 1, that is the cost Vi+1,t+q(i) of the optimal schedule
+
+ˆ
+
+t+q(i ) −1
+
+29: end for
+
+u=i
+
+Vi,Kˆ −U q(u) +1 = BKKˆ −U q(u) +1 ,
+
++ Vi+1,t+q(i) < Vi,t+1 then
+
+Set Vi,t ← Bt
++ Vi+1,t+q(i) , Wi,t ← t
+18:
+else
+Set Vi,t ← Vi,t+1 , Wi,t ← Wi,t+1
+19:
+20:
+end if
+end for
+21:
+22: end for
+23: // Generation of a schedule with the computed optimal cost
+24: Let S  ← ∅, k ← 0
+h
+25: for i ← 1 to U do
+Set k ← Wi,k+1
+26:
+27:
+Sh ← Sh ∪ { j (i ) , h, {k, k + 1, . . . , k + q(i ) − 1}}
+
+Vi,t := E (S  (i, t ))
+
+u=i
+
+t+q(i ) −1
+
+if Bt
+
+17:
+
+as the cumulative cost of time slots t, t + 1, . . . , t + l − 1. For each
+i = 1, 2, . . . , U and t = 1, 2, . . . , Kˆ , we refer to
+
+i−1
+
+
+ˆ
+
+Vi,t ← BtK
+Wi,t ← t
+12: end for
+13: // Main loop
+14: for i ← U downto 1 do
+for t ← Kˆ − rU−i+1 downto li + 1 do
+15:
+11:
+
+k=t
+
+t =
+
+Let t ← Kˆ − rU−i+1 + 1
+
+10:
+
+t = 1, 2, . . . , Kˆ , l = 1, 2, . . . , Kˆ − t + 1,
+
+ck ,
+
+for i = 1, 2, . . . , U + 1, t = 1, 2, . . . , Kˆ
+
+8: for i ← 1 to U do
+
+as the optimal schedule for jobs j (i ) , j (i+1 ) , . . . , j (U ) in the time
+
+slots t, t + 1, . . . , Kˆ − Uu=i q(u ) + 1. Observe that a feasible schedule
+for the last i jobs in the processing sequence on machine h requires
+
+at least Uu=i q(u ) time slots for processing. We also deﬁne
+t+
+l−1
+
+
+Set li ← q(i ) + li−1 , ri ← q(U−i+1 ) + ri−1
+
+5: end for
+
+u=i
+
+l−1
+Bt+
+=
+t
+
+(30)
+
+as the ﬁrst time slot of job j (i ) in schedule S  (i, t ).
+
+for easier readability. We refer to
+
+S  (i, t ),
+
+} for t = 1, 2, . . . , Kˆ − q(U ) . Finally, we refer to
+
+i = 1, 2, . . . , U,
+
+(28)
+(29)
+
+The base case condition (28) ensures that the optimal cost
+Vi,Kˆ −U q(u) +1 of scheduling the last i jobs in the processing seu=i
+
+quence on the machine in the last Uu=i q(u ) time slots is indeed
+
+the sum of the costs of the slots from Kˆ − Uu=i q(u ) + 1 to Kˆ , for
+i = 1, 2, . . . , U. Condition (29) allows correctly expressing VU,t as
+855
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+At the ﬁrst iteration, i.e., when Kˆ = K, EHS cannot exploit any previous assignment, S is empty, and the solution S for D (K ) is generated with SGH (line 7). Instead, for Kˆ = K − 1, K − 2, . . . , K (I ), it
+is possible to leverage the assignments in the feasible schedule S
+to compute S. Hence, in this case, EHS computes the solution S for
+D (Kˆ ) by using A-SGH (line 9). The loop is stopped at line 12 if S is
+unfeasible. Otherwise, S is improved through R-ES (line 14) as well
+as ESR (lines 17–20), and the resulting schedule is assigned to S .
+Then, EHS updates the set O by adding S (line 21) and decreases
+Kˆ by 1 (line 22). Finally, it returns the set of non-dominated solutions in O (line 24).
+
+tively (line 24). Then, at each iteration of lines 25–29, (i) the start
+time Wi,k+1 of job i is assigned to the variable k (line 26), (ii) Sh
+
+is updated by assigning job j (i ) to the location (h, {k, k + 1, . . . , k +
+q(i ) − 1} ) (line 27), and ﬁnally (iii) k is updated so that the next
+iteration (if i < U) considers the optimal assignment for job i + 1
+after time slot k + q(i ) − 1, i.e., after the last slot used to process
+job i (line 28). Lastly, ESR returns the new schedule Sh . Observe
+that, at the ﬁrst iteration, i.e., when i = 1, k is ﬁrst set as W1,1 .
+5.3.4. Enhanced heuristic scheduler
+We are ﬁnally able to describe Enhanced heuristic scheduler
+(EHS), which combines A-SGH, R-ES, and ESR to solve instances of
+the BPMSTP. This algorithm computes a set of non-dominated solutions for an instance I of the BPMSTP with a very low computational burden. Clearly, EHS beneﬁts from the aforementioned computational improvements of A-SGH and R-ES since it applies such
+two algorithms sequentially. However, such a combination entails a
+further advantage with respect to SGS-ES. Speciﬁcally, within SGSES, it is useless to consider EPS swaps in ES involving an EPS-J and
+an empty EPS-I before the ﬁrst improving EPS move since ES is
+preceded by SGH, i.e., a constructive greedy heuristic based on the
+LPT rule. Indeed, as empty EPS-Is correspond to free locations, if
+there was such an improving EPS swap, then the empty EPS-I involved in the swap would have been greedily chosen by SGH as
+a free location for the job in the involved EPS-J. The further improvements of the schedules on the various machines enabled by
+ESR provide very effective results.
+The pseudo-code of EHS is reported in Algorithm 5.7. EHS is
+
+6. Numerical results
+In this section, we report the results of the experimental tests
+aimed at evaluating the performance of the solution approaches
+described in Section 5. Speciﬁcally, the tests are motivated by the
+following goals:
+(a) investigate the differences between Formulation 1 and Formulation 2 when used in the exact algorithm from an experimental standpoint;
+(b) assess the effectiveness of EHS with respect to the state-ofthe-art heuristic SGS-ES (Anghinolﬁ et al., 2021), as well as
+the constructive heuristic CH by Wang et al. (2018) and an
+implementation of the Non-dominated Sorting Genetic Algorithm (NSGA-III) (Deb & Jain, 2013) initialized with CH;
+(c) measure the speed-up achieved by the exact algorithm
+when provided with an initial solution computed by EHS;
+(d) evaluate the performance of EHS with respect to the exact
+algorithm with Formulation 2. In particular, the comparison
+of their computational times allows us to investigate the impact of the trade-off between solution quality and computational eﬃciency.
+
+Algorithm 5.7 Enhanced heuristic scheduler (EHS).
+Input: A BPMSTP instance I
+Output: A set of non-dominated heuristic solutions to I
+1: Let K (I ) be the lower bound deﬁned in (25)
+2: Let O ← ∅, Kˆ ← K, S
+
+3: while Kˆ ≥ K (I ) do
+4:
+5:
+6:
+7:
+
+The remainder of this section is organized as follows.
+Section 6.1 provides a description of the test instances and
+the implementation of the algorithms. Section 6.2 presents the
+metrics used to evaluate the performance of the algorithms.
+Section 6.3 focuses on goal (a), Section 6.4 deals with goal (b),
+while Section 6.5 addresses both goals (c) and (d).
+
+←∅
+
+Let D (Kˆ ) be an instance as in (26)
+// If it is the ﬁrst iteration of the loop, compute the schedule
+with SGH
+if S = ∅ then
+S ← SGH(D (Kˆ ))
+
+6.1. Test instances and implementation details
+
+else // Otherwise, compute it with A-SGH, by exploiting
+previous job assignments
+S ← A-SGH(D (Kˆ ), S )
+9:
+end if
+10:
+if S is unfeasible then // Checks if S = ∅
+11:
+12:
+break
+end if
+13:
+14:
+S ← R-ES(S ) // Apply R-ES to improve the TEC of S
+// Apply ESR to further improve the TEC by minimizing the
+15:
+cost on each machine
+Let S ← ∅
+16:
+for h ∈ H do
+17:
+18:
+Sh ← ESR(Sh )
+S ← S ∪ Sh
+19:
+end for
+20:
+Set O ← O ∪ {S }
+21:
+Kˆ ← Kˆ − 1
+22:
+23: end while
+24: return the set of non-dominated solutions in O
+8:
+
+The experimental tests were carried out on a set of 90 BPMSTP
+instances, numbered from 1 to 90. The ﬁrst 60 instances were originally proposed by Wang et al. (2018), while the last set of 30 instances was introduced by Anghinolﬁ et al. (2021). Instances 1–30,
+31–60, and 61–90 are called small-scale, medium-scale, and largescale instances, respectively. The instances differ in the values of
+the number of jobs N, the number of machines M, and the number of time slots K. In particular, the values of N, M, and K for
+instances 1–30 are no greater than the values of N, M, and K, respectively, for instances 31–60. The same applies to instances 31–
+60 and 61–90. Appendix A provides a description of all the considered 90 instances.
+Concerning implementation, we used the Java 16 programming
+language for the exact algorithm (Algorithm 5.1), EHS, SGS-ES, CH,
+and NSGA-III. The exact algorithm also exploits the Java CPLEX
+20.1.0 API. In particular, we set the maximum optimality gap of the
+MILP solver to 10−6 and a time limit of 4 hours. As regards CH and
+NSGA-III, we reimplemented and adapted the MATLAB code shared
+by Wang et al. (2018). More speciﬁcally, we developed the implementation of NSGA-III consistently with the design proposed by
+Wang et al. (2018) for NSGA-II, i.e., we used the same solution representation, initialization procedure, crossover and mutation operators, as well as the same parameter settings (more details can be
+
+based on the  -constraint method, like the exact algorithm described in Section 5.1. In more detail, it ﬁrst initializes the set O
+of computed solutions to an empty set and Kˆ to K (line 2). Then,
+EHS iterates over Kˆ from K to the lower bound K (I ) (lines 3–23).
+856
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+found in Wang et al., 2018). We performed all the experimental
+tests on a Windows 10 system equipped with an Intel Core i99900K Octa-core 3.6 GHz processor and 16 GB of RAM. For the sake
+of computational performance, the implementation of the exact algorithm does not generate a CPLEX representation of the mathematical formulation for D (Kˆ ) from scratch at each iteration, as it
+may be suggested by the pseudo-code at line 3 of Algorithm 5.1.
+Instead, such a representation is generated only at the ﬁrst iteration, i.e., for Kˆ = K. The CPLEX representations in the subsequent
+iterations are obtained from the ﬁrst one by adding proper constraints, which set the decision variables related to the slots that
+are not in D (Kˆ ) to zero as follows:
+
+X j,h,t = 0,
+
+generally using the Euclidean distance metric. Lower values for IGD
+correspond to a better approximation of the Pareto front. However,
+IGD fails to be compliant with the Pareto-dominance relation when
+comparing two different non-dominated sets. In fact, IGD may not
+always assign the lower value to the dominating set. IGD+ overcomes this drawback by employing a different distance metric that
+we denote by d+ (·, · ). Speciﬁcally, given a reference point p ∈ F
+and a non-dominated point q ∈ O, such a distance is computed as
+
+
+d ( p, q ) =
++
+
+ 12
+(max{qi − pi , 0} )
+
+2
+
+,
+
+i=1
+
+j ∈ J , h ∈ H, Kˆ − p j + 1 < t ≤ K
+
+where pi and qi are the values of p and q, respectively, associated
+with the ith objective. Then, the IGD+ value for the set O of nondominated points is given by
+
+for Formulation 1, and
+
+Yd,h,t = 0,
+
+n
+
+
+d ∈ P, h ∈ H, Kˆ − d + 1 < t ≤ K
+
+IGD+ (O ) =
+
+for Formulation 2. Such constraints avoid assigning jobs with completion times exceeding Kˆ . As a consequence, the makespan cannot
+exceed Kˆ , as desired. According to experimental evidence, the computational overhead caused by such additional constraints is lower
+than the one due to the generation of new CPLEX representations at each iteration. The numerical results obtained with the
+algorithm implementations are available at “https://github.com/
+ORresearcher/Exact- and- Heuristic- Solution- Approaches- for- Energy
+- Eﬃcient- Identical- Parallel- Machine- Scheduling”.
+
+1 
+min d+ ( p, q ).
+|F | p∈F q∈O
+
+6.3. Comparing the two mathematical formulations
+This subsection evaluates the two mathematical formulations
+introduced in Section 3 when used in the exact algorithm, by comparing the computational times achieved on the test instances. Toward this end, the MILP solver used at line 3 of Algorithm 5.1 was
+ﬁrst implemented with Formulation 1, and then with Formulation 2.
+Table 1 reports the results of the comparison for instances 1–
+60. The exact algorithm was not able to solve large-scale instances
+61–90 with Formulation 1 due to the memory constraints of the
+experimental setup. On the other hand, Formulation 2 was capable of solving all of such instances, as reported in later subsections. Table 1 shows the computational times obtained by using
+Formulation 1 and Formulation 2, along with their percentage deviation . Formally, given the computational times δF 1,i and δF 2,i ,
+i = 1, 2, . . . , 60, obtained with Formulation 1 and Formulation 2,
+respectively, the value of the percentage deviation for the ith instance is given by 1 − δF 2,i /δF 1,i , so that an improvement of Formulation 2 with respect to Formulation 1 is always expressed as
+a percentage between 0% and 100%. In the table, all the values of
+the computational times were rounded to 4 decimal places. The
+best result for each instance is highlighted in bold, according to
+the actual (non-rounded) value. At the bottom of the table, the
+rows “Avg.” and “Std dev.” report the averages and the standard
+deviation, respectively, of the computational times and percentage
+deviations on instances 1–30 and 31–60. The row “N. best” shows
+the number of instances where one of the implementations of the
+exact algorithm outperforms or equals the other, while “N. draw”
+indicates the number of instances such that the various approaches
+obtain the same performance. Finally, the last row displays the
+p-values obtained with the non-parametric Wilcoxon signed rank
+test (Gibbons & Chakraborti, 2020), aimed at assessing the statistical signiﬁcance of the difference between the computational times
+obtained by Formulation 1 and Formulation 2. In more detail, we
+assume that, if p is smaller than 0.05, then we can reject the null
+hypothesis that the two formulations generate non-signiﬁcantly
+different results. In the tables presented in the remainder of the
+section, we adopt the same conventions used in Table 1 as regards
+boldface highlighting, decimal rounding, and rows “Avg.”, “Std dev.”
+“N. best”, “N. draw”, and p. The following subsections display the
+percentage deviation for Hypervolume and IGD+ as well. Throughout the section, the symbol , used for the percentage deviation,
+reports the solution approach that is evaluated for the considered
+metric as a subscript, and the one used as a reference as a superscript. For instance, in this subsection, we aim at showing the
+
+6.2. Performance metrics
+Comparing different solutions to the same instance of a multiobjective optimization problem is not a straightforward task. In
+fact, in contrast to single-objective optimization problems, the solution to an instance of a multi-objective problem is a set of nondominated points. As a consequence, we employ two distinct stateof-the-art metrics for the purpose of comparing different sets of
+non-dominated points, so as to provide an in-depth analysis of the
+performances achieved by the proposed solution approaches. More
+speciﬁcally, we use two convergence and distribution metrics, according to the classiﬁcation proposed by Audet et al. (2021). Given
+a set of non-dominated points, such metrics are indeed able to
+quantify at the same time how close such a set is to the Pareto
+front and how it is distributed in the objectives space.
+Let O ⊆ Rn be a set of non-dominated points in the objective
+space, and F be its reference Pareto-optimal front. The ﬁrst metric used in this paper, called Hypervolume (Guerreiro et al., 2021;
+Zitzler & Thiele, 1999), measures the hypervolume covered by O
+with respect to a reference point in the space of the objectives. As
+such, it can be used to compare two or more fronts by assuming a
+common reference point. Formally, let r be a reference point in Rn .
+Then, the Hypervolume of O is the measure of the region weakly
+dominated by O and bounded above by r, i.e.,
+
+H(O ) = ({q ∈ Rn : ∃ p ∈ O : p ≤ q ≤ r}} ),
+where (· ) is the Lebesgue measure. Larger Hypervolume values
+denote a better approximation of the Pareto-optimal front. We observe that the Hypervolume metric is Pareto-compliant, as pointed
+out by Zitzler et al. (2007).
+The other metric used for comparisons is called Modiﬁed inverted generation distance (IGD+ ) (Ishibuchi et al., 2015).
+IGD+ is a metric that extends the Inverted generation distance
+(IGD) (Coello Coello & Reyes Sierra, 2004) to achieve Paretocompliance. Both IGD and IGD+ measure the quality of a set of
+non-dominated points O computed by an algorithm in comparison to a set of reference solutions F, which typically consists of a
+set of Pareto-optimal solutions. In particular, IGD measures the average distance from each point in F to the nearest point in O by
+857
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+Table 1
+Comparison of the computational times obtained by the exact algorithm when using Formulation 1
+(F1) and Formulation 2 (F2) for instances 1–30 and 31–60.
+Instance
+
+CPU time (s)
+F1
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+F2
+
+0.7670
+0.3525
+0.6523
+0.4799
+0.3438
+0.3041
+0.3968
+0.5265
+0.4713
+0.4288
+0.6932
+0.4466
+0.6179
+0.3865
+0.9727
+0.5586
+0.5401
+0.2809
+0.9134
+0.7209
+0.7175
+0.4399
+1.2644
+0.7382
+0.8214
+0.4236
+1.2381
+0.6709
+0.7826
+0.3676
+1.7645
+0.7276
+1.1950
+0.5931
+2.4932
+1.0311
+1.2564
+0.4866
+1.8639
+0.6527
+2.2242
+0.6678
+2.8476
+0.9895
+1.5190
+0.4635
+4.1561
+1.2782
+1.1941
+0.2998
+3.1824
+0.8721
+1.6282
+0.4519
+4.6395
+1.1910
+3.7396
+0.9733
+4.3741
+0.9687
+1.6424
+0.6258
+1.2561
+0.2731
+1
+29
+0
+2.3534E-06
+
+Instance
+
+F1
+F2 (%)
+54.04
+26.43
+11.54
+−32.67
+9.02
+35.57
+37.44
+42.57
+47.99
+21.07
+38.69
+41.62
+48.43
+45.81
+53.04
+58.76
+50.37
+58.64
+61.27
+64.98
+69.98
+65.25
+69.49
+69.24
+74.89
+72.60
+72.25
+74.33
+73.97
+77.85
+49.82
+24.57
+
+CPU time (s)
+F1
+
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+F2
+
+7.4852
+0.9499
+21.4092
+1.1458
+67.1348
+1.5192
+178.3155
+2.2330
+265.2156
+2.5779
+10.3682
+0.9013
+29.6823
+1.3302
+129.6473
+2.5866
+219.0398
+2.7987
+416.4091
+4.1294
+16.1153
+0.9398
+38.0861
+1.7630
+124.4411
+2.6687
+333.3671
+3.7989
+650.1111
+5.8304
+45.6422
+3.4909
+98.6533
+4.2710
+296.3851
+7.3489
+1242.2259
+17.5062
+1291.4013
+11.3853
+132.9453
+7.2481
+101.9938
+5.3167
+509.0894
+10.1980
+819.4229
+12.6210
+2225.5660
+18.1268
+93.0159
+4.1815
+231.8769
+10.9855
+537.1396
+13.1024
+1705.2297
+21.4852
+2329.4400
+20.7640
+472.2285
+6.7735
+646.3344
+6.2401
+0
+30
+0
+1.7344E-06
+
+F1
+F2 (%)
+87.31
+94.65
+97.74
+98.75
+99.03
+91.31
+95.52
+98.00
+98.72
+99.01
+94.17
+95.37
+97.86
+98.86
+99.10
+92.35
+95.67
+97.52
+98.59
+99.12
+94.55
+94.79
+98.00
+98.46
+99.19
+95.50
+95.26
+97.56
+98.74
+99.11
+96.66
+2.80
+
+On the other hand, a positive value of SGS-ES
+for the Hypervolume
+EHS
+highlights that EHS is able to compute a better Pareto front with
+respect to SGS-ES. Throughout the section, whenever the percentage deviation cannot be computed due to a division by zero, we
+write a dash instead. Since both EHS and SGS-ES perform stochastic choices, we averaged the results obtained over 10 independent
+runs of the algorithms.
+The numerical results show that EHS achieves better results
+than SGS-ES in terms of Hypervolume and IGD+ for most of instances 1–30 and 31–60, and for all instances 61–90. The results
+obtained in terms of Hypervolume are coherent with those obtained in terms of IGD+ . Furthermore, EHS outperforms SGS-ES in
+terms of computational times on 83 instances over 90, with the
+average of 10.12%, 48.97%, and 63.04% improvements on instances
+1–30, 31–60, and 61–90, as shown in Tables 2–4, respectively. Such
+improvements are signiﬁcant also in the case of instances 1–30,
+where the CPU times are in the orders of few milliseconds, and
+where also the exact algorithm using Formulation 2 is able to ﬁnd
+a solution always in less than 5 seconds (see Table 1). The small
+values of p support the relevance of these results, proving that the
+difference between the series of data is statistically signiﬁcant. This
+is more evident for instances 61–90, where the p-values are in the
+order of 10−6 or 10−8 . Thus, we conclude that EHS proves to be
+more computationally eﬃcient with respect to SGS-ES while preserving the quality of the computed solutions. In more detail, EHS
+consistently outperforms SGS-ES on all the large-scale instances
+61–90, as regards the values of Hypervolume, IGD+ , and computational times. These results showcase the capability of EHS to gen-
+
+computational times obtained with Formulation 2 in comparison
+with the ones of Formulation 1, and we consistently express the
+percentage deviation between the computational times as F1
+.
+F2
+The implementation of the exact algorithm based on Formulation 2 outperforms the one exploiting Formulation 1 in all instances with the only exception of instance 4, where Formulation 2
+is 32.67% worse than Formulation 1. However, the average computational time of the former implementation on medium-scale instances 31–60 is two orders of magnitude lower than the average
+time achieved by the latter, with a remarkable average percentage
+deviation equal to 96.66%. Moreover, the computational advantage
+of Formulation 2 with respect to Formulation 1 on the small-scale
+instances, i.e., instances 1–30, is still noteworthy, with an average
+percentage deviation of 49.82%. We observe that the small values
+of p denote the statistical signiﬁcance of the numerical results.
+6.4. Comparing EHS with the other heuristics
+This subsection ﬁrst compares EHS, i.e., the novel heuristic
+proposed in this paper, with the state-of-the-art heuristic SGSES. Tables 2–4 report the values of the performance metrics introduced in Section 6.2, i.e., Hypervolume and IGD+ , and the computational times obtained by EHS and SGS-ES on instances 1–30,
+31–60 and 61–90, respectively. Each of the three tables adopts the
+same conventions used for Table 1. In particular, SGS-ES
+denotes
+EHS
+the percentage deviation of the performance of EHS with respect
+to SGS-ES. For instance, a positive value of SGS-ES
+for the comEHS
+putational times indicates that EHS requires less time than SGS-ES.
+858
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Table 2
+Comparison of the results obtained by EHS and SGS-ES for instances 1–30. The table shows the values of the Hypervolume, IGD+ , and computational times achieved by the
+two heuristics, along with the related percentage deviations.
+Instance
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+
+CPU time (s)
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+0.6976
+0.7683
+0.7425
+0.7438
+0.4531
+0.7532
+0.7460
+0.7745
+0.7336
+0.7514
+0.8013
+0.8212
+0.7259
+0.8139
+0.7563
+0.7722
+0.8077
+0.8485
+0.6900
+0.7533
+0.7508
+0.7989
+0.7063
+0.8026
+0.5789
+0.7294
+0.7455
+0.7967
+0.7706
+0.8402
+0.7491
+0.0764
+13
+
+0.6976
+0.7683
+0.7425
+0.7438
+0.4531
+0.7532
+0.7460
+0.7745
+0.7317
+0.7514
+0.8017
+0.8212
+0.7256
+0.8137
+0.7559
+0.7722
+0.8077
+0.8484
+0.6900
+0.7533
+0.7509
+0.7987
+0.7064
+0.8022
+0.5785
+0.7294
+0.7455
+0.7968
+0.7703
+0.8403
+0.7490
+0.0764
+5
+
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.27
+0.00
+−0.05
+0.00
+0.04
+0.03
+0.05
+0.00
+0.00
+0.01
+0.00
+0.00
+−0.01
+0.03
+−0.01
+0.05
+0.06
+0.00
+0.00
+−0.01
+0.04
+−0.01
+0.02
+0.05
+
+0.0000
+0.0000
+0.0000
+0.0000
+0.0000
+0.0000
+0.0000
+0.0013
+0.0205
+0.0003
+0.0009
+0.0024
+0.0000
+0.0009
+0.0081
+0.0013
+0.0000
+0.0027
+0.0000
+0.0016
+0.0012
+0.0005
+0.0006
+0.0042
+0.0006
+0.0000
+0.0005
+0.0002
+0.0037
+0.0018
+0.0018
+0.0039
+15
+
+0.0000
+0.0000
+0.0000
+0.0000
+0.0000
+0.0000
+0.0000
+0.0014
+0.0208
+0.0004
+0.0004
+0.0025
+0.0004
+0.0012
+0.0087
+0.0013
+0.0000
+0.0029
+0.0000
+0.0016
+0.0011
+0.0009
+0.0006
+0.0048
+0.0011
+0.0000
+0.0005
+0.0001
+0.0038
+0.0016
+0.0019
+0.0040
+4
+
+–
+–
+–
+–
+–
+–
+–
+0.79
+1.50
+20.00
+−163.64
+2.41
+100.00
+23.05
+7.39
+0.80
+–
+5.33
+–
+2.93
+−9.50
+42.77
+0.00
+12.39
+42.54
+–
+3.45
+−60.00
+1.63
+−13.58
+1.01
+48.92
+
+0.0042
+0.0060
+0.0034
+0.0067
+0.0043
+0.0085
+0.0035
+0.0082
+0.0045
+0.0118
+0.0055
+0.0102
+0.0032
+0.0095
+0.0051
+0.0106
+0.0058
+0.0135
+0.0039
+0.0104
+0.0063
+0.0164
+0.0072
+0.0148
+0.0051
+0.0080
+0.0068
+0.0125
+0.0069
+0.0192
+0.0081
+0.0041
+24
+
+0.0024
+0.0059
+0.0037
+0.0091
+0.0054
+0.0116
+0.0059
+0.0098
+0.0046
+0.0137
+0.0077
+0.0148
+0.0031
+0.0104
+0.0054
+0.0153
+0.0079
+0.0193
+0.0038
+0.0104
+0.0060
+0.0196
+0.0082
+0.0185
+0.0042
+0.0084
+0.0070
+0.0143
+0.0075
+0.0217
+0.0095
+0.0054
+6
+
+−71.26
+−1.03
+8.63
+25.89
+20.93
+26.73
+39.66
+16.12
+3.58
+14.24
+28.42
+30.89
+−2.97
+8.71
+6.28
+30.75
+26.62
+30.12
+−2.73
+0.30
+−5.09
+16.40
+12.19
+20.12
+−19.62
+4.99
+3.36
+12.50
+7.60
+11.29
+10.12
+20.36
+
+12
+0.0642
+
+11
+0.0442
+
+erate high-quality Pareto fronts while preserving uniformity in the
+distribution of non-dominated points.
+We now compare EHS with the previous heuristics proposed by
+Wang et al. (2018), i.e., the constructive heuristic named CH and
+NSGA-III (Deb & Jain, 2013), initialized with CH. In this case, the
+comparison is not possible for all the instances 1–90. In fact, as
+also pointed out in (Anghinolﬁ et al., 2021, pages 419 and 429),
+the original CH heuristic by Wang et al. (2018) may be unable to
+build feasible schedules, even if a feasible schedule exists, when no
+location including only free adjacent slots is available for a job due
+to previous assignments.
+Table 5 reports the results in terms of Hypervolume and IGD+
+only for the instances such that CH is able to compute a feasible solution. The computational times of NSGA-III include the
+time needed to perform initialization, i.e., to run CH. The percentage deviation best
+is the deviation of the best heuristic beEHS
+tween CH and NSGA-III with respect to EHS. The p-values in
+the columns related to NSGA-III are obtained by comparing EHS
+with NSGA-III, while the p-values in the columns for CH refer
+to the comparison between EHS and CH. The results highlight
+that CH is unable to ﬁnd a feasible solution for most of the
+large instances 61–90. Overall, CH can ﬁnd a feasible solution for
+only 48 out of 90 instances. For such instances, the superiority
+of EHS with respect to the other heuristics is evident, both in
+terms of accuracy and computational times. In more detail, EHS
+achieves the best result on 47, 46, and 45 instances (out of 48 instances) in terms of Hypervolume, IGD+ , and computational time,
+respectively.
+
+0
+0.0001
+
+6.5. The exact algorithm and EHS
+This subsection ﬁrst presents an evaluation of the computational advantage introduced by the use of EHS to provide an initial
+solution for the MILP solver used by the implementation of the
+exact algorithm (Algorithm 5.1) based on Formulation 2. Furthermore, this subsection compares the exact algorithm with EHS to
+measure the trade-off between the quality of solutions and computational requirements.
+Table 6 shows the values of the computational times obtained
+for instances 1–90 by the exact algorithm based on Formulation 2
+with and without providing the solution computed by EHS as an
+initial solution to the MILP solver. In the table, F2 denotes the results obtained by using the exact algorithm using Formulation 2,
+while F2-init denotes the results obtained with the exact algorithm based on Formulation 2 when performing initialization with
+EHS. The table adopts the same conventions used for Tables 1–
+indicates the percentage deviation of the
+4. In particular, F2
+F2-init
+computational times of the exact algorithm exploiting the initial
+solution provided by EHS with respect to the implementation of
+the exact algorithm without initialization. We observe that the
+times reported for the latter implementation include the computational overhead due to the execution of EHS for initialization.
+Table 6 highlights that, differently from the implementation of the
+exact algorithm with Formulation 1, the memory requirements of
+Formulation 2 enable to solve the large-scale instances 61–90 as
+well (we recall that Formulation 1 was able to ﬁnd a solution only
+for the ﬁrst 60 instances, as pointed out in Section 6.3). However,
+
+859
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Table 3
+Comparison of the results obtained by EHS and SGS-ES for instances 31–60. The table shows the values of the Hypervolume, IGD+ , and computational times achieved by the
+two heuristics, along with the related percentage deviations.
+Instance
+
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+0.8816
+0.8116
+0.7766
+0.6915
+0.6011
+0.8545
+0.8709
+0.8393
+0.7702
+0.7762
+0.9259
+0.8528
+0.8613
+0.8229
+0.7904
+0.8166
+0.8493
+0.8742
+0.8039
+0.8222
+0.8377
+0.8667
+0.8880
+0.8836
+0.8450
+0.8831
+0.7440
+0.9058
+0.8893
+0.8173
+0.8285
+0.0668
+22
+
+0.8813
+0.8109
+0.7769
+0.6916
+0.6011
+0.8541
+0.8710
+0.8397
+0.7700
+0.7730
+0.9259
+0.8529
+0.8614
+0.8223
+0.7899
+0.8162
+0.8494
+0.8725
+0.8020
+0.8158
+0.8370
+0.8656
+0.8875
+0.8836
+0.8445
+0.8824
+0.7432
+0.9057
+0.8880
+0.8169
+0.8277
+0.0668
+8
+
+0.03
+0.09
+−0.03
+−0.03
+0.01
+0.05
+−0.01
+−0.05
+0.02
+0.42
+−0.01
+0.00
+−0.01
+0.07
+0.07
+0.05
+0.00
+0.19
+0.23
+0.78
+0.09
+0.12
+0.06
+0.00
+0.07
+0.08
+0.11
+0.01
+0.14
+0.04
+0.09
+0.16
+
+CPU time (s)
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+0.0017
+0.0 0 07
+0.0012
+0.0103
+0.0 0 0 0
+0.0021
+0.0033
+0.0071
+0.0026
+0.0056
+0.0026
+0.0013
+0.0016
+0.0050
+0.0034
+0.0096
+0.0041
+0.0026
+0.0023
+0.0063
+0.0139
+0.0038
+0.0038
+0.0024
+0.0 0 04
+0.0042
+0.0111
+0.0 0 08
+0.0033
+0.0029
+0.0040
+0.0034
+24
+
+0.0023
+0.0016
+0.0 0 09
+0.0102
+0.0 0 01
+0.0033
+0.0034
+0.0066
+0.0028
+0.0083
+0.0024
+0.0012
+0.0020
+0.0056
+0.0040
+0.0093
+0.0044
+0.0040
+0.0034
+0.0109
+0.0152
+0.0051
+0.0045
+0.0024
+0.0 0 09
+0.0053
+0.0122
+0.0012
+0.0040
+0.0034
+0.0047
+0.0037
+6
+
+26.67
+59.20
+−22.41
+−1.17
+86.67
+37.30
+4.18
+−6.42
+6.80
+32.88
+−8.47
+−4.73
+16.97
+10.51
+16.40
+−3.22
+6.57
+35.48
+33.22
+42.01
+8.88
+25.71
+15.90
+2.62
+51.02
+20.25
+9.14
+27.27
+16.45
+13.13
+18.63
+22.46
+
+0.0243
+0.0383
+0.0563
+0.0878
+0.0510
+0.0299
+0.0477
+0.0768
+0.1072
+0.1778
+0.0319
+0.0474
+0.0814
+0.1221
+0.1993
+0.1764
+0.2868
+0.4227
+0.6800
+0.8537
+0.2841
+0.3933
+0.5025
+0.6990
+0.9189
+0.3502
+0.4964
+0.6180
+0.9788
+1.0671
+0.3302
+0.3223
+29
+
+0.0384
+0.0551
+0.0767
+0.0946
+0.0483
+0.0641
+0.0914
+0.1351
+0.2147
+0.2913
+0.0651
+0.1035
+0.1566
+0.2399
+0.4059
+0.3468
+0.6161
+0.8131
+1.1943
+1.5257
+0.6305
+0.9671
+1.3249
+1.8315
+2.8734
+0.9294
+1.4716
+2.0238
+3.8813
+3.6342
+0.8715
+1.0614
+1
+
+36.88
+30.42
+26.67
+7.17
+−5.72
+53.27
+47.77
+43.15
+50.05
+38.96
+50.98
+54.17
+48.04
+49.10
+50.91
+49.12
+53.46
+48.01
+43.06
+44.05
+54.94
+59.33
+62.07
+61.83
+68.02
+62.32
+66.27
+69.46
+74.78
+70.64
+48.97
+17.49
+
+0
+0.0 0 04
+
+0
+0.0 0 01
+
+0
+1.9209E-06
+
+Table 4
+Comparison of the results obtained by EHS and SGS-ES for instances 61–90. The table shows the values of the Hypervolume, IGD+ , and computational times achieved by the
+two heuristics, along with the related percentage deviations.
+Instance
+
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+0.8178
+0.8272
+0.7660
+0.7842
+0.7221
+0.8008
+0.7558
+0.7388
+0.7369
+0.7481
+0.7997
+0.8724
+0.7929
+0.8486
+0.7850
+0.8503
+0.7453
+0.7884
+0.7472
+0.8133
+0.8158
+0.8630
+0.8174
+0.8270
+0.8210
+0.8283
+0.8054
+0.8364
+0.7622
+0.8080
+0.7975
+0.0401
+30
+
+0.8162
+0.8262
+0.7645
+0.7827
+0.7205
+0.7984
+0.7549
+0.7372
+0.7356
+0.7450
+0.7980
+0.8703
+0.7913
+0.8471
+0.7835
+0.8488
+0.7442
+0.7866
+0.7451
+0.8117
+0.8140
+0.8615
+0.8159
+0.8261
+0.8200
+0.8272
+0.8040
+0.8351
+0.7588
+0.8068
+0.7959
+0.0402
+0
+
+0.19
+0.13
+0.20
+0.19
+0.22
+0.30
+0.12
+0.22
+0.17
+0.41
+0.21
+0.24
+0.20
+0.17
+0.19
+0.18
+0.14
+0.23
+0.28
+0.19
+0.23
+0.18
+0.18
+0.11
+0.12
+0.14
+0.17
+0.16
+0.44
+0.15
+0.20
+0.08
+
+0
+1.7344E-06
+
+CPU time (s)
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+EHS
+
+SGS-ES
+
+SGS-ES
+(%)
+EHS
+
+0.0039
+0.0034
+0.0036
+0.0035
+0.0064
+0.0045
+0.0028
+0.0045
+0.0043
+0.0065
+0.0046
+0.0031
+0.0042
+0.0030
+0.0033
+0.0037
+0.0049
+0.0041
+0.0039
+0.0031
+0.0047
+0.0043
+0.0038
+0.0032
+0.0035
+0.0039
+0.0042
+0.0032
+0.0051
+0.0042
+0.0040
+0.0 0 09
+30
+
+0.0050
+0.0040
+0.0046
+0.0044
+0.0072
+0.0060
+0.0033
+0.0054
+0.0047
+0.0087
+0.0055
+0.0044
+0.0051
+0.0039
+0.0042
+0.0047
+0.0056
+0.0051
+0.0052
+0.0041
+0.0058
+0.0055
+0.0048
+0.0039
+0.0040
+0.0045
+0.0049
+0.0041
+0.0076
+0.0049
+0.0050
+0.0011
+0
+
+21.31
+16.76
+21.43
+19.77
+11.37
+24.54
+15.12
+16.19
+9.62
+24.61
+16.53
+29.50
+16.68
+23.90
+20.50
+20.53
+12.48
+20.47
+25.92
+23.92
+19.43
+22.14
+21.92
+16.53
+12.59
+14.18
+13.36
+21.61
+32.06
+14.24
+19.31
+5.36
+
+8.0704
+16.0995
+10.9416
+17.9779
+13.6809
+22.1340
+11.7066
+28.1576
+14.0772
+37.2852
+8.1154
+14.4530
+10.9099
+18.1652
+11.5784
+20.8766
+14.0398
+31.7094
+20.5086
+30.8912
+9.2991
+17.8626
+13.1299
+21.7891
+14.7378
+24.7579
+16.2661
+33.0019
+23.8458
+45.2837
+19.3784
+9.1422
+30
+
+18.6766
+53.8304
+22.1941
+49.0354
+25.6876
+65.3891
+22.0816
+72.8456
+22.0728
+77.6561
+21.7973
+56.3769
+26.4831
+67.1380
+30.1399
+79.8189
+31.9174
+92.9936
+40.2177
+86.7287
+32.5687
+79.0559
+36.6585
+97.6430
+42.2191
+111.6060
+45.2810
+128.1692
+63.2728
+136.8648
+57.8807
+32.9438
+0
+
+56.79
+70.09
+50.70
+63.34
+46.74
+66.15
+46.98
+61.35
+36.22
+51.99
+62.77
+74.36
+58.80
+72.94
+61.58
+73.85
+56.01
+65.90
+49.01
+64.38
+71.45
+77.41
+64.18
+77.68
+65.09
+77.82
+64.08
+74.25
+62.31
+66.91
+63.04
+10.33
+
+0
+1.7344E-06
+
+860
+
+0
+1.7344E-06
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Table 5
+Comparison of the results obtained by EHS and NSGA-III and CH for all the instances such that CH returns a feasible solution. The table shows the values of the Hypervolume,
+IGD+ , and computational times achieved by the three approaches, along with the related percentage deviations computed with respect to the best competitor of EHS.
+Instance
+
+1
+2
+3
+7
+10
+12
+13
+14
+16
+17
+18
+19
+21
+22
+23
+25
+26
+27
+28
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+44
+45
+46
+47
+48
+50
+51
+52
+53
+55
+56
+57
+58
+60
+66
+74
+86
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+
+CPU time (s)
+
+EHS
+
+NSGA-III
+
+CH
+
+best
+(%)
+EHS
+
+EHS
+
+NSGA-III
+
+CH
+
+best
+(%)
+EHS
+
+EHS
+
+NSGA-III
+
+CH
+
+best
+(%)
+EHS
+
+0.6976
+0.7683
+0.7425
+0.7460
+0.7514
+0.8212
+0.7259
+0.8139
+0.7722
+0.8077
+0.8485
+0.6900
+0.7508
+0.7989
+0.7063
+0.5789
+0.7294
+0.7455
+0.7967
+0.8816
+0.8116
+0.7766
+0.6915
+0.6011
+0.8545
+0.8709
+0.8393
+0.7702
+0.7762
+0.9259
+0.8528
+0.8229
+0.7904
+0.8166
+0.8493
+0.8742
+0.8222
+0.8377
+0.8667
+0.8880
+0.8450
+0.8831
+0.7440
+0.9058
+0.8173
+0.8008
+0.8486
+0.8283
+0.7955
+0.0724
+47
+
+0.6962
+0.7683
+0.7425
+0.7452
+0.7510
+0.8208
+0.7243
+0.8121
+0.7688
+0.8063
+0.8461
+0.6862
+0.7452
+0.7931
+0.7021
+0.5725
+0.7198
+0.7440
+0.7943
+0.8715
+0.7980
+0.7733
+0.6794
+0.5875
+0.8437
+0.8658
+0.8372
+0.7651
+0.7592
+0.9253
+0.8505
+0.8197
+0.7800
+0.8088
+0.8463
+0.8654
+0.8003
+0.8281
+0.8636
+0.8847
+0.8411
+0.8794
+0.7363
+0.9046
+0.8148
+0.7805
+0.8379
+0.8157
+0.7896
+0.0730
+0
+0
+2.3968E-09
+
+0.6906
+0.7671
+0.7425
+0.7449
+0.7506
+0.8208
+0.7243
+0.8121
+0.7687
+0.8063
+0.8461
+0.6852
+0.7451
+0.7930
+0.7021
+0.5723
+0.7170
+0.7440
+0.7943
+0.8715
+0.7980
+0.7733
+0.6793
+0.5875
+0.8434
+0.8658
+0.8372
+0.7651
+0.7592
+0.9253
+0.8505
+0.8196
+0.7800
+0.8084
+0.8463
+0.8654
+0.8003
+0.8280
+0.8635
+0.8847
+0.8411
+0.8788
+0.7353
+0.9046
+0.8148
+0.7805
+0.8379
+0.8157
+0.7893
+0.0733
+1
+
+0.21
+0.01
+0.00
+0.11
+0.05
+0.05
+0.22
+0.22
+0.43
+0.17
+0.28
+0.56
+0.74
+0.73
+0.60
+1.11
+1.32
+0.21
+0.31
+1.15
+1.68
+0.43
+1.75
+2.27
+1.26
+0.58
+0.25
+0.66
+2.19
+0.06
+0.28
+0.39
+1.32
+0.95
+0.36
+1.01
+2.66
+1.15
+0.35
+0.38
+0.47
+0.42
+1.03
+0.13
+0.31
+2.53
+1.26
+1.52
+0.75
+0.69
+
+0.0000
+0.0000
+0.0000
+0.0000
+0.0003
+0.0024
+0.0000
+0.0009
+0.0013
+0.0000
+0.0027
+0.0000
+0.0012
+0.0005
+0.0006
+0.0006
+0.0000
+0.0005
+0.0002
+0.0017
+0.0007
+0.0012
+0.0103
+0.0000
+0.0021
+0.0033
+0.0071
+0.0026
+0.0056
+0.0026
+0.0013
+0.0050
+0.0034
+0.0096
+0.0041
+0.0026
+0.0063
+0.0139
+0.0038
+0.0038
+0.0004
+0.0042
+0.0111
+0.0008
+0.0029
+0.0045
+0.0030
+0.0039
+0.0028
+0.0032
+46
+
+0.0023
+0.0001
+0.0000
+0.0007
+0.0005
+0.0023
+0.0020
+0.0034
+0.0057
+0.0017
+0.0052
+0.0035
+0.0064
+0.0062
+0.0057
+0.0065
+0.0060
+0.0028
+0.0027
+0.0106
+0.0118
+0.0044
+0.0212
+0.0150
+0.0072
+0.0075
+0.0087
+0.0071
+0.0194
+0.0036
+0.0039
+0.0077
+0.0113
+0.0149
+0.0062
+0.0092
+0.0233
+0.0163
+0.0071
+0.0072
+0.0034
+0.0079
+0.0152
+0.0030
+0.0054
+0.0195
+0.0105
+0.0123
+0.0076
+0.0057
+1
+1
+2.7281E-09
+
+0.0066
+0.0020
+0.0000
+0.0011
+0.0010
+0.0032
+0.0020
+0.0035
+0.0058
+0.0017
+0.0052
+0.0045
+0.0064
+0.0063
+0.0057
+0.0067
+0.0086
+0.0028
+0.0027
+0.0106
+0.0118
+0.0044
+0.0213
+0.0150
+0.0074
+0.0075
+0.0087
+0.0071
+0.0194
+0.0036
+0.0039
+0.0077
+0.0113
+0.0152
+0.0062
+0.0092
+0.0233
+0.0174
+0.0071
+0.0072
+0.0034
+0.0086
+0.0161
+0.0030
+0.0054
+0.0195
+0.0105
+0.0123
+0.0079
+0.0057
+0
+
+100.00
+100.00
+–
+100.00
+40.00
+−8.00
+100.00
+72.40
+76.47
+100.00
+48.43
+100.00
+81.08
+91.95
+90.32
+90.55
+100.00
+83.53
+91.62
+84.02
+94.34
+73.68
+51.40
+99.95
+70.85
+56.02
+19.31
+62.80
+71.30
+28.84
+67.44
+35.46
+70.19
+35.45
+33.48
+71.98
+72.89
+15.04
+45.93
+47.72
+87.32
+46.15
+27.05
+72.03
+45.76
+76.84
+71.87
+68.47
+67.28
+26.90
+
+0.0042
+0.0060
+0.0034
+0.0035
+0.0118
+0.0102
+0.0032
+0.0095
+0.0106
+0.0058
+0.0135
+0.0039
+0.0063
+0.0164
+0.0072
+0.0051
+0.0080
+0.0068
+0.0125
+0.0243
+0.0383
+0.0563
+0.0878
+0.0510
+0.0299
+0.0477
+0.0768
+0.1072
+0.1778
+0.0319
+0.0474
+0.1221
+0.1993
+0.1764
+0.2868
+0.4227
+0.8537
+0.2841
+0.3933
+0.5025
+0.9189
+0.3502
+0.4964
+0.6180
+1.0671
+22.1340
+18.1652
+24.7579
+1.5140
+5.3139
+45
+
+10.9688
+10.9884
+10.8791
+10.6625
+10.9952
+10.8785
+10.8018
+10.6095
+10.9737
+10.8916
+10.8807
+10.8885
+10.6952
+10.7534
+10.9184
+10.8099
+10.8309
+10.7334
+10.8425
+11.0500
+11.3557
+11.7489
+12.3398
+13.1657
+11.4679
+11.6202
+12.2492
+12.9709
+13.8076
+11.5631
+12.0115
+13.1930
+14.5432
+13.1718
+13.2982
+13.7993
+15.1520
+15.2817
+15.8807
+16.2283
+17.6802
+17.8474
+18.0846
+18.9285
+20.9968
+223.5118
+149.1959
+149.0026
+22.8568
+40.4773
+0
+0
+1.6310E-09
+
+0.0206
+0.0215
+0.0099
+0.0082
+0.0312
+0.0435
+0.0067
+0.0213
+0.0396
+0.0182
+0.0504
+0.0079
+0.0122
+0.0747
+0.0103
+0.0074
+0.0700
+0.0075
+0.0764
+0.1584
+0.1010
+0.0634
+0.0622
+0.0578
+0.1026
+0.1056
+0.2738
+0.1297
+0.1656
+0.1355
+0.1300
+0.1538
+0.1684
+2.0441
+2.1061
+2.1209
+2.3195
+3.9061
+3.9766
+4.0585
+4.1856
+6.1874
+6.1088
+6.1696
+6.3643
+206.0299
+132.1338
+129.1161
+10.8161
+38.9220
+3
+
+79.77
+72.13
+65.75
+56.87
+62.27
+76.56
+51.33
+55.16
+73.26
+68.05
+73.30
+51.06
+48.31
+78.08
+29.93
+30.92
+88.56
+9.65
+83.57
+84.68
+62.05
+11.30
+−41.16
+11.62
+70.81
+54.79
+71.96
+17.30
+−7.39
+76.46
+63.52
+20.61
+−18.35
+91.37
+86.38
+80.07
+63.20
+92.73
+90.11
+87.62
+78.05
+94.34
+91.87
+89.98
+83.23
+89.26
+86.25
+80.83
+60.79
+32.12
+
+1.7378E-09
+
+the maximum time limit of 4 hours for the MILP solver was not
+suﬃcient to compute the optimal Pareto fronts for instances 62,
+79, 83, 85, 86, 88, and 89. On the contrary, the initialization of the
+exact algorithm through EHS allows solving instances 62, 83, 85,
+86, and 89 within the time limit. Moreover, such an initialization
+enables large time savings in 88 instances over 90, with the exception of instances 79 and 88, where the time limit is again reached.
+With a little abuse of notation, in the remainder of this subsection, we simply refer to the implementation of Algorithm 5.1 based
+on Formulation 2 with the initialization provided by EHS as “exact algorithm with initialization”. Tables 7–9 report the results
+of the comparison between the exact algorithm with initialization and EHS in terms of the performance metrics introduced in
+Section 6.2 and computational times for instances 1–30, 31–60 and
+
+2.3968E-09
+
+3.4284E-08
+
+61–90 respectively. We remark that both tables adopt the conventions introduced in the previous subsections.
+We ﬁrst focus on Tables 7 and 8. It is interesting to observe
+that EHS is able to compute the optimal Pareto front for instances
+1, 2, 4, 5, 6, 7, 10, 13, 17, 19, and 26. In fact, EHS and the exact algorithm achieved the same values of Hypervolume and IGD+ . For
+the other instances, the quality of results provided by the exact
+algorithm is always larger than the one given by EHS. The computational times of EHS are always less than the ones of the exact
+algorithm with initialization, with the minimum percentage deviation being equal to 71.14%, and an average of 97.28% and 89.47%
+deviation for instances 1–30 and 31–60, respectively. Similar arguments can be reported as regards the results for the large-scale
+instances 61–90 shown in Table 9, where the percentage deviation
+
+861
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Table 6
+Comparison of the computational times obtained by the exact algorithm when using Formulation 2 (F2) and Formulation 2 with initialization provided by EHS (F2-init) for
+instances 1–30, 31–60, and 61–90.
+CPU time (s)
+Instance
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+F2
+
+F2-init
+
+0.3525
+0.2150
+0.4799
+0.1387
+0.3041
+0.0892
+0.5265
+0.1154
+0.4288
+0.0789
+0.4466
+0.1060
+0.3865
+0.3000
+0.5586
+0.4035
+0.2809
+0.2154
+0.7209
+0.2146
+0.4399
+0.1624
+0.7382
+0.3179
+0.4236
+0.2772
+0.6709
+0.4220
+0.3676
+0.2575
+0.7276
+0.3325
+0.5931
+0.3609
+1.0311
+0.5939
+0.4866
+0.2932
+0.6527
+0.4862
+0.6678
+0.4605
+0.9895
+0.7531
+0.4635
+0.2670
+1.2782
+1.1608
+0.2998
+0.1972
+0.8721
+0.4775
+0.4519
+0.2971
+1.1910
+0.7695
+0.9733
+0.7052
+0.9687
+0.8249
+0.6258
+0.3764
+0.2731
+0.2550
+0
+30
+0
+1.7344E-06
+
+CPU time (s)
+
+F2
+(%)
+F2-init
+39.01
+71.10
+70.68
+78.09
+81.60
+76.26
+22.40
+27.77
+23.31
+70.23
+63.09
+56.94
+34.56
+37.10
+29.95
+54.30
+39.15
+42.40
+39.73
+25.52
+31.04
+23.89
+42.40
+9.19
+34.23
+45.25
+34.25
+35.39
+27.55
+14.85
+42.71
+19.84
+
+Instance
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+F2
+
+CPU time (s)
+
+F2
+(%)
+F2-init
+
+F2-init
+
+0.9499
+0.7694
+1.1458
+0.8805
+1.5192
+1.0644
+2.2330
+1.8488
+2.5779
+1.5583
+0.9013
+0.4714
+1.3302
+0.8897
+2.5866
+2.1766
+2.7987
+1.9215
+4.1294
+3.2607
+0.9398
+0.3561
+1.7630
+0.6580
+2.6687
+1.9790
+3.7989
+2.9698
+5.8304
+4.2192
+3.4909
+1.0783
+4.2710
+2.7043
+7.3489
+4.9430
+17.5062
+13.3570
+11.3853
+8.9311
+7.2481
+0.9845
+5.3167
+1.2420
+10.1980
+4.1180
+12.6210
+4.6798
+18.1268
+10.7669
+4.1815
+1.5448
+10.9855
+1.7778
+13.1024
+2.7290
+21.4852
+15.7179
+20.7640
+7.7110
+6.7735
+3.5770
+6.2401
+3.9109
+0
+30
+0
+1.7344E-06
+
+19.01
+23.15
+29.94
+17.21
+39.55
+47.70
+33.12
+15.85
+31.34
+21.04
+62.11
+62.68
+25.84
+21.83
+27.63
+69.11
+36.68
+32.74
+23.70
+21.56
+86.42
+76.64
+59.62
+62.92
+40.60
+63.06
+83.82
+79.17
+26.84
+62.86
+43.46
+22.29
+
+Instance
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+F2
+
+F2-init
+
+827.0859
+611.6478
+14400.0000
+1151.5676
+1376.1149
+1081.9362
+2019.4856
+1603.4638
+1165.4502
+1013.6229
+2180.1869
+1778.8279
+1426.0655
+1117.5993
+5291.3348
+4939.7465
+2543.0730
+2165.1171
+2690.2322
+2357.9327
+1017.8704
+815.0992
+906.8871
+717.3885
+1201.6998
+965.8806
+1340.3735
+1178.4611
+1299.6371
+1065.3111
+1348.7682
+1142.3735
+1860.7451
+1612.8176
+2998.1649
+2592.9869
+14400.0000
+14400.0000
+2741.5972
+2290.5488
+828.6165
+667.3496
+2708.3709
+1344.9350
+14400.0000
+1096.4566
+2891.7570
+1755.8605
+14400.0000
+1236.8127
+14400.0000
+1775.3635
+1402.1250
+1157.3959
+14400.0000
+14400.0000
+14400.0000
+8863.0899
+3606.3123
+3108.4430
+4882.3985
+2666.9345
+5422.8772
+3563.0504
+0
+28
+2
+3.7896E-06
+
+F2
+(%)
+F2-init
+26.05
+92.00
+21.38
+20.60
+13.03
+18.41
+21.63
+6.64
+14.86
+12.35
+19.92
+20.90
+19.62
+12.08
+18.03
+15.30
+13.32
+13.51
+0.00
+16.45
+19.46
+50.34
+92.39
+39.28
+91.41
+87.67
+17.45
+0.00
+38.45
+13.81
+28.21
+26.98
+
+Fig. 6. Box-and-whiskers plots for the values of Hypervolume (a), IGD+ (b), and computational times (c) of the solutions computed by the exact algorithm exploiting
+Formulation 2 with initialization provided by EHS (F2-init), EHS itself, and SGS-ES on instances 61–90. In (c), we also show the computational times of the exact algorithm
+exploiting Formulation 2 (F2), and we provide an enlargement of the box-and-whiskers plot of EHS and SGS-ES at a ﬁner scale. We enhanced the readability of all the plots
+by omitting the outliers.
+
+of EHS with respect to the exact algorithm with initialization is
+equal to 98.85% on the average and never lower than 97%. In this
+case, the quality of the solutions of the exact algorithm is always
+better than the one of EHS, except for instances 79 and 88. In fact,
+the exact algorithm could not compute the optimal Pareto front for
+such two instances within the 4 hours time limit. This motivates
+also the better average values of EHS with respect to F2-init, even
+if the remaining 28 instances are characterized by the superiority
+of F2-init. However, for the other instances, the values of Hypervolume and IGD+ are equal up to the second decimal place, hence
+proving the effectiveness of EHS in ﬁnding a solution.
+Overall, we can conclude that EHS constitutes an excellent
+trade-off between the quality of solutions and computational ef-
+
+fort. Furthermore, the solutions computed by EHS provide a signiﬁcant speed-up to the exact algorithm, which is able to compute
+the optimal solution to the considered instances within a time that
+is only two orders of magnitude greater than the one required by
+EHS. Finally, we observe that all the aforementioned considerations are always supported by the small p-values, which conﬁrm
+the statistical difference between the results provided by the two
+approaches.
+Figs. 6 and 7 provide visual support to our discussion. The ﬁgures also display the results achieved by SGS-ES so as to provide a
+more comprehensive evaluation of the novel solution approaches.
+Speciﬁcally, Fig. 6 provides the box-and-whiskers plots for Hypervolume (a), IGD+ (b), and computational times (c) of the solu-
+
+862
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Table 7
+Comparison of the results obtained by the exact algorithm when using Formulation 2 with initialization provided by EHS (denoted by F2-init) and EHS itself for instances
+1–30. The table shows the values of the Hypervolume, IGD+ , and computational times achieved by the two approaches, along with the related percentage deviations.
+Instance
+
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+F2-init
+
+EHS
+
+EHS
+(%)
+F2-init
+
+0.6976
+0.7683
+0.7425
+0.7438
+0.4531
+0.7532
+0.7460
+0.7756
+0.7507
+0.7514
+0.8019
+0.8220
+0.7259
+0.8153
+0.7687
+0.7732
+0.8077
+0.8506
+0.6900
+0.7548
+0.7520
+0.7993
+0.7067
+0.8067
+0.5794
+0.7294
+0.7458
+0.7970
+0.7743
+0.8413
+0.7508
+0.0768
+19
+
+0.6976
+0.7683
+0.7425
+0.7438
+0.4531
+0.7532
+0.7460
+0.7745
+0.7336
+0.7514
+0.8013
+0.8212
+0.7259
+0.8139
+0.7563
+0.7722
+0.8077
+0.8485
+0.6900
+0.7533
+0.7508
+0.7989
+0.7063
+0.8026
+0.5789
+0.7294
+0.7455
+0.7967
+0.7706
+0.8402
+0.7503
+0.0767
+0
+
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.14
+2.27
+0.00
+0.08
+0.10
+0.00
+0.17
+1.61
+0.13
+0.00
+0.25
+0.00
+0.19
+0.16
+0.05
+0.05
+0.52
+0.08
+0.00
+0.04
+0.03
+0.48
+0.13
+0.22
+0.49
+
+CPU time (s)
+
+F2-init
+
+EHS
+
+EHS
+(%)
+F2-init
+
+F2-init
+
+EHS
+
+F2-init
+(%)
+EHS
+
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+19
+
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0013
+0.0205
+0.0 0 03
+0.0 0 09
+0.0024
+0.0 0 0 0
+0.0 0 09
+0.0081
+0.0013
+0.0 0 0 0
+0.0027
+0.0 0 0 0
+0.0016
+0.0012
+0.0 0 05
+0.0 0 06
+0.0042
+0.0 0 06
+0.0 0 0 0
+0.0 0 05
+0.0 0 02
+0.0037
+0.0018
+0.0018
+0.0039
+0
+
+–
+–
+–
+–
+–
+–
+–
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+–
+10 0.0 0
+10 0.0 0
+10 0.0 0
+–
+10 0.0 0
+–
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+–
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+0.00
+
+0.2150
+0.1387
+0.0892
+0.1154
+0.0789
+0.1060
+0.30 0 0
+0.4035
+0.2154
+0.2146
+0.1624
+0.3179
+0.2772
+0.4220
+0.2575
+0.3325
+0.3609
+0.5939
+0.2932
+0.4862
+0.4605
+0.7531
+0.2670
+1.1608
+0.1972
+0.4775
+0.2971
+0.7695
+0.7052
+0.8249
+0.3764
+0.2550
+0
+
+0.0042
+0.0060
+0.0034
+0.0067
+0.0043
+0.0085
+0.0035
+0.0082
+0.0045
+0.0118
+0.0055
+0.0102
+0.0032
+0.0095
+0.0051
+0.0106
+0.0058
+0.0135
+0.0039
+0.0104
+0.0063
+0.0164
+0.0072
+0.0148
+0.0051
+0.0080
+0.0068
+0.0125
+0.0069
+0.0192
+0.0081
+0.0041
+30
+
+98.06
+95.68
+96.19
+94.16
+94.56
+91.99
+98.82
+97.96
+97.93
+94.52
+96.62
+96.79
+98.83
+97.74
+98.04
+96.82
+98.39
+97.73
+98.68
+97.86
+98.64
+97.83
+97.30
+98.73
+97.42
+98.32
+97.72
+98.37
+99.02
+97.67
+97.28
+1.64
+
+11
+1.3183E-04
+
+11
+1.3183E-04
+
+0
+1.7344E-06
+
+Table 8
+Comparison of the results obtained by the exact algorithm when using Formulation 2 with initialization provided by EHS (denoted by F2-init) and EHS itself for instances
+31–60. The table shows the values of the Hypervolume, IGD+ , and computational times achieved by the two approaches, along with the related percentage deviations.
+Instance
+
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+F2-init
+
+EHS
+
+EHS
+(%)
+F2-init
+
+0.8829
+0.8122
+0.7783
+0.7021
+0.6012
+0.8563
+0.8731
+0.8464
+0.7733
+0.7823
+0.9267
+0.8535
+0.8630
+0.8279
+0.7936
+0.8266
+0.8523
+0.8760
+0.8064
+0.8320
+0.8459
+0.8681
+0.8903
+0.8848
+0.8454
+0.8852
+0.7517
+0.9060
+0.8921
+0.8198
+0.8318
+0.0658
+30
+
+0.8816
+0.8116
+0.7766
+0.6915
+0.6011
+0.8545
+0.8709
+0.8393
+0.7702
+0.7762
+0.9259
+0.8528
+0.8613
+0.8229
+0.7904
+0.8166
+0.8493
+0.8742
+0.8039
+0.8222
+0.8377
+0.8667
+0.8880
+0.8836
+0.8450
+0.8831
+0.7440
+0.9058
+0.8893
+0.8173
+0.7503
+0.0767
+0
+
+0.15
+0.08
+0.21
+1.52
+0.00
+0.21
+0.26
+0.84
+0.40
+0.77
+0.08
+0.08
+0.19
+0.61
+0.40
+1.21
+0.34
+0.21
+0.31
+1.19
+0.97
+0.17
+0.25
+0.14
+0.04
+0.23
+1.02
+0.02
+0.31
+0.31
+0.42
+0.41
+
+0
+1.7344E-06
+
+CPU time (s)
+
+F2-init
+
+EHS
+
+EHS
+(%)
+F2-init
+
+F2-init
+
+EHS
+
+F2-init
+(%)
+EHS
+
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+30
+
+0.0017
+0.0 0 07
+0.0012
+0.0103
+0.0 0 0 0
+0.0021
+0.0033
+0.0071
+0.0026
+0.0056
+0.0026
+0.0013
+0.0016
+0.0050
+0.0034
+0.0096
+0.0041
+0.0026
+0.0023
+0.0063
+0.0139
+0.0038
+0.0038
+0.0024
+0.0 0 04
+0.0042
+0.0111
+0.0 0 08
+0.0033
+0.0029
+0.0040
+0.0034
+0
+
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+0.00
+
+0.7694
+0.8805
+1.0644
+1.8488
+1.5583
+0.4714
+0.8897
+2.1766
+1.9215
+3.2607
+0.3561
+0.6580
+1.9790
+2.9698
+4.2192
+1.0783
+2.7043
+4.9430
+13.3570
+8.9311
+0.9845
+1.2420
+4.1180
+4.6798
+10.7669
+1.5448
+1.7778
+2.7290
+15.7179
+7.7110
+3.5770
+3.9109
+0
+
+0.0243
+0.0383
+0.0563
+0.0878
+0.0510
+0.0299
+0.0477
+0.0768
+0.1072
+0.1778
+0.0319
+0.0474
+0.0814
+0.1221
+0.1993
+0.1764
+0.2868
+0.4227
+0.6800
+0.8537
+0.2841
+0.3933
+0.5025
+0.6990
+0.9189
+0.3502
+0.4964
+0.6180
+0.9788
+1.0671
+0.3302
+0.3223
+30
+
+96.85
+95.65
+94.71
+95.25
+96.72
+93.65
+94.64
+96.47
+94.42
+94.55
+91.04
+92.79
+95.89
+95.89
+95.28
+83.64
+89.40
+91.45
+94.91
+90.44
+71.14
+68.33
+87.80
+85.06
+91.47
+77.33
+72.08
+77.35
+93.77
+86.16
+89.47
+8.27
+
+0
+1.7344E-06
+
+863
+
+0
+1.7344E-06
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+Table 9
+Comparison of the results obtained by the exact algorithm when using Formulation 2 with initialization provided by EHS (denoted by F2-init) and EHS itself for instances
+61–90. The table shows the values of the Hypervolume, IGD+ , and computational times achieved by the two approaches, along with the related percentage deviations.
+Instance
+
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+Avg.
+Std dev.
+N. best
+N. draw
+p
+
+IGD+
+
+Hypervolume
+F2-init
+
+EHS
+
+EHS
+(%)
+F2-init
+
+0.8223
+0.8313
+0.7704
+0.7886
+0.7299
+0.8064
+0.7590
+0.7446
+0.7418
+0.7563
+0.8052
+0.8762
+0.7982
+0.8522
+0.7890
+0.8550
+0.7514
+0.7935
+0.3657
+0.8171
+0.8217
+0.8683
+0.8221
+0.8314
+0.8250
+0.8333
+0.8106
+0.7039
+0.7683
+0.8131
+0.7851
+0.0896
+28
+
+0.8178
+0.8272
+0.7660
+0.7842
+0.7221
+0.8008
+0.7558
+0.7388
+0.7369
+0.7481
+0.7997
+0.8724
+0.7929
+0.8486
+0.7850
+0.8503
+0.7453
+0.7884
+0.7472
+0.8133
+0.8158
+0.8630
+0.8174
+0.8270
+0.8210
+0.8283
+0.8054
+0.8364
+0.7622
+0.8080
+0.7503
+0.0767
+2
+
+0.55
+0.50
+0.57
+0.56
+1.06
+0.70
+0.41
+0.77
+0.66
+1.09
+0.69
+0.43
+0.66
+0.42
+0.50
+0.55
+0.81
+0.64
+−104.34
+0.47
+0.72
+0.61
+0.57
+0.53
+0.49
+0.60
+0.64
+−18.82
+0.80
+0.63
+−3.52
+19.37
+
+0
+3.5888E-04
+
+F2-init
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.1910
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0 0 0 0
+0.0375
+0.0 0 0 0
+0.0 0 0 0
+0.0076
+0.0353
+28
+
+CPU time (s)
+EHS
+
+EHS
+(%)
+F2-init
+
+F2-init
+
+EHS
+
+F2-init
+(%)
+EHS
+
+0.0039
+0.0034
+0.0036
+0.0035
+0.0064
+0.0045
+0.0028
+0.0045
+0.0043
+0.0065
+0.0046
+0.0031
+0.0042
+0.0030
+0.0033
+0.0037
+0.0049
+0.0041
+0.0039
+0.0031
+0.0047
+0.0043
+0.0038
+0.0032
+0.0035
+0.0039
+0.0042
+0.0032
+0.0051
+0.0042
+0.0040
+0.0 0 09
+2
+
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+−4849.50
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+10 0.0 0
+−1062.61
+10 0.0 0
+10 0.0 0
+−103.74
+921.09
+
+611.6478
+1151.5676
+1081.9362
+1603.4638
+1013.6229
+1778.8279
+1117.5993
+4939.7465
+2165.1171
+2357.9327
+815.0992
+717.3885
+965.8806
+1178.4611
+1065.3111
+1142.3735
+1612.8176
+2592.9869
+1440 0.0 0 0 0
+2290.5488
+667.3496
+1344.9350
+1096.4566
+1755.8605
+1236.8127
+1775.3635
+1157.3959
+1440 0.0 0 0 0
+8863.0899
+3108.4430
+2666.9345
+3563.0504
+0
+
+8.0704
+16.0995
+10.9416
+17.9779
+13.6809
+22.1340
+11.7066
+28.1576
+14.0772
+37.2852
+8.1154
+14.4530
+10.9099
+18.1652
+11.5784
+20.8766
+14.0398
+31.7094
+20.5086
+30.8912
+9.2991
+17.8626
+13.1299
+21.7891
+14.7378
+24.7579
+16.2661
+33.0019
+23.8458
+45.2837
+45.2837
+9.1422
+30
+
+98.68
+98.60
+98.99
+98.88
+98.65
+98.76
+98.95
+99.43
+99.35
+98.42
+99.00
+97.99
+98.87
+98.46
+98.91
+98.17
+99.13
+98.78
+99.86
+98.65
+98.61
+98.67
+98.80
+98.76
+98.81
+98.61
+98.59
+99.77
+99.73
+98.54
+98.85
+0.43
+
+0
+3.5888E-04
+
+0
+1.7344E-06
+
+Fig. 7. Pareto fronts of instance 40 (a) and instance 90 (b) computed by the exact algorithm exploiting Formulation 2 with initialization provided by EHS (F2-init), EHS itself,
+and SGS-ES. Enlargements of two different parts of the fronts are also reported to appreciate the difference between the various algorithms at a ﬁner scale.
+
+tions computed by the exact algorithm with initialization, EHS itself and SGS-ES on the large-scale instances, i.e., 61–90. In particular, Fig. 6(c) also displays the computational times obtained by
+the exact algorithm. The plots are consistent with the conclusions
+drawn in this section on the comparisons between the exact algorithm exploiting Formulation 2 (with and without initialization)
+and EHS, as well as EHS itself and SGS-ES (see Subsection 6.4), according to the numerical results presented in the tables. Fig. 6(c)
+magniﬁes the box-and-whiskers plots related to EHS and SGS-ES so
+as to provide a more accurate comparison of their computational
+times on a different scale. Finally, Fig. 7 provides a graphical representation of the Pareto fronts computed by the exact algorithm
+with initialization and EHS for instances 40 (a) and 90 (b). Enlargements of different portions of the ﬁgure allow the reader to appre-
+
+ciate the differences between the displayed Pareto fronts with a
+ﬁner level of detail.
+7. Conclusions
+Energy-eﬃcient manufacturing has become a compelling matter in the latest years, owing to the pressing environmental issues
+and the consequent desire to shift toward sustainable production.
+In this context, the development of suitable scheduling models and
+eﬃcient solution approaches plays an essential role in the deﬁnition of a new paradigm that encompasses both productivity goals
+and environmental awareness.
+In this paper, we have considered the bi-objective scheduling
+problem of simultaneously minimizing the makespan and the TEC
+864
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+set of machines H, were drawn from U [1, 3], U [1, 3], and U [1, 6] for
+instances 1–30, 31–60, and 61–90, respectively. Furthermore, the
+time slot costs ct ∈ Z+ , for each t in the set of time slots T , belong
+to the sets {1, 2, 3, 4}, {1, 2, 3, 4}, and {1, 2, . . . , 8} for instances 1–
+30, 31–60, and 61–90, respectively. The number |P | of distinct processing times is in {3, 4, 5} for instances 1–30 and {3, 4} for instances 31–60, while it is equal to 12 for instances 61–90. Finally,
+the maximum processing time is equal to |P | for all the instances,
+except for instances 1, 3, 4, 6, 9, 12, and 15, where it is equal to 5.
+The whole set of instances is available at “https://github.com/
+ORresearcher/Exact- and- Heuristic- Solution- Approaches- for- Ene
+rgy- Eﬃcient- Identical- Parallel- Machine- Scheduling”.
+
+of a set of independent jobs on parallel identical machines, called
+the Bi-objective scheduling on parallel identical machines with
+time-of-use costs problem (BPMSTP). We have introduced a combinatorial property that has provided a novel description of the solution space of the BPMSTP. This characterizing property has enabled
+the development of a compact formulation that constitutes the
+foundation of an exact algorithm for the problem. Such an algorithm signiﬁcantly improves upon the previous exact approaches,
+as it has reduced the computational times by two orders of magnitude for several instances in the test dataset. We have also presented a novel heuristic for the BPMSTP, called Enhanced heuristic scheduler (EHS). Such a heuristic is based on several ideas that
+enable an accurate and fast resolution of both small and large instances. We have shown that EHS outperforms the previous stateof-the-art heuristic for the BPMSTP, called Split-greedy scheduler
+with exchange search (SGS-ES). Furthermore, EHS has also proved
+able to speed up the exact algorithm, by further reducing its computational burden.
+Summarizing, the novelty of this paper constitutes a signiﬁcant
+step in the development of effective solution approaches, both exact and heuristic, for the BPMSTP. This work will hopefully enable additional research on identical parallel machine scheduling
+under TOU costs in the future, by encouraging the design of simpler and/or faster approaches. In this respect, as future research
+directions, we plan to address the generalization of the combinatorial properties of the BPMSTP to similar problems. For instance,
+classical objectives in scheduling, such as the total weighted tardiness or the maximum lateness, could be considered along with
+the makespan or the TEC in order to increase the capability of
+the problem to model real manufacturing systems. From a mathematical standpoint, we will consider different representations
+of the time horizon, so as to possibly develop continuous-time
+or sequence-based formulations that are ubiquitous in classical
+scheduling. From the computational viewpoint, we will investigate
+the possibility of speeding up the exact algorithm by tackling the
+sequential single-objective problems through parallel computing,
+so as to fully exploit the available CPU and memory resources. Finally, we will focus on extending the local search used by EHS to
+consider larger sets of improving moves, which may further enhance the quality of solutions at the expense of slightly increasing
+computational times.
+
+References
+Absalom, E. E., Shukla, A. K., Nath, R., Akinyelu, A. A., Agushaka, J. O., Chiroma, H., & Muhuri, P. K. (2021). Metaheuristics: A comprehensive overview and
+classiﬁcation along with bibliometric analysis. Artiﬁcial Intelligence Review, 54,
+4237–4316.
+Agrawal, P., & Rao, S. (2014). Energy-aware scheduling of distributed systems. IEEE
+Transactions on Automation Science and Engineering, 11(4), 1163–1175.
+Anghinolﬁ, D., Paolucci, M., & Ronco, R. (2021). A bi-objective heuristic approach
+for green identical parallel machine scheduling. European Journal of Operational
+Research, 289(2), 416–434.
+Audet, C., Digabel, S. L., Cartier, D., Bigeon, J., & Salomon, L. (2021). Performance indicators in multiobjective optimization. European Journal of Operational Research,
+292(2), 397–422.
+Bambagini, M., Marinoni, M., Aydin, H., & Buttazzo, G. (2016). Energy-aware
+scheduling for real-time systems: A survey. ACM Transactions on Embedded Computing Systems, 15(1), 1–34.
+Barak, S., Moghdani, R., & Maghsoudlou, H. (2021). Energy-eﬃcient multi-objective
+ﬂexible manufacturing scheduling. Journal of Cleaner Production, 283, 124610.
+Branke, J., Deb, K., Miettinen, K., & Slowiński, R. (2008). Multiobjective optimization:
+Interactive and evolutionary approaches: vol. 5252. Springer Science & Business
+Media.
+Castro, P., Ave, G. D., Engell, S., Grossmann, I., & Harjunkoski, I. (2020). Industrial
+demand side management of a steel plant considering alternative power modes
+and electrode replacement. Industrial and Engineering Chemistry Research, 59(30),
+13642–13656.
+Castro, P., Sun, L., & Harjunkoski, I. (2013). Resource–task network formulations for
+industrial demand side management of a steel plant. Industrial and Engineering
+Chemistry Research, 52(36), 13046–13058.
+Catanzaro, D., Pesenti, R., & Ronco, R. (2023). Job scheduling under time-of-use energy tariffs for sustainable manufacturing: A survey. European Journal of Operational Research, 308(3), 1091–1109.
+Caviglione, L., Gaggero, M., Paolucci, M., & Ronco, R. (2021). Deep reinforcement
+learning for multi-objective placement of virtual machines in cloud datacenters.
+Soft Computing, 25(19), 12569–12588.
+Chankong, V., & Haimes, Y. (2008). Multiobjective decision making: Theory and
+methodology. Dover Books on Engineering. Dover Publications.
+Chen, B., & Zhang, X. (2019). Scheduling with time-of-use costs. European Journal of
+Operational Research, 274(3), 900–908.
+Chen, L., Megow, N., Rischke, R., Stougie, L., & Verschae, J. (2021). Optimal algorithms for scheduling under time-of-use tariffs. Annals of Operations Research,
+304, 85–107.
+Cheng, J., Chu, F., Liu, M., Wu, P., & Xia, W. (2017). Bi-criteria single-machine batch
+scheduling with machine on/off switching under time-of-use tariffs. Computers
+and Industrial Engineering, 112, 721–734.
+Cheng, J., Chu, F., & Zhou, M. (2018). An improved model for parallel machine
+scheduling under time-of-use electricity price. IEEE Transactions on Automation
+Science and Engineering, 15(2), 896–899.
+Cheng, J., Wu, P., & Chu, F. (2019). Mixed-integer programming for unrelated parallel machines scheduling problem considering electricity cost and makespan
+penalty cost. In 2019 International conference on industrial engineering and systems management (IESM) (pp. 1–5). IEEE.
+Coello Coello, C. A., & Reyes Sierra, M. (2004). A study of the parallelization of a
+coevolutionary multi-objective evolutionary algorithm. In MICAI 2004: Advances
+in artiﬁcial intelligence: Third mexican international conference on artiﬁcial intelligence, Mexico City, Mexico, April 26–30, 2004. Proceedings 3 (pp. 688–697).
+Springer.
+Deb, K. (2001). Multi-objective optimization using evolutionary algorithms. In Wiley-interscience series in systems and optimization.
+Deb, K., & Jain, H. (2013). An evolutionary many-objective optimization algorithm
+using reference-point-based nondominated sorting approach, part I: Solving
+problems with box constraints. IEEE Transactions on evolutionary computation,
+18(4), 577–601.
+Deb, K., Pratap, A., Agarwal, S., & Meyarivan, T. (2002). A fast and elitist multiobjective genetic algorithm: NSGA-II. IEEE Transactions on Evolutionary Computation,
+6(2), 182–197.
+Ding, J.-Y., Song, S., Zhang, R., Chiong, R., & Wu, C. (2016). Parallel machine
+scheduling under time-of-use electricity prices: New models and optimiza-
+
+Acknowledgment
+The authors are in debt with Prof. Raffaele Pesenti for his useful
+comments on the ﬁrst version of the manuscript. The authors are
+also grateful to the anonymous referees for their valuable suggestions that allowed us to signiﬁcantly improve the manuscript.
+Appendix A. Test instances
+In this Appendix, we report the details of the set of test instances used in Section 6. For each instance, the number of jobs
+N, the number of machines M, and the number of time slots K is
+given by an element (N, M, K ) of the Cartesian product between
+•
+•
+
+{6, 10, 15, 20, 25}, {3, 5, 7}, and {50, 80} for instances 1–30;
+{30, 60, 100, 150, 200}, {8, 16, 25}, and {100, 300} for in-
+
+stances 31–60, except for instances 41–44, where the number of machines is equal to 20 instead of 25;
+• {250, 300, 350, 400, 500}, {25, 30, 40}, and {350, 500} for instances 61–90.
+The processing times p j ∈ Z+ , for each j in the set of jobs
+J , were randomly drawn from the uniform distributions U[1, 4],
+U [1, 4], and U [1, 12] for instances 1–30, 31–60, and 61–90, respectively. Similarly, the consumption rates uh ∈ Z+ , for each h in the
+865
+
+M. Gaggero, M. Paolucci and R. Ronco
+
+European Journal of Operational Research 311 (2023) 845–866
+
+tion approaches. IEEE Transactions on Automation Science and Engineering, 13(2),
+1138–1154.
+Fang, K., Uhan, N. A., Zhao, F., & Sutherland, J. W. (2016). Scheduling on a single machine under time-of-use electricity tariffs. Annals of Operations Research, 238(1),
+199–227.
+Fang, K.-T., & Lin, B. (2013). Parallel-machine scheduling to minimize tardiness
+penalty and power cost. Computers and Industrial Engineering, 64, 224–234.
+Faria, G., Vieira, S., & Branco, P. (2019). Evolutionary process scheduling approach
+for energy cost minimization in a yeast production factory: Design, simulation,
+and factory implementation. Energy Systems, 10(1), 113–139.
+Forghani, A., Lotﬁ, M., Ranjbar, M., & Sadegheih, A. (2021). Hierarchical framework for maintenance and production scheduling of continuous ball mills in
+tile industries under TOU electricity pricing. Journal of Cleaner Production, 327,
+129440.
+Gahm, C., Denz, F., Dirr, M., & Tuma, A. (2016). Energy-eﬃcient scheduling in manufacturing companies: A review and research framework. European Journal of
+Operational Research, 248, 744–757.
+Gao, K., Huang, Y., Sadollah, A., & Wang, L. (2020). A review of energy-eﬃcient
+scheduling in intelligent production systems. Complex and Intelligent Systems, 6,
+237–249.
+Garey, M. R., & Johnson, D. S. (1978). “Strong” NP-completeness results: Motivation,
+examples, and implications. Journal of the ACM, 25, 499–508.
+Gibbons, J., & Chakraborti, S. (2020). Nonparametric statistical inference. CRC Press.
+Giret, A., Trentesaux, D., & Prabhu, V. (2015). Sustainability in manufacturing operations scheduling: A state of the art review. Journal of Manufacturing Systems, 37,
+126–140.
+Golmohamadi, H. (2022). Demand-side management in industrial sector: A review
+of heavy industries. Renewable and Sustainable Energy Reviews, 156, 111963.
+Guerreiro, A. P., Fonseca, C. M., & Paquete, L. (2021). The hypervolume indicator.
+ACM Computing Surveys, 54, 1–42.
+Haapala, K., Zhao, F., Camelio, J., Sutherland, J., Skerlos, S., Dornfeld, D., &
+Rickli, J. (2013). A review of engineering research in sustainable manufacturing.
+Journal of Manufacturing Science and Engineering, 135(4), 1–16.
+Haimes, Y., Lasdon, L., & Wismer, D. (1971). On a bicriterion formulation of the problems of integrated system identiﬁcation and system optimization. IEEE Transactions on Systems, Man, and Cybernetics, 1, 296–297.
+Ishibuchi, H., Masuda, H., Tanigaki, Y., & Nojima, Y. (2015). Modiﬁed distance calculation in generational distance and inverted generational distance. In Evolutionary multi-criterion optimization: 8th international conference, EMO 2015,
+Guimarães, Portugal, March 29–April 1, 2015. Proceedings, part II 8 (pp. 110–125).
+Springer.
+Jia, Z.-H., Zhang, Y.-L., Leung, J., & Li, K. (2017). Bi-criteria ant colony optimization
+algorithm for minimizing makespan and energy consumption on parallel batch
+machines. Applied Soft Computing, 55, 226–237.
+Jiang, E.-d., & Wang, L. (2020). Multi-objective optimization based on decomposition for ﬂexible job shop scheduling under time-of-use electricity prices. Knowledge-Based Systems, 204, 106177.
+Karimi, S., Kwon, S., & Ning, F. (2021). Energy-aware production scheduling for additive manufacturing. Journal of Cleaner Production, 278, 123183.
+Lei, D., Li, M., & Wang, L. (2018). A two-phase meta-heuristic for multiobjective ﬂexible job shop scheduling problem with total energy consumption threshold. IEEE
+Transactions on Cybernetics, 49(3), 1097–1109.
+Li, K., Zhang, X., Leung, J., & Yang, S.-L. (2016). Parallel machine scheduling problems
+in green manufacturing industry. Journal of Manufacturing Systems, 38, 98–106.
+
+Mitra, S., Grossmann, I., Pinto, J., & Arora, N. (2012). Optimal production planning
+under time-sensitive electricity prices for continuous power-intensive processes.
+Computers and Chemical Engineering, 38, 171–184.
+Moon, J.-Y., Shin, K., & Park, J. (2013). Optimization of production scheduling with
+time-dependent and machine-dependent electricity cost for industrial energy
+eﬃciency. The International Journal of Advanced Manufacturing Technology, 68(1),
+523–535.
+Panda, S., Mohanty, S., Rout, P., Sahu, B., Bajaj, M., Zawbaa, H., & Kamel, S. (2022).
+Residential demand side management model, optimization and future perspective: A review. Energy Reports, 8, 3727–3766.
+Pei, Z., Wan, M., Jiang, Z.-Z., Wang, Z., & Dai, X. (2021). An approximation algorithm for unrelated parallel machine scheduling under TOU electricity tariffs.
+IEEE Transactions on Automation Science and Engineering, 18(2), 743–756.
+Pinedo, M. (2016). Scheduling: Theory, algorithms, and systems (5th ed.). Springer.
+Qian, S.-y., Jia, Z.-h., & Li, K. (2020). A multi-objective evolutionary algorithm based
+on adaptive clustering for energy-aware batch scheduling problem. Future Generation Computer Systems, 113, 441–453.
+Rocholl, J., Mönch, L., & Fowler, J. (2020). Bi-criteria parallel batch machine scheduling to minimize total weighted tardiness and electricity cost. Journal of Business
+Economics, 90(9), 1345–1381.
+Sharma, A., Zhao, F., & Sutherland, J. W. (2015). Econological scheduling of a manufacturing enterprise operating under a time-of-use electricity tariff. Journal of
+Cleaner Production, 108, 256–270.
+Sin, I. H., & Chung, B. D. (2020). Bi-objective optimization approach for energy aware
+scheduling considering electricity cost and preventive maintenance using genetic algorithm. Journal of Cleaner Production, 244, 118869.
+Tang, D., Dai, M., Salido, M. A., & Giret, A. (2016). Energy-eﬃcient dynamic scheduling for a ﬂexible ﬂow shop using an improved particle swarm optimization.
+Computers in Industry, 81, 82–95.
+Wang, S., Wang, X., Yu, J., Ma, S., & Liu, M. (2018). Bi-objective identical parallel machine scheduling to minimize total energy consumption and makespan. Journal
+of Cleaner Production, 193, 424–440.
+Wang, Y., & Li, L. (2015). Time-of-use electricity pricing for industrial customers: A
+survey of U.S. utilities. Applied Energy, 149, 89–103.
+Zeng, Q.-q., Li, J.-q., Li, R.-h., Huang, T., Han, Y.-y., & Sang, H. (2023). Improved NSGA-II for energy-eﬃcient distributed no-wait ﬂow-shop with sequence-dependent setup time. Complex and Intelligent Systems, 9, 825–849.
+Zeng, Y., Che, A., & Wu, X. (2018). Bi-objective scheduling on uniform parallel machines considering electricity cost. Engineering Optimization, 50(1), 19–36.
+Zhang, R., & Chiong, R. (2016). Solving the energy-eﬃcient job shop scheduling
+problem: A multi-objective genetic algorithm with enhanced local search for
+minimizing the total weighted tardiness and total energy consumption. Journal
+of Cleaner Production, 112, 3361–3375.
+Zhou, S., Jin, M., & Du, N. (2020). Energy-eﬃcient scheduling of a single batch processing machine with dynamic job arrival times. Energy, 209, 118420.
+Zitzler, E., Brockhoff, D., & Thiele, L. (2007). The hypervolume indicator revisited:
+On the design of Pareto-compliant indicators via weighted integration. In Evolutionary multi-criterion optimization: 4th international conference, EMO 2007, Matsushima, Japan, March 5–8, 2007. Proceedings 4 (pp. 862–876). Springer.
+Zitzler, E., & Thiele, L. (1999). Multiobjective evolutionary algorithms: A comparative
+case study and the strength Pareto approach. IEEE Transactions on Evolutionary
+Computation, 3(4), 257–271.
+
+866
+
+

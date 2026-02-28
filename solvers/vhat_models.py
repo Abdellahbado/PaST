@@ -55,6 +55,11 @@ class PolyRidgeValueModel:
         x_poly = self._poly_transform_single(x)
         return float(np.dot(self.weights, x_poly))
 
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Predict for a batch of raw feature vectors. X: (N, d_raw) -> (N,)."""
+        X_poly = _poly_expand_batch(X, self.powers_)
+        return X_poly @ self.weights
+
     def _poly_transform_single(self, x: np.ndarray) -> np.ndarray:
         """Manual degree-2 polynomial expansion for a single sample (no sklearn at inference)."""
         return _poly_expand_single(x, self.powers_)
@@ -74,6 +79,8 @@ class PolyRidgeValueModel:
             pmax_for_hist=int(self.spec.pmax_for_hist),
             include_price_shape=int(self.spec.include_price_shape),
             include_meta=int(self.spec.include_meta),
+            include_extra=int(self.spec.include_extra),
+            per_class_pad=int(self.spec.per_class_pad),
             model_type="poly",
         )
 
@@ -85,16 +92,32 @@ class PolyRidgeValueModel:
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=bool(int(ckpt["normalize"])),
-            include_len_hist=bool(int(ckpt["include_len_hist"]))
-            if "include_len_hist" in ckpt.files
-            else False,
-            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
-            include_price_shape=bool(int(ckpt["include_price_shape"]))
-            if "include_price_shape" in ckpt.files
-            else False,
-            include_meta=bool(int(ckpt["include_meta"]))
-            if "include_meta" in ckpt.files
-            else False,
+            include_len_hist=(
+                bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False
+            ),
+            pmax_for_hist=(
+                int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12
+            ),
+            include_price_shape=(
+                bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False
+            ),
+            include_meta=(
+                bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False
+            ),
+            include_extra=(
+                bool(int(ckpt["include_extra"]))
+                if "include_extra" in ckpt.files
+                else False
+            ),
+            per_class_pad=(
+                int(ckpt["per_class_pad"]) if "per_class_pad" in ckpt.files else 0
+            ),
         )
         return PolyRidgeValueModel(
             weights=np.asarray(ckpt["weights"], dtype=np.float64),
@@ -222,6 +245,156 @@ def fit_poly_ridge(
 
 
 # ============================================================================
+#  1b. ElasticNet / LASSO on degree-2 polynomial features (sklearn)
+# ============================================================================
+
+
+@dataclass
+class ElasticNetPolyValueModel:
+    """ElasticNet (or LASSO) regression on degree-2 polynomial features.
+
+    Uses sklearn.linear_model.ElasticNet under the hood. When l1_ratio=1.0
+    this becomes pure LASSO; l1_ratio=0.0 is equivalent to Ridge.
+    """
+
+    weights: np.ndarray  # shape (D_poly,)
+    intercept: float  # scalar bias (sklearn fits intercept separately)
+    spec: FeatureSpec
+    powers_: np.ndarray = field(default_factory=lambda: np.empty(0))
+    H: int = 20
+
+    def predict_from_used(
+        self,
+        *,
+        t: int,
+        used: Sequence[int],
+        totals: np.ndarray,
+        lengths: Sequence[int],
+        ctx: TOUFeatureContext,
+    ) -> float:
+        x = phi_for_state(
+            t=t, used=used, totals=totals, lengths=lengths, ctx=ctx, spec=self.spec
+        )
+        x_poly = _poly_expand_single(x, self.powers_)
+        return float(np.dot(self.weights, x_poly) + self.intercept)
+
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Batch predict. X: (N, d_raw) -> (N,)."""
+        X_poly = _poly_expand_batch(X, self.powers_)
+        return (X_poly @ self.weights + self.intercept).ravel()
+
+    def save(self, path: str) -> None:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            p,
+            weights=self.weights,
+            intercept=np.float64(self.intercept),
+            powers=self.powers_,
+            include_per_class_counts=int(self.spec.include_per_class_counts),
+            include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
+            include_bins=int(self.spec.include_bins),
+            normalize=int(self.spec.normalize),
+            include_len_hist=int(self.spec.include_len_hist),
+            pmax_for_hist=int(self.spec.pmax_for_hist),
+            include_price_shape=int(self.spec.include_price_shape),
+            include_meta=int(self.spec.include_meta),
+            include_extra=int(self.spec.include_extra),
+            per_class_pad=int(self.spec.per_class_pad),
+            model_type="elasticnet",
+        )
+
+    @staticmethod
+    def load(path: str) -> "ElasticNetPolyValueModel":
+        ckpt = np.load(path, allow_pickle=True)
+        spec = FeatureSpec(
+            include_per_class_counts=bool(int(ckpt["include_per_class_counts"])),
+            include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
+            include_bins=bool(int(ckpt["include_bins"])),
+            normalize=bool(int(ckpt["normalize"])),
+            include_len_hist=(
+                bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False
+            ),
+            pmax_for_hist=(
+                int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12
+            ),
+            include_price_shape=(
+                bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False
+            ),
+            include_meta=(
+                bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False
+            ),
+            include_extra=(
+                bool(int(ckpt["include_extra"]))
+                if "include_extra" in ckpt.files
+                else False
+            ),
+            per_class_pad=(
+                int(ckpt["per_class_pad"]) if "per_class_pad" in ckpt.files else 0
+            ),
+        )
+        return ElasticNetPolyValueModel(
+            weights=np.asarray(ckpt["weights"], dtype=np.float64),
+            intercept=float(ckpt["intercept"]),
+            spec=spec,
+            powers_=np.asarray(ckpt["powers"], dtype=np.int32),
+        )
+
+
+def fit_elasticnet(
+    X: np.ndarray,
+    y: np.ndarray,
+    *,
+    alpha: float = 1e-3,
+    l1_ratio: float = 0.5,
+    max_iter: int = 5000,
+) -> Tuple[np.ndarray, np.ndarray, float]:
+    """Fit ElasticNet on degree-2 polynomial features.
+
+    Returns (weights, powers_matrix, intercept).
+
+    Args:
+        alpha: Regularization strength (total penalty).
+        l1_ratio: 1.0 = LASSO, 0.0 = Ridge, 0.5 = balanced ElasticNet.
+        max_iter: Maximum iterations for coordinate descent.
+    """
+    from sklearn.linear_model import ElasticNet as _SkElasticNet
+
+    X = np.asarray(X, dtype=np.float64)
+    y = np.asarray(y, dtype=np.float64)
+    d_in = int(X.shape[1])
+
+    powers = _poly_powers_degree2(d_in)
+    X_poly = _poly_expand_batch(X, powers)
+
+    model = _SkElasticNet(
+        alpha=float(alpha),
+        l1_ratio=float(l1_ratio),
+        max_iter=int(max_iter),
+        fit_intercept=True,
+        warm_start=False,
+    )
+    model.fit(X_poly, y)
+
+    w = np.asarray(model.coef_, dtype=np.float64)
+    intercept = float(model.intercept_)
+
+    n_nonzero = int(np.count_nonzero(w))
+    print(
+        f"[elasticnet] alpha={alpha:.4g}, l1_ratio={l1_ratio:.4g}: "
+        f"{n_nonzero}/{len(w)} non-zero coefficients"
+    )
+
+    return w, powers, intercept
+
+
+# ============================================================================
 #  2. Small MLP (numpy inference)
 # ============================================================================
 
@@ -262,6 +435,12 @@ class MLPValueModel:
         y = np.asarray(y, dtype=np.float64).reshape(-1)
         return float(y[0])
 
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Batch predict. X: (N, d_in) -> (N,). Uses baked standardization."""
+        h1 = np.maximum(0, X @ self.W1 + self.b1)
+        h2 = np.maximum(0, h1 @ self.W2 + self.b2)
+        return (h2 @ self.W3 + self.b3).ravel()
+
     def save(self, path: str) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -281,6 +460,8 @@ class MLPValueModel:
             pmax_for_hist=int(self.spec.pmax_for_hist),
             include_price_shape=int(self.spec.include_price_shape),
             include_meta=int(self.spec.include_meta),
+            include_extra=int(self.spec.include_extra),
+            per_class_pad=int(self.spec.per_class_pad),
             model_type="mlp",
         )
 
@@ -292,16 +473,32 @@ class MLPValueModel:
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=bool(int(ckpt["normalize"])),
-            include_len_hist=bool(int(ckpt["include_len_hist"]))
-            if "include_len_hist" in ckpt.files
-            else False,
-            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
-            include_price_shape=bool(int(ckpt["include_price_shape"]))
-            if "include_price_shape" in ckpt.files
-            else False,
-            include_meta=bool(int(ckpt["include_meta"]))
-            if "include_meta" in ckpt.files
-            else False,
+            include_len_hist=(
+                bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False
+            ),
+            pmax_for_hist=(
+                int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12
+            ),
+            include_price_shape=(
+                bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False
+            ),
+            include_meta=(
+                bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False
+            ),
+            include_extra=(
+                bool(int(ckpt["include_extra"]))
+                if "include_extra" in ckpt.files
+                else False
+            ),
+            per_class_pad=(
+                int(ckpt["per_class_pad"]) if "per_class_pad" in ckpt.files else 0
+            ),
         )
         W3 = np.asarray(ckpt["W3"], dtype=np.float64)
         b3 = np.asarray(ckpt["b3"], dtype=np.float64)
@@ -458,7 +655,6 @@ def fit_mlp(
     )
 
 
-
 # ============================================================================
 #  2b. Poly-MLP (numpy inference)
 # ============================================================================
@@ -503,6 +699,13 @@ class PolyMLPValueModel:
         y = np.asarray(y, dtype=np.float64).reshape(-1)
         return float(y[0])
 
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Batch predict. X: (N, d_raw) -> (N,)."""
+        X_poly = _poly_expand_batch(X, self.powers)
+        h1 = np.maximum(0, X_poly @ self.W1 + self.b1)
+        h2 = np.maximum(0, h1 @ self.W2 + self.b2)
+        return (h2 @ self.W3 + self.b3).ravel()
+
     def save(self, path: str) -> None:
         np.savez(
             path,
@@ -521,6 +724,8 @@ class PolyMLPValueModel:
             pmax_for_hist=int(self.spec.pmax_for_hist),
             include_price_shape=int(self.spec.include_price_shape),
             include_meta=int(self.spec.include_meta),
+            include_extra=int(self.spec.include_extra),
+            per_class_pad=int(self.spec.per_class_pad),
             model_type="poly_mlp",
         )
 
@@ -532,16 +737,32 @@ class PolyMLPValueModel:
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=bool(int(ckpt["normalize"])),
-            include_len_hist=bool(int(ckpt["include_len_hist"]))
-            if "include_len_hist" in ckpt.files
-            else False,
-            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
-            include_price_shape=bool(int(ckpt["include_price_shape"]))
-            if "include_price_shape" in ckpt.files
-            else False,
-            include_meta=bool(int(ckpt["include_meta"]))
-            if "include_meta" in ckpt.files
-            else False,
+            include_len_hist=(
+                bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False
+            ),
+            pmax_for_hist=(
+                int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12
+            ),
+            include_price_shape=(
+                bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False
+            ),
+            include_meta=(
+                bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False
+            ),
+            include_extra=(
+                bool(int(ckpt["include_extra"]))
+                if "include_extra" in ckpt.files
+                else False
+            ),
+            per_class_pad=(
+                int(ckpt["per_class_pad"]) if "per_class_pad" in ckpt.files else 0
+            ),
         )
         W3 = np.asarray(ckpt["W3"], dtype=np.float64)
         b3 = np.asarray(ckpt["b3"], dtype=np.float64)
@@ -591,19 +812,21 @@ def fit_poly_mlp(
 
     d_in_raw = X_train.shape[1]
     powers = _poly_powers_degree2(d_in_raw)
-    
+
     print(f"  [poly_mlp] Expanding features ...")
     X_train_poly = _poly_expand_batch(X_train, powers)
     X_val_poly = _poly_expand_batch(X_val, powers)
 
-    print(f"  [poly_mlp] Training on device={device}, {d_in_raw} -> {X_train_poly.shape[1]} dims")
+    print(
+        f"  [poly_mlp] Training on device={device}, {d_in_raw} -> {X_train_poly.shape[1]} dims"
+    )
 
     d_in = X_train_poly.shape[1]
 
     # Standardize features for better training
     X_mean = X_train_poly.mean(axis=0)
     X_std = X_train_poly.std(axis=0) + 1e-8
-    
+
     X_train_norm = (X_train_poly - X_mean) / X_std
     X_val_norm = (X_val_poly - X_mean) / X_std
 
@@ -746,8 +969,8 @@ class FactoredMLPValueModel:
     """
 
     # Work encoder: x_work → h_work
-    W_work: np.ndarray   # (d_work, h_dim)
-    b_work: np.ndarray   # (h_dim,)
+    W_work: np.ndarray  # (d_work, h_dim)
+    b_work: np.ndarray  # (h_dim,)
     # Price encoder: x_price → h_price
     W_price: np.ndarray  # (d_price, h_dim)
     b_price: np.ndarray  # (h_dim,)
@@ -757,7 +980,7 @@ class FactoredMLPValueModel:
     W_final2: np.ndarray  # (d_final, 1)
     b_final2: np.ndarray  # (1,)
     # Feature group indices
-    work_idx: np.ndarray   # indices into phi vector for work features
+    work_idx: np.ndarray  # indices into phi vector for work features
     price_idx: np.ndarray  # indices into phi vector for price features
 
     spec: FeatureSpec
@@ -791,16 +1014,31 @@ class FactoredMLPValueModel:
         y = (h @ self.W_final2) + self.b_final2
         return float(np.asarray(y, dtype=np.float64).reshape(-1)[0])
 
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Batch predict. X: (N, d_raw) -> (N,)."""
+        x_work = X[:, self.work_idx]
+        x_price = X[:, self.price_idx]
+        h_work = np.maximum(0, x_work @ self.W_work + self.b_work)
+        h_price = np.maximum(0, x_price @ self.W_price + self.b_price)
+        combined = np.concatenate([h_work, h_price, h_work * h_price], axis=1)
+        h = np.maximum(0, combined @ self.W_final1 + self.b_final1)
+        return (h @ self.W_final2 + self.b_final2).ravel()
+
     def save(self, path: str) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         np.savez(
             p,
-            W_work=self.W_work, b_work=self.b_work,
-            W_price=self.W_price, b_price=self.b_price,
-            W_final1=self.W_final1, b_final1=self.b_final1,
-            W_final2=self.W_final2, b_final2=self.b_final2,
-            work_idx=self.work_idx, price_idx=self.price_idx,
+            W_work=self.W_work,
+            b_work=self.b_work,
+            W_price=self.W_price,
+            b_price=self.b_price,
+            W_final1=self.W_final1,
+            b_final1=self.b_final1,
+            W_final2=self.W_final2,
+            b_final2=self.b_final2,
+            work_idx=self.work_idx,
+            price_idx=self.price_idx,
             include_per_class_counts=int(self.spec.include_per_class_counts),
             include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
             include_bins=int(self.spec.include_bins),
@@ -809,6 +1047,8 @@ class FactoredMLPValueModel:
             pmax_for_hist=int(self.spec.pmax_for_hist),
             include_price_shape=int(self.spec.include_price_shape),
             include_meta=int(self.spec.include_meta),
+            include_extra=int(self.spec.include_extra),
+            per_class_pad=int(self.spec.per_class_pad),
             model_type="factored_mlp",
         )
 
@@ -820,16 +1060,32 @@ class FactoredMLPValueModel:
             include_per_class_now_cost=bool(int(ckpt["include_per_class_now_cost"])),
             include_bins=bool(int(ckpt["include_bins"])),
             normalize=bool(int(ckpt["normalize"])),
-            include_len_hist=bool(int(ckpt["include_len_hist"]))
-            if "include_len_hist" in ckpt.files
-            else False,
-            pmax_for_hist=int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12,
-            include_price_shape=bool(int(ckpt["include_price_shape"]))
-            if "include_price_shape" in ckpt.files
-            else False,
-            include_meta=bool(int(ckpt["include_meta"]))
-            if "include_meta" in ckpt.files
-            else False,
+            include_len_hist=(
+                bool(int(ckpt["include_len_hist"]))
+                if "include_len_hist" in ckpt.files
+                else False
+            ),
+            pmax_for_hist=(
+                int(ckpt["pmax_for_hist"]) if "pmax_for_hist" in ckpt.files else 12
+            ),
+            include_price_shape=(
+                bool(int(ckpt["include_price_shape"]))
+                if "include_price_shape" in ckpt.files
+                else False
+            ),
+            include_meta=(
+                bool(int(ckpt["include_meta"]))
+                if "include_meta" in ckpt.files
+                else False
+            ),
+            include_extra=(
+                bool(int(ckpt["include_extra"]))
+                if "include_extra" in ckpt.files
+                else False
+            ),
+            per_class_pad=(
+                int(ckpt["per_class_pad"]) if "per_class_pad" in ckpt.files else 0
+            ),
         )
         W_final2 = np.asarray(ckpt["W_final2"], dtype=np.float64)
         b_final2 = np.asarray(ckpt["b_final2"], dtype=np.float64)
@@ -948,7 +1204,9 @@ def fit_factored_mlp(
 
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  [factored_mlp] Parameters: {n_params}")
-    print(f"  [factored_mlp] d_work={d_work} d_price={d_price} h_dim={h_dim} d_final={d_final}")
+    print(
+        f"  [factored_mlp] d_work={d_work} d_price={d_price} h_dim={h_dim} d_final={d_final}"
+    )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -1010,43 +1268,49 @@ def fit_factored_mlp(
     with torch.no_grad():
         sd = model.state_dict()
         # Work encoder
-        Ww_raw = sd["work_enc.weight"].cpu().numpy().astype(np.float64)   # (h_dim, d_work)
-        bw_raw = sd["work_enc.bias"].cpu().numpy().astype(np.float64)    # (h_dim,)
+        Ww_raw = (
+            sd["work_enc.weight"].cpu().numpy().astype(np.float64)
+        )  # (h_dim, d_work)
+        bw_raw = sd["work_enc.bias"].cpu().numpy().astype(np.float64)  # (h_dim,)
         # Price encoder
-        Wp_raw = sd["price_enc.weight"].cpu().numpy().astype(np.float64)  # (h_dim, d_price)
-        bp_raw = sd["price_enc.bias"].cpu().numpy().astype(np.float64)   # (h_dim,)
+        Wp_raw = (
+            sd["price_enc.weight"].cpu().numpy().astype(np.float64)
+        )  # (h_dim, d_price)
+        bp_raw = sd["price_enc.bias"].cpu().numpy().astype(np.float64)  # (h_dim,)
         # Final layers
-        Wf1_raw = sd["final1.weight"].cpu().numpy().astype(np.float64)   # (d_final, d_combined)
-        bf1_raw = sd["final1.bias"].cpu().numpy().astype(np.float64)     # (d_final,)
-        Wf2_raw = sd["final2.weight"].cpu().numpy().astype(np.float64)   # (1, d_final)
-        bf2_raw = sd["final2.bias"].cpu().numpy().astype(np.float64)     # (1,)
+        Wf1_raw = (
+            sd["final1.weight"].cpu().numpy().astype(np.float64)
+        )  # (d_final, d_combined)
+        bf1_raw = sd["final1.bias"].cpu().numpy().astype(np.float64)  # (d_final,)
+        Wf2_raw = sd["final2.weight"].cpu().numpy().astype(np.float64)  # (1, d_final)
+        bf2_raw = sd["final2.bias"].cpu().numpy().astype(np.float64)  # (1,)
 
     # Bake standardization into encoder weights:
     #   h = W_raw @ ((x - mean) / std) + b_raw
     #     = (W_raw / std) @ x + (b_raw - W_raw @ (mean / std))
     work_std_64 = work_std.astype(np.float64)
     work_mean_64 = work_mean.astype(np.float64)
-    Ww_baked = Ww_raw / work_std_64[None, :]                     # (h_dim, d_work)
-    bw_baked = bw_raw - Ww_raw @ (work_mean_64 / work_std_64)   # (h_dim,)
+    Ww_baked = Ww_raw / work_std_64[None, :]  # (h_dim, d_work)
+    bw_baked = bw_raw - Ww_raw @ (work_mean_64 / work_std_64)  # (h_dim,)
 
     price_std_64 = price_std.astype(np.float64)
     price_mean_64 = price_mean.astype(np.float64)
-    Wp_baked = Wp_raw / price_std_64[None, :]                      # (h_dim, d_price)
+    Wp_baked = Wp_raw / price_std_64[None, :]  # (h_dim, d_price)
     bp_baked = bp_raw - Wp_raw @ (price_mean_64 / price_std_64)  # (h_dim,)
 
     # Transpose for x @ W format
     return FactoredMLPValueModel(
-        W_work=Ww_baked.T,      # (d_work, h_dim)
-        b_work=bw_baked,         # (h_dim,)
-        W_price=Wp_baked.T,     # (d_price, h_dim)
-        b_price=bp_baked,        # (h_dim,)
-        W_final1=Wf1_raw.T,    # (d_combined, d_final)
-        b_final1=bf1_raw,        # (d_final,)
-        W_final2=Wf2_raw.T,    # (d_final, 1)
-        b_final2=bf2_raw,        # (1,)
+        W_work=Ww_baked.T,  # (d_work, h_dim)
+        b_work=bw_baked,  # (h_dim,)
+        W_price=Wp_baked.T,  # (d_price, h_dim)
+        b_price=bp_baked,  # (h_dim,)
+        W_final1=Wf1_raw.T,  # (d_combined, d_final)
+        b_final1=bf1_raw,  # (d_final,)
+        W_final2=Wf2_raw.T,  # (d_final, 1)
+        b_final2=bf2_raw,  # (1,)
         work_idx=work_idx,
         price_idx=price_idx,
-        spec=FeatureSpec(),      # will be set by caller
+        spec=FeatureSpec(),  # will be set by caller
     )
 
 
@@ -1082,6 +1346,10 @@ class LGBMValueModel:
         pred = self.booster.predict(x.reshape(1, -1))
         return float(pred[0])
 
+    def predict_batch(self, X: np.ndarray) -> np.ndarray:
+        """Batch predict. X: (N, d_in) -> (N,)."""
+        return np.asarray(self.booster.predict(X), dtype=np.float64)
+
     def save(self, path: str) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -1093,6 +1361,8 @@ class LGBMValueModel:
             "include_per_class_now_cost": int(self.spec.include_per_class_now_cost),
             "include_bins": int(self.spec.include_bins),
             "normalize": int(self.spec.normalize),
+            "include_extra": int(self.spec.include_extra),
+            "per_class_pad": int(self.spec.per_class_pad),
             "model_type": "lgbm",
             "booster_path": booster_path,
         }
@@ -1121,6 +1391,8 @@ class LGBMValueModel:
             include_per_class_now_cost=bool(int(meta["include_per_class_now_cost"])),
             include_bins=bool(int(meta["include_bins"])),
             normalize=bool(int(meta["normalize"])),
+            include_extra=bool(int(meta.get("include_extra", 0))),
+            per_class_pad=int(meta.get("per_class_pad", 0)),
         )
         booster = lgb.Booster(model_file=meta["booster_path"])
         return LGBMValueModel(booster=booster, spec=spec)

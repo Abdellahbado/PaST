@@ -373,21 +373,16 @@ def run_evaluation_phase(
         # Random scalarisation weight for this episode (no hypervolume!).
         w = rng.random()  # w in [0,1]; scalar = w*norm_cmax + (1-w)*norm_tec
 
-        # Normalisation references (from current archive or fallbacks).
-        if archive.size(inst_id) >= 2:
-            pts = [(e.makespan, e.energy) for e in archive.entries_for(inst_id)]
-            cmax_lo = min(c for c, _ in pts)
-            cmax_hi = max(c for c, _ in pts)
-            tec_lo = min(t for _, t in pts)
-            tec_hi = max(t for _, t in pts)
-        else:
-            cmax_lo, cmax_hi = cur_cmax, cur_cmax + 1
-            tec_lo, tec_hi = cur_energy, cur_energy + 1.0
+        # Instance-based fixed normalisation references.
+        # Using instance properties guarantees stable delta magnitudes
+        # regardless of archive size — prevents "delta collapse" where
+        # archive-based normalisation compressed deltas to zero as the
+        # Pareto front matured (exp(-0/T) = 1 always ⇒ 100% accept).
+        ref_cmax = max(float(inst["T"]), 1.0)
+        ref_tec = max(float(sum(inst["p"]) * max(inst["e"]) * max(inst["ct"])), 1.0)
 
         def scalarise(cmax: int, tec: float) -> float:
-            c_range = max(float(cmax_hi - cmax_lo), 1.0)
-            t_range = max(tec_hi - tec_lo, 1.0)
-            return w * (cmax - cmax_lo) / c_range + (1 - w) * (tec - tec_lo) / t_range
+            return w * cmax / ref_cmax + (1 - w) * tec / ref_tec
 
         cur_scalar = scalarise(cur_cmax, cur_energy)
         best_scalar = cur_scalar  # episode-best scalar objective (paper's x*)

@@ -1,0 +1,1552 @@
+Journal of Cleaner Production 156 (2017) 688e697
+
+Contents lists available at ScienceDirect
+
+Journal of Cleaner Production
+journal homepage: www.elsevier.com/locate/jclepro
+
+Energy-conscious unrelated parallel machine scheduling under
+time-of-use electricity tariffs
+Ada Che*, Shibohua Zhang, Xueqi Wu
+School of Management, Northwestern Polytechnical University, Xi'an 710072, China
+
+a r t i c l e i n f o
+
+a b s t r a c t
+
+Article history:
+Received 17 February 2017
+Received in revised form
+1 April 2017
+Accepted 3 April 2017
+Available online 6 April 2017
+
+This paper investigates an energy-conscious unrelated parallel machine scheduling problem under timeof-use (TOU) electricity pricing scheme, in which the electricity price varies throughout a day. The
+problem lies in assigning a group of jobs to a set of unrelated parallel machines and then scheduling jobs
+on each separate machine so as to minimize the total electricity cost. We ﬁrst build an improved
+continuous-time mixed-integer linear programming (MILP) model for the problem. To tackle large-size
+problems, we then propose a two-stage heuristic. Speciﬁcally, at the ﬁrst stage, jobs are assigned to
+machines aiming at minimizing the total electricity cost under the preemptive circumstance. At the
+second stage, the jobs assigned to each machine are scheduled using an insertion heuristic. Computational results on a real-life instance for turning process and random test instances demonstrate that the
+proposed MILP approach is able to solve small-size problems while the two-stage heuristic is appropriate
+for large-size problems. The case study for turning process also reveals that the proposed optimization
+approaches can contribute to cleaner production.
+© 2017 Elsevier Ltd. All rights reserved.
+
+^ as de
+Handling Editor: Cecilia Maria Villas Bo
+Almeida
+Keywords:
+Energy-conscious scheduling
+Unrelated parallel machines
+Time-of-use (TOU) tariffs
+Mixed-integer linear programming (MILP)
+Two-stage heuristic
+
+1. Introduction
+The rapid development of global economy has been demanding
+more energy and the shortage of energy is threatening the overall
+development of many countries. Energy saving has attracted huge
+attention in recent years due to the fact that a large proportion of
+resources for energy generation are nonrenewable (Tacconi, 2000)
+and that energy consumption has grown by as much as 300% over
+the last 50 years (Park et al., 2009). Inappropriate usage of energy
+has also brought about the serious problem of excessive emissions
+of greenhouse gases, which takes a heavy toll on the climate as well
+as the environment. Hence, efﬁcient utilization of energy is
+important in terms of both promoting economic growth and protecting environment.
+It is well known that the industrial sector is the backbone of
+many countries and consumes the most energy (Jovane et al., 2008;
+Lu et al., 2017). For example, in China, according to Liu (2014), the
+industrial sector consumes about half of the total electricity
+generated. Therefore, improving the energy efﬁciency in the industrial sector is of great signiﬁcance (Li et al., 2016; Cai et al., 2016;
+
+* Corresponding author.
+E-mail address: ache@nwpu.edu.cn (A. Che).
+http://dx.doi.org/10.1016/j.jclepro.2017.04.018
+0959-6526/© 2017 Elsevier Ltd. All rights reserved.
+
+ElMaraghy et al., 2016). Electricity is the main form of energy utilized by this sector (Sun and Li, 2013), which is transferred to its
+customers immediately after being generated. Since the customers'
+demand for electricity can vary during one day, the problem of how
+to balance the electricity supply and demand can be quite tricky. To
+tackle this problem, electricity suppliers usually introduce backup
+power facilities (Wang and Li, 2013). However, these facilities are
+kept idle for most of the time and cost considerable extra resources.
+Another strategy to balance the electricity supply and demand is
+through demand-side management programs, also known as demand response (DR) technology (Albadi and El-Saadany, 2008).
+The so-called demand-side management programs include a
+wide variety of electricity load control strategies and mechanisms,
+among which the time-of-use (TOU) pricing policy is the most
+prevalent one. This scheme is motivated by the observation that the
+total electricity demand in the grid can vary signiﬁcantly in a single
+day. As a result, it is recommended that electricity suppliers should
+set different prices for electricity consumed in different periods of a
+day. Generally, the electricity consumed when the grid is overloaded tends to be set at higher prices while that consumed when
+the load is small at lower prices. For example, the TOU pricing
+scheme executed in Shaanxi Province, China, consists of six pricing
+periods for a whole day and the electricity price during on-peak
+periods is almost triple of that during off-peak periods (Che et al.,
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+2016). This implies that if some workloads are shifted from on-peak
+periods to off-peak or mid-peak periods, signiﬁcant electricity cost
+may be saved. Such schemes enable us to utilize the current infrastructures more efﬁciently (Albadi and El-Saadany, 2008) and
+improve the grid's carbon efﬁciency as well (Wang and Li, 2013).
+Scheduling focuses on how to allocate limited resources to
+various tasks optimally (Pinedo, 2012). Recently, driven by the
+pressure of energy saving and environment protection, scheduling
+problems under the TOU electricity pricing scheme have been
+studied by several scholars. For example, Zhang et al. (2014)
+examined a ﬂow shop scheduling problem with the objective of
+minimizing both the electricity cost and the carbon footprint and
+formulated a multi-objective mixed-integer linear programming
+(MILP) model for their problem. It was shown that there is a tradeoff between the two objectives. Luo et al. (2013) addressed a hybrid
+ﬂow shop scheduling problem considering both production and
+energy efﬁciency. The aim was to minimize both the makespan and
+the electricity cost and an ant colony optimization meta-heuristic
+was proposed to solve their problem. Sharma et al. (2015) investigated a multi-machine scheduling problem with variable processing speeds to minimize the electricity cost and environmental
+impact and developed a simulated annealing algorithm. Shrouf
+et al. (2014) studied a single-machine scheduling problem taking
+into account the change of machine mode. They developed a genetic algorithm to obtain near-optimal solutions for the problem
+and revealed that shifting the workload from on-peak periods to
+off-peak periods can reduce electricity cost signiﬁcantly. Fang et al.
+(2016) examined single-machine scheduling problems with ﬁxed
+and variable processing speeds to minimize the total electricity
+cost. Che et al. (2016) proposed a continuous-time MILP model and
+an efﬁcient greedy insertion heuristic algorithm for the the singlemachine scheduling problem with ﬁxed processing speed. Wang
+et al. (2016b) investigated a single-machine batch scheduling
+problem with variable processing speeds and proposed a discretetime MILP model and two heuristics based on the MILP model.
+Parallel machine scheduling problem is of great signiﬁcance due
+to the fact that it is not only a generalization of the single-machine
+scheduling problem, but also a special case of the ﬂexible ﬂow shop
+scheduling problem (Pinedo, 2012). Parallel machine scheduling
+problems usually involve a two-stage decision-making process:
+assigning jobs to machines and then sequencing the assigned jobs
+on each machine. Traditionally, the majority of such problems are
+aimed to optimize the criteria pertaining to production efﬁciency,
+such as makespan (e.g., Rustogi and Strusevich, 2013) and tardiness
+(e.g., Lin and Lin, 2015). For parallel machine scheduling under the
+TOU pricing scheme, Moon et al. (2013) investigated an unrelated
+parallel machine scheduling problem to minimize the weighted
+sum of makespan and electricity costs. They proposed a hybrid
+genetic algorithm with a blank job insertion algorithm for the
+problem, which is able to solve problems with up to 65 jobs and 20
+machines. Ding et al. (2016) addressed a similar problem to minimize the total electricity cost. They ﬁrst formulated a time-intervalbased MILP model for the problem and then proposed a column
+generation heuristic. Their approaches can deal with problems with
+up to 200 jobs and 20 machines. Zeng et al. (2017) proposed an
+insertion heuristic and an iterative search framework for the biobjective uniform parallel machine scheduling problem.
+
+
+yi;j;k ¼
+
+ui;j;k ¼
+
+689
+
+In this paper, we address an energy-conscious unrelated parallel
+machine scheduling problem under the TOU tariffs with the
+objective of minimizing the total electricity cost. To tackle such a
+problem, we ﬁrst formulate an improved MILP model to obtain
+optimal solutions for small-size problems. We then propose an
+efﬁcient two-stage heuristic to deal with large-size problems. The
+ﬁrst stage focuses on assigning jobs to machines aiming at minimizing the total electricity cost under the preemptive circumstance. That is, jobs are allowed to be preemptively processed on a
+machine. The second stage is related to scheduling jobs on each
+machine to minimize the total electricity cost without preemption.
+Computational results show the proposed optimization approaches
+can contribute to cleaner production; the proposed MILP approach
+is able to solve small-size problems while the two-stage heuristic is
+appropriate for large-size problems.
+The remainder of this paper is organized as follows. In Section 2,
+we present a detailed description for the problem considered and
+formulate an improved MILP model. An efﬁcient two-stage heuristic is proposed in Section 3. We present the computational results in Section 4 and draw the conclusions in Section 5.
+
+2. MILP formulation for the problem
+2.1. Problem description and basic model
+In the considered problem, there are N jobs to be processed on M
+parallel machines. Each job, say job i, is characterized by its processing time on machine j, ti,j, and power consumption per unit
+time, called electricity consumption rate, on machine j, pi,j,
+1  i  N, 1  j  M. Note that the processing time and the power
+consumption rate of a job are dependent on both the machine and
+the job itself. Thus, the problem under investigation is an unrelated
+parallel machine scheduling problem. Each machine can process
+only one job at a time and each job cannot be processed on more
+than one machine at the same time. No preemption is allowed. All
+jobs and machines are available at the beginning of the production
+horizon. Furthermore, machines breakdown and their preventive
+maintenance are not considered in this paper.
+As mentioned above, the electricity prices follow a TOU pricing
+scheme. That is to say, the prices of electricity, depending on its
+demands, may vary throughout a day. In a TOU pricing scheme, the
+time horizon is divided into a set of K time periods. Period k,
+1  k  K, is featured by its start time sk and electricity price ck,
+1  k  K. Without loss of generality, we set s1 ¼ 0. Period k can be
+represented by the interval [sk, skþ1], 1  k  K. The duration of
+period k is denoted by Tk (Tk ¼ skþ1  sk), 1  k  K. Let sKþ1 be the
+given makespan (maximum completion time) for processing all
+jobs.
+The problem considered in this paper consists in assigning the N
+jobs to the M unrelated parallel machines and then allocating
+available time periods on each machine to the jobs assigned to it so
+as to minimize the total electricity cost. Note that a job may be
+processed across two or more adjacent periods on a machine. We
+choose the following decision variables to formulate this problem.
+xi,j,k: The actual processing time of job i in period k of machine j,
+for 1  i  N, 1  j  M, 1  k  K.
+
+1;
+0;
+
+if job i is processed in period k on machine j;
+otherwise:
+
+1;
+0;
+
+if job i is processed across periods k and k þ 1 on machine j;
+otherwise:
+
+for 1  i  N; 1  j  M; 1  k  K:
+
+for 1  i  N; 1  j  M; 1  k  K:
+
+690
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+
+vi;j ¼
+
+1;
+0;
+
+if job i is processed on machine j;
+otherwise:
+
+for 1  i
+
+ N; 1  j  M:
+To better formulate the problem, we ﬁrst introduce a new
+parameter ti,j to denote the possible maximum number of periods
+that job i can span if it is processed on machine j. Parameter ti,j can
+be computed in advance according to the problem parameters.
+With the notation deﬁned above, we present the following basic
+formulation for the problem.
+
+min TEC ¼
+
+P0 :
+
+N X
+M X
+K
+X
+
+pi;j ck xi;j;k
+
+i¼1 j¼1 k¼1
+
+s. t.
+K X
+M 
+X
+
+. 
+xi;j;k ti;j ¼ 1; ci ¼ 1…N;
+
+(1)
+
+xi;j;k  ti;j yi;j;k ; ci ¼ 1…N; j ¼ 1…M; k ¼ 1…K;
+
+(2)
+
+k¼1 j¼1
+
+N
+X
+
+xi;j;k  Tk ; cj ¼ 1…M; k ¼ 1…K;
+
+(3)
+
+i¼1
+
+ui;j;k  yi;j;k þ yi;j;kþ1  1; ci ¼ 1…N; j ¼ 1…M; k ¼ 1…K  1;
+(4)
+N
+X
+
+ui;j;k  1; cj ¼ 1…M; k ¼ 1…K;
+
+(5)
+
+i¼1
+
+
+
+yi;j;l  K 1  yi;j;k þ yi;j;kþ1 ; ci ¼ 1…N; j ¼ 1…M; k
+
+K
+X
+l¼kþ2
+
+¼ 1…K  2;
+
+(6)
+
+
+
+
+xi;j;k  yi;j;k1 þ yi;j;kþ1  1 Tk ; ci ¼ 1…N; j ¼ 1…M; k
+¼ 2…K  1;
+
+vi;j 
+
+K
+X
+
+.
+yi;j;k ti;j ; ci ¼ 1…N; j ¼ 1…M;
+
+vi;j ¼ 1; ci ¼ 1…N;
+
+K
+X
+
+xi;j;k  vi;j ti;j ; ci ¼ 1…N; j ¼ 1…M;
+
+(14)
+
+yi;j;k  vi;j ti;j ; ci ¼ 1…N; j ¼ 1…M:
+
+(15)
+
+k¼1
+
+(7)
+
+K
+X
+k¼1
+
+(8)
+
+k¼1
+M
+X
+
+is equal to its corresponding processing time. Constraint (2) ensures
+if job i is not processed in period k on machine j (i.e., yi,j,k ¼ 0), then
+the actual processing time of job i in period k on machine j should
+take the value of 0. Constraint (3) requires that the total processing
+time of all jobs assigned in a period on any machine cannot exceed
+its duration. Constraint (4) speciﬁes the mathematical relation
+between the two decision variables yi,j,k and ui,j,k. Constraint (5)
+ensures that at most one job can be processed across periods k
+and k þ 1 of machine j. Constraints (6) and (7) are connected with
+the processing continuity constraint if some job is processed across
+multiple periods. Constraint (6) ensures if job i is processed on
+some machine across more than one period, then these periods
+must be continuous. To be more speciﬁc, for any adjacent periods k
+and k þ 1, 1  k  K  2, on machine j used for processing job i, if
+yi,j,k ¼ 1 and yi,j,kþ1 ¼ 0, then yi,j,l ¼ 0 must hold for all k þ 2  l  K to
+ensure the continuity of processing periods for job i. Constraint (7)
+requires that if a job is processed in periods k1 and kþ1 on some
+machine, then the middle period k must be fully occupied by the
+job due to the non-preemption assumption. Constraint (8) ensures
+the consistency in the deﬁnitions of binary variables yi,j,k and vi,j.
+Speciﬁcally, it restricts that if yi,j,k ¼ 1 for some i, j and k, then vi,j ¼ 1
+must hold. Note that this constraint can also be formulated as
+vi,j  yi,j,k. which has in total NMK inequalities. We prefer to use
+constraint (8) in its current form since it consists of NM inequalities
+and is more compact. Constraint (9) guarantees that each job can
+only be processed on one machine. Constraints (10)e(12) and (13)
+are binary and non-negativity restrictions on the variables,
+respectively.
+It is known that an MILP model can often be tightened in the
+sense of providing a better linear programming relaxation by
+adding valid inequalities to the model. An MILP model is usually
+solved by a branch-and-cut algorithm with linear programming
+relaxation. Thus, a tighter MILP formulation with a better linear
+programming relaxation can generate tighter lower bounds in the
+branch-and-cut search procedure and contribute to reducing
+computational time. In view of this point, we develop the following
+two valid inequalities to tighten the above MILP model.
+
+(9)
+
+Inequality (14) restricts that if job i is not processed on machine
+j, i.e., vi,j ¼ 0, then the total processing time of job i in all periods on
+machine j should be equal to zero. Similarly, inequality (15) speciﬁes that if job i is not handled on machine j, then the total number
+of periods occupied by job i on machine j should be zero.
+
+j¼1
+
+yi;j;k 2f0; 1g; ci ¼ 1…N; j ¼ 1…M; k ¼ 1…K;
+
+(10)
+
+ui;j;k 2f0; 1g; ci ¼ 1…N; j ¼ 1…M; k ¼ 1…K;
+
+(11)
+
+vi;j 2f0; 1g; ci ¼ 1…N; j ¼ 1…M;
+
+(12)
+
+xi;j;k  0; for ci ¼ 1…N; j ¼ 1…M; k ¼ 1…K:
+
+(13)
+
+The goal is to minimize the total electricity cost (TEC) required
+for processing all the jobs. Constraints (1)e(3) are associated with
+the processing time constraints. Constraint (1) guarantees that the
+total processing time of a job assigned in all periods on all machines
+
+2.2. Further improvement of the basic model
+As mentioned above, constraints (4)e(5) in our model ensure
+that at most one job can be processed across periods k and k þ 1 on
+machine j. In what follows, we demonstrate that they are unnecessary and can be removed from the model. Due to this removal,
+ui,j,k is also unnecessary. Let us consider the following MILP model:
+
+P1 :
+
+min TEC ¼
+
+N X
+M X
+K
+X
+
+pi;j ck xi;j;k
+
+i¼1 j¼1 k¼1
+
+s. t. (1)e(3), (6)e(10), (12)e(15).
+The difference between models P0 and P1 is that constraints
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+(4)e(5) and the binary variable ui,j,k are removed in the latter one.
+Now we analyze the property of the optimal solution of model P1.
+Let ðTEC * ; x*i;j;k ; y*i;j;k ; v*i;j Þ be an optimal solution of model P1.
+Theorem 1. In the optimal solution of model P1, for any machine j
+and period k, if multiple jobs are processed across periods k and
+k þ 1 on machine j, then they must have the same electricity
+consumption rate.
+Proof. We prove the theorem by contradiction. Assume that in the
+optimal solution ðTEC * ; x*i;j;k ; y*i;j;k ; v*i;j Þ, there exist a pair of jobs, say
+i and l, such that jobs i and l are both processed across periods k and
+k þ 1 on machine j and pi,j s pl,j We will demonstrate that in this
+case, a new solution with smaller total electricity cost than TEC * can
+be obtained.
+By assumption, jobs i and l are both processed across periods k
+and k þ 1 of machine j. This means that x*i;j;k > 0, x*i;j;kþ1 > 0, x*l;j;k > 0,
+and x*l;j;kþ1 > 0. In this case, it is understandable that at least one job
+is processed in a preemptive way. We can move all the other jobs
+processed in period k of machine j within the period in such a way
+that the processing of jobs i and l in period k happens at the end of
+period k; and move all the other jobs processed in period k þ 1 of
+machine j within the period in such a way that the processing of
+jobs i and l in period k þ 1 happens at the start of period k þ 1, as
+shown in Fig. 1.
+Without loss of generality, we assume that electricity consumption rate pi,j > pl,j. That is, we designate the job with higher
+electricity consumption rate as job i. We now demonstrate that in
+this case, we can obtain a non-preemptive schedule with smaller
+total electricity cost after reassignment of jobs.
+Let us ﬁrst consider the case that ck < ckþ1. Since our objective is
+to minimize the total electricity cost, job i with higher electricity
+consumption rate has a higher priority than job l to be processed in
+period k using the duration x*i;j;k þ x*l;j;k . Two cases are possible:
+Case (a): x*i;j;k þ x*l;j;k  ti,j. We reassign the two jobs as follows.
+Job i is processed in period k and the remaining duration
+x*i;j;k þ x*l;j;k  ti;j plus the processing duration x*i;j;kþ1 þ x*l;j;kþ1 will be
+used for processing job l. In this case, job i is processed within
+period k and job l is processed across periods k and kþ1. Fig. 1 gives
+an illustration of this reassignment.
+Let E1 and E2 denote the total electricity cost required for processing job i and job l before and after reassignment of jobs,
+respectively. Then
+
+
+
+
+
+
+
+E1 ¼ ck x*i;j;k pi;j þ x*l;j;k pl;j þ ckþ1 x*i;j;kþ1 pi;j þ x*l;j;kþ1 pl;j
+
+
+
+
+
+
+
+E2 ¼ ck ti;j pi;j þ ck x*i;j;k þ x*l;j;k  ti;j pl;j þ ckþ1 x*i;j;kþ1 þ x*l;j;kþ1 pl;j
+Knowing that ti;j ¼ x*i;j;k þ x*i;j;kþ1 , we have
+
+
+
+
+
+E1  E2 ¼ ck x*i;j;k pi;j þ x*l;j;k pl;j þ ckþ1 x*i;j;kþ1 pi;j þ x*l;j;kþ1 pl;j
+
+
+
+
+ck ti;j pi;j  ck x*i;j;k þ x*l;j;k  ti;j pl;j  ckþ1 x*i;j;kþ1 þ x*l;j;kþ1 pl;j
+
+
+¼ x*i;j;k ðck  ckþ1 Þ pl;j  pi;j :
+Since pi,j > pl,j and ck < ckþ1, relation E1 > E2 holds. Note that the
+electricity cost required for processing all other jobs remains unchanged. We thus obtain a smaller total electricity cost than TEC * ,
+which contradicts the assumption that ðTEC * ; x*i;j;k ; y*i;j;k ; v*i;j Þ is an
+optimal solution of model P1.
+
+691
+
+Case (b): x*i;j;k þ x*l;j;k < ti,j. We reassign the two jobs as follows.
+Job l is processed in period k þ 1 and the remaining duration
+x*i;j;kþ1 þ x*l;j;kþ1  tl;j of period kþ1 plus the duration x*i;j;k þ x*l;j;k of
+period k will be used for processing job i. In this case, job l is processed within period kþ1 and job i is processed across periods k and
+kþ1. An illustration is presented in Fig. 2.
+Let E3 be the total electricity cost required for processing job i
+and job l after reassignment of jobs in this case. Then
+
+
+
+
+
+E3 ¼ ckþ1 tl;j pl;j þ ck x*i;j;kþ1 þ x*l;j;kþ1  tl;j pi;j þ ck x*i;j;k þ x*l;j;k pi;j
+Knowing that tl;j ¼ x*l;j;k þ x*l;j;kþ1 , we have
+
+
+
+
+
+E1  E3 ¼ ck x*i;j;k pi;j þ x*l;j;k pl;j þ ckþ1 x*i;j;kþ1 pi;j þ x*l;j;kþ1 pl;j
+
+
+
+
+ckþ1 tl;j pl;j  ck x*i;j;kþ1 þ x*l;j;kþ1  tl;j pi;j  ck x*i;j;k þ x*l;j;k pi;j
+
+
+¼ ðck  ckþ1 Þ xl;j;k pl;j  xi;j;kþ1 pi;j :
+For this case, we have x*i;j;k þ x*l;j;k < ti,j ¼ x*i;j;k þ x*i;j;kþ1 . Thus we
+have x*l;j;k < x*i;j;kþ1 . Furthermore, we have ck < ckþ1 and pl;j < pi;j .
+These relations lead to E1  E3 > 0. Therefore, relation E1 > E3 holds.
+Note that the electricity cost required for processing all other jobs
+remains the same. We thus obtain a smaller total electricity cost
+than TEC * , which is in contradiction with the assumption that
+ðTEC * ; x*i;j;k ; y*i;j;k ; v*i;j Þ is an optimal solution of model P1.
+Thus, we prove that for the case of ck < ckþ1, we can obtain a nonpreemptive schedule with smaller total electricity cost if there are
+two jobs that are processed across periods k and k þ 1 of machine j.
+Note that if ck > ckþ1, the same result can be reached as well. When
+there are over two jobs processed across period k and k þ 1, the
+claim can be proven to be true in a similar way. This ends the proof.
+Theorem 2. In the optimal solution of model P1, for any machine j
+and period k, if multiple jobs with the same electricity consumption
+rate are processed across periods k and kþ1 of machine j, we can
+always obtain a non-preemptive schedule with the same total
+electricity cost as TEC * .
+Proof. Assume that in the optimal solution ðTEC * ; x*i;j;k ; y*i;j;k ; v*i;j Þ,
+jobs i and l are both processed across periods k and k þ1 of machine
+j and pi,j ¼ pl,j. By assumption, we have x*i;j;k > 0, x*i;j;kþ1 > 0, x*l;j;k > 0,
+and x*l;j;kþ1 > 0. In this case, it is clear that at least one job is processed in a preemptive way. Similarly, we can move all other jobs
+processed in period k of machine j within the period such that the
+processing of jobs i and l in period k happens at the end of period k;
+and move all other jobs processed in period kþ1 of machine j
+within the period such that the processing of jobs i and l in period
+kþ1 happens at the start of period kþ1. Now we can insert jobs i
+and l in an arbitrary order into the segment across period k and kþ1
+with the duration x*i;j;k þ x*l;j;k þ x*i;j;kþ1 þ x*l;j;kþ1 . Note that after
+insertion, the duration in period k is still equal to x*i;j;k þ x*l;j;k and
+that in period kþ1 is still x*i;j;kþ1 þ x*l;j;kþ1 . Since pi,j ¼ pl,j, it is clear
+that the electricity cost required for handling jobs i and l remains
+the same. Note that the electricity cost required for processing
+other jobs remains unchanged. For this reason, the total electricity
+cost is still equal to TEC * . If more than two jobs with the same
+electricity consumption rate are processed across periods k and
+k þ1 of machine j, we can always obtain a non-preemptive schedule
+with the same total electricity cost in a similar way. This ends the
+proof.
+
+692
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+According to Theorem 1 and Theorem 2, it is understandable
+that the optimal schedule obtained with model P1 may be a preemptive one. However, if this is so, we can always construct a nonpreemptive schedule with the same total electricity cost from the
+preemptive schedule. Thus, we have the following corollary, which
+demonstrates the correctness of model P1.
+Corollary 1. Constraints (4) and (5) can be relaxed in model P0.
+With Corollary 1, ui,j,k is unnecessary and constraints (4)e(5) can
+be removed from model P0 and we thus have model P1, which becomes more compact in terms of the numbers of variables and
+constraints.
+As mentioned above, Ding et al. (2016) also proposed an MILP
+model for the unrelated parallel machine scheduling problem. We
+now describe the differences between model P1 and Ding et al.'s
+model (Ding-model for short). It should be noted that variables xi,j,k
+and yi,j,k are taken from Ding-model and constraints (1)e(3) in
+model P1 are equivalent to constraints (11)e(13) in Ding-model.
+The difference between the two models lies in the following two
+aspects. First, constraints (4) and (5) are relaxed and not necessary
+in our model. As such, the binary variable ui,j,k is no longer necessary. This reduces NMK binary variables and NM(K1)þMK constraints. Second, constraint (6) and (7) are used to ensure the
+processing continuity of a job in multiple periods. In order to
+formulate the processing contiguity constraint, Ding et al. deﬁned
+additional 2NMK binary variables and the total number of associated constraints is 3NMK þ N. In this work, we formulate the processing contiguity constraints without deﬁning any additional
+variables while the number of associated constraints is 2NM(Ke2).
+In addition, we introduce an additional two-dimension binary
+variable vi,j and additional constraints (8) and (9) to ensure that
+each job can be processed on one and only one machine. Its total
+numbers of variables and constraints are NM and NM þ N,
+respectively. The valid inequalities (14) and (15) count 2NM constraints. From the above analysis, it is clear that our model is more
+compact than Ding-model in terms of the number of variables and
+the number of constraints.
+3. An efﬁcient two-stage heuristic
+As mentioned above, parallel machine scheduling problems can
+be decomposed into two decision issues. The ﬁrst one is to assign
+the jobs to the machines and the second one is to schedule the jobs
+on each machine. In view of this observation, we propose a twostage heuristic to solve our problem. At the ﬁrst stage, we assign
+the jobs to machines aiming at minimizing the total electricity cost
+under the preemptive circumstance. At the second stage, the jobs
+assigned to each machine are inserted one by one into its available
+time period(s) with minimum electricity cost without preemption.
+The reason why we consider a preemptive schedule at the ﬁrst
+stage is explained as follows. We observe that if a preemptive
+schedule leads to a lower total electricity cost, then its nonpreemptive version tends to take less electricity cost as well. In
+view of this point, the preemptive schedule is considered to save
+computational time when assigning the jobs to the machines.
+3.1. Assignment of jobs to the machines
+The ﬁrst stage of the heuristic focuses on assigning the jobs to
+the machines, aiming at minimizing the total electricity cost under
+the preemptive circumstance. To achieve this, we ﬁrst determine
+the assignment order of jobs and then assign the jobs one after
+another to the machines. Inspired by the Vogel's method of allocation for classical transportation problems, we introduce the
+concept of penalty cost to determine the assignment order of jobs.
+
+Before presenting the deﬁnition of penalty costs, let us ﬁrst review some problem properties. As mentioned above, the processing time of job i on machine j is ti,j, while its corresponding
+electricity consumption rate is pi,j. Let q0i;j denote the total amount of
+electricity consumed by machine j for processing job i. By deﬁnition, we have q0i;j ¼ ti,jpi,j. Note that different machines may require
+different amounts of electricity consumption to process the same
+job. That is, each job may require different amounts of electricity
+consumption on different machines. Note that the total electricity
+cost is dependent on the amount of electricity consumption and its
+price. For this reason, it is favorable to assign a job to the machine
+with less electricity consumption. However, due to limited capacity
+of each machine, not all jobs can be assigned to their respective
+machines with the least electricity assumption. To solve this issue,
+we calculate the difference between the two least electricity consumptions for each job on the machines. The difference is called the
+penalty cost of a job for not being processed on the machine with
+the least electricity consumption. It is understandable that the job
+with a higher penalty cost should be given a higher priority to be
+ﬁrst assigned, called Highest-Penalty-Cost-First for short. To
+implement this assignment rule, we ﬁrst sort all jobs in nonincreasing order of their penalty costs and let the order be 4(1),
+4(2), …, 4(N), where 4(i) is the index of the i-th job. We then assign
+the jobs to the machines one after another according to this order.
+That is, we ﬁrst assign job 4(1) among the machines, then job 4(2),
+and ﬁnally job 4(N). Note that if several jobs share the same value of
+penalty cost, then the job with lower least electricity consumption
+is granted higher priority to be ﬁrst assigned.
+Once the job assignment order is determined, we need to decide
+to which machine each job should be assigned. Thus, our problem
+becomes how to assign a given job to a machine. Suppose that we
+need to determine to which machine job i should be assigned at
+some moment. Let Sj(i) be the set of jobs that have been assigned to
+machine j before assigning job i. And let Cj(i) denote the optimal
+total electricity cost for processing all the jobs in set Sj(i) on machine j in a preemptive way. With preemption, it means that jobs
+can be preemptively processed on machine j. That is, the processing
+of a job can be paused and resumed at a later time point. According
+to Fang et al. (2016), the optimal preemptive schedule for scheduling multiple jobs on a single machine under TOU tariffs to
+minimize the total electricity cost can be obtained in the following
+way. First, all periods are sorted in non-decreasing order of their
+prices and let the order be f(1), f(2), …, f(K) such that
+cf(1)  cf(2)  …  cf(K), where f(k) is the index of the k-th period.
+The jobs are then inserted one by one, in non-increasing of their
+electricity consumption rates, into the sorted periods f(1), f(2), …,
+f(K). That is, the ﬁrst job is inserted into period f(1) and then the
+other jobs are inserted into this period until it is fully occupied.
+When period f(1) is fully occupied, the remaining jobs are inserted
+into period f(2) and this process continues until all the jobs have
+been inserted. Note that due to preemption, part of a job may be
+processed in period f(k) and its remaining part processed in period
+f(k þ 1) for some 1  k  Ke1.
+To assign job i, we ﬁrst deﬁne the assignment cost of job i to
+machine j. Let Cj0 ðiÞ be the optimal total electricity cost for processing all the jobs in set Sj(i) plus job i on machine j in the preemptive way. We deﬁne the assignment cost of job i to machine j,
+denoted by Ai,j, as Ai;j ¼ Cj0 ðiÞ  Cj ðiÞ. That is, the assignment cost of
+job i to machine j is deﬁned as the increase in the total electricity
+cost required for processing the additional job i on machine j
+calculated in the preemptive way. Now job i will be assigned to
+machinej0 with the minimum assignment cost among all the values
+of Ai,j for all 1  j  M. With such a way, the jobs are assigned one
+after another to the machines and the process ends when all the
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+693
+
+Fig. 1. Illustration of case (a).
+
+Fig. 2. Illustration of case (b).
+
+jobs have been assigned to the machines.
+To illustrate the above assignment procedure, let us consider the
+following instance with 6 jobs and 3 machines. The makespan is 18
+time units, and the whole production course is comprised of 3
+pricing periods, called periods 1, 2 and 3, whose durations are 4, 6
+and 8 time units, respectively. Their corresponding electricity prices are 5, 2 and 3 price units, respectively. To obtain a preemptive
+schedule, the periods are ﬁrst sorted in increasing order of their
+electricity prices. We thus have fð1Þ ¼ 2, fð2Þ ¼ 3, and fð3Þ ¼ 1. The
+parameters of the jobs are shown in Table 1.
+From Table 1, we can calculate the penalty costs for jobs 1e6,
+which are 10, 10, 1, 3, 4 and 6, respectively. Therefore, 4ð1Þ ¼ 1,
+4ð2Þ ¼ 2, 4ð3Þ ¼ 6, 4ð4Þ ¼ 5, 4ð5Þ ¼ 4, and 4ð6Þ ¼ 3. That is, the job
+assignment order is [1, 2, 6, 5, 4, 3]. Job 1 is the ﬁrst job that should
+be assigned. For job 1, we can obtain that A1,1 ¼ 36, A1,2 ¼ 18, and
+A1,3 ¼ 105. Therefore, job 1 should be assigned to machine 2. We
+now consider the assignment of job 2. Note that machine 2 has
+already been allocated with job 1. Thus, when calculating the
+assignment cost A2,2, we need to rearrange the processing sequence
+of job 1 and job 2 on machine 2 according to their electricity consumption rates in order to obtain a preemptive schedule. Similarly,
+we have A2,1 ¼ 32, A2,2 ¼ 44, and A2,3 ¼ 12. Thus job 2 should be
+assigned to machine 3. Other jobs are assigned in the similar way
+and Fig. 3 depicts the ﬁnal job assignment for this instance.
+The above assignment approach is short-sighted. When
+assigning the current job to a machine, the information about the
+unassigned jobs is not considered. To overcome this shortcoming,
+we design the adjustment procedure, which is aimed at reducing
+the total electricity cost by exchanging two jobs between a pair of
+machines.
+The adjustment procedure is an iterative process, in which two
+jobs are exchanged between a pair of machines as long as such an
+operation can decrease the total electricity cost. In each iteration of
+the adjustment procedure, for a given job assignment j, we ﬁrst
+need to determine which pair of jobs should be exchanged to
+reduce its electricity consumption as much as possible. Let qi be the
+amount of electricity consumption for processing job i in job
+assignment j and j(i) be the index of its corresponding machine;
+be the least electricity consumption required for proand qmin
+i
+cessing job i among all the machines and jmin(i) be the index of its
+corresponding machine. To identify the job to be moved, we ﬁrst
+> 0 in non-increasing order of
+sort all the jobs such that q(i) qmin
+i
+}. Let the order be s(1), s(2), …, s(N0 ),
+the values of {q(i)  qmin
+i
+
+where s(i) is the index of the i-th job and N' < N. We ﬁrst check job
+s(1), which has the largest reduced amount of electricity consumption if it is moved from machine j(s(1)) to machine jmin(s(1)).
+As an exchange, a speciﬁc job, say job i', must be moved from
+machine jmin(s(1)) to machine j(s(1)) to maintain the workload
+balance between the two machines. Job i' is chosen as the job with
+the smallest increased amount of electricity consumption among
+all jobs on machine jmin(s(1)) if they are moved to machine j(s(1)).
+If the following conditions both hold, then exchange of job s(1) and
+job i' is implemented.
+(C1) : The exchange of the two jobs can decrease the total electricity cost for processing them;
+(C2) : The exchange of the two jobs does not exceed the given
+makespan.
+If the above conditions hold, we exchange job s(1) and job i'
+between the machines j(s(1)) and jmin(s(1)) and then go to the next
+adjustment iteration; otherwise, we check job s(2), …, s(N0 ) until
+an exchange operation can be done. If no jobs are found to satisfy
+conditions (C1) and (C2), then the adjustment procedure ends.
+The whole procedure for the ﬁrst stage of the proposed heuristic
+can be summarized as follows.
+
+Assignment of jobs to the machines
+Step 1: Calculate penalty cost for job i for all 1  i  N.
+Step 2: Sort all the jobs in non-increasing order of their penalty costs.
+Step 3: For i ¼ 1 to N do
+Step 3.1: Calculate assignment cost A4ðiÞ;j for all 1  j  M.
+Step 3.2: Assign job 4ðiÞ to machine j0 with the minimum assignment cost
+among
+all A4ðiÞ;j for 1  j  M.
+Step 4: Sort all jobs such that q(i) qmin
+> 0 in non-increasing order of q(i) 
+i
+qmin
+.
+i
+Step 5: For i ¼ 1 to N0 do
+Step 5.1: Calculate the increased amount of electricity consumption for all
+jobs
+on machine jmin(s(i)) if they are moved to machine j(s(i)).
+Step 5.2: Choose the job with the smallest increased amount of electricity
+consumption as job i'.
+Step 5.3: If conditions (C1) and (C2) both hold, exchange job s(i) and job i'
+between the machines, and go to Step 4.
+Step 5.4: If (i ¼¼ N0 ), then go to Step 6.
+Step 6: Output the job assignment.
+
+694
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+Table 1
+Parameters for the instance.
+Job 1 Job 2 Job 3 Job 4 Job 5 Job 6
+Processing time
+
+Machine 1 6
+Machine 2 8
+Machine 3 9
+Electricity consumption rate Machine 1 3
+Machine 2 1
+Machine 3 5
+
+4
+4
+6
+4
+5
+1
+
+5
+8
+8
+3
+2
+3
+
+4
+1
+6
+2
+5
+4
+
+4
+7
+4
+3
+2
+2
+
+3
+3
+7
+2
+4
+3
+
+Fig. 3. The ﬁnal job assignment for the instance.
+
+previously inserted jobs needed to be moved forward (resp. backward) so that job i can be exactly inserted into the extended forward (resp. backward) block from period k.
+Now we can deﬁne the insertion cost of a job. The insertion cost
+of job i into the forward (resp. backward) block from period k on
+machine j, denoted by FICi;j;k (resp. BICi;j;k ), refers to the electricity
+cost for job i to be processed in this position plus the extra electricity cost due to the movement of jobs in its forward-moving or
+backward-moving set, if any. The greedy insertion heuristic inserts
+each job into the position with the least insertion cost. Please see
+Che et al. (2016) for details.
+The complete insertion heuristic for scheduling the jobs on each
+machine can be summarized as follow:
+
+Insertion Heuristic
+Step 1: For j ¼ 1 to M do
+Step 1.1: Sort all jobs assigned to machine j in non-increasing order of their
+electricity consumption rates.
+Step 1.2: For each sorted job i on machine j do
+Step 1.2.1: For k ¼ 1 to K do
+Calculate FICi,j,k and BICi,j,k
+Step 1.2.2: Select the position with the least insertion cost for job i
+Step 1.2.3: Insert job i into this position
+Step 1.2.4: Update other jobs' positions
+Step 2: Calculate and output the total electricity cost
+
+3.2. Insertion heuristic to schedule jobs on a single machine
+
+4. Computational results
+
+After the ﬁrst stage of the heuristic, each machine is allocated
+with certain number of jobs. Hence, the second stage is to schedule
+the jobs on each single machine separately in a non-preemptive
+way with the objective of minimizing the total electricity cost.
+Thus, at the second stage, the problem can be transformed into a
+series of single-machine scheduling problems under TOU tariffs.
+This problem has been studied by Che et al. (2016), who proposed
+an efﬁcient greedy insertion heuristic to minimize the total electricity cost. Hence, in this paper, we utilize their algorithm to
+schedule the jobs on each machine in order to minimize the total
+electricity cost.
+Generally, the greedy insertion heuristic proposed by Che et al.
+(2016) tries to insert the jobs one by one into the position that
+brings about the least electricity cost. The jobs are inserted in nonincreasing order of their electricity consumption rates. In their
+work, they proposed the concept of block to deﬁne the candidate
+insertion positions for jobs, which are based on the fact that the
+movement of a job incurs no change to the total electricity cost as
+long as its start time and completion time are always within the
+same period. Actually, each period on a machine provides two
+blocks for jobs to insert: the forward block and the backward
+blocks. The forward and backward directions refer to the directions
+along which time increases and decreases, respectively. The forward (resp. backward) block from a certain period on a machine is
+deﬁned as the possible longest idle segment from this period to its
+ﬁrst non-empty forward (resp. backward) period considering the
+movement of jobs within a period.
+Note that as pointed out by Che et al. (2016), the movement of
+previously inserted jobs should be taken into account when the
+forward and backward blocks are not large enough. This will help to
+improve the performance of the algorithm. To achieve this, they
+developed the concept of the forward-moving (resp. backwardmoving) set of jobs. The forward-moving (resp. backwardmoving) set for job i in period k on machine j consists of the
+
+In this section, we ﬁrst validate the proposed MILP model and
+two-stage heuristic with a real-life instance for turning process. The
+results are analyzed and discussed in detail. After that, we evaluate
+the performance of the proposed MILP model and two-stage heuristic with random test instances. The model formulations are
+coded and implemented in Cþþ and solved by the MIP solver of
+CPLEX (Version 12.6). All the experiments are performed on an
+ideaPad Laptop with 1.7 GHz Intel i5 CPU and 8 GB RAM.
+4.1. A real-life instance for turning process
+Turning operation is one of the most fundamental machining
+processes. A turning process is usually comprised of two stages:
+rough turning and ﬁne turning. In this work, a real-life instance for
+turning process from Wang et al. (2016a) is used to validate the
+proposed MILP model and two-stage heuristic. In this instance, jobs
+to be handled have to undergo the rough turning process and then
+the ﬁne turning process. At each stage, each job can be processed on
+one of unrelated parallel machines. Speciﬁcally, there are in total
+eleven C630 lathes involved, ﬁve for the rough turning and six for
+the ﬁne turning. Note that each stage of the turning process can be
+considered as a separate unrelated parallel machine environment.
+For simplicity, this work only considers the ﬁrst stage, i.e., rough
+turning.
+The jobs to be processed are different in terms of materials,
+diameters as well as lengths. There are 12 types of jobs depending
+on the above features. As mentioned above, ﬁve lathes are available
+for the rough turning process. Each lathe has 12 different spindle
+speeds to choose. Different speed levels correspond to different
+processing times and amounts of electricity consumption. For the
+purpose of energy saving, we select the optimal speed determined
+by Wang et al. (2016a) for each job to be processed on a particular
+machine. The processing time and its corresponding electricity
+consumption for a job processed on a speciﬁc machine can be
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+695
+
+Fig. 4. The Pareto front for the real-life instance.
+
+computed according to the method and data given in Wang et al.
+(2016a). For a given job to be processed on certain machine, once
+its processing time and amount of electricity consumption are
+determined, its corresponding power consumption rate can be
+obtained by dividing the latter value by the former one. The task is
+to handle 60 jobs, which are a combination of 12 types of jobs.
+Speciﬁcally, the numbers of jobs for job types 1e12 are 8, 8, 6, 6, 6,
+6, 4, 4, 2, 2, 4 and 4, respectively.
+We employ the TOU pricing scheme executed in Beijing, China,
+to test the instance. Its detailed periods and their electricity prices
+can be found in Ding et al. (2016). To reveal the relation between
+the total electricity cost and makespan, we ﬁx the makespan of
+production at different levels from 8 h to 16 h with an increment of
+1 h. We solve the problem for each value of makespan using the
+improved MILP model and the two-stage heuristic. The limit of
+computational time for CPLEX solver is set at 3600 s. If the optimal
+objective value cannot be found by CPLEX solver within 3600s, the
+current best objective value and the lower bound that CPLEX solver
+has obtained at 3600s are output.
+The Pareto fronts for the real-life instance obtained by the MILP
+model and the two-stage heuristic are depicted in Fig. 4. The percentage in Fig. 4 is the relative gap of the objective value obtained
+by the heuristic deviated from the optimal value or the lower
+bound obtained by CPLEX if it cannot solve an instance to optimality within 3600s. The gap ranges from 0.76% to 1.76%. This
+suggests that the proposed two-stage heuristic can generate highquality solutions. It can be seen from Fig. 4 that the total electricity
+cost generally shows a descending trend when the makespan increases. That is, the total electricity cost may be saved by prolonging the makespan. This is because larger makespan tends to
+provide more periods with lower electricity prices for job processing. However, when the makespan reaches 11 h, the descending trend becomes slow. This can be explained as follows. Since the
+production starts at 7am, when the makespan increases from 11 h
+to 16 h, the prolonged production time mainly lies in the peak
+period with the highest electricity price. Hence, to minimize the
+total electricity cost, the jobs tend not to be processed during the
+new added periods. For this reason, the optimal values of the total
+electricity cost are almost the same. Therefore, for this instance,
+production managers should focus their attention mainly on the
+trade-off between the two criteria when the makespan is no more
+than 11 h.
+For this instance, we are also interested in the number of jobs
+
+that are assigned to the machines with the least electricity consumption and the percentage of total processing time assigned to
+the off-peak periods in the solutions obtained by the two-stage
+heuristic. Our computational results reveal that depending on the
+makespan, nearly 60%e77% jobs are assigned to the machines with
+the least electricity consumption and 88%e100% jobs are dispatched to the machines with the two least electricity consumptions. The reason why not all jobs can be assigned to the machines
+with the least electricity consumption lies in two aspects. First, the
+capacity of any machine is limited. Second, the balance of workload
+among the machine is important to minimize the total electricity
+cost. This implies that the proposed job assignment approach is
+very effective. The total amount of electricity consumption tends to
+be minimized by assigning the jobs to the machines consuming as
+less electricity as possible. It is clear that the less the electricity
+consumption is, the less the carbon emissions will be. Thus, such an
+optimization approach contributes to cleaner production. On the
+other hand, our computational results also show that 61%e99% of
+the total processing time of all jobs is assigned to the off-peak
+periods. The total electricity cost can be saved by doing so. This
+can also contribute to balancing the demand and supply of electricity and consequently reducing CO2 emission (Shrouf et al., 2014;
+Che et al., 2016).
+Concerning computational time, when the value of makespan is
+set as 9 h and 16 h, CPLEX solver cannot obtain the optimal
+objective value within 3600s. For other values of makespan, the
+computational time ranges from 43s to 742s. However, the proposed two-stage heuristic can ﬁnd the solution for all the values of
+makespan within 0.02 s. This implies that the proposed two-stage
+heuristic is much more efﬁcient in terms of computational time.
+4.2. Random test instances
+In this section, we evaluate the performance of the proposed
+MILP model and two-stage heuristic with random test instances,
+which are generated in the same method as Ding et al. (2016). The
+notation “NM” is used to represent a speciﬁc scale of random
+instance set, where N and M stand for the number of jobs and the
+number of machines, respectively. Note that Ding et al. (2016)
+tested their approaches under two types of TOU pricing schemes
+implemented in Beijing and in Italy, respectively. Since we are only
+accessible to the data related with the former one, we conduct the
+computational experiment under the TOU tariffs implemented in
+
+696
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+Table 2
+Computation results for comparison of the two models.
+Problem
+
+Model
+
+Number of variables
+
+Number of constraints
+
+Optimal TEC (Gap)
+
+Number of optimal solutions
+
+Computational time (in seconds)
+
+50e5
+
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+Ding-model
+Our model
+Ding/Our
+
+6001
+2551
+2.35
+5501
+2501
+2.20
+8001
+3801
+2.10
+19,501
+8101
+2.40
+19,001
+8201
+2.32
+22,001
+10,001
+2.20
+43,501
+17,851
+2.44
+42,001
+17,701
+2.37
+42,001
+18,601
+2.26
+75,001
+30,601
+2.45
+68,001
+28,401
+2.39
+76,001
+32,801
+2.32
+
+5896
+3323
+1.77
+5140
+2620
+1.96
+7156
+4528
+1.58
+19 276
+11,138
+1.73
+18,272
+10,036
+1.82
+20,280
+10,240
+1.98
+43,164
+25,257
+1.70
+40,908
+23,154
+1.76
+39,404
+20,752
+1.89
+74,548
+43,874
+1.69
+66,532
+38,066
+1.74
+72,544
+39,672
+1.82
+
+402.64(0.02%)
+402.64
+1.00
+347.18
+347.18
+1.00
+236.95
+236.95
+1.00
+573.10
+573.12
+1.00
+756.20(0.03%)
+756.22
+1.00
+546.81
+546.81
+1.00
+812.97(0.01%)
+813.00(0.01%)
+1.00
+975.67(0.05%)
+975.68(0.04%)
+1.00
+848.35
+848.34
+1.00
+1091.27(0.03%)
+1091.28(0.02%)
+1.00
+1059.74(0.06%)
+1059.74
+1.00
+1103.41(0.02%)
+1103.37
+1.00
+
+4
+5
+0.80
+5
+5
+1.00
+5
+5
+1.00
+5
+5
+1.00
+4
+5
+0.80
+5
+5
+1.00
+4
+4
+1.00
+3
+4
+0.75
+4
+5
+0.80
+1
+3
+0.33
+1
+5
+0.20
+1
+5
+0.20
+
+726.07
+3.75
+193.61
+25.68
+3.60
+7.13
+4.71
+1.41
+3.34
+240.42
+17.61
+13.65
+1122.77
+15.60
+71.97
+124.36
+16.46
+7.55
+1755.37
+723.63
+2.42
+1751.56
+119.43
+14.66
+1036.57
+32.47
+31.92
+2926.43
+1348.12
+2.17
+2322.86
+400.10
+5.80
+2890.06
+190.62
+15.16
+
+50e10
+
+50e20
+
+100e5
+
+100e10
+
+100e20
+
+150e5
+
+150e10
+
+150e20
+
+200e5
+
+200e10
+
+200e20
+
+Beijing. The limit of computational time for CLPEX solver is still set
+at 3600 s. If the optimal objective value cannot be obtained at
+3600s, the current best objective value, and its gap from the lower
+bound are output. For each combination of problem NM, ﬁve instances are generated and tested, and their average values are
+calculated. The comparison results between the proposed MILP
+model and Ding-model are shown in Table 2.
+From Table 2, we can see that the number of both variables and
+constraints of our improved model is much less than Ding-model.
+To be more speciﬁc, the number of variables of our model is 1/
+2.45e1/2.1 of that of Ding-model, and the number of constraints of
+our model is 1/1.69e1/1.98 of Ding et al.'s. This implies that our
+model is more compact than Ding-model. The number of optimal
+solutions in Table 2 shows how many optimal solutions can be
+found among ﬁve instances within 3600s. We can see from Table 2
+that with our MILP model, four instances out of 60 instances cannot
+be solved to optimality within 3600s. However, with Ding-model,
+there are in total 18 instances that cannot be solved to optimality
+within 3600s. We can also see that the ratio of computational time
+of Ding-model against our model ranges from 2.17 to 193.61. This
+demonstrates that our improved model runs much faster than
+Ding-model.
+The evaluation of the proposed heuristic is conducted by
+comparing it with our MILP model in terms of solution quality and
+computational time. To evaluate the solution quality of the heuristic, we calculate the gap of its objective value deviated from the
+optimal value or the lower bound obtained by CPLEX if it cannot
+obtain the optimal solution within 3600s.
+Table 3 shows the computational results of the comparison. We
+
+Table 3
+Computational comparison of the improved model and heuristic.
+Problem
+
+50e5
+50e10
+50e20
+100e5
+100e10
+100e20
+150e5
+150e10
+150e20
+200e5
+200e10
+200e20
+Average
+
+Total electricity cost
+
+Computational time
+(in seconds)
+
+Heuristic
+
+MILP
+
+Gap (%)
+
+Heuristic
+
+MILP
+
+424.92
+377.19
+249.59
+613.89
+802.47
+568.24
+868.61
+1034.16
+873.45
+1179.82
+1129.98
+1134.22
+771.38
+
+402.64
+347.18
+236.95
+573.12
+756.22
+546.81
+813.00(0.01%)
+975.68(0.04%)
+848.34
+1091.28(0.02%)
+1059.74
+1103.37
+729.53
+
+5.5
+8.6
+5.3
+7.1
+6.1
+3.9
+6.8
+6.0
+3.0
+8.1
+6.6
+3.0
+5.8
+
+0.01
+0.03
+0.06
+0.02
+0.03
+0.06
+0.02
+0.04
+0.08
+0.02
+0.05
+0.10
+0.04
+
+3.75
+3.60
+1.41
+17.61
+15.60
+16.46
+723.63
+119.43
+32.47
+1348.12
+400.10
+190.62
+239.40
+
+can see that the gap between the total electricity costs obtained by
+our heuristic and by CPLEX solver ranges from 3.0% to 8.6%. However, the heuristic is much more efﬁcient in terms of computational
+time. All the instances can be solved within 0.1 s using the proposed
+heuristic, while four instances out of 60 instances cannot be solved
+to optimality within 3600s using our MILP model. This suggests
+that the two-stage heuristic may have huge potentials for solving
+large-size instances with more than 50 jobs.
+5. Conclusion
+This paper considers an unrelated parallel machine scheduling
+
+A. Che et al. / Journal of Cleaner Production 156 (2017) 688e697
+
+problem under the TOU tariffs to minimize the total electricity cost.
+We ﬁrst formulate an improved MILP model for the problem. To
+tackle large-size problem, we then develop an efﬁcient two-stage
+heuristic.
+The proposed MILP approach and two-stage heuristic are ﬁrst
+evaluated using a real-life instance for turning process. Computational results demonstrate that the relative gap of the Pareto points
+obtained by the heuristic ranges from 0.76% to 1.76%. This suggests
+that the two-stage heuristic can yield high-quality Pareto solutions.
+Computational experiment also reveals that the total electricity
+cost may be saved by prolonging the makespan and the proposed
+optimization approaches can contribute to cleaner production.
+To further evaluate the performance of our improved MILP
+model, we compare it with Ding-model using random test instances. Computational comparison between the two models
+shows that our model runs much faster than Ding-model, the ratio
+of computational time of Ding-model against our model ranging
+from 2.17 to 193.61. This is because our model is more compact in
+terms of the number of variables and constraints. We also evaluate
+the performance of the heuristic using random test instances. Our
+computational results demonstrate that the gap between the total
+electricity costs obtained by the heuristic and by the MILP model
+ranges from 3.0% to 8.6%. All the instances can be solved within 0.1 s
+using the proposed heuristic, while four instances out of 60 instances cannot be solved to optimality within 3600s using the MILP
+model. This suggests that the proposed heuristic can yield highquality solution with very short amount of time.
+Several management implications can be obtained from this
+research when formulating production plans for unrelated parallel
+machines under the TOU pricing scheme. Firstly, production managers are suggested to ﬁrst determine the production plan for the
+jobs with large gaps between the two least electricity consumptions required for its processing on the machines and each job
+should be processed on the machine consuming as less electricity
+as possible while balancing the load among the machines. Secondly, jobs should be tried to be processed in the off-peak periods if
+the makespan is large enough. Thirdly, there is a trade-off between
+the total electricity cost and the makespan. The total electricity cost
+can be reduced by appropriately prolonging the makespan.
+This work has a close connection with cleaner production from
+two points of views. The proposed two-stage heuristic is aimed at
+minimizing the total electricity cost under the TOU tariffs. The ﬁrst
+stage of the heuristic focuses on minimizing the total amount of
+electricity consumption by assigning jobs to machines appropriately. It is understandable that the less the electricity consumption
+is, the less the carbon emissions are. The second stage tries to
+minimize the total electricity costs on each separate machine when
+the total amount of electricity consumption for the jobs is ﬁxed. Our
+computational results revealed that the off-peak periods with
+lower electricity price has a higher possibility to be used than peak
+periods. Thus, the schedule obtained contributes to balancing the
+demand and supply of electricity. This may spare the utilization of
+backup machines for electricity suppliers, which usually have
+higher CO2 emission. Thus, the TOU policy can contribute to the
+reduction of CO2 emission and cleaner production.
+The TOU pricing policy is now being implemented in many
+countries. Under TOU electricity tariffs, the total electricity cost can
+be saved by an effective schedule. The proposed MILP model
+executed by CPLEX and the heuristic can be used by production
+managers to make production plans aiming at reducing total electricity cost under TOU electricity tariffs.
+Future research can be focused on the extension of the problem
+to other machine environments, such as ﬂow shop and job shop,
+and investigating the multi-objective version of the problem using
+
+697
+
+multi-objective optimization approaches.
+
+Acknowledgement
+The authors are most grateful to Fang Wang for providing us
+with the data for the real-life instance reported in this study. This
+work was partially supported by the National Natural Science
+Foundation of China under grant numbers 71471145 and 71071129.
+
+References
+Albadi, M.H., El-Saadany, E.F., 2008. A summary of demand response in electricity
+markets. Electr. Power Syst. Res. 78, 1989e1996.
+Cai, W., Liu, F., Zhou, X., Xie, J., 2016. Fine energy consumption allowance of
+workpieces in the mechanical manufacturing industry. Energy 114, 623e633.
+Che, A., Zeng, Y., Lyu, K., 2016. An efﬁcient greedy insertion heuristic for energyconscious single machine scheduling problem under time-of-use electricity
+tariffs. J. Clean. Prod. 129, 565e577.
+Ding, J.Y., Song, S., Zhang, R., Chiong, R., 2016. Parallel machine scheduling under
+time-of-use electricity prices: new models and optimization approaches. IEEE
+Trans. Autom. Sci. Eng. 13 (2), 1138e1154.
+ElMaraghy, H.A., Youssef, A.M.A., Marzouk, A.M., ElMaraghy, W.H., 2016. Energy use
+analysis and local benchmarking of manufacturing lines. J. Clean. Prod. http://
+dx.doi.org/10.1016/j.jclepro.2015.12.026.
+Fang, K., Uhan, N.A., Zhao, F., Sutherland, J.W., 2016. Scheduling on a single machine
+under time-of-use electricity tariffs. Ann. Oper. Res. 238 (1), 199e227.
+€r, C.R., Westkamper, E., Williams, D.,
+Jovane, F., Yoshikawa, H., Alting, L., Boe
+Tseng, M., Seliger, G., Paci, A.M., 2008. The incoming global technological and
+industrial revolution towards competitive sustainable manufacturing. CIRP Ann.
+Manuf. Technol. 57, 641e659.
+Li, K., Zhang, X., Leung, J.Y.T., Yang, S., 2016. Parallel machine scheduling problems in
+green manufacturing industry. J. Manuf. Syst. 38, 98e106.
+Lin, Y.-K., Lin, H.-C., 2015. Bicriteria scheduling problem for unrelated parallel
+machines with release dates. Comput. Oper. Res. 64, 28e39.
+Liu, C.H., 2014. Approximate trade-off between minimisation of total weighted
+tardiness and minimisation of carbon dioxide (CO) emissions in bi-criteria
+batch scheduling problem. Int. J. Comput. Integr. Manuf. 27, 759e771.
+Lu, C., Gao, L., Li, X., Pan, Q., Wang, Q., 2017. Energy-efﬁcient permutation ﬂow shop
+scheduling problem using a hybrid multi-objective backtracking search algorithm. J. Clean. Prod. 144, 228e238.
+Luo, H., Du, B., Huang, G.Q., Chen, H., Li, X., 2013. Hybrid ﬂow shop scheduling
+considering machine electricity consumption cost. Int. J. Prod. Econ. 146,
+423e439.
+Moon, J.Y., Shin, K., Park, J., 2013. Optimization of production scheduling with timedependent and machine-dependent electricity cost for industrial energy efﬁciency. Int. J. Adv. Manuf. Technol. 68, 523e535.
+Park, C.W., Kwon, K.S., Kim, W.B., Min, B.K., Park, S.J., Sung, I.H., Yoon, Y.S., Lee, K.S.,
+Lee, J.H., Seok, J., 2009. Energy consumption reduction technology in
+manufacturing d a selective review of policies, standards, and research. Int. J.
+Precis. Eng. Manuf. 10, 151e173.
+Pinedo, M.L., 2012. Scheduling: Theory, Algorithms, and Systems. Springer-Verlag,
+New York.
+Rustogi, K., Strusevich, V.A., 2013. Parallel machine scheduling: impact of adding
+extra machines. Oper. Res. 61, 1243e1257.
+Sharma, A., Zhao, F., Sutherland, J.W., 2015. Econological scheduling of a
+manufacturing enterprise operating under a time-of-use electricity tariff.
+J. Clean. Prod. 108, 256e270.
+, J., García-Sa
+nchez, A., Ortega-Mier, M., 2014. Optimizing
+Shrouf, F., Ordieres-Mere
+the production scheduling of a single machine to minimize total energy consumption costs. J. Clean. Prod. 67, 197e207.
+Sun, Z., Li, L., 2013. Opportunity estimation for real-time energy control of sustainable manufacturing systems. IEEE Trans. Autom. Sci. Eng. 10, 38e44.
+Tacconi, L., 2000. Biodiversity and ecological economics: participation, values and
+resource management. Biol. Conserv. 107, 259e260.
+Wang, F., Rao, Y., Zhang, C., Tang, Q., Zhang, L., 2016a. Estimation of distribution
+algorithm for energy-efﬁcient scheduling in turning processes. Sustainability 8,
+762e781.
+Wang, S., Liu, M., Chu, F., Chu, C., 2016b. Bi-objective optimization of a single machine batch scheduling problem with energy cost consideration. J. Clean. Prod.
+137, 1205e1215.
+Wang, Y., Li, L., 2013. Time-of-use based electricity demand response for sustainable
+manufacturing systems. Energy 63, 233e244.
+Zeng, Y., Che, A., Wu, X., 2017. Bi-objective scheduling on uniform parallel machines
+considering
+electricity
+cost.
+Eng.
+Optim.
+http://dx.doi.org/10.1080/
+0305215X.2017.1296437. Published online.
+Zhang, H., Zhao, F., Fang, K., Sutherland, J.W., 2014. Energy-conscious ﬂow shop
+scheduling under time-of-use electricity tariffs. CIRP Ann. Manuf. Technol. 63,
+37e40.
+
+

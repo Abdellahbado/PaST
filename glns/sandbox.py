@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import math
+import random
 import resource
+import signal
 import sys
 import traceback
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -52,6 +55,9 @@ def _worker(
     result_queue: mp.Queue,
 ) -> None:
     """Execute *fn_name* (compiled from *fn_code*) with *args* in isolation."""
+    # Ignore SIGINT in worker processes so that Ctrl+C in the parent only
+    # sets the stop flag there; workers finish their current task cleanly.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     try:
         # Memory limit: RLIMIT_AS caps *virtual memory*.
         # This is generally OK with 'spawn'. With 'fork' on Linux containers,
@@ -64,7 +70,13 @@ def _worker(
                 pass  # not fatal — proceed without memory cap
 
         # Compile & extract the function.
-        ns: Dict[str, Any] = {"__builtins__": __builtins__}
+        # We pre-inject common stdlib modules so operators don't crash on
+        # missing imports like `random` (common LLM mistake).
+        ns: Dict[str, Any] = {
+            "__builtins__": __builtins__,
+            "random": random,
+            "math": math,
+        }
         exec(compile(fn_code, "<operator>", "exec"), ns)  # noqa: S102
         fn: Callable = ns[fn_name]
         result = fn(*args)
@@ -138,7 +150,11 @@ def compile_operator(code: str, fn_name: str) -> Callable:
     Used for seed operators and quick local checks where sandboxing overhead is
     unnecessary.
     """
-    ns: Dict[str, Any] = {"__builtins__": __builtins__}
+    ns: Dict[str, Any] = {
+        "__builtins__": __builtins__,
+        "random": random,
+        "math": math,
+    }
     exec(compile(code, "<operator>", "exec"), ns)  # noqa: S102
     if fn_name not in ns:
         raise KeyError(

@@ -160,8 +160,10 @@ def repair(partial_solution: List[List[int]],
 ## Rules
 1. Each operator is a SINGLE self-contained Python function. ALL helper functions and imports go INSIDE.
 2. Only stdlib + `math` + `random` may be used (no numpy/scipy/torch).
-3. Return ONLY valid JSON — no markdown fences, no prose outside the JSON.
-4. Keep operators efficient: O(n*m) or O(n^2) at most; avoid exponential search.
+3. ALWAYS include `import random` inside the function (and `import math` if you use math).
+4. Return ONLY valid JSON — no markdown fences, no prose outside the JSON.
+5. Keep operators efficient: O(n*m) or O(n^2) at most; avoid exponential search.
+6. Keep the "idea" field SHORT (1-2 sentences, <120 words). Put detailed reasoning in code comments instead.
 
 ## Domain hints (idea library)
 Destroy ideas: random removal, worst-energy-contributor removal, most-loaded-machine removal,
@@ -282,7 +284,13 @@ class GroqOperatorClient:
 
     @staticmethod
     def _extract_json(raw: str) -> list:
-        """Extract a JSON array from possibly markdown-fenced LLM output."""
+        """Extract a JSON array from possibly markdown-fenced LLM output.
+
+        Includes a fallback that salvages individually-complete JSON objects
+        when the response was truncated mid-array (common when max_tokens is
+        tight).  This avoids falling back to seed operators for an entire
+        generation just because the last operator was cut off.
+        """
         # Try direct parse first.
         raw_stripped = raw.strip()
         if raw_stripped.startswith("["):
@@ -299,13 +307,43 @@ class GroqOperatorClient:
             except json.JSONDecodeError:
                 pass
 
-        # Last resort: find outermost [ ... ].
+        # Try outermost [ ... ].
         m = re.search(r"\[.*]", raw, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(0))
             except json.JSONDecodeError:
                 pass
+
+        # --- Truncation salvage -------------------------------------------
+        # If we reach here the JSON array is likely truncated (max_tokens hit).
+        # Try to recover individual complete {...} objects from the text.
+        salvaged: list = []
+        depth = 0
+        start = -1
+        for i, ch in enumerate(raw):
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    candidate = raw[start : i + 1]
+                    try:
+                        obj = json.loads(candidate)
+                        if isinstance(obj, dict) and "code" in obj and "type" in obj:
+                            salvaged.append(obj)
+                    except json.JSONDecodeError:
+                        pass
+                    start = -1
+        if salvaged:
+            logger.warning(
+                "JSON array was truncated; salvaged %d/%s complete operator(s)",
+                len(salvaged),
+                "?",
+            )
+            return salvaged
 
         raise ValueError(
             f"Could not extract JSON array from LLM response:\n{raw[:500]}"
@@ -334,6 +372,7 @@ class GroqOperatorClient:
         self,
         actions: List[dict],
         reference_ops: List[OperatorRecord],
+        search_context: Optional[str] = None,
     ) -> OperatorBatch:
         """One batched LLM call per generation to fill ALL pruned slots.
 
@@ -405,10 +444,19 @@ class GroqOperatorClient:
             )
         slots_block = "\n".join(slot_parts)
 
+        ctx_block = ""
+        if getattr(self.cfg, "include_search_context", True) and search_context:
+            max_chars = int(getattr(self.cfg, "search_context_max_chars", 900))
+            ctx = str(search_context).strip()
+            if max_chars > 0 and len(ctx) > max_chars:
+                ctx = ctx[:max_chars] + "..."
+            ctx_block = f"## Search context (concise)\n{ctx}\n\n"
+
         n_total = len(actions)
         user_msg = (
             f"Action: EVOLUTION (fill {n_total} pruned slots in one batch)\n\n"
-            f"## Existing high-performing operators (for context)\n{ref_block}\n\n"
+            + ctx_block
+            + f"## Existing high-performing operators (for context)\n{ref_block}\n\n"
             f"## Slots to fill\n{slots_block}\n\n"
             f"Return a JSON list of exactly {n_total} operator dicts "
             f"(in the same order as the slots above):\n"

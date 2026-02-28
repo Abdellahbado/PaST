@@ -526,6 +526,7 @@ def solve_optimal_benchmark_dp(
     beam_width: int = 2000,
     prune_factor: float = 2.0,
     vhat: Optional[callable] = None,
+    vhat_batch: Optional[callable] = None,
     track_schedule: bool = True,
     max_states: int = 0,
 ) -> DPResult:
@@ -624,6 +625,7 @@ def solve_optimal_benchmark_dp(
                 K=K,
                 final_state=final_state,
                 vhat=vhat,
+                vhat_batch=vhat_batch,
                 beam_width=int(beam_width),
                 prune_factor=float(prune_factor),
                 time_limit=float(time_limit),

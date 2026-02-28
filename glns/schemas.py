@@ -24,7 +24,7 @@ class OperatorSpec(BaseModel):
     """One destroy or repair operator as returned by the LLM."""
 
     type: Literal["destroy", "repair"]
-    idea: str = Field(..., min_length=3, max_length=500)
+    idea: str = Field(..., min_length=3, max_length=1200)
     code: str = Field(..., min_length=20)
 
     @field_validator("code")

@@ -49,6 +49,7 @@ from PaST.solvers.vhat_linear import (
     LinearRidgeValueModel,
     fit_ridge,
     phi_for_state,
+    phi_for_states_batch,
 )
 from PaST.solvers.vhat_tou_features import build_tou_feature_context
 from PaST.sandbox.train_eval_vhat_beam_dp import (
@@ -60,11 +61,13 @@ from PaST.sandbox.train_eval_vhat_beam_dp import (
 )
 from PaST.solvers.vhat_models import (
     PolyRidgeValueModel,
+    ElasticNetPolyValueModel,
     MLPValueModel,
     PolyMLPValueModel,
     FactoredMLPValueModel,
     LGBMValueModel,
     fit_poly_ridge,
+    fit_elasticnet,
     fit_mlp,
     fit_poly_mlp,
     fit_factored_mlp,
@@ -74,7 +77,13 @@ from PaST.solvers.vhat_models import (
 
 # Union type for all model types
 ValueModel = Union[
-    LinearRidgeValueModel, PolyRidgeValueModel, MLPValueModel, PolyMLPValueModel, FactoredMLPValueModel, LGBMValueModel
+    LinearRidgeValueModel,
+    PolyRidgeValueModel,
+    ElasticNetPolyValueModel,
+    MLPValueModel,
+    PolyMLPValueModel,
+    FactoredMLPValueModel,
+    LGBMValueModel,
 ]
 
 
@@ -216,6 +225,25 @@ def _make_generate_data_daily_prices(
     if len(ct) != int(T):
         raise RuntimeError("Internal error: generated daily profile has wrong length")
     return ct
+
+
+# Named fixed pricing profiles (length-20 repeating day)
+_NAMED_PROFILES: Dict[str, List[float]] = {
+    # Flat: uniform price across all slots (tests pure scheduling ability)
+    "flat": [3.0] * 20,
+    # Two-block: cheap off-peak / expensive peak (simpler than 3-regime daily_tou)
+    "two_block": [1.0] * 10 + [6.0] * 10,
+    # Ramp: linearly increasing price through the day
+    "ramp": [float(1 + i * 0.5) for i in range(20)],
+    # Double-peak: morning and evening peaks with cheap midday/night
+    "double_peak": (
+        [1.0, 1.0, 2.0, 4.0, 6.0, 4.0, 2.0, 1.0, 1.0, 1.0]
+        + [1.0, 1.0, 2.0, 4.0, 6.0, 5.0, 3.0, 2.0, 1.0, 1.0]
+    ),
+    # Weekend/weekday: alternating cheap and expensive days
+    # (Simulates weekly patterns compressed into 20 slots)
+    "weekend_weekday": [1.0] * 6 + [4.0] * 8 + [1.0] * 6,
+}
 
 
 def _make_realized_prices_from_forecast(
@@ -554,9 +582,7 @@ def _stream_fit_ridge(
         # Training-time augmentation for robustness (does not change labels)
         if float(x_noise_sigma) > 0.0 or float(feature_dropout) > 0.0:
             rng = np.random.default_rng(
-                int(augment_seed)
-                + int(start)
-                + 10_000 * int(split_seed)
+                int(augment_seed) + int(start) + 10_000 * int(split_seed)
             )
             if float(feature_dropout) > 0.0:
                 keep_p = 1.0 - float(feature_dropout)
@@ -683,9 +709,7 @@ def _stream_fit_poly_ridge(
         # Training-time augmentation for robustness (before poly expansion)
         if float(x_noise_sigma) > 0.0 or float(feature_dropout) > 0.0:
             rng = np.random.default_rng(
-                int(augment_seed)
-                + int(start)
-                + 10_000 * int(split_seed)
+                int(augment_seed) + int(start) + 10_000 * int(split_seed)
             )
             if float(feature_dropout) > 0.0:
                 keep_p = 1.0 - float(feature_dropout)
@@ -1118,11 +1142,20 @@ def main() -> None:
         "--daily-price-profile",
         type=str,
         default="daily_tou",
-        choices=["daily_tou", "generate_data"],
+        choices=[
+            "daily_tou",
+            "generate_data",
+            "flat",
+            "two_block",
+            "ramp",
+            "double_peak",
+            "weekend_weekday",
+        ],
         help=(
             "Which 20-hour repeating daily profile to use. "
             "daily_tou matches New Benchmark/new_data.py daily_tou; "
-            "generate_data samples a 20-slot day using interval prices and repeats it."
+            "generate_data samples a 20-slot day using interval prices and repeats it. "
+            "flat/two_block/ramp/double_peak/weekend_weekday are fixed named profiles."
         ),
     )
     ap.add_argument(
@@ -1373,6 +1406,8 @@ def main() -> None:
         choices=[
             "linear",
             "poly",
+            "elasticnet",
+            "lasso",
             "mlp",
             "poly_mlp",
             "factored_mlp",
@@ -1384,6 +1419,7 @@ def main() -> None:
             "mlp_all",
         ],
         help="Base algorithm to train: linear (ridge), poly (deg=2 ridge), "
+        "elasticnet (l1+l2 on deg-2 poly), lasso (pure l1 on deg-2 poly), "
         "mlp (small neural net), poly_mlp (expand then MLP), factored_mlp (factored-interaction MLP), lgbm (gradient boosted trees).",
     )
     ap.add_argument(
@@ -1505,6 +1541,31 @@ def main() -> None:
         default=0,
         help="Override pmax_for_hist used by --feat-len-hist (0 = use --pmax).",
     )
+    ap.add_argument(
+        "--feat-extra",
+        action="store_true",
+        help="Include extra generalization features (horizon fraction, congestion, job-mix stats, cheap-slot fraction).",
+    )
+
+    # ElasticNet / LASSO knobs
+    ap.add_argument(
+        "--elasticnet-alpha",
+        type=float,
+        default=1e-3,
+        help="Regularization strength for elasticnet model type.",
+    )
+    ap.add_argument(
+        "--elasticnet-l1-ratio",
+        type=float,
+        default=0.5,
+        help="L1/L2 mix for elasticnet (1.0 = LASSO, 0.0 = Ridge). Default 0.5.",
+    )
+    ap.add_argument(
+        "--elasticnet-max-iter",
+        type=int,
+        default=5000,
+        help="Maximum iterations for ElasticNet coordinate descent.",
+    )
 
     # Model I/O
     ap.add_argument(
@@ -1581,7 +1642,8 @@ def main() -> None:
     eval_seeds = parse_seed_range(args.eval_seeds)
 
     daily_prices_20: List[float] | None = None
-    if str(args.daily_price_profile).strip().lower() == "generate_data":
+    _pp = str(args.daily_price_profile).strip().lower()
+    if _pp == "generate_data":
         daily_prices_20 = _make_generate_data_daily_prices(
             seed=int(args.gd_seed),
             T=20,
@@ -1589,6 +1651,10 @@ def main() -> None:
             ck_low=int(args.gd_ck_low),
             ck_high=int(args.gd_ck_high),
         )
+    elif _pp in _NAMED_PROFILES:
+        daily_prices_20 = list(_NAMED_PROFILES[_pp])
+        print(f"[pool] Using named price profile: {_pp} → {daily_prices_20}")
+    # else: daily_tou — daily_prices_20 stays None → build_instance uses default
 
     if str(args.beams).strip():
         beams = [int(x) for x in str(args.beams).split(",") if x.strip()]
@@ -1609,6 +1675,7 @@ def main() -> None:
             include_per_class_now_cost=True,
             include_bins=True,
             normalize=use_normalize,
+            per_class_pad=int(args.pmax),  # fixed-length per-class features
         )
 
     # Apply optional feature enrichments for any model type.
@@ -1617,7 +1684,12 @@ def main() -> None:
         if int(args.feat_pmax_for_hist) > 0
         else int(args.pmax)
     )
-    if bool(args.feat_len_hist) or bool(args.feat_price_shape) or bool(args.feat_meta):
+    if (
+        bool(args.feat_len_hist)
+        or bool(args.feat_price_shape)
+        or bool(args.feat_meta)
+        or bool(args.feat_extra)
+    ):
         spec = FeatureSpec(
             include_per_class_counts=spec.include_per_class_counts,
             include_per_class_now_cost=spec.include_per_class_now_cost,
@@ -1629,6 +1701,8 @@ def main() -> None:
                 spec.include_price_shape or bool(args.feat_price_shape)
             ),
             include_meta=(spec.include_meta or bool(args.feat_meta)),
+            include_extra=(spec.include_extra or bool(args.feat_extra)),
+            per_class_pad=spec.per_class_pad,
         )
 
     # Eval instance parameters (possibly different from training)
@@ -1671,6 +1745,8 @@ def main() -> None:
                 pmax_for_hist=int(args.pmax),
                 include_price_shape=False,
                 include_meta=False,
+                include_extra=spec.include_extra,
+                per_class_pad=spec.per_class_pad,
             )
         elif model_type == "mlp_price":
             spec = FeatureSpec(
@@ -1682,6 +1758,8 @@ def main() -> None:
                 pmax_for_hist=int(args.pmax),
                 include_price_shape=True,
                 include_meta=False,
+                include_extra=spec.include_extra,
+                per_class_pad=spec.per_class_pad,
             )
         elif model_type == "mlp_meta":
             spec = FeatureSpec(
@@ -1693,6 +1771,8 @@ def main() -> None:
                 pmax_for_hist=int(args.pmax),
                 include_price_shape=False,
                 include_meta=True,
+                include_extra=spec.include_extra,
+                per_class_pad=spec.per_class_pad,
             )
         else:
             spec = FeatureSpec(
@@ -1704,8 +1784,16 @@ def main() -> None:
                 pmax_for_hist=int(args.pmax),
                 include_price_shape=True,
                 include_meta=True,
+                include_extra=spec.include_extra,
+                per_class_pad=spec.per_class_pad,
             )
         model_type = "mlp"
+
+    # Map lasso shortcut → elasticnet with l1_ratio=1.0
+    if model_type == "lasso":
+        model_type = "elasticnet"
+        args.elasticnet_l1_ratio = 1.0
+
     n_workers_req = int(args.workers) if int(args.workers) > 0 else mp.cpu_count()
     # Spawning more processes than there are instances wastes RAM (each process
     # imports numpy, solver modules, etc.). Cap at number of training seeds.
@@ -1792,11 +1880,22 @@ def main() -> None:
                     if "include_meta" in ckpt.files
                     else False
                 ),
+                include_extra=(
+                    bool(int(ckpt["include_extra"]))
+                    if "include_extra" in ckpt.files
+                    else False
+                ),
+                per_class_pad=(
+                    int(ckpt["per_class_pad"]) if "per_class_pad" in ckpt.files else 0
+                ),
             )
             # Also load the actual model object (spec was just restored above)
             if _mt == "poly":
                 model = PolyRidgeValueModel.load(loaded_model_path)
                 model_type = "poly"
+            elif _mt == "elasticnet":
+                model = ElasticNetPolyValueModel.load(loaded_model_path)
+                model_type = "elasticnet"
             elif _mt == "poly_mlp":
                 model = PolyMLPValueModel.load(loaded_model_path)
                 model_type = "poly_mlp"
@@ -1817,6 +1916,9 @@ def main() -> None:
         elif _mt == "poly":
             model = PolyRidgeValueModel.load(loaded_model_path)
             model_type = "poly"
+        elif _mt == "elasticnet":
+            model = ElasticNetPolyValueModel.load(loaded_model_path)
+            model_type = "elasticnet"
         elif _mt == "poly_mlp":
             model = PolyMLPValueModel.load(loaded_model_path)
             model_type = "poly_mlp"
@@ -2150,17 +2252,22 @@ def main() -> None:
                 X_test, y_test = X_pool[test_idx], y_pool[test_idx]
 
                 # Apply robustness augmentation to the training design matrix only.
-                if float(args.train_x_noise_sigma) > 0.0 or float(args.train_feature_dropout) > 0.0:
+                if (
+                    float(args.train_x_noise_sigma) > 0.0
+                    or float(args.train_feature_dropout) > 0.0
+                ):
                     rng_aug = np.random.default_rng(int(args.train_augment_seed))
                     X_train = np.asarray(X_train, dtype=np.float64)
                     if float(args.train_feature_dropout) > 0.0:
                         keep_p = 1.0 - float(args.train_feature_dropout)
-                        mask = (rng_aug.random(X_train.shape) < keep_p).astype(np.float64)
+                        mask = (rng_aug.random(X_train.shape) < keep_p).astype(
+                            np.float64
+                        )
                         X_train = X_train * mask
                     if float(args.train_x_noise_sigma) > 0.0:
-                        X_train = X_train + float(args.train_x_noise_sigma) * rng_aug.standard_normal(
-                            X_train.shape
-                        )
+                        X_train = X_train + float(
+                            args.train_x_noise_sigma
+                        ) * rng_aug.standard_normal(X_train.shape)
 
                 w = fit_ridge(X_train, y_train, l2=float(args.l2))
                 model = LinearRidgeValueModel(weights=w, spec=spec)
@@ -2180,7 +2287,9 @@ def main() -> None:
                 print(f"    #{rank+1} feat[{fi}] w={w[fi]:.6f}")
 
         elif model_type == "poly":
-            poly_l2 = float(args.poly_l2) if float(args.poly_l2) > 0.0 else float(args.l2)
+            poly_l2 = (
+                float(args.poly_l2) if float(args.poly_l2) > 0.0 else float(args.l2)
+            )
             if stream_fit:
                 w, powers, m = _stream_fit_poly_ridge(
                     X_pool,
@@ -2209,17 +2318,22 @@ def main() -> None:
                 X_train, y_train = X_pool[train_idx], y_pool[train_idx]
                 X_test, y_test = X_pool[test_idx], y_pool[test_idx]
                 # Apply robustness augmentation to the training design matrix only.
-                if float(args.train_x_noise_sigma) > 0.0 or float(args.train_feature_dropout) > 0.0:
+                if (
+                    float(args.train_x_noise_sigma) > 0.0
+                    or float(args.train_feature_dropout) > 0.0
+                ):
                     rng_aug = np.random.default_rng(int(args.train_augment_seed))
                     X_train = np.asarray(X_train, dtype=np.float64)
                     if float(args.train_feature_dropout) > 0.0:
                         keep_p = 1.0 - float(args.train_feature_dropout)
-                        mask = (rng_aug.random(X_train.shape) < keep_p).astype(np.float64)
+                        mask = (rng_aug.random(X_train.shape) < keep_p).astype(
+                            np.float64
+                        )
                         X_train = X_train * mask
                     if float(args.train_x_noise_sigma) > 0.0:
-                        X_train = X_train + float(args.train_x_noise_sigma) * rng_aug.standard_normal(
-                            X_train.shape
-                        )
+                        X_train = X_train + float(
+                            args.train_x_noise_sigma
+                        ) * rng_aug.standard_normal(X_train.shape)
 
                 w, powers = fit_poly_ridge(
                     X_train, y_train, l2=float(poly_l2), degree=2
@@ -2237,6 +2351,58 @@ def main() -> None:
 
             print(
                 f"[pool] Polynomial: {X_pool.shape[1]} raw → {int(feat_dim)} poly features"
+            )
+
+        elif model_type == "elasticnet":
+            # Train/test split
+            idx = np.arange(len(y_pool))
+            np.random.default_rng(42).shuffle(idx)
+            split = int(0.85 * len(idx))
+            train_idx = idx[:split]
+            test_idx = idx[split:]
+
+            X_train, y_train = X_pool[train_idx], y_pool[train_idx]
+            X_test, y_test = X_pool[test_idx], y_pool[test_idx]
+
+            # Apply robustness augmentation to training data only.
+            if (
+                float(args.train_x_noise_sigma) > 0.0
+                or float(args.train_feature_dropout) > 0.0
+            ):
+                rng_aug = np.random.default_rng(int(args.train_augment_seed))
+                X_train = np.asarray(X_train, dtype=np.float64)
+                if float(args.train_feature_dropout) > 0.0:
+                    keep_p = 1.0 - float(args.train_feature_dropout)
+                    mask = (rng_aug.random(X_train.shape) < keep_p).astype(np.float64)
+                    X_train = X_train * mask
+                if float(args.train_x_noise_sigma) > 0.0:
+                    X_train = X_train + float(
+                        args.train_x_noise_sigma
+                    ) * rng_aug.standard_normal(X_train.shape)
+
+            w, powers, intercept = fit_elasticnet(
+                X_train,
+                y_train,
+                alpha=float(args.elasticnet_alpha),
+                l1_ratio=float(args.elasticnet_l1_ratio),
+                max_iter=int(args.elasticnet_max_iter),
+            )
+            model = ElasticNetPolyValueModel(
+                weights=w, intercept=intercept, spec=spec, powers_=powers
+            )
+            X_train_poly = _poly_expand_batch(X_train, powers)
+            X_test_poly = _poly_expand_batch(X_test, powers)
+            y_hat_train = X_train_poly @ w + intercept
+            y_hat_test = X_test_poly @ w + intercept
+            feat_dim = int(X_train_poly.shape[1])
+            r2_train = _r2_score(y_train, y_hat_train)
+            mae_train = float(np.mean(np.abs(y_train - y_hat_train)))
+            r2_test = _r2_score(y_test, y_hat_test)
+            mae_test = float(np.mean(np.abs(y_test - y_hat_test)))
+
+            print(
+                f"[pool] ElasticNet: {X_pool.shape[1]} raw → {int(feat_dim)} poly features, "
+                f"alpha={float(args.elasticnet_alpha):.4g}, l1_ratio={float(args.elasticnet_l1_ratio):.4g}"
             )
 
         elif model_type == "mlp":
@@ -2292,19 +2458,19 @@ def main() -> None:
             )
             poly_mlp_model.spec = spec
             model = poly_mlp_model
-            
+
             # Compute predictions for metrics using numpy inference
             x_train_poly = _poly_expand_batch(X_train, model.powers)
             h1 = np.maximum(0, np.dot(x_train_poly, model.W1) + model.b1)
             h2 = np.maximum(0, np.dot(h1, model.W2) + model.b2)
             y_hat_train = np.dot(h2, model.W3).ravel() + model.b3[0]
-            
+
             x_test_poly = _poly_expand_batch(X_test, model.powers)
             h1 = np.maximum(0, np.dot(x_test_poly, model.W1) + model.b1)
             h2 = np.maximum(0, np.dot(h1, model.W2) + model.b2)
             y_hat_test = np.dot(h2, model.W3).ravel() + model.b3[0]
             feat_dim = int(X_pool.shape[1])
-        
+
         elif model_type == "factored_mlp":
             # Train/test split (same seed as others for consistency)
             idx = np.arange(len(y_pool))
@@ -2407,10 +2573,18 @@ def main() -> None:
                     pmax_for_hist=int(spec.pmax_for_hist),
                     include_price_shape=int(spec.include_price_shape),
                     include_meta=int(spec.include_meta),
+                    include_extra=int(spec.include_extra),
+                    per_class_pad=int(spec.per_class_pad),
                     normalize_labels=int(use_normalize_labels),
                     model_type="linear",
                 )
-            elif model_type in ("poly", "mlp", "poly_mlp", "factored_mlp"):
+            elif model_type in (
+                "poly",
+                "elasticnet",
+                "mlp",
+                "poly_mlp",
+                "factored_mlp",
+            ):
                 model.save(str(save_p))
                 # Also save normalize_labels in a sidecar (stable filename)
                 np.savez(
@@ -2603,6 +2777,79 @@ def main() -> None:
             model, totals, lengths, ctx, radices, used_cache, T, prefix_prices, _nlabels
         )
 
+        # Build vhat_batch closure for batch-vectorized beam pruning
+        def _make_vhat_batch(
+            model_ref,
+            totals_ref,
+            lengths_ref,
+            ctx_ref,
+            radices_ref,
+            cache_ref,
+            spec_ref,
+            T_ref,
+            prefix_ref,
+            nlabels,
+        ):
+            """Create a vhat_batch closure for batch beam pruning."""
+            _has_predict_batch = hasattr(model_ref, "predict_batch")
+
+            def vhat_batch(t: int, states: list, costs: np.ndarray) -> np.ndarray:
+                n = len(states)
+                if n == 0:
+                    return np.empty(0, dtype=np.float64)
+
+                # Batch feature extraction
+                X = phi_for_states_batch(
+                    t=int(t),
+                    states=states,
+                    totals=totals_ref,
+                    lengths=lengths_ref.tolist(),
+                    ctx=ctx_ref,
+                    spec=spec_ref,
+                    radices=radices_ref,
+                    used_cache=cache_ref,
+                )
+
+                # Batch prediction
+                if _has_predict_batch:
+                    vals = model_ref.predict_batch(X)
+                else:
+                    # Fallback: serial prediction
+                    vals = np.array(
+                        [
+                            (
+                                float(np.dot(model_ref.weights, X[i]))
+                                if hasattr(model_ref, "weights")
+                                else 0.0
+                            )
+                            for i in range(n)
+                        ],
+                        dtype=np.float64,
+                    )
+
+                # Denormalize if needed
+                if nlabels:
+                    tt = max(0, min(int(t), T_ref))
+                    rem_budget = float(prefix_ref[T_ref] - prefix_ref[tt])
+                    vals = vals * rem_budget
+
+                return vals
+
+            return vhat_batch
+
+        vhat_batch_fn = _make_vhat_batch(
+            model,
+            totals,
+            lengths,
+            ctx,
+            radices,
+            used_cache,
+            spec,
+            T,
+            prefix_prices,
+            _nlabels,
+        )
+
         # Price heuristic
         def _make_vhat_price(
             totals_ref, lengths_ref, radices_ref, cache_ref, T_ref, prefix_ref
@@ -2640,6 +2887,7 @@ def main() -> None:
                 beam_width=int(beam),
                 prune_factor=float(args.prune_factor),
                 vhat=vhat,
+                vhat_batch=vhat_batch_fn,
                 time_limit=float(eval_time_limit),
                 max_states=int(args.dp_max_states),
                 track_schedule=False,  # eval only needs .cost
