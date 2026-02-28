@@ -1361,6 +1361,10 @@ class LGBMValueModel:
             "include_per_class_now_cost": int(self.spec.include_per_class_now_cost),
             "include_bins": int(self.spec.include_bins),
             "normalize": int(self.spec.normalize),
+            "include_len_hist": int(self.spec.include_len_hist),
+            "pmax_for_hist": int(self.spec.pmax_for_hist),
+            "include_price_shape": int(self.spec.include_price_shape),
+            "include_meta": int(self.spec.include_meta),
             "include_extra": int(self.spec.include_extra),
             "per_class_pad": int(self.spec.per_class_pad),
             "model_type": "lgbm",
@@ -1377,6 +1381,12 @@ class LGBMValueModel:
             include_per_class_now_cost=int(self.spec.include_per_class_now_cost),
             include_bins=int(self.spec.include_bins),
             normalize=int(self.spec.normalize),
+            include_len_hist=int(self.spec.include_len_hist),
+            pmax_for_hist=int(self.spec.pmax_for_hist),
+            include_price_shape=int(self.spec.include_price_shape),
+            include_meta=int(self.spec.include_meta),
+            include_extra=int(self.spec.include_extra),
+            per_class_pad=int(self.spec.per_class_pad),
         )
 
     @staticmethod
@@ -1391,6 +1401,10 @@ class LGBMValueModel:
             include_per_class_now_cost=bool(int(meta["include_per_class_now_cost"])),
             include_bins=bool(int(meta["include_bins"])),
             normalize=bool(int(meta["normalize"])),
+            include_len_hist=bool(int(meta.get("include_len_hist", 0))),
+            pmax_for_hist=int(meta.get("pmax_for_hist", 12)),
+            include_price_shape=bool(int(meta.get("include_price_shape", 0))),
+            include_meta=bool(int(meta.get("include_meta", 0))),
             include_extra=bool(int(meta.get("include_extra", 0))),
             per_class_pad=int(meta.get("per_class_pad", 0)),
         )

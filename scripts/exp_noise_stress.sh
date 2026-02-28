@@ -16,7 +16,10 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
-WORKERS="${WORKERS:-2}"
+
+# ── Workers: auto-scale for HPC (eval-only, small instances = low memory) ──
+NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+WORKERS="${WORKERS_SMALL:-$(( NCPU > 32 ? 32 : NCPU ))}"
 
 LOG_DIR="ADP/logs/exp_noise_stress"
 MODEL_DIR_B="ADP/models/exp_profile_sweep"   # reuse models from Exp B
