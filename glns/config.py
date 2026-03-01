@@ -23,7 +23,7 @@ class LLMConfig(BaseModel):
     model: str = "moonshotai/Kimi-K2-Instruct-0905"
     temperature: float = 0.8
     # Enough headroom for search-context reasoning + full operator code.
-    max_tokens: int = 4_500
+    max_tokens: int = 8_000
     # Built-in Groq SDK retry (covers 429/5xx). No extra tenacity layer.
     max_retries: int = 3
     # Client-side throttle: minimum seconds between consecutive API calls.
@@ -74,6 +74,33 @@ class EvolutionConfig(BaseModel):
     strategy_weights: Tuple[float, float, float, float] = (1.0, 1.0, 1.0, 1.0)
     max_retries_per_operator: int = 3
 
+    # ---- HPC: wall-clock budget ----------------------------------------
+    time_limit_hours: float = Field(
+        0.0,
+        description=(
+            "Hard wall-clock time budget in hours.  The run stops cleanly after "
+            "the current generation once elapsed time exceeds this limit.  "
+            "0 = unlimited (default)."
+        ),
+    )
+
+    # ---- HPC: stagnation control ----------------------------------------
+    stagnation_patience: int = Field(
+        20,
+        description=(
+            "Number of consecutive generations with no hypervolume improvement "
+            "before forced SA reheating and a call to LLM for fresh operators. "
+            "0 = disabled."
+        ),
+    )
+    stagnation_reheat_factor: float = Field(
+        8.0,
+        description=(
+            "When stagnation_patience is reached, multiply current effective SA T0 "
+            "by this factor (capped at sa_T0 ceiling) to escape local optima."
+        ),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Evaluation (inner ALNS loop)
@@ -110,13 +137,45 @@ class EvalConfig(BaseModel):
     )
 
     # Destruction
-    destroy_ratio: float = Field(0.2, description="Fraction of jobs to remove")
+    destroy_ratio: float = Field(
+        0.2, description="Fraction of jobs to remove (fixed when min==max)"
+    )
+    destroy_ratio_min: float = Field(
+        0.10,
+        description=(
+            "Minimum adaptive destruction ratio.  Each episode uniformly samples a "
+            "ratio in [destroy_ratio_min, destroy_ratio_max] when the two differ."
+        ),
+    )
+    destroy_ratio_max: float = Field(
+        0.40,
+        description=(
+            "Maximum adaptive destruction ratio.  Set equal to destroy_ratio_min "
+            "to use a fixed ratio (legacy behaviour)."
+        ),
+    )
 
     # Adaptive weight smoothing (Eq. 6 in G-LNS paper)
     lambda_smooth: float = Field(0.5, description="Weight update smoothing factor")
 
     # Scoring vector σ = (σ1, σ2, σ3, σ4)
     sigma: Tuple[float, float, float, float] = (1.5, 1.2, 0.8, 0.1)
+
+    # ---- HPC: heavier final test phase ------------------------------------
+    T_final: int = Field(
+        0,
+        description=(
+            "ALNS iterations per episode in the very last benchmark evaluation "
+            "(after evolution ends).  0 = use T_test."
+        ),
+    )
+    K_final: int = Field(
+        0,
+        description=(
+            "Number of episodes in the very last benchmark evaluation.  "
+            "0 = use max(10, K_episodes)."
+        ),
+    )
 
     # Periodic benchmark evaluation (every N generations; 0 = disabled).
     benchmark_eval_every: int = Field(
@@ -165,9 +224,19 @@ class SandboxConfig(BaseModel):
     )
 
     timeout_sec: float = Field(
-        5.0, description="Hard wall-clock timeout per operator call"
+        10.0,
+        description=(
+            "Hard wall-clock timeout per operator call.  "
+            "Bumped to 10 s from 5 s to handle large instances on HPC nodes."
+        ),
     )
-    max_memory_mb: int = Field(512, description="RSS memory limit for worker process")
+    max_memory_mb: int = Field(
+        2048,
+        description=(
+            "RSS memory limit for worker process.  "
+            "Bumped to 2 GB to handle large Wang2018 instances on HPC nodes."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +316,31 @@ class GLNSConfig(BaseModel):
     archive: ArchiveConfig = ArchiveConfig()
     sandbox: SandboxConfig = SandboxConfig()
     instances: InstanceConfig = InstanceConfig()
+
+    # ---- Assignment-only decomposition mode (v2) --------------------------
+    assignment_mode: bool = Field(
+        False,
+        description=(
+            "If True, use assignment-only operators + optimal DP sequencing. "
+            "LLM operators work on List[int] assignments instead of List[List[int]] sequences."
+        ),
+    )
+    sequencing_mode: str = Field(
+        "auto",
+        description=(
+            "How to solve per-machine sequencing in assignment mode: "
+            "'optimal' = always use sparse DP, "
+            "'heuristic' = always use fast heuristic, "
+            "'auto' = optimal when state space ≤ 500K, else heuristic."
+        ),
+    )
+    max_workers: int = Field(
+        0,
+        description=(
+            "Number of parallel workers for per-machine DP evaluation. "
+            "0 = auto (use all CPU cores). Only used in assignment mode."
+        ),
+    )
 
     class Config:
         # Allow Path objects to be serialized nicely.

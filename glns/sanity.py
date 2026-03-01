@@ -251,3 +251,150 @@ def sanity_check(
                 )
 
     return True, None
+
+
+# ---------------------------------------------------------------------------
+# Assignment-only sanity check (v2)
+# ---------------------------------------------------------------------------
+
+
+def _make_trivial_assignment(inst: dict) -> List[int]:
+    """Round-robin assignment for sanity checking (assignment mode)."""
+    m = inst["m"]
+    n = inst["n"]
+    return [j % m for j in range(n)]
+
+
+def sanity_check_assignment(
+    spec: OperatorSpec,
+    sandbox_cfg: SandboxConfig,
+    toy_instances: Optional[List[dict]] = None,
+) -> Tuple[bool, Optional[str]]:
+    """Sanity check for assignment-only operators.
+
+    Destroy operators work on List[int] assignment vectors (setting entries to -1).
+    Repair operators work on partial assignment vectors (filling -1 entries).
+
+    Returns (passed, error_message). error_message is None on success.
+    """
+    if toy_instances is None:
+        toy_instances = make_toy_instances()
+
+    fn_name = spec.type
+
+    # 1. Syntax check.
+    try:
+        compile(spec.code, "<sanity>", "exec")
+    except SyntaxError as e:
+        return False, f"Syntax error: {e}"
+
+    # 2. Functional test on each toy instance.
+    rng = random.Random(12345)
+
+    for idx, inst in enumerate(toy_instances):
+        assign = _make_trivial_assignment(inst)
+        n = inst["n"]
+        m = inst["m"]
+
+        if spec.type == "destroy":
+            destroy_cnt = max(1, n // 3)
+            ok, result = run_operator_sandboxed(
+                fn_code=spec.code,
+                fn_name="destroy",
+                args=(list(assign), destroy_cnt, inst, rng),
+                cfg=sandbox_cfg,
+            )
+            if not ok:
+                return False, f"Destroy crashed on toy instance {idx}: {result}"
+
+            # Validate output shape: (removed_jobs, partial_assignment)
+            if not isinstance(result, (tuple, list)) or len(result) != 2:
+                return False, (
+                    f"Destroy must return (removed_jobs, partial_assignment), "
+                    f"got {type(result).__name__} of length "
+                    f"{len(result) if isinstance(result, (tuple, list)) else '?'}"
+                )
+            removed_jobs, partial_assign = result
+
+            if not isinstance(removed_jobs, list):
+                return (
+                    False,
+                    f"removed_jobs must be a list, got {type(removed_jobs).__name__}",
+                )
+            if not isinstance(partial_assign, list):
+                return (
+                    False,
+                    f"partial_assignment must be a list, got {type(partial_assign).__name__}",
+                )
+            if len(partial_assign) != n:
+                return (
+                    False,
+                    f"partial_assignment must have length {n}, got {len(partial_assign)}",
+                )
+
+            # Check removed_jobs are valid.
+            removed_set = set(removed_jobs)
+            if len(removed_set) != len(removed_jobs):
+                return False, "removed_jobs contains duplicates"
+            if not removed_set.issubset(set(range(n))):
+                return False, f"removed_jobs contains invalid indices (not in 0..{n-1})"
+
+            # Removed jobs should have -1 in partial_assign.
+            for j in removed_jobs:
+                if partial_assign[j] != -1:
+                    return (
+                        False,
+                        f"partial_assignment[{j}] should be -1 for removed job, got {partial_assign[j]}",
+                    )
+
+            # Non-removed jobs should still have valid assignments.
+            for j in range(n):
+                if j not in removed_set:
+                    if partial_assign[j] < 0 or partial_assign[j] >= m:
+                        return (
+                            False,
+                            f"partial_assignment[{j}] = {partial_assign[j]} is not valid (expected 0..{m-1})",
+                        )
+
+        else:  # repair
+            # Create a partial assignment by unassigning some jobs.
+            destroy_cnt = max(1, n // 3)
+            partial = list(assign)
+            removed: List[int] = []
+            candidates = list(range(n))
+            rng.shuffle(candidates)
+            for j in candidates[:destroy_cnt]:
+                removed.append(j)
+                partial[j] = -1
+
+            ok, result = run_operator_sandboxed(
+                fn_code=spec.code,
+                fn_name="repair",
+                args=(list(partial), list(removed), inst, rng),
+                cfg=sandbox_cfg,
+            )
+            if not ok:
+                return False, f"Repair crashed on toy instance {idx}: {result}"
+
+            if not isinstance(result, list):
+                return (
+                    False,
+                    f"Repair must return a list (assignment), got {type(result).__name__}",
+                )
+            if len(result) != n:
+                return False, f"Repair output must have length {n}, got {len(result)}"
+
+            # Every entry must be a valid machine index.
+            for j in range(n):
+                if not isinstance(result[j], int):
+                    return (
+                        False,
+                        f"Repair output[{j}] must be int, got {type(result[j]).__name__}",
+                    )
+                if result[j] < 0 or result[j] >= m:
+                    return (
+                        False,
+                        f"Repair output[{j}] = {result[j]} is not valid (expected 0..{m-1})",
+                    )
+
+    return True, None

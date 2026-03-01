@@ -102,20 +102,28 @@ Bi-objective green parallel-machine scheduling under Time-of-Use (TOU) electrici
 - Horizon of T time slots with per-slot electricity price c_t.
 - Objectives: minimise makespan (Cmax) AND total energy cost (TEC).
   TEC = sum over all machines h, for each job j on h: e_h * sum(c_t for t in processing slots of j).
-- A separate DP layer computes optimal start times given a fixed job ordering per machine.
-  Your operators only control ASSIGNMENT (which machine) and SEQUENCING (job order per machine).
+- **A separate optimal DP solver handles job ordering and start-time scheduling on each machine.**
+  **Your operators ONLY control ASSIGNMENT: which machine gets which job.**
+
+## Architecture (important!)
+The system uses a decomposed approach:
+1. YOUR operators decide the machine assignment (which jobs go to which machine).
+2. An OPTIMAL dynamic programming solver then determines the best job ordering
+   and start times on each machine — you do NOT need to handle sequencing.
+This means: a good assignment = good solution. Focus all your intelligence on
+balancing load, energy cost, and makespan through smart assignment decisions.
 
 ## Solution representation
-A solution is `sequences: List[List[int]]` of length m.
-  sequences[h] = ordered list of global job indices assigned to machine h.
-Every job index in 0..n-1 appears exactly once across all machines.
+A solution is `assignment: List[int]` of length n.
+  assignment[j] = index of the machine (0 to m-1) that job j is assigned to.
+Every job index 0..n-1 has exactly one machine assignment.
 
 ## Instance dict (available as `instance` argument)
 {
   "m": int,               # number of machines
   "n": int,               # number of jobs
   "T": int,               # time horizon length
-  "p": List[int],         # processing times, length n
+  "p": List[int],         # processing times, length n (integers, can be 1..12)
   "e": List[int],         # machine energy rates, length m
   "ct": List[int],        # per-slot TOU prices, length T
 }
@@ -123,37 +131,37 @@ Every job index in 0..n-1 appears exactly once across all machines.
 ## Operator interface contract
 ### Destroy operator
 ```python
-def destroy(solution: List[List[int]],
+def destroy(assignment: List[int],
             destroy_cnt: int,
             instance: dict,
-            rng) -> tuple[list[int], list[list[int]]]:
-    \"\"\"Remove destroy_cnt jobs from the solution.
+            rng) -> tuple[list[int], list[int]]:
+    \"\"\"Unassign destroy_cnt jobs from the assignment.
     Args:
-        solution: current sequences (list of m lists of job ids).
-        destroy_cnt: number of jobs to remove.
+        assignment: current assignment vector (length n, values 0..m-1).
+        destroy_cnt: number of jobs to unassign.
         instance: problem data dict.
         rng: random.Random instance for stochastic decisions.
     Returns:
-        (removed_jobs, partial_solution)
-        - removed_jobs: list of removed job indices.
-        - partial_solution: sequences with those jobs removed.
+        (removed_jobs, partial_assignment)
+        - removed_jobs: list of unassigned job indices.
+        - partial_assignment: copy of assignment with those jobs set to -1.
     \"\"\"
 ```
 
 ### Repair operator
 ```python
-def repair(partial_solution: List[List[int]],
+def repair(partial_assignment: List[int],
            removed_jobs: List[int],
            instance: dict,
-           rng) -> list[list[int]]:
-    \"\"\"Reinsert all removed jobs into the partial solution.
+           rng) -> list[int]:
+    \"\"\"Assign all removed jobs to machines.
     Args:
-        partial_solution: sequences with some jobs missing.
-        removed_jobs: list of job indices to reinsert.
+        partial_assignment: assignment with some entries = -1 (unassigned).
+        removed_jobs: list of job indices to assign.
         instance: problem data dict.
         rng: random.Random instance.
     Returns:
-        Complete sequences (every job 0..n-1 appears exactly once).
+        Complete assignment (length n, every value in 0..m-1, no -1).
     \"\"\"
 ```
 
@@ -165,15 +173,37 @@ def repair(partial_solution: List[List[int]],
 5. Keep operators efficient: O(n*m) or O(n^2) at most; avoid exponential search.
 6. Keep the "idea" field SHORT (1-2 sentences, <120 words). Put detailed reasoning in code comments instead.
 
-## Domain hints (idea library)
-Destroy ideas: random removal, worst-energy-contributor removal, most-loaded-machine removal,
-peak-period job removal, slack-sensitive removal, energy-imbalance pair removal,
-high-penalty-gap removal, critical-path tail removal, idle-gap cleanup, TOU-boundary removal.
-Repair ideas: greedy TOU-aware insertion (try all machine+position, pick lowest energy estimate),
-load-balancing assignment, random insertion, block-based insertion, energy-aware pairwise swap.
-For bi-objective balance: sometimes focus destroy on Cmax-sensitive parts (tail of critical machine),
-sometimes on TEC-sensitive parts (peak-period jobs), sometimes mix both.
+## Benchmark characteristics (Wang2018)
+The benchmark has 90 instances across 3 scales — your operators must work well on ALL:
+- **Small** (1-30): n=6-25 jobs, m=3-7 machines, T=50-80, processing times p ∈ {1..5}, K=3-5 distinct p values
+- **Medium** (31-60): n=30-200 jobs, m=8-25 machines, T=100-300, p ∈ {1..4}, K=3-4
+- **Large** (61-90): n=250-500 jobs, m=25-40 machines, T=350-500, p ∈ {1..12}, K=12
+Key characteristics:
+- Processing times are SHORT (often 1-5 slots) and HIGHLY VARIABLE within an instance.
+- Many jobs with p=1 exist — these are trivially scheduled but their assignment still matters for load balance.
+- Energy rates e vary across machines (some machines are 2-3x more expensive).
+- TOU prices ct fluctuate significantly (peaks can be 4-5x valleys).
+- The DP solver handles sequencing optimally, so your repair operator's main lever is:
+  which machine to assign each job to, considering load balance AND energy cost.
+
+## Domain hints (idea library for assignment operators)
+Destroy ideas: random removal, worst-energy-contributor removal (remove jobs from expensive machines),
+most-loaded-machine removal (remove from bottleneck), peak-period job removal (remove large jobs
+that likely land in expensive time slots), energy-imbalance removal (swap between high/low-e machines),
+load-variance removal (remove from machines with extreme loads), processing-time-class removal
+(remove all jobs of a specific p value to enable rebalancing).
+Repair ideas: greedy load-balance (assign to least-loaded machine by total processing time),
+energy-aware assignment (assign to cheapest machine, accounting for e_h and likely slot costs),
+hybrid score (assign to machine minimising w*load_increase + (1-w)*energy_estimate with random w),
+makespan-aware (assign large-p jobs first to balance load, small-p jobs to cheap machines),
+random diversification (pure random assignment for exploration),
+regret-based (assign job to machine with largest gap between best and 2nd-best assignment cost).
+For bi-objective balance: sometimes focus destroy on Cmax-sensitive parts (bottleneck machine),
+sometimes on TEC-sensitive parts (jobs on expensive machines), sometimes both.
 """
+
+# System prompt for sequence-based mode (legacy, kept for backward compatibility)
+SYSTEM_PROMPT_SEQUENCE = SYSTEM_PROMPT  # TODO: keep old prompt if needed
 
 
 # ---------------------------------------------------------------------------

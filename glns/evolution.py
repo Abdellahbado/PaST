@@ -19,11 +19,15 @@ from typing import List, Optional
 from glns.config import EvolutionConfig, SandboxConfig
 from glns.llm_client import GroqOperatorClient, GroqRateLimitError
 from glns.population import PopulationManager
-from glns.sanity import sanity_check
+from glns.sanity import sanity_check, sanity_check_assignment
 from glns.schemas import OperatorRecord, OperatorSpec
 from glns.seed_operators import (
     build_seed_destroy_operators,
     build_seed_repair_operators,
+)
+from glns.seed_operators_v2 import (
+    build_seed_destroy_operators_v2,
+    build_seed_repair_operators_v2,
 )
 
 logger = logging.getLogger(__name__)
@@ -137,11 +141,13 @@ def evolve_generation(
     generation: int,
     rng: random.Random,
     search_context: Optional[str] = None,
+    assignment_mode: bool = False,
 ) -> EvolutionOutcome:
     """Fill all pruned slots with ONE batched LLM call per generation.
 
     Returns the list of newly created (and sanity-checked) OperatorRecords.
     """
+    check_fn = sanity_check_assignment if assignment_mode else sanity_check
     d_slots = pop.destroy_pool.empty_slots()
     r_slots = pop.repair_pool.empty_slots()
     total_needed = d_slots + r_slots
@@ -199,7 +205,7 @@ def evolve_generation(
         rate_limited_for: Optional[float] = None
     except GroqRateLimitError as exc:
         logger.warning("LLM evolution skipped due to rate limit: %s", exc)
-        ops = _fallback_fill(pop, d_slots, r_slots, generation)
+        ops = _fallback_fill(pop, d_slots, r_slots, generation, assignment_mode)
         return EvolutionOutcome(
             inserted=ops,
             llm_ok=False,
@@ -208,7 +214,7 @@ def evolve_generation(
         )
     except Exception as exc:
         logger.error("LLM evolution call failed: %s", exc)
-        ops = _fallback_fill(pop, d_slots, r_slots, generation)
+        ops = _fallback_fill(pop, d_slots, r_slots, generation, assignment_mode)
         return EvolutionOutcome(inserted=ops, llm_ok=False, used_fallback=len(ops))
 
     # ----- Sanity check each returned operator ----------------------------
@@ -229,7 +235,7 @@ def evolve_generation(
             )
             # Use the operator's actual type — forcing would crash Pydantic.
 
-        passed, err = sanity_check(spec, sandbox_cfg)
+        passed, err = check_fn(spec, sandbox_cfg)
         if passed:
             rec = OperatorRecord(spec=spec, generation_born=generation)
             new_ops.append(rec)
@@ -244,7 +250,7 @@ def evolve_generation(
                 retry_batch = llm.regenerate_with_error(spec, err or "Unknown error")
                 retry_spec = retry_batch.operators[0]
                 # Don't force type — trust the retry's own declared type.
-                passed2, err2 = sanity_check(retry_spec, sandbox_cfg)
+                passed2, err2 = check_fn(retry_spec, sandbox_cfg)
                 if passed2:
                     rec = OperatorRecord(spec=retry_spec, generation_born=generation)
                     new_ops.append(rec)
@@ -268,7 +274,7 @@ def evolve_generation(
 
         if not fixed:
             logger.warning("All retries exhausted for slot %d; using fallback", idx)
-            fb = _get_fallback(expected_type, generation)
+            fb = _get_fallback(expected_type, generation, assignment_mode)
             new_ops.append(fb)
             fallback_used += 1
 
@@ -292,11 +298,19 @@ def evolve_generation(
 # ---------------------------------------------------------------------------
 
 
-def _get_fallback(op_type: str, generation: int) -> OperatorRecord:
-    if op_type == "destroy":
-        seeds = build_seed_destroy_operators()
+def _get_fallback(
+    op_type: str, generation: int, assignment_mode: bool = False
+) -> OperatorRecord:
+    if assignment_mode:
+        if op_type == "destroy":
+            seeds = build_seed_destroy_operators_v2()
+        else:
+            seeds = build_seed_repair_operators_v2()
     else:
-        seeds = build_seed_repair_operators()
+        if op_type == "destroy":
+            seeds = build_seed_destroy_operators()
+        else:
+            seeds = build_seed_repair_operators()
     fb = seeds[0]
     fb.generation_born = generation
     fb.id = f"fallback_{op_type}_{generation}_{uuid.uuid4().hex[:6]}"  # type: ignore[assignment]
@@ -304,16 +318,20 @@ def _get_fallback(op_type: str, generation: int) -> OperatorRecord:
 
 
 def _fallback_fill(
-    pop: PopulationManager, d_slots: int, r_slots: int, generation: int
+    pop: PopulationManager,
+    d_slots: int,
+    r_slots: int,
+    generation: int,
+    assignment_mode: bool = False,
 ) -> List[OperatorRecord]:
     """Emergency fill with hand-coded operators when the entire LLM call fails."""
     ops: List[OperatorRecord] = []
     for _ in range(d_slots):
-        fb = _get_fallback("destroy", generation)
+        fb = _get_fallback("destroy", generation, assignment_mode)
         pop.destroy_pool.add(fb)
         ops.append(fb)
     for _ in range(r_slots):
-        fb = _get_fallback("repair", generation)
+        fb = _get_fallback("repair", generation, assignment_mode)
         pop.repair_pool.add(fb)
         ops.append(fb)
     return ops

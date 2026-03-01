@@ -27,15 +27,24 @@ from glns.evaluation import (
     make_initial_solution,
     run_evaluation_phase,
 )
+from glns.evaluation_v2 import run_evaluation_phase_v2
 from glns.evolution import evolve_generation
 from glns.llm_client import GroqOperatorClient
 from glns.pareto import ArchiveEntry, ParetoArchive
 from glns.population import PopulationManager
-from glns.sanity import sanity_check
+from glns.sanity import sanity_check, sanity_check_assignment
 from glns.schemas import OperatorRecord
 from glns.seed_operators import (
     build_seed_destroy_operators,
     build_seed_repair_operators,
+)
+from glns.seed_operators_v2 import (
+    build_seed_destroy_operators_v2,
+    build_seed_repair_operators_v2,
+)
+from glns.sequencing import (
+    evaluate_assignment,
+    make_initial_assignment,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +150,86 @@ def _init_populations(
         pop.destroy_pool.add(fb)
     while pop.repair_pool.empty_slots() > 0:
         seeds = build_seed_repair_operators()
+        fb = seeds[len(pop.repair_pool) % len(seeds)]
+        fb.id = f"dup_r{len(pop.repair_pool)}"  # type: ignore[assignment]
+        pop.repair_pool.add(fb)
+
+
+# ---------------------------------------------------------------------------
+# Initialisation helpers (assignment-only v2)
+# ---------------------------------------------------------------------------
+
+
+def _seed_archive_v2(
+    instances: List[dict],
+    archive: ParetoArchive,
+    rng: random.Random,
+    sequencing_mode: str = "auto",
+) -> None:
+    """Build initial solutions via LPT assignment + optimal DP sequencing."""
+    for inst in instances[:8]:
+        inst_id = int(inst.get("instance_id", 0))
+        assign = make_initial_assignment(inst)
+        energy, cmax, seqs, starts = evaluate_assignment(
+            assign,
+            inst,
+            sequencing_mode=sequencing_mode,
+        )
+        if energy < float("inf"):
+            archive.add(
+                ArchiveEntry(
+                    instance_id=inst_id,
+                    makespan=cmax,
+                    energy=energy,
+                    sequences=seqs,
+                    start_times=starts,
+                )
+            )
+
+
+def _init_populations_v2(
+    pop: PopulationManager,
+    llm: Optional[GroqOperatorClient],
+    cfg: GLNSConfig,
+) -> None:
+    """Inject assignment-only seed operators and optionally LLM top-up."""
+    for op in build_seed_destroy_operators_v2():
+        pop.destroy_pool.add(op)
+    for op in build_seed_repair_operators_v2():
+        pop.repair_pool.add(op)
+
+    # Top-up with LLM if pools not full.
+    d_need = pop.destroy_pool.empty_slots()
+    r_need = pop.repair_pool.empty_slots()
+    if (d_need > 0 or r_need > 0) and llm is not None:
+        logger.info(
+            "Requesting %d destroy + %d repair operators from LLM for initialisation (v2 assignment mode)",
+            d_need,
+            r_need,
+        )
+        try:
+            batch = llm.generate_init_batch(n_destroy=d_need, n_repair=r_need)
+            for spec in batch.operators:
+                passed, err = sanity_check_assignment(spec, cfg.sandbox)
+                if passed:
+                    rec = OperatorRecord(spec=spec, generation_born=0)
+                    pool = (
+                        pop.destroy_pool if spec.type == "destroy" else pop.repair_pool
+                    )
+                    pool.add(rec)
+                else:
+                    logger.warning("LLM init operator (v2) failed sanity: %s", err)
+        except Exception as exc:
+            logger.error("LLM initialisation call (v2) failed: %s", exc)
+
+    # Fallback: duplicate seed operators.
+    while pop.destroy_pool.empty_slots() > 0:
+        seeds = build_seed_destroy_operators_v2()
+        fb = seeds[len(pop.destroy_pool) % len(seeds)]
+        fb.id = f"dup_d{len(pop.destroy_pool)}"  # type: ignore[assignment]
+        pop.destroy_pool.add(fb)
+    while pop.repair_pool.empty_slots() > 0:
+        seeds = build_seed_repair_operators_v2()
         fb = seeds[len(pop.repair_pool) % len(seeds)]
         fb.id = f"dup_r{len(pop.repair_pool)}"  # type: ignore[assignment]
         pop.repair_pool.add(fb)
@@ -330,15 +419,28 @@ def run_test_phase(
     for e in archive.entries:
         test_archive.add(copy.deepcopy(e))
 
-    run_evaluation_phase(
-        destroy_pool=list(pop.destroy_pool),
-        repair_pool=list(pop.repair_pool),
-        instances=test_instances,
-        archive=test_archive,
-        eval_cfg=test_eval_cfg,
-        sandbox_cfg=cfg.sandbox,
-        rng=rng,
-    )
+    if cfg.assignment_mode:
+        run_evaluation_phase_v2(
+            destroy_pool=list(pop.destroy_pool),
+            repair_pool=list(pop.repair_pool),
+            instances=test_instances,
+            archive=test_archive,
+            eval_cfg=test_eval_cfg,
+            sandbox_cfg=cfg.sandbox,
+            rng=rng,
+            sequencing_mode=cfg.sequencing_mode,
+            n_workers=cfg.max_workers,
+        )
+    else:
+        run_evaluation_phase(
+            destroy_pool=list(pop.destroy_pool),
+            repair_pool=list(pop.repair_pool),
+            instances=test_instances,
+            archive=test_archive,
+            eval_cfg=test_eval_cfg,
+            sandbox_cfg=cfg.sandbox,
+            rng=rng,
+        )
     return test_archive
 
 
@@ -359,15 +461,28 @@ def run_benchmark_probe(
 
     probe_archive = ParetoArchive(max_size=cfg.archive.max_size * 2)
 
-    run_evaluation_phase(
-        destroy_pool=list(pop.destroy_pool),
-        repair_pool=list(pop.repair_pool),
-        instances=benchmark_instances,
-        archive=probe_archive,
-        eval_cfg=probe_eval,
-        sandbox_cfg=cfg.sandbox,
-        rng=rng,
-    )
+    if cfg.assignment_mode:
+        run_evaluation_phase_v2(
+            destroy_pool=list(pop.destroy_pool),
+            repair_pool=list(pop.repair_pool),
+            instances=benchmark_instances,
+            archive=probe_archive,
+            eval_cfg=probe_eval,
+            sandbox_cfg=cfg.sandbox,
+            rng=rng,
+            sequencing_mode=cfg.sequencing_mode,
+            n_workers=cfg.max_workers,
+        )
+    else:
+        run_evaluation_phase(
+            destroy_pool=list(pop.destroy_pool),
+            repair_pool=list(pop.repair_pool),
+            instances=benchmark_instances,
+            archive=probe_archive,
+            eval_cfg=probe_eval,
+            sandbox_cfg=cfg.sandbox,
+            rng=rng,
+        )
 
     # Compute per-instance HV with instance-specific ref points.
     bm_ref: Dict[int, Tuple[int, float]] = {}
@@ -496,13 +611,24 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
 
     # ----- Initialise archive, populations, LLM --------------------------
     archive = ParetoArchive(max_size=cfg.archive.max_size)
-    _seed_archive(evo_instances, archive, rng)
-    logger.info(
-        "Seeded archive with %d initial solutions (tracking instance %d has %d)",
-        archive.size(),
-        tracking_instance_id,
-        archive.size(tracking_instance_id),
-    )
+    if cfg.assignment_mode:
+        _seed_archive_v2(
+            evo_instances, archive, rng, sequencing_mode=cfg.sequencing_mode
+        )
+        logger.info(
+            "ASSIGNMENT MODE: seeded archive with %d initial solutions (tracking instance %d has %d)",
+            archive.size(),
+            tracking_instance_id,
+            archive.size(tracking_instance_id),
+        )
+    else:
+        _seed_archive(evo_instances, archive, rng)
+        logger.info(
+            "Seeded archive with %d initial solutions (tracking instance %d has %d)",
+            archive.size(),
+            tracking_instance_id,
+            archive.size(tracking_instance_id),
+        )
 
     pop = PopulationManager(cfg.population)
 
@@ -520,7 +646,10 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
             "Neither GROQ_API_KEY nor GROQ_API_KEYS set — running with seed operators only (no LLM evolution)"
         )
 
-    _init_populations(pop, llm, cfg)
+    if cfg.assignment_mode:
+        _init_populations_v2(pop, llm, cfg)
+    else:
+        _init_populations(pop, llm, cfg)
     logger.info(
         "Populations initialised: %d destroy, %d repair",
         len(pop.destroy_pool),
@@ -558,6 +687,10 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
     sa_T0_ceiling = cfg.eval.sa_T0  # never exceed initial value
     sa_floor_stuck_gens = 0  # counts consecutive gens at floor with high accept
 
+    # ----- Stagnation patience & wall-clock budget -----------------------
+    stagnation_gens = 0  # consecutive gens with no HV improvement (for patience)
+    t_run_start = time.perf_counter()  # wall-clock start for time_limit_hours
+
     # Allow Ctrl+C to stop the loop cleanly and still save results.
     _stop_requested = False
     _completed_gens = 0
@@ -580,8 +713,21 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
     for gen in range(cfg.evolution.G_max):
         t_gen = time.perf_counter()
 
+        # ---- Wall-clock time limit check ---------------------------------
+        if cfg.evolution.time_limit_hours > 0:
+            elapsed_h = (t_gen - t_run_start) / 3600.0
+            if elapsed_h >= cfg.evolution.time_limit_hours:
+                logger.info(
+                    "Time limit %.2f h reached after %d gens (elapsed %.2f h) — stopping.",
+                    cfg.evolution.time_limit_hours,
+                    gen,
+                    elapsed_h,
+                )
+                _stop_requested = True
+                break
+
         logger.info(
-            "=== Generation %d/%d | inst=%d | archive=%d (total %d) | pools: D=%d R=%d | sa_T0_eff=%.4f ===",
+            "=== Generation %d/%d | inst=%d | archive=%d (total %d) | pools: D=%d R=%d | sa_T0_eff=%.4f | stale=%d ===",
             gen + 1,
             cfg.evolution.G_max,
             tracking_instance_id,
@@ -590,19 +736,42 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
             len(pop.destroy_pool),
             len(pop.repair_pool),
             effective_sa_T0,
+            stagnation_gens,
         )
 
         # Phase 1: Evaluate — with generation-adapted SA temperature.
-        gen_eval_cfg = cfg.eval.model_copy(update={"sa_T0": effective_sa_T0})
-        F_d, F_r, synergy, eval_stats = run_evaluation_phase(
-            destroy_pool=list(pop.destroy_pool),
-            repair_pool=list(pop.repair_pool),
-            instances=evo_instances,
-            archive=archive,
-            eval_cfg=gen_eval_cfg,
-            sandbox_cfg=cfg.sandbox,
-            rng=rng,
+        # Adaptive destroy ratio: sample uniformly in [min, max] each generation.
+        dr_min = cfg.eval.destroy_ratio_min
+        dr_max = cfg.eval.destroy_ratio_max
+        if dr_min < dr_max:
+            sampled_dr = dr_min + rng.random() * (dr_max - dr_min)
+        else:
+            sampled_dr = cfg.eval.destroy_ratio
+        gen_eval_cfg = cfg.eval.model_copy(
+            update={"sa_T0": effective_sa_T0, "destroy_ratio": sampled_dr}
         )
+        if cfg.assignment_mode:
+            F_d, F_r, synergy, eval_stats = run_evaluation_phase_v2(
+                destroy_pool=list(pop.destroy_pool),
+                repair_pool=list(pop.repair_pool),
+                instances=evo_instances,
+                archive=archive,
+                eval_cfg=gen_eval_cfg,
+                sandbox_cfg=cfg.sandbox,
+                rng=rng,
+                sequencing_mode=cfg.sequencing_mode,
+                n_workers=cfg.max_workers,
+            )
+        else:
+            F_d, F_r, synergy, eval_stats = run_evaluation_phase(
+                destroy_pool=list(pop.destroy_pool),
+                repair_pool=list(pop.repair_pool),
+                instances=evo_instances,
+                archive=archive,
+                eval_cfg=gen_eval_cfg,
+                sandbox_cfg=cfg.sandbox,
+                rng=rng,
+            )
         sa_rate = float(eval_stats.get("sa_rate", 0.0))
 
         # Adaptive SA T0 adjustment: prevent runaway acceptance.
@@ -718,6 +887,7 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
                 search_context=(
                     search_context if cfg.llm.include_search_context else None
                 ),
+                assignment_mode=cfg.assignment_mode,
             )
             if outcome.llm_ok:
                 logger.info(
@@ -743,6 +913,7 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
                     pop.destroy_pool.empty_slots(),
                     pop.repair_pool.empty_slots(),
                     gen,
+                    assignment_mode=cfg.assignment_mode,
                 )
 
         # Phase 5: Reset metrics.
@@ -765,14 +936,32 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
         if best_hv is None or prev_hv > best_hv + 1e-9:
             best_hv = prev_hv
             hv_stale_gens = 0
+            stagnation_gens = 0
         else:
             hv_stale_gens += 1
+            stagnation_gens += 1
             if hv_stale_gens in (10, 25, 50):
                 logger.warning(
                     "HV has not improved for %d generations (tracking inst %d).",
                     hv_stale_gens,
                     tracking_instance_id,
                 )
+
+        # ---- Stagnation patience: forced SA reheat -----------------------
+        patience = cfg.evolution.stagnation_patience
+        if patience > 0 and stagnation_gens >= patience:
+            reheat_target = min(
+                sa_T0_ceiling,
+                effective_sa_T0 * cfg.evolution.stagnation_reheat_factor,
+            )
+            effective_sa_T0 = reheat_target
+            stagnation_gens = 0
+            logger.info(
+                "Gen %d: STAGNATION patience=%d reached → FORCED REHEAT sa_T0_eff to %.4f",
+                gen + 1,
+                patience,
+                reheat_target,
+            )
         gen_log.append(entry)
 
         # ----- Periodic benchmark probe (dual-benchmark testing) ----------
@@ -832,22 +1021,42 @@ def run_glns(cfg: GLNSConfig) -> ParetoArchive:
                 pop, benchmark_instances, cfg, rng, label="final_external"
             )
             # Run heavier evaluation for final external benchmark.
+            # T_final / K_final allow a separate, heavier budget for the last pass.
             final_ext_eval = cfg.eval.model_copy()
-            final_ext_eval.K_episodes = max(10, cfg.eval.K_episodes)
-            final_ext_eval.T_iters = cfg.eval.T_test
+            final_ext_eval.K_episodes = (
+                cfg.eval.K_final
+                if cfg.eval.K_final > 0
+                else max(10, cfg.eval.K_episodes)
+            )
+            final_ext_eval.T_iters = (
+                cfg.eval.T_final if cfg.eval.T_final > 0 else cfg.eval.T_test
+            )
             ext_test_archive = ParetoArchive(max_size=cfg.archive.max_size * 2)
             if final_ext_archive:
                 for e_entry in final_ext_archive.entries:
                     ext_test_archive.add(copy.deepcopy(e_entry))
-            run_evaluation_phase(
-                destroy_pool=list(pop.destroy_pool),
-                repair_pool=list(pop.repair_pool),
-                instances=benchmark_instances,
-                archive=ext_test_archive,
-                eval_cfg=final_ext_eval,
-                sandbox_cfg=cfg.sandbox,
-                rng=rng,
-            )
+            if cfg.assignment_mode:
+                run_evaluation_phase_v2(
+                    destroy_pool=list(pop.destroy_pool),
+                    repair_pool=list(pop.repair_pool),
+                    instances=benchmark_instances,
+                    archive=ext_test_archive,
+                    eval_cfg=final_ext_eval,
+                    sandbox_cfg=cfg.sandbox,
+                    rng=rng,
+                    sequencing_mode=cfg.sequencing_mode,
+                    n_workers=cfg.max_workers,
+                )
+            else:
+                run_evaluation_phase(
+                    destroy_pool=list(pop.destroy_pool),
+                    repair_pool=list(pop.repair_pool),
+                    instances=benchmark_instances,
+                    archive=ext_test_archive,
+                    eval_cfg=final_ext_eval,
+                    sandbox_cfg=cfg.sandbox,
+                    rng=rng,
+                )
             # Keep a reference so we can save it alongside archive_full.json.
             _bm_eval_archive = ext_test_archive
             # Compute final external HV.

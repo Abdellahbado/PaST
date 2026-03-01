@@ -49,20 +49,71 @@ def _parse_args() -> argparse.Namespace:
         "--instances", type=Path, default=Path("New Benchmark/instances_90.json")
     )
 
+    # ---- HPC convenience preset ------------------------------------------
+    # Sets sensible high-resource defaults; individual flags below still
+    # override the preset when supplied explicitly after --hpc.
+    p.add_argument(
+        "--hpc",
+        action="store_true",
+        default=False,
+        help=(
+            "HPC super-preset: sets generations=500, K-episodes=30, T-iters=200, "
+            "T-test=1500, T-final=2000, K-final=20, pop-size=8, prune-count=3, "
+            "sandbox-timeout=15, sandbox-memory=4096, archive-max-size=200, "
+            "benchmark-eval-every=25, benchmark-eval-episodes=10, benchmark-eval-iters=100. "
+            "Individual flags override the preset."
+        ),
+    )
+
     # LLM.
     p.add_argument("--model", type=str, default="moonshotai/Kimi-K2-Instruct-0905")
     p.add_argument("--temperature", type=float, default=0.8)
-    p.add_argument("--max-tokens", type=int, default=4_500)
+    p.add_argument("--max-tokens", type=int, default=8_000)
 
     # Evolution.
-    p.add_argument("--generations", type=int, default=200, dest="G_max")
-    p.add_argument("--pop-size", type=int, default=5, dest="N_pop")
-    p.add_argument("--prune-count", type=int, default=2, dest="M_prune")
+    p.add_argument("--generations", type=int, default=None, dest="G_max")
+    p.add_argument("--pop-size", type=int, default=None, dest="N_pop")
+    p.add_argument("--prune-count", type=int, default=None, dest="M_prune")
+
+    # HPC: wall-clock budget & stagnation control.
+    p.add_argument(
+        "--time-limit-hours",
+        type=float,
+        default=None,
+        dest="time_limit_hours",
+        help="Stop after N hours of wall-clock time (0 = unlimited)",
+    )
+    p.add_argument(
+        "--stagnation-patience",
+        type=int,
+        default=None,
+        dest="stagnation_patience",
+        help="Gens with no HV improvement before forced reheat (0=disabled, default=20)",
+    )
+    p.add_argument(
+        "--stagnation-reheat-factor",
+        type=float,
+        default=None,
+        dest="stagnation_reheat_factor",
+        help="SA reheat multiplier on stagnation trigger (default=8.0)",
+    )
 
     # Evaluation.
-    p.add_argument("--K-episodes", type=int, default=20)
-    p.add_argument("--T-iters", type=int, default=100)
-    p.add_argument("--T-test", type=int, default=500)
+    p.add_argument("--K-episodes", type=int, default=None)
+    p.add_argument("--T-iters", type=int, default=None)
+    p.add_argument("--T-test", type=int, default=None)
+    p.add_argument(
+        "--T-final",
+        type=int,
+        default=None,
+        help="ALNS iters for the very last benchmark eval (0 = use T-test)",
+    )
+    p.add_argument(
+        "--K-final",
+        type=int,
+        default=None,
+        help="Episodes for the very last benchmark eval (0 = use max(10,K-episodes))",
+    )
     p.add_argument("--sa-T0", type=float, default=0.5, help="SA initial temperature")
     p.add_argument(
         "--sa-alpha", type=float, default=0.98, help="SA cooling rate per iteration"
@@ -79,29 +130,78 @@ def _parse_args() -> argparse.Namespace:
         default=False,
         help="Disable adaptive SA T0 adjustment (use fixed decay only)",
     )
-    p.add_argument("--destroy-ratio", type=float, default=0.2)
+    p.add_argument(
+        "--destroy-ratio",
+        type=float,
+        default=None,
+        help="Fixed destruction ratio (overrides adaptive min/max if set alone)",
+    )
+    p.add_argument(
+        "--destroy-ratio-min",
+        type=float,
+        default=None,
+        dest="destroy_ratio_min",
+        help="Min adaptive destruction ratio (default 0.10)",
+    )
+    p.add_argument(
+        "--destroy-ratio-max",
+        type=float,
+        default=None,
+        dest="destroy_ratio_max",
+        help="Max adaptive destruction ratio (default 0.40)",
+    )
+    p.add_argument(
+        "--lambda-smooth",
+        type=float,
+        default=None,
+        dest="lambda_smooth",
+        help="ALNS weight smoothing factor lambda (default 0.5)",
+    )
+    p.add_argument(
+        "--sigma",
+        type=str,
+        default=None,
+        help=(
+            "Scoring vector as 4 comma-separated floats, e.g. '1.5,1.2,0.8,0.1'. "
+            "sigma1=new Pareto, sigma2=better scalarised, sigma3=accepted, sigma4=rejected."
+        ),
+    )
+    p.add_argument(
+        "--n-reference-ops",
+        type=int,
+        default=None,
+        dest="n_reference_ops",
+        help="Number of top operators to include as reference in LLM prompt (default 2)",
+    )
+    p.add_argument(
+        "--search-context-max-chars",
+        type=int,
+        default=None,
+        dest="search_context_max_chars",
+        help="Max chars of search-state context sent to LLM each generation (default 900)",
+    )
     p.add_argument(
         "--benchmark-eval-every",
         type=int,
-        default=10,
+        default=None,
         help="Run dual-benchmark probe every N generations (0=disabled)",
     )
     p.add_argument(
         "--benchmark-eval-episodes",
         type=int,
-        default=5,
+        default=None,
         help="ALNS episodes per benchmark probe",
     )
     p.add_argument(
         "--benchmark-eval-iters",
         type=int,
-        default=50,
+        default=None,
         help="ALNS iterations per benchmark probe episode",
     )
 
     # Sandbox.
-    p.add_argument("--sandbox-timeout", type=float, default=5.0)
-    p.add_argument("--sandbox-memory-mb", type=int, default=512)
+    p.add_argument("--sandbox-timeout", type=float, default=None)
+    p.add_argument("--sandbox-memory-mb", type=int, default=None)
     p.add_argument(
         "--sandbox-start-method",
         type=str,
@@ -111,7 +211,7 @@ def _parse_args() -> argparse.Namespace:
     )
 
     # Archive.
-    p.add_argument("--archive-max-size", type=int, default=100)
+    p.add_argument("--archive-max-size", type=int, default=None)
 
     # Benchmark data.
     p.add_argument(
@@ -151,6 +251,36 @@ def _parse_args() -> argparse.Namespace:
         help="Random seed for the stratified evolution/evaluation split.",
     )
 
+    # Assignment-only decomposition mode (v2).
+    p.add_argument(
+        "--assignment-mode",
+        action="store_true",
+        default=False,
+        help=(
+            "Use assignment-only operators + optimal DP sequencing. "
+            "LLM operators work on List[int] assignments instead of List[List[int]] sequences. "
+            "This is the recommended mode for the Wang2018 benchmark."
+        ),
+    )
+    p.add_argument(
+        "--sequencing-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "optimal", "heuristic"],
+        dest="sequencing_mode",
+        help=(
+            "How to solve per-machine sequencing in assignment mode: "
+            "'auto' (default) uses optimal DP when state space ≤ 500K, else heuristic."
+        ),
+    )
+    p.add_argument(
+        "--max-workers",
+        type=int,
+        default=0,
+        dest="max_workers",
+        help="Number of parallel workers for DP evaluation (0 = auto; use all CPU cores).",
+    )
+
     return p.parse_args()
 
 
@@ -176,7 +306,49 @@ def main() -> None:
             raw = json.load(f)
         cfg = GLNSConfig(**raw)
     else:
-        # Build config from CLI arguments.
+        # ---- HPC preset: establish baseline values -------------------------
+        # Start with the pydantic model defaults, then layer the preset on top,
+        # then layer any explicit CLI overrides last (those arrive as non-None).
+        _defaults = GLNSConfig()
+
+        # Helper — picks the first non-None value in priority order.
+        def _pick(*values, fallback=None):
+            for v in values:
+                if v is not None:
+                    return v
+            return fallback
+
+        if args.hpc:
+            hpc_G_max = 500
+            hpc_K_ep = 30
+            hpc_T_iters = 200
+            hpc_T_test = 1500
+            hpc_T_final = 2000
+            hpc_K_final = 20
+            hpc_N_pop = 8
+            hpc_M_prune = 3
+            hpc_sb_to = 15.0
+            hpc_sb_mem = 4096
+            hpc_arch = 200
+            hpc_be_ev = 25
+            hpc_be_ep = 10
+            hpc_be_it = 100
+        else:
+            hpc_G_max = hpc_K_ep = hpc_T_iters = hpc_T_test = hpc_T_final = None
+            hpc_K_final = hpc_N_pop = hpc_M_prune = hpc_sb_to = hpc_sb_mem = None
+            hpc_arch = hpc_be_ev = hpc_be_ep = hpc_be_it = None
+
+        # Parse --sigma string if provided.
+        sigma_val = None
+        if args.sigma is not None:
+            try:
+                parts = [float(x.strip()) for x in args.sigma.split(",")]
+                if len(parts) != 4:
+                    raise ValueError("need exactly 4 values")
+                sigma_val = tuple(parts)
+            except Exception as exc:
+                sys.exit(f"ERROR: --sigma must be 4 comma-separated floats: {exc}")
+
         cfg = GLNSConfig(
             seed=args.seed,
             output_dir=args.output_dir,
@@ -184,34 +356,96 @@ def main() -> None:
                 model=args.model,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
+                n_reference_ops=_pick(
+                    args.n_reference_ops, fallback=_defaults.llm.n_reference_ops
+                ),
+                search_context_max_chars=_pick(
+                    args.search_context_max_chars,
+                    fallback=_defaults.llm.search_context_max_chars,
+                ),
             ),
             population=PopulationConfig(
-                N=args.N_pop,
-                M=args.M_prune,
+                N=_pick(args.N_pop, hpc_N_pop, fallback=_defaults.population.N),
+                M=_pick(args.M_prune, hpc_M_prune, fallback=_defaults.population.M),
             ),
             evolution=EvolutionConfig(
-                G_max=args.G_max,
+                G_max=_pick(args.G_max, hpc_G_max, fallback=_defaults.evolution.G_max),
+                time_limit_hours=_pick(
+                    args.time_limit_hours, fallback=_defaults.evolution.time_limit_hours
+                ),
+                stagnation_patience=_pick(
+                    args.stagnation_patience,
+                    fallback=_defaults.evolution.stagnation_patience,
+                ),
+                stagnation_reheat_factor=_pick(
+                    args.stagnation_reheat_factor,
+                    fallback=_defaults.evolution.stagnation_reheat_factor,
+                ),
             ),
             eval=EvalConfig(
-                K_episodes=args.K_episodes,
-                T_iters=args.T_iters,
-                T_test=args.T_test,
+                K_episodes=_pick(
+                    args.K_episodes, hpc_K_ep, fallback=_defaults.eval.K_episodes
+                ),
+                T_iters=_pick(
+                    args.T_iters, hpc_T_iters, fallback=_defaults.eval.T_iters
+                ),
+                T_test=_pick(args.T_test, hpc_T_test, fallback=_defaults.eval.T_test),
+                T_final=_pick(
+                    args.T_final, hpc_T_final, fallback=_defaults.eval.T_final
+                ),
+                K_final=_pick(
+                    args.K_final, hpc_K_final, fallback=_defaults.eval.K_final
+                ),
                 sa_T0=args.sa_T0,
                 sa_alpha=args.sa_alpha,
                 sa_T0_gen_decay=args.sa_T0_gen_decay,
                 sa_adaptive=not args.no_sa_adaptive,
-                destroy_ratio=args.destroy_ratio,
-                benchmark_eval_every=args.benchmark_eval_every,
-                benchmark_eval_episodes=args.benchmark_eval_episodes,
-                benchmark_eval_iters=args.benchmark_eval_iters,
+                destroy_ratio=_pick(
+                    args.destroy_ratio, fallback=_defaults.eval.destroy_ratio
+                ),
+                destroy_ratio_min=_pick(
+                    args.destroy_ratio_min, fallback=_defaults.eval.destroy_ratio_min
+                ),
+                destroy_ratio_max=_pick(
+                    args.destroy_ratio_max, fallback=_defaults.eval.destroy_ratio_max
+                ),
+                lambda_smooth=_pick(
+                    args.lambda_smooth, fallback=_defaults.eval.lambda_smooth
+                ),
+                sigma=sigma_val or _defaults.eval.sigma,
+                benchmark_eval_every=_pick(
+                    args.benchmark_eval_every,
+                    hpc_be_ev,
+                    fallback=_defaults.eval.benchmark_eval_every,
+                ),
+                benchmark_eval_episodes=_pick(
+                    args.benchmark_eval_episodes,
+                    hpc_be_ep,
+                    fallback=_defaults.eval.benchmark_eval_episodes,
+                ),
+                benchmark_eval_iters=_pick(
+                    args.benchmark_eval_iters,
+                    hpc_be_it,
+                    fallback=_defaults.eval.benchmark_eval_iters,
+                ),
             ),
             archive=ArchiveConfig(
-                max_size=args.archive_max_size,
+                max_size=_pick(
+                    args.archive_max_size, hpc_arch, fallback=_defaults.archive.max_size
+                ),
             ),
             sandbox=SandboxConfig(
                 start_method=args.sandbox_start_method,
-                timeout_sec=args.sandbox_timeout,
-                max_memory_mb=args.sandbox_memory_mb,
+                timeout_sec=_pick(
+                    args.sandbox_timeout,
+                    hpc_sb_to,
+                    fallback=_defaults.sandbox.timeout_sec,
+                ),
+                max_memory_mb=_pick(
+                    args.sandbox_memory_mb,
+                    hpc_sb_mem,
+                    fallback=_defaults.sandbox.max_memory_mb,
+                ),
             ),
             instances=InstanceConfig(
                 instances_json=args.instances,
@@ -222,32 +456,60 @@ def main() -> None:
                 benchmark_adaptation_evo_frac=args.benchmark_adaptation_evo_frac,
                 benchmark_adaptation_split_seed=args.benchmark_adaptation_split_seed,
             ),
+            assignment_mode=args.assignment_mode,
+            sequencing_mode=args.sequencing_mode,
+            max_workers=args.max_workers,
         )
 
     # Print config summary.
-    print(f"G-LNS config:")
-    print(f"  seed          = {cfg.seed}")
-    print(f"  generations   = {cfg.evolution.G_max}")
-    print(f"  population    = {cfg.population.N} (prune {cfg.population.M})")
-    print(f"  K_episodes    = {cfg.eval.K_episodes}")
-    print(f"  T_iters       = {cfg.eval.T_iters}")
-    print(f"  T_test        = {cfg.eval.T_test}")
-    print(f"  sa_T0         = {cfg.eval.sa_T0}")
-    print(f"  sa_alpha      = {cfg.eval.sa_alpha}")
-    print(f"  sa_T0_decay   = {cfg.eval.sa_T0_gen_decay}")
-    print(f"  sa_adaptive   = {cfg.eval.sa_adaptive}")
-    print(f"  model         = {cfg.llm.model}")
-    print(f"  max_tokens    = {cfg.llm.max_tokens}")
-    print(f"  output_dir    = {cfg.output_dir}")
-    print(f"  instances     = {cfg.instances.instances_json}")
-    print(f"  benchmark     = {cfg.instances.benchmark_data_dir or 'disabled'}")
-    print(f"  bm_adapt_mode = {cfg.instances.benchmark_adaptation}")
+    hpc_tag = " [HPC preset]" if (not args.config and args.hpc) else ""
+    print(f"G-LNS config{hpc_tag}:")
+    print(f"  seed             = {cfg.seed}")
+    print(f"  generations      = {cfg.evolution.G_max}")
+    if cfg.evolution.time_limit_hours > 0:
+        print(f"  time_limit       = {cfg.evolution.time_limit_hours:.1f} h")
+    print(
+        f"  stagnation_pat   = {cfg.evolution.stagnation_patience} gens (reheat x{cfg.evolution.stagnation_reheat_factor})"
+    )
+    print(f"  population       = {cfg.population.N} (prune {cfg.population.M})")
+    print(f"  K_episodes       = {cfg.eval.K_episodes}")
+    print(f"  T_iters          = {cfg.eval.T_iters}")
+    print(f"  T_test           = {cfg.eval.T_test}")
+    t_fin = cfg.eval.T_final or cfg.eval.T_test
+    k_fin = cfg.eval.K_final or max(10, cfg.eval.K_episodes)
+    print(f"  T_final/K_final  = {t_fin} / {k_fin}")
+    print(
+        f"  destroy_ratio    = [{cfg.eval.destroy_ratio_min:.2f}, {cfg.eval.destroy_ratio_max:.2f}] (fixed={cfg.eval.destroy_ratio:.2f})"
+    )
+    print(f"  lambda_smooth    = {cfg.eval.lambda_smooth}")
+    print(f"  sigma            = {cfg.eval.sigma}")
+    print(f"  sa_T0            = {cfg.eval.sa_T0}")
+    print(f"  sa_alpha         = {cfg.eval.sa_alpha}")
+    print(f"  sa_T0_decay      = {cfg.eval.sa_T0_gen_decay}")
+    print(f"  sa_adaptive      = {cfg.eval.sa_adaptive}")
+    print(f"  model            = {cfg.llm.model}")
+    print(f"  max_tokens       = {cfg.llm.max_tokens}")
+    print(f"  n_ref_ops        = {cfg.llm.n_reference_ops}")
+    print(f"  output_dir       = {cfg.output_dir}")
+    print(f"  instances        = {cfg.instances.instances_json}")
+    print(f"  benchmark        = {cfg.instances.benchmark_data_dir or 'disabled'}")
+    print(f"  bm_adapt_mode    = {cfg.instances.benchmark_adaptation}")
     if cfg.instances.benchmark_adaptation:
         print(
-            f"  bm_evo_frac   = {cfg.instances.benchmark_adaptation_evo_frac:.2f} (seed={cfg.instances.benchmark_adaptation_split_seed})"
+            f"  bm_evo_frac      = {cfg.instances.benchmark_adaptation_evo_frac:.2f} (seed={cfg.instances.benchmark_adaptation_split_seed})"
         )
-    print(f"  bm_eval_every = {cfg.eval.benchmark_eval_every}")
-    print(f"  sandbox_start = {cfg.sandbox.start_method}")
+    print(f"  bm_eval_every    = {cfg.eval.benchmark_eval_every}")
+    print(
+        f"  bm_eval_ep/iter  = {cfg.eval.benchmark_eval_episodes} / {cfg.eval.benchmark_eval_iters}"
+    )
+    print(f"  archive_max      = {cfg.archive.max_size}")
+    print(
+        f"  sandbox          = timeout={cfg.sandbox.timeout_sec}s mem={cfg.sandbox.max_memory_mb}MB start={cfg.sandbox.start_method}"
+    )
+    print(f"  assign_mode      = {cfg.assignment_mode}")
+    if cfg.assignment_mode:
+        print(f"  seq_mode         = {cfg.sequencing_mode}")
+        print(f"  max_workers      = {cfg.max_workers or 'auto'}")
 
     multi_keys = os.environ.get("GROQ_API_KEYS", "").strip()
     api_key = os.environ.get("GROQ_API_KEY", "").strip()
