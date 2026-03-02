@@ -30,7 +30,7 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
-WORKERS="${WORKERS:-2}"
+WORKERS="${WORKERS:-16}"
 
 LOG_DIR="ADP/logs/exp_forecast_bias"
 MODEL_DIR="ADP/models/exp_hard_profile_sweep"

@@ -27,7 +27,7 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
-WORKERS="${WORKERS:-2}"
+WORKERS="${WORKERS:-16}"
 
 LOG_DIR="ADP/logs/exp_non_repeating"
 MODEL_DIR_H="ADP/models/exp_non_repeating"

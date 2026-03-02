@@ -52,7 +52,7 @@ export PYTHON_BIN="${PYTHON_BIN:-python}"
 NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 export WORKERS="${WORKERS:-$(( NCPU > 32 ? 32 : NCPU ))}"
 export WORKERS_SMALL="$WORKERS"
-export WORKERS_MEDIUM="${WORKERS_MEDIUM:-$(( NCPU > 8 ? 8 : NCPU ))}"
+export WORKERS_MEDIUM="${WORKERS_MEDIUM:-$(( NCPU > 16 ? 16 : NCPU ))}"
 
 echo "============================================================"
 echo " Running All V2 Rigorous Experiments (Hard Instances)"
