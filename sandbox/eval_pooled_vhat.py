@@ -294,6 +294,123 @@ def _make_realized_prices_from_forecast(
     return realized.astype(np.float64)
 
 
+def _make_non_repeating_daily_prices(
+    *,
+    seed: int,
+    D: int,
+    H: int = 20,
+    Tk_choices: Sequence[int] = (2, 3, 5),
+    ck_low: int = 1,
+    ck_high: int = 8,
+) -> List[float]:
+    """Generate T-length NON-repeating prices: a DIFFERENT random day for each day.
+
+    Uses the generate_data.py-style interval sampling independently per day,
+    so each of the D days has its own random within-day price structure.
+    """
+    import random
+
+    rng = random.Random(int(seed))
+    ct: List[float] = []
+    for _d in range(int(D)):
+        while True:
+            remaining = int(H)
+            Tk: List[int] = []
+            while remaining > 0:
+                feasible = [int(x) for x in Tk_choices if int(x) <= remaining]
+                if not feasible:
+                    break
+                dur = int(rng.choice(feasible))
+                Tk.append(dur)
+                remaining -= dur
+            if remaining == 0 and Tk:
+                break
+        ck = [int(rng.randint(int(ck_low), int(ck_high))) for _ in range(len(Tk))]
+        for dur, price in zip(Tk, ck):
+            ct.extend([float(price)] * int(dur))
+    return ct
+
+
+def _make_drifting_amplitude_prices(
+    forecast_prices: np.ndarray,
+    *,
+    seed: int,
+    drift_sigma: float,
+    drift_rho: float = 0.9,
+    H: int = 20,
+    clip_low: float = 0.1,
+) -> np.ndarray:
+    """Create realized prices with per-day multiplicative amplitude drift.
+
+    Each day d gets a factor (1 + alpha_d) where alpha follows AR(1):
+        alpha_d = rho * alpha_{d-1} + sigma * z_d.
+    This weakens the repeating assumption: structure is preserved but
+    amplitude changes day-to-day.
+    """
+    fc = np.asarray(forecast_prices, dtype=np.float64)
+    T = int(len(fc))
+    D = T // int(H)
+    if D * int(H) != T:
+        raise ValueError(f"T={T} not divisible by H={H}")
+
+    rng = np.random.default_rng(int(seed))
+    r = float(max(-0.999, min(0.999, float(drift_rho))))
+
+    alphas = np.zeros(D, dtype=np.float64)
+    z = rng.standard_normal(D).astype(np.float64)
+    for d in range(1, D):
+        alphas[d] = r * alphas[d - 1] + float(drift_sigma) * z[d]
+
+    realized = fc.copy()
+    for d in range(D):
+        start = d * int(H)
+        end = start + int(H)
+        factor = max(float(clip_low), 1.0 + float(alphas[d]))
+        realized[start:end] *= factor
+
+    return np.maximum(realized, float(clip_low))
+
+
+def _make_biased_forecast_prices(
+    true_prices: np.ndarray,
+    *,
+    bias_factor: float = 0.0,
+    bias_shift: int = 0,
+    H: int = 20,
+) -> np.ndarray:
+    """Create a systematically biased forecast from the true price vector.
+
+    - bias_factor: peak underprediction. If 0.2, peak-regime prices in the
+      forecast are 80% of their true value. Only the top tertile is affected.
+    - bias_shift: circular shift of each day's prices by this many slots.
+      Simulates peak-timing prediction errors.
+    The returned forecast is still day-repeating (same bias each day).
+    """
+    true = np.asarray(true_prices, dtype=np.float64)
+    T = int(len(true))
+    D = T // int(H)
+    if D * int(H) != T:
+        raise ValueError(f"T={T} not divisible by H={H}")
+
+    forecast = true.copy()
+
+    if int(bias_shift) != 0:
+        for d in range(D):
+            start = d * int(H)
+            end = start + int(H)
+            day = forecast[start:end].copy()
+            forecast[start:end] = np.roll(day, int(bias_shift))
+
+    if float(bias_factor) > 0.0:
+        day0 = forecast[: int(H)]
+        threshold = float(np.percentile(day0, 66.7))
+        for t in range(T):
+            if float(forecast[t]) >= threshold:
+                forecast[t] *= 1.0 - float(bias_factor)
+
+    return forecast
+
+
 def _collect_state_labels(
     *,
     rng: np.random.Generator,
@@ -909,6 +1026,9 @@ def _collect_worker(
     optimal_path_topup_max: int,
     optimal_path_topup_dp_time_limit: float,
     require_optimal_labels: bool,
+    non_repeating: bool = False,
+    gd_ck_low: int = 1,
+    gd_ck_high: int = 8,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     attempts = 0
@@ -938,7 +1058,23 @@ def _collect_worker(
 
         T = int(len(prices))
         lengths, totals, radices, _mult = encode_setup(p)
-        ctx = build_tou_feature_context(prices, H=20, validate_repeating=True)
+
+        # Non-repeating: replace prices with independent per-day prices
+        if non_repeating:
+            _nr_prices = _make_non_repeating_daily_prices(
+                seed=int(seed) + 7777,
+                D=int(D_use),
+                H=20,
+                Tk_choices=(2, 3, 5),
+                ck_low=int(gd_ck_low),
+                ck_high=int(gd_ck_high),
+            )
+            prices = np.asarray(_nr_prices, dtype=np.float64)
+            T = int(len(prices))
+
+        ctx = build_tou_feature_context(
+            prices, H=20, validate_repeating=(not non_repeating)
+        )
         prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
         lm = str(label_mode).strip().lower()
@@ -1150,6 +1286,7 @@ def main() -> None:
             "ramp",
             "double_peak",
             "weekend_weekday",
+            "non_repeating",
         ],
         help=(
             "Which 20-hour repeating daily profile to use. "
@@ -1172,12 +1309,19 @@ def main() -> None:
         "--eval-price-mode",
         type=str,
         default="deterministic",
-        choices=["deterministic", "forecast_realized"],
+        choices=[
+            "deterministic",
+            "forecast_realized",
+            "drifting_amplitude",
+            "forecast_bias",
+        ],
         help=(
             "Price regime for evaluation. 'deterministic' uses the same repeating "
             "profile for both guidance and true costs. 'forecast_realized' uses a "
-            "repeating forecast price vector for features/guidance, but evaluates "
-            "true costs on a noisy realized price vector."
+            "repeating forecast for features + noisy realized for costs. "
+            "'drifting_amplitude' adds per-day multiplicative drift to realized "
+            "prices (weakly non-repeating). 'forecast_bias' uses a systematically "
+            "biased forecast (peak underprediction / time shift) with true costs."
         ),
     )
     ap.add_argument(
@@ -1221,6 +1365,37 @@ def main() -> None:
         type=float,
         default=1e9,
         help="Upper clip for realized prices.",
+    )
+
+    # --- Drifting amplitude mode ---
+    ap.add_argument(
+        "--eval-price-drift-sigma",
+        type=float,
+        default=0.0,
+        help="Per-day amplitude drift std dev for drifting_amplitude mode.",
+    )
+    ap.add_argument(
+        "--eval-price-drift-rho",
+        type=float,
+        default=0.9,
+        help="AR(1) autocorrelation for per-day amplitude drift.",
+    )
+
+    # --- Forecast bias mode ---
+    ap.add_argument(
+        "--eval-price-bias-factor",
+        type=float,
+        default=0.0,
+        help=(
+            "Peak underprediction fraction for forecast_bias mode. "
+            "E.g. 0.2 means forecast underpredicts peak prices by 20%%."
+        ),
+    )
+    ap.add_argument(
+        "--eval-price-bias-shift",
+        type=int,
+        default=0,
+        help="Peak time shift in slots for forecast_bias mode (1-2 typical).",
     )
 
     ap.add_argument(
@@ -1643,6 +1818,7 @@ def main() -> None:
 
     daily_prices_20: List[float] | None = None
     _pp = str(args.daily_price_profile).strip().lower()
+    _use_non_repeating = _pp == "non_repeating"
     if _pp == "generate_data":
         daily_prices_20 = _make_generate_data_daily_prices(
             seed=int(args.gd_seed),
@@ -1654,6 +1830,10 @@ def main() -> None:
     elif _pp in _NAMED_PROFILES:
         daily_prices_20 = list(_NAMED_PROFILES[_pp])
         print(f"[pool] Using named price profile: {_pp} → {daily_prices_20}")
+    elif _use_non_repeating:
+        # Non-repeating: generate a different day for each day.
+        # daily_prices_20 stays None here; full-T prices generated per instance.
+        print("[pool] Using NON-REPEATING daily prices (each day differs).")
     # else: daily_tou — daily_prices_20 stays None → build_instance uses default
 
     if str(args.beams).strip():
@@ -2002,6 +2182,9 @@ def main() -> None:
                     args.optimal_path_topup_dp_time_limit
                 ),
                 require_optimal_labels=bool(args.require_optimal_labels),
+                non_repeating=_use_non_repeating,
+                gd_ck_low=int(args.gd_ck_low),
+                gd_ck_high=int(args.gd_ck_high),
             )
 
             mtpc = int(args.maxtasksperchild)
@@ -2058,9 +2241,19 @@ def main() -> None:
                     target_util=(tu if tu > 0.0 else None),
                     M_for_cap=1,
                 )
+                if _use_non_repeating:
+                    _nr = _make_non_repeating_daily_prices(
+                        seed=int(probe_seed) + 7777,
+                        D=int(D_use),
+                        H=20,
+                        Tk_choices=(2, 3, 5),
+                        ck_low=int(args.gd_ck_low),
+                        ck_high=int(args.gd_ck_high),
+                    )
+                    prices_probe = np.asarray(_nr, dtype=np.float64)
                 lengths_p, totals_p, _rad, _mul = encode_setup(p_probe)
                 ctx_p = build_tou_feature_context(
-                    prices_probe, H=20, validate_repeating=True
+                    prices_probe, H=20, validate_repeating=(not _use_non_repeating)
                 )
                 used0 = tuple([0] * int(len(lengths_p)))
                 phi0 = phi_for_state(
@@ -2681,8 +2874,25 @@ def main() -> None:
         )
         forecast_prices = np.asarray(forecast_prices, dtype=np.float64)
 
+        # Non-repeating: replace the repeating prices with independent per-day prices
+        if _use_non_repeating:
+            _nr_prices = _make_non_repeating_daily_prices(
+                seed=int(eval_seed) + 7777,
+                D=int(D_use),
+                H=20,
+                Tk_choices=(2, 3, 5),
+                ck_low=int(args.gd_ck_low),
+                ck_high=int(args.gd_ck_high),
+            )
+            forecast_prices = np.asarray(_nr_prices, dtype=np.float64)
+
         price_mode = str(args.eval_price_mode).strip().lower()
-        if price_mode not in ("deterministic", "forecast_realized"):
+        if price_mode not in (
+            "deterministic",
+            "forecast_realized",
+            "drifting_amplitude",
+            "forecast_bias",
+        ):
             raise ValueError(f"Unknown --eval-price-mode: {args.eval_price_mode!r}")
 
         if price_mode == "forecast_realized":
@@ -2697,6 +2907,21 @@ def main() -> None:
                 clip_low=float(args.eval_price_clip_low),
                 clip_high=float(args.eval_price_clip_high),
             )
+        elif price_mode == "drifting_amplitude":
+            realized_prices = _make_drifting_amplitude_prices(
+                forecast_prices,
+                seed=int(eval_seed),
+                drift_sigma=float(args.eval_price_drift_sigma),
+                drift_rho=float(args.eval_price_drift_rho),
+            )
+        elif price_mode == "forecast_bias":
+            true_prices = forecast_prices.copy()
+            forecast_prices = _make_biased_forecast_prices(
+                true_prices,
+                bias_factor=float(args.eval_price_bias_factor),
+                bias_shift=int(args.eval_price_bias_shift),
+            )
+            realized_prices = true_prices
         else:
             realized_prices = forecast_prices
 
@@ -2728,9 +2953,12 @@ def main() -> None:
 
         lengths, totals, radices, _mult = encode_setup(p)
         ctx_prices = prices
-        if price_mode == "forecast_realized":
+        if price_mode in ("forecast_realized", "drifting_amplitude", "forecast_bias"):
             ctx_prices = forecast_prices
-        ctx = build_tou_feature_context(ctx_prices, H=20, validate_repeating=True)
+        _validate_rep = (not _use_non_repeating) and price_mode != "drifting_amplitude"
+        ctx = build_tou_feature_context(
+            ctx_prices, H=20, validate_repeating=_validate_rep
+        )
 
         # Build vhat closure for this instance using the SHARED model
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
