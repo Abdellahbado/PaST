@@ -29,13 +29,13 @@ FEAT_FLAGS="--feat-len-hist --feat-price-shape --feat-meta --feat-extra --normal
 LABEL="--label-mode optimal_path --optimal-path-n-paths 2"
 DP_TIME_LIMIT="${DP_TIME_LIMIT:-120}"
 
-MODELS=("mlp" "elasticnet" "poly")
+MODELS=("mlp" "poly" "poly_mlp" "factored_mlp")
 PROFILES=("ramp" "double_peak" "daily_tou" "generate_data")
 BEAMS="5,10,20"
 
-TRAIN_SEEDS="0-99"
-EVAL_SEEDS="200-224"
-SAMPLES=5000
+TRAIN_SEEDS="0-299"
+EVAL_SEEDS="500-549"
+SAMPLES=10000
 
 # ── Size configs ─────────────────────────────────────────────────────
 SMALL_D="4" ; SMALL_N="20" ; SMALL_PMAX="5"
@@ -70,8 +70,7 @@ run_one() {
 
   MODEL_ARGS=""
   case "$MODEL" in
-    elasticnet) MODEL_ARGS="--elasticnet-alpha $EN_ALPHA --elasticnet-l1-ratio $EN_L1_RATIO" ;;
-    mlp)        MODEL_ARGS="--mlp-max-epochs $MLP_EPOCHS --mlp-patience $MLP_PATIENCE" ;;
+    mlp|poly_mlp|factored_mlp) MODEL_ARGS="--mlp-max-epochs $MLP_EPOCHS --mlp-patience $MLP_PATIENCE" ;;
     poly)       MODEL_ARGS="--l2 1e-3" ;;
   esac
 
