@@ -10,20 +10,23 @@ from collections import defaultdict, OrderedDict
 log_path = sys.argv[1] if len(sys.argv) > 1 else "ADP/logs/logs/rigourous/round_2.log"
 
 if not os.path.isfile(log_path):
-    print(f"ERROR: {log_path} not found"); sys.exit(1)
+    print(f"ERROR: {log_path} not found")
+    sys.exit(1)
 
-with open(log_path, 'rb') as f:
+with open(log_path, "rb") as f:
     raw = f.read()
-text = raw.decode('utf-8', errors='replace')
-lines = text.split('\n')
+text = raw.decode("utf-8", errors="replace")
+lines = text.split("\n")
 
 # ── Tag patterns ─────────────────────────────────────────────────────
-TAG_RE = re.compile(r'(?:RUN|CROSS|EVAL)\s+(\S+)')
+TAG_RE = re.compile(r"(?:RUN|CROSS|EVAL)\s+(\S+)")
 
 current_exp = None
 skipped = []
-data_info = OrderedDict()       # tag -> (samples, r2_train, r2_test)
-eval_rows = []                  # (tag, beam, n, gapL_m, gapL_md, gapZ_m, gapZ_md, gapP_m, gapP_md, speed)
+data_info = OrderedDict()  # tag -> (samples, r2_train, r2_test)
+eval_rows = (
+    []
+)  # (tag, beam, n, gapL_m, gapL_md, gapZ_m, gapZ_md, gapP_m, gapP_md, speed)
 last_samples = 0
 
 for line in lines:
@@ -36,47 +39,57 @@ for line in lines:
     if m:
         tag = m.group(1)
         # Clean up mangled tags (interleaved output)
-        tag = re.sub(r'[=:].*', '', tag).strip()
+        tag = re.sub(r"[=:].*", "", tag).strip()
         if tag:
             current_exp = tag
             last_samples = 0
 
     # SKIP
-    if 'SKIP (exists)' in line:
-        m_skip = re.search(r'SKIP \(exists\)\s+(\S+)', line)
+    if "SKIP (exists)" in line:
+        m_skip = re.search(r"SKIP \(exists\)\s+(\S+)", line)
         if m_skip:
             csv = m_skip.group(1)
             tag = os.path.splitext(os.path.basename(csv))[0]
             skipped.append(tag)
 
     # Pooled samples
-    m_pool = re.search(r'Pooled samples:\s*(\d[\d,]*)', line)
+    m_pool = re.search(r"Pooled samples:\s*(\d[\d,]*)", line)
     if m_pool and current_exp:
-        last_samples = int(m_pool.group(1).replace(',', ''))
+        last_samples = int(m_pool.group(1).replace(",", ""))
 
     # R2 scores
-    m_r2 = re.search(r'R2_train=([\d.]+)\s+R2_test=([\d.]+)', line)
+    m_r2 = re.search(r"R2_train=([\d.]+)\s+R2_test=([\d.]+)", line)
     if m_r2 and current_exp:
-        data_info[current_exp] = (last_samples, float(m_r2.group(1)), float(m_r2.group(2)))
+        data_info[current_exp] = (
+            last_samples,
+            float(m_r2.group(1)),
+            float(m_r2.group(2)),
+        )
 
     # Evaluation beam lines
     m_beam = re.search(
-        r'beam=\s*(\d+)\s+n=\s*(\d+)\s+'
-        r'gapL=\s*([\d.]+)%/\s*([\d.]+)%\s+'
-        r'gapZ=\s*([\d.]+)%/\s*([\d.]+)%\s+'
-        r'gapP=\s*([\d.]+)%/\s*([\d.]+)%\s+'
-        r'speedL=([\d.]+)x',
-        line
+        r"beam=\s*(\d+)\s+n=\s*(\d+)\s+"
+        r"gapL=\s*([\d.]+)%/\s*([\d.]+)%\s+"
+        r"gapZ=\s*([\d.]+)%/\s*([\d.]+)%\s+"
+        r"gapP=\s*([\d.]+)%/\s*([\d.]+)%\s+"
+        r"speedL=([\d.]+)x",
+        line,
     )
     if m_beam and current_exp:
-        eval_rows.append((
-            current_exp,
-            int(m_beam.group(1)), int(m_beam.group(2)),
-            float(m_beam.group(3)), float(m_beam.group(4)),
-            float(m_beam.group(5)), float(m_beam.group(6)),
-            float(m_beam.group(7)), float(m_beam.group(8)),
-            float(m_beam.group(9)),
-        ))
+        eval_rows.append(
+            (
+                current_exp,
+                int(m_beam.group(1)),
+                int(m_beam.group(2)),
+                float(m_beam.group(3)),
+                float(m_beam.group(4)),
+                float(m_beam.group(5)),
+                float(m_beam.group(6)),
+                float(m_beam.group(7)),
+                float(m_beam.group(8)),
+                float(m_beam.group(9)),
+            )
+        )
 
 # ── Group by experiment tag ──────────────────────────────────────────
 exp_beams = defaultdict(list)
@@ -110,12 +123,18 @@ for beam_w in [20, 10, 5]:
         continue
     print()
     print("=" * 130)
-    print(f"  EVALUATION @ beam={beam_w}   gapL=Learned  gapP=PriceHeuristic  gapZ=ZeroVhat  (mean/median)")
+    print(
+        f"  EVALUATION @ beam={beam_w}   gapL=Learned  gapP=PriceHeuristic  gapZ=ZeroVhat  (mean/median)"
+    )
     print("=" * 130)
-    print(f"  {'Experiment':<48} {'n':>3} {'gapL_m':>7} {'gapL_md':>8} {'gapP_m':>7} {'gapP_md':>8} {'gapZ_m':>7} {'gapZ_md':>8} {'speed':>6}")
+    print(
+        f"  {'Experiment':<48} {'n':>3} {'gapL_m':>7} {'gapL_md':>8} {'gapP_m':>7} {'gapP_md':>8} {'gapZ_m':>7} {'gapZ_md':>8} {'speed':>6}"
+    )
     print("  " + "-" * 126)
     for tag, beam, n, gl_m, gl_md, gz_m, gz_md, gp_m, gp_md, sp in rows_for_beam:
-        print(f"  {tag:<48} {n:>3} {gl_m:>6.2f}% {gl_md:>6.2f}% {gp_m:>6.2f}% {gp_md:>6.2f}% {gz_m:>6.2f}% {gz_md:>6.2f}% {sp:>5.1f}x")
+        print(
+            f"  {tag:<48} {n:>3} {gl_m:>6.2f}% {gl_md:>6.2f}% {gp_m:>6.2f}% {gp_md:>6.2f}% {gz_m:>6.2f}% {gz_md:>6.2f}% {sp:>5.1f}x"
+        )
 
 print()
 print("=" * 80)
