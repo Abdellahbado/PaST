@@ -69,6 +69,9 @@ def phi_for_state(
     if t > T:
         t = T
 
+    # Detect NR-honest mode
+    _nr = bool(getattr(ctx, "is_nonrepeating", False))
+
     # Normalization denominator (T for absolute→ratio conversion)
     norm = float(T) if spec.normalize else 1.0
 
@@ -81,8 +84,23 @@ def phi_for_state(
     S = float((T - t) - int(W))
     S_pos = float(max(S, 0.0))
 
-    h = int(t % ctx.H)
-    reg = int(ctx.day_regime[h])
+    # --- Regime & distances: NR-honest vs repeating-proxy ------------------
+    if _nr:
+        t_idx = min(t, T - 1) if T > 0 else 0
+        reg = int(ctx.regime[t_idx])
+        _d_off_full = getattr(ctx, "dist_to_next_off_full", None)
+        _d_cheap_full = getattr(ctx, "dist_to_next_cheap_full", None)
+        if _d_off_full is not None and _d_cheap_full is not None:
+            d_off = float(int(_d_off_full[t_idx]))
+            d_cheap = float(int(_d_cheap_full[t_idx]))
+        else:
+            d_off = 0.0
+            d_cheap = 0.0
+    else:
+        h = int(t % ctx.H)
+        reg = int(ctx.day_regime[h])
+        d_off = float(int(ctx.dist_to_next_off[h]))
+        d_cheap = float(int(ctx.dist_to_next_cheap[h]))
 
     # Regime one-hot (dimensionless, no normalization needed)
     reg_oh = [0.0, 0.0, 0.0]
@@ -98,9 +116,8 @@ def phi_for_state(
     pressure_off = float(W / (c_off + 1.0))
     pressure_cheap = float(W / (c_off + c_sh + 1.0))
 
-    # Distances to next off/cheap within cycle (bounded by H=20, no normalization)
-    d_off = float(int(ctx.dist_to_next_off[h]))
-    d_cheap = float(int(ctx.dist_to_next_cheap[h]))
+    # Distances to next off/cheap (bounded by H in repeating, T in NR)
+    # (already computed above in the NR/repeating branch)
 
     feats: List[float] = []
 
@@ -167,23 +184,29 @@ def phi_for_state(
     # Optional: price-shape features from the daily pattern.
     # Useful when profiles vary (even if still repeating daily).
     if spec.include_price_shape:
-        day = np.asarray(ctx.day, dtype=np.float64)
-        # Basic stats
-        feats.extend(
-            [
-                float(np.mean(day)),
-                float(np.std(day)),
-                float(np.min(day)),
-                float(np.max(day)),
-            ]
-        )
-        # Fourier components (k=1..3) to capture within-day shape.
-        H = int(ctx.H)
-        x = np.arange(H, dtype=np.float64)
-        for k in (1, 2, 3):
-            ang = 2.0 * np.pi * float(k) * x / float(H)
-            feats.append(float(np.mean(day * np.cos(ang))))
-            feats.append(float(np.mean(day * np.sin(ang))))
+        _lpf = getattr(ctx, "local_price_feats", None)
+        if _nr and _lpf is not None:
+            # NR-honest: precomputed local stats + Fourier for this time step
+            t_idx = min(t, T - 1) if T > 0 else 0
+            feats.extend(_lpf[t_idx].tolist())
+        else:
+            day = np.asarray(ctx.day, dtype=np.float64)
+            # Basic stats
+            feats.extend(
+                [
+                    float(np.mean(day)),
+                    float(np.std(day)),
+                    float(np.min(day)),
+                    float(np.max(day)),
+                ]
+            )
+            # Fourier components (k=1..3) to capture within-day shape.
+            H = int(ctx.H)
+            x = np.arange(H, dtype=np.float64)
+            for k in (1, 2, 3):
+                ang = 2.0 * np.pi * float(k) * x / float(H)
+                feats.append(float(np.mean(day * np.cos(ang))))
+                feats.append(float(np.mean(day * np.sin(ang))))
 
     # Per-class counts (normalized)
     if spec.include_per_class_counts:
@@ -202,6 +225,7 @@ def phi_for_state(
     # Per-class cost-if-run-now (wrap within day) and aggregate
     # Note: cost values are already price-scaled (bounded by price profile), not by T
     if spec.include_per_class_now_cost:
+        _pfx = getattr(ctx, "prefix_prices", None)
         pad = int(spec.per_class_pad)
         agg = 0.0
         if pad > 0:
@@ -210,10 +234,16 @@ def phi_for_state(
             for nk, L in zip(remaining.tolist(), lengths_arr.tolist()):
                 if nk <= 0:
                     continue
-                if int(L) <= ctx.H:
-                    cost_now = float(ctx.day_window_cost[int(L)][h])
+                if _nr and _pfx is not None:
+                    # NR-honest: exact cost from prefix sums
+                    end = min(t + int(L), T)
+                    cost_now = float(_pfx[end] - _pfx[t])
                 else:
-                    cost_now = float(get_day_window_cost(ctx, int(L))[h])
+                    h = int(t % ctx.H)
+                    if int(L) <= ctx.H:
+                        cost_now = float(ctx.day_window_cost[int(L)][h])
+                    else:
+                        cost_now = float(get_day_window_cost(ctx, int(L))[h])
                 v = float(int(nk)) * cost_now / norm
                 idx = int(L) - 1
                 if 0 <= idx < pad:
@@ -225,10 +255,15 @@ def phi_for_state(
                 if nk <= 0:
                     feats.append(0.0)
                     continue
-                if int(L) <= ctx.H:
-                    cost_now = float(ctx.day_window_cost[int(L)][h])
+                if _nr and _pfx is not None:
+                    end = min(t + int(L), T)
+                    cost_now = float(_pfx[end] - _pfx[t])
                 else:
-                    cost_now = float(get_day_window_cost(ctx, int(L))[h])
+                    h = int(t % ctx.H)
+                    if int(L) <= ctx.H:
+                        cost_now = float(ctx.day_window_cost[int(L)][h])
+                    else:
+                        cost_now = float(get_day_window_cost(ctx, int(L))[h])
                 v = float(int(nk)) * cost_now / norm
                 feats.append(v)
                 agg += v

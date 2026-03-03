@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 
@@ -40,6 +40,21 @@ class TOUFeatureContext:
     # Window cost if starting at hour-of-day h with length L (wrap within day)
     # Stored as dict: L -> np.ndarray shape (H,)
     day_window_cost: Dict[int, np.ndarray]
+
+    # --- NR-honest fields (populated only by build_tou_feature_context_nonrepeating) ---
+    prefix_prices: Optional[np.ndarray] = (
+        None  # shape (T+1,) cumsum for exact window costs
+    )
+    is_nonrepeating: bool = False
+    dist_to_next_off_full: Optional[np.ndarray] = (
+        None  # shape (T,) forward-looking per slot
+    )
+    dist_to_next_cheap_full: Optional[np.ndarray] = (
+        None  # shape (T,) forward-looking per slot
+    )
+    local_price_feats: Optional[np.ndarray] = (
+        None  # shape (T, 10) local stats + Fourier
+    )
 
 
 def _bucket_3_levels(day_prices: np.ndarray) -> np.ndarray:
@@ -80,6 +95,24 @@ def _dist_to_next(mask: np.ndarray) -> np.ndarray:
             dist[i] = int(after[0] - i)
         else:
             dist[i] = int((true_idx[0] + H) - i)
+    return dist
+
+
+def _dist_to_next_forward(mask: np.ndarray) -> np.ndarray:
+    """For each index t, distance to next True in mask[t:] (non-cyclic).
+
+    If no True exists at or after t, returns len(mask)-t (beyond horizon).
+    """
+    T = int(len(mask))
+    if T == 0:
+        return np.zeros(0, dtype=np.int32)
+
+    dist = np.zeros(T, dtype=np.int32)
+    last_true = T  # sentinel: beyond horizon
+    for t in range(T - 1, -1, -1):
+        if mask[t]:
+            last_true = t
+        dist[t] = int(last_true - t)
     return dist
 
 
@@ -152,6 +185,105 @@ def build_tou_feature_context(
         dist_to_next_off=dist_to_next_off,
         dist_to_next_cheap=dist_to_next_cheap,
         day_window_cost=day_window_cost,
+    )
+
+
+def build_tou_feature_context_nonrepeating(
+    prices: np.ndarray,
+    *,
+    H: int = 20,
+) -> TOUFeatureContext:
+    """Build feature context for NON-repeating prices.
+
+    Unlike the repeating version, this uses the ACTUAL prices at every time
+    step rather than assuming prices[:H] repeats.
+
+    - Regime buckets are computed from the FULL trajectory (tertile-based).
+    - Suffix regime counts reflect actual future prices.
+    - Distance-to-next-off/cheap is forward-looking (non-cyclic, per slot).
+    - A prefix-sum array enables exact window-cost queries at any (t, L).
+    - Local price features (mean/std/min/max + Fourier k=1..3 in a window
+      of H slots ahead) are precomputed for each time step.
+    """
+    prices = np.asarray(prices, dtype=np.float64)
+    T = int(len(prices))
+    if T <= 0:
+        raise ValueError("prices must be non-empty")
+    if H <= 0:
+        raise ValueError("H must be positive")
+
+    # --- Regime from FULL trajectory (honest bucketing) --------------------
+    regime = _bucket_3_levels(prices)  # shape (T,), int8
+
+    # For backward compat: 'day' = first H slots; day_regime from that slice
+    day = prices[: min(H, T)].copy()
+    if len(day) < H:
+        day = np.pad(day, (0, H - len(day)), constant_values=float(day[-1]))
+    day_regime = _bucket_3_levels(day)
+
+    # Per-slot forward distance to next off / cheap (non-cyclic)
+    dist_off_full = _dist_to_next_forward(regime == 0)
+    dist_cheap_full = _dist_to_next_forward(regime <= 1)
+
+    # Cycle-based distances kept for compat (unused in NR phi_for_state)
+    dist_to_next_off = _dist_to_next(day_regime == 0)
+    dist_to_next_cheap = _dist_to_next(day_regime <= 1)
+
+    # --- Suffix regime counts from ACTUAL regimes --------------------------
+    count_regime = np.zeros((3, T + 1), dtype=np.int32)
+    for t in range(T - 1, -1, -1):
+        count_regime[:, t] = count_regime[:, t + 1]
+        r = int(regime[t])
+        if 0 <= r < 3:
+            count_regime[r, t] += 1
+
+    # --- Prefix prices for exact window-cost queries -----------------------
+    prefix_prices = np.zeros(T + 1, dtype=np.float64)
+    prefix_prices[1:] = np.cumsum(prices)
+
+    # --- day_window_cost (from day, kept for compat; not used in NR mode) --
+    day2 = np.concatenate([day, day])
+    pref2 = np.zeros(len(day2) + 1, dtype=np.float64)
+    pref2[1:] = np.cumsum(day2)
+    day_window_cost: Dict[int, np.ndarray] = {}
+    for L in range(1, H + 1):
+        costs = np.zeros(H, dtype=np.float64)
+        for h_idx in range(H):
+            costs[h_idx] = pref2[h_idx + L] - pref2[h_idx]
+        day_window_cost[int(L)] = costs
+
+    # --- Local price features per time step (stats + Fourier) --------------
+    # Shape (T, 10): [mean, std, min, max, cos1, sin1, cos2, sin2, cos3, sin3]
+    local_price_feats = np.zeros((T, 10), dtype=np.float64)
+    for t in range(T):
+        window = prices[t : min(t + H, T)]
+        wH = len(window)
+        local_price_feats[t, 0] = float(np.mean(window))
+        local_price_feats[t, 1] = float(np.std(window))
+        local_price_feats[t, 2] = float(np.min(window))
+        local_price_feats[t, 3] = float(np.max(window))
+        x = np.arange(wH, dtype=np.float64)
+        for ki, k in enumerate((1, 2, 3)):
+            ang = 2.0 * np.pi * float(k) * x / float(max(wH, 1))
+            local_price_feats[t, 4 + 2 * ki] = float(np.mean(window * np.cos(ang)))
+            local_price_feats[t, 5 + 2 * ki] = float(np.mean(window * np.sin(ang)))
+
+    return TOUFeatureContext(
+        prices=prices,
+        T=T,
+        H=H,
+        day=day,
+        regime=regime,
+        count_regime=count_regime,
+        day_regime=day_regime,
+        dist_to_next_off=dist_to_next_off,
+        dist_to_next_cheap=dist_to_next_cheap,
+        day_window_cost=day_window_cost,
+        prefix_prices=prefix_prices,
+        is_nonrepeating=True,
+        dist_to_next_off_full=dist_off_full,
+        dist_to_next_cheap_full=dist_cheap_full,
+        local_price_feats=local_price_feats,
     )
 
 

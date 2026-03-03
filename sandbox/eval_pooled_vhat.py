@@ -51,7 +51,10 @@ from PaST.solvers.vhat_linear import (
     phi_for_state,
     phi_for_states_batch,
 )
-from PaST.solvers.vhat_tou_features import build_tou_feature_context
+from PaST.solvers.vhat_tou_features import (
+    build_tou_feature_context,
+    build_tou_feature_context_nonrepeating,
+)
 from PaST.sandbox.train_eval_vhat_beam_dp import (
     build_instance,
     decode_state,
@@ -315,6 +318,44 @@ def _make_non_repeating_daily_prices(
     for _d in range(int(D)):
         while True:
             remaining = int(H)
+            Tk: List[int] = []
+            while remaining > 0:
+                feasible = [int(x) for x in Tk_choices if int(x) <= remaining]
+                if not feasible:
+                    break
+                dur = int(rng.choice(feasible))
+                Tk.append(dur)
+                remaining -= dur
+            if remaining == 0 and Tk:
+                break
+        ck = [int(rng.randint(int(ck_low), int(ck_high))) for _ in range(len(Tk))]
+        for dur, price in zip(Tk, ck):
+            ct.extend([float(price)] * int(dur))
+    return ct
+
+
+def _make_weekly_repeating_daily_prices(
+    *,
+    seed: int,
+    n_days_per_week: int = 7,
+    H_day: int = 20,
+    Tk_choices: Sequence[int] = (2, 3, 5),
+    ck_low: int = 1,
+    ck_high: int = 8,
+) -> List[float]:
+    """Generate a weekly-repeating price template (length n_days_per_week * H_day).
+
+    Each day in the week has a DIFFERENT random within-day price structure,
+    but the week itself repeats identically.
+    Returns a flat list of length n_days_per_week * H_day.
+    """
+    import random
+
+    rng = random.Random(int(seed))
+    ct: List[float] = []
+    for _d in range(int(n_days_per_week)):
+        while True:
+            remaining = int(H_day)
             Tk: List[int] = []
             while remaining > 0:
                 feasible = [int(x) for x in Tk_choices if int(x) <= remaining]
@@ -1029,6 +1070,8 @@ def _collect_worker(
     non_repeating: bool = False,
     gd_ck_low: int = 1,
     gd_ck_high: int = 8,
+    H_cycle: int = 20,
+    weekly_template: List[float] | None = None,
 ) -> Tuple[np.ndarray, np.ndarray, int]:
     """Worker function for parallel data collection. Runs in a subprocess."""
     attempts = 0
@@ -1072,9 +1115,21 @@ def _collect_worker(
             prices = np.asarray(_nr_prices, dtype=np.float64)
             T = int(len(prices))
 
-        ctx = build_tou_feature_context(
-            prices, H=20, validate_repeating=(not non_repeating)
-        )
+        # Weekly: tile the 140-slot weekly template across D days
+        if weekly_template is not None:
+            wt = weekly_template
+            T_total = int(D_use) * 20
+            prices = np.array(
+                [float(wt[t % len(wt)]) for t in range(T_total)], dtype=np.float64
+            )
+            T = int(len(prices))
+
+        if non_repeating:
+            ctx = build_tou_feature_context_nonrepeating(prices, H=int(H_cycle))
+        else:
+            ctx = build_tou_feature_context(
+                prices, H=int(H_cycle), validate_repeating=(not non_repeating)
+            )
         prefix_prices = np.concatenate([[0.0], np.cumsum(prices, dtype=np.float64)])
 
         lm = str(label_mode).strip().lower()
@@ -1287,12 +1342,15 @@ def main() -> None:
             "double_peak",
             "weekend_weekday",
             "non_repeating",
+            "weekly_repeating",
         ],
         help=(
-            "Which 20-hour repeating daily profile to use. "
+            "Which price profile to use. "
             "daily_tou matches New Benchmark/new_data.py daily_tou; "
             "generate_data samples a 20-slot day using interval prices and repeats it. "
-            "flat/two_block/ramp/double_peak/weekend_weekday are fixed named profiles."
+            "flat/two_block/ramp/double_peak/weekend_weekday are fixed named profiles. "
+            "non_repeating generates an independent random day per day (H_cycle=20, NR-honest features). "
+            "weekly_repeating generates 7 unique days forming a repeating week (H_cycle=140)."
         ),
     )
     ap.add_argument(
@@ -1819,6 +1877,11 @@ def main() -> None:
     daily_prices_20: List[float] | None = None
     _pp = str(args.daily_price_profile).strip().lower()
     _use_non_repeating = _pp == "non_repeating"
+    _use_weekly = _pp == "weekly_repeating"
+    # H_cycle: cycle length for feature context (20 for daily, 140 for weekly)
+    _H_cycle: int = 140 if _use_weekly else 20
+    # Weekly template (length 140) — generated once, tiled per instance
+    _weekly_template_140: List[float] | None = None
     if _pp == "generate_data":
         daily_prices_20 = _make_generate_data_daily_prices(
             seed=int(args.gd_seed),
@@ -1833,7 +1896,21 @@ def main() -> None:
     elif _use_non_repeating:
         # Non-repeating: generate a different day for each day.
         # daily_prices_20 stays None here; full-T prices generated per instance.
-        print("[pool] Using NON-REPEATING daily prices (each day differs).")
+        print(
+            "[pool] Using NON-REPEATING daily prices (NR-honest features, each day differs)."
+        )
+    elif _use_weekly:
+        _weekly_template_140 = _make_weekly_repeating_daily_prices(
+            seed=int(args.gd_seed),
+            n_days_per_week=7,
+            H_day=20,
+            Tk_choices=(2, 3, 5),
+            ck_low=int(args.gd_ck_low),
+            ck_high=int(args.gd_ck_high),
+        )
+        # For build_instance we still need a length-20 daily_prices_20 (first day of week)
+        daily_prices_20 = _weekly_template_140[:20]
+        print(f"[pool] Using WEEKLY-REPEATING prices (H_cycle=140, 7 unique days).")
     # else: daily_tou — daily_prices_20 stays None → build_instance uses default
 
     if str(args.beams).strip():
@@ -2185,6 +2262,8 @@ def main() -> None:
                 non_repeating=_use_non_repeating,
                 gd_ck_low=int(args.gd_ck_low),
                 gd_ck_high=int(args.gd_ck_high),
+                H_cycle=_H_cycle,
+                weekly_template=_weekly_template_140,
             )
 
             mtpc = int(args.maxtasksperchild)
@@ -2251,10 +2330,27 @@ def main() -> None:
                         ck_high=int(args.gd_ck_high),
                     )
                     prices_probe = np.asarray(_nr, dtype=np.float64)
+                if _weekly_template_140 is not None:
+                    _T_total = int(D_use) * 20
+                    prices_probe = np.array(
+                        [
+                            float(_weekly_template_140[t % len(_weekly_template_140)])
+                            for t in range(_T_total)
+                        ],
+                        dtype=np.float64,
+                    )
                 lengths_p, totals_p, _rad, _mul = encode_setup(p_probe)
-                ctx_p = build_tou_feature_context(
-                    prices_probe, H=20, validate_repeating=(not _use_non_repeating)
-                )
+                if _use_non_repeating:
+                    ctx_p = build_tou_feature_context_nonrepeating(
+                        prices_probe,
+                        H=_H_cycle,
+                    )
+                else:
+                    ctx_p = build_tou_feature_context(
+                        prices_probe,
+                        H=_H_cycle,
+                        validate_repeating=(not _use_non_repeating),
+                    )
                 used0 = tuple([0] * int(len(lengths_p)))
                 phi0 = phi_for_state(
                     t=0,
@@ -2886,6 +2982,17 @@ def main() -> None:
             )
             forecast_prices = np.asarray(_nr_prices, dtype=np.float64)
 
+        # Weekly: tile the 140-slot weekly template across D days
+        if _weekly_template_140 is not None:
+            _T_total = int(D_use) * 20
+            forecast_prices = np.array(
+                [
+                    float(_weekly_template_140[t % len(_weekly_template_140)])
+                    for t in range(_T_total)
+                ],
+                dtype=np.float64,
+            )
+
         price_mode = str(args.eval_price_mode).strip().lower()
         if price_mode not in (
             "deterministic",
@@ -2956,9 +3063,17 @@ def main() -> None:
         if price_mode in ("forecast_realized", "drifting_amplitude", "forecast_bias"):
             ctx_prices = forecast_prices
         _validate_rep = (not _use_non_repeating) and price_mode != "drifting_amplitude"
-        ctx = build_tou_feature_context(
-            ctx_prices, H=20, validate_repeating=_validate_rep
-        )
+        if _use_non_repeating:
+            ctx = build_tou_feature_context_nonrepeating(
+                ctx_prices,
+                H=_H_cycle,
+            )
+        else:
+            ctx = build_tou_feature_context(
+                ctx_prices,
+                H=_H_cycle,
+                validate_repeating=_validate_rep,
+            )
 
         # Build vhat closure for this instance using the SHARED model
         used_cache: Dict[int, Tuple[int, ...]] = {0: tuple([0] * len(lengths))}
