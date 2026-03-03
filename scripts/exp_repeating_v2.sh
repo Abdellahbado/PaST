@@ -18,7 +18,8 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
-WORKERS="${WORKERS:-16}"
+WORKERS_SMALL="${WORKERS_SMALL:-64}"
+WORKERS_MEDIUM="${WORKERS_MEDIUM:-16}"
 
 LOG_DIR="ADP/logs/exp_repeating_v2"
 MODEL_DIR="ADP/models/exp_repeating_v2"
@@ -59,16 +60,19 @@ echo "============================================================"
 run_one() {
   local TAG="$1" SIZE="$2" MODEL="$3" PROFILE="$4"
 
+  local W
   if [[ "$SIZE" == "small" ]]; then
     D=$SMALL_D; N=$SMALL_N; PMAX=$SMALL_PMAX
     TDR=$SMALL_TRAIN_D_RANGE; TNR=$SMALL_TRAIN_N_RANGE
     EDR=$SMALL_EVAL_D_RANGE;  ENR=$SMALL_EVAL_N_RANGE
     LABEL="$LABEL_SMALL"
+    W="$WORKERS_SMALL"
   else
     D=$MED_D; N=$MED_N; PMAX=$MED_PMAX
     TDR=$MED_TRAIN_D_RANGE; TNR=$MED_TRAIN_N_RANGE
     EDR=$MED_EVAL_D_RANGE;  ENR=$MED_EVAL_N_RANGE
     LABEL="$LABEL_MEDIUM"
+    W="$WORKERS_MEDIUM"
   fi
 
   MODEL_ARGS=""
@@ -82,7 +86,7 @@ run_one() {
     echo "  SKIP (exists) $OUT_CSV"; return 0
   fi
 
-  echo "  RUN $TAG : $PROFILE / $MODEL / $SIZE"
+  echo "  RUN $TAG : $PROFILE / $MODEL / $SIZE  (workers=$W)"
   $PYTHON_BIN sandbox/eval_pooled_vhat.py \
     --daily-price-profile "$PROFILE" \
     --model-type "$MODEL" \
@@ -96,7 +100,7 @@ run_one() {
     --eval-seeds "$EVAL_SEEDS" \
     --eval-D-range "$EDR" --eval-N-range "$ENR" \
     --beams "$BEAMS" \
-    --workers "$WORKERS" \
+    --workers "$W" \
     --save-model "$MODEL_DIR/vhat_${TAG}.npz" \
     --out-csv "$OUT_CSV" \
     $FEAT_FLAGS $MODEL_ARGS \
@@ -115,7 +119,7 @@ run_cross_size() {
     echo "  SKIP (no model) $MODEL_PATH"; return 0
   fi
 
-  echo "  CROSS $TAG : $MODEL  (small→medium)"
+  echo "  CROSS $TAG : $MODEL  (small→medium, workers=$WORKERS_MEDIUM)"
   $PYTHON_BIN sandbox/eval_pooled_vhat.py \
     --daily-price-profile "$PROFILE" \
     --model-type "$MODEL" \
@@ -125,7 +129,7 @@ run_cross_size() {
     --eval-seeds "$EVAL_SEEDS" \
     --eval-D-range "$MED_EVAL_D_RANGE" --eval-N-range "$MED_EVAL_N_RANGE" \
     --beams "$BEAMS" \
-    --workers "$WORKERS" \
+    --workers "$WORKERS_MEDIUM" \
     --out-csv "$OUT_CSV" \
     $FEAT_FLAGS \
     2>&1 | tee "$LOG_DIR/${TAG}.log"

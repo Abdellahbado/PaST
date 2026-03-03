@@ -25,13 +25,15 @@ export PYTHONUNBUFFERED=1
 
 cd "$(dirname "$0")/.."
 
+mkdir -p ADP/logs/logs/rigourous
+
 SKIP_B2="${SKIP_B2:-0}"
 SKIP_I="${SKIP_I:-0}"
 SKIP_J="${SKIP_J:-0}"
 
 echo "========================================================================"
 echo " ROUND 2 — Corrected Experiments"
-echo "   WORKERS=${WORKERS:-16}  RESUME=${RESUME:-1}  DP_TIME_LIMIT=${DP_TIME_LIMIT:-120}"
+echo "   WORKERS_SMALL=${WORKERS_SMALL:-64}  WORKERS_MEDIUM=${WORKERS_MEDIUM:-16}  RESUME=${RESUME:-1}  DP_TIME_LIMIT=${DP_TIME_LIMIT:-120}"
 echo "   Phases: B2=$( [[ $SKIP_B2 == 1 ]] && echo SKIP || echo RUN )"
 echo "           I=$( [[ $SKIP_I == 1 ]] && echo SKIP || echo RUN )"
 echo "           J=$( [[ $SKIP_J == 1 ]] && echo SKIP || echo RUN )"
