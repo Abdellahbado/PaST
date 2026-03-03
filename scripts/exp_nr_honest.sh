@@ -36,7 +36,8 @@ mkdir -p "$LOG_DIR" "$MODEL_DIR"
 
 TARGET_UTIL="0.95"
 FEAT_FLAGS="--feat-len-hist --feat-price-shape --feat-meta --feat-extra --normalize --normalize-labels"
-LABEL="--label-mode optimal_path --optimal-path-n-paths 2 --optimal-path-topup-max -1 --optimal-path-topup-dp-time-limit 1.0"
+LABEL_SMALL="--label-mode subproblem"
+LABEL_MEDIUM="--label-mode optimal_path --optimal-path-n-paths 2 --optimal-path-topup-max -1 --optimal-path-topup-dp-time-limit 1.0"
 DP_TIME_LIMIT="${DP_TIME_LIMIT:-120}"
 
 MODELS=("mlp" "poly" "poly_mlp" "factored_mlp")
@@ -74,10 +75,12 @@ run_one() {
     D=$SMALL_D; N=$SMALL_N; PMAX=$SMALL_PMAX
     TDR=$SMALL_TRAIN_D_RANGE; TNR=$SMALL_TRAIN_N_RANGE
     EDR=$SMALL_EVAL_D_RANGE;  ENR=$SMALL_EVAL_N_RANGE
+    LABEL="$LABEL_SMALL"
   else
     D=$MED_D; N=$MED_N; PMAX=$MED_PMAX
     TDR=$MED_TRAIN_D_RANGE; TNR=$MED_TRAIN_N_RANGE
     EDR=$MED_EVAL_D_RANGE;  ENR=$MED_EVAL_N_RANGE
+    LABEL="$LABEL_MEDIUM"
   fi
 
   MODEL_ARGS=""
