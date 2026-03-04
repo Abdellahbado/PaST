@@ -21,6 +21,12 @@
 #   WORKERS=16     — parallel workers for DP data collection
 #   DP_TIME_LIMIT  — per-solve DP timeout in seconds (default: 120)
 # ============================================================================
+#
+# Cross-size:
+#   After training on small, each saved model is evaluated on medium-hard
+#   instances (larger D/N ranges) with no retraining — pure generalization.
+#   Results land in: ADP/logs/exp_hard_profile_sweep/<profile>_<model>_hard_medium.csv
+# ============================================================================
 set -euo pipefail
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
@@ -49,8 +55,8 @@ DATA_DIR="ADP/data/exp_hard_profile_sweep"
 mkdir -p "$LOG_DIR" "$MODEL_DIR" "$DATA_DIR"
 
 # ── Instance settings ────────────────────────────────────────────────────────
-# non_repeating uses B2-style (D=3-6, N=10-40, pmax=5, 300 seeds)
-# generate_data / two_block use hard-small settings (D=3-5, N=8-20, pmax=12, 200 seeds)
+# non_repeating: D/N closer to B2 style; pmax=5
+# generate_data / two_block: hard-small settings; pmax=12
 if [[ "$PROFILE" == "non_repeating" ]]; then
   PMAX=5
   TRAIN_SEEDS="0-299"
@@ -59,6 +65,11 @@ if [[ "$PROFILE" == "non_repeating" ]]; then
   EVAL_SEEDS="500-549"
   EVAL_D_RANGE="3-6"
   EVAL_N_RANGE="10-40"
+  # Medium (cross-size): larger D/N, same pmax
+  MED_EVAL_SEEDS="600-624"
+  MED_EVAL_D_RANGE="6-10"
+  MED_EVAL_N_RANGE="20-60"
+  MED_DP_TIME_LIMIT="180"
   LABEL_MODE="subproblem"
   TARGET_UTIL="0.95"
 else
@@ -69,6 +80,11 @@ else
   EVAL_SEEDS="200-224"
   EVAL_D_RANGE="3-5"
   EVAL_N_RANGE="8-20"
+  # Medium (cross-size): larger D/N, same pmax=12 — harder instances
+  MED_EVAL_SEEDS="400-424"
+  MED_EVAL_D_RANGE="6-8"
+  MED_EVAL_N_RANGE="15-28"
+  MED_DP_TIME_LIMIT="300"
   LABEL_MODE="subproblem"
   TARGET_UTIL="0.95"
 fi
@@ -159,6 +175,51 @@ done
 
 echo ""
 echo "============================================================"
-echo " Done: $PROFILE (small)"
-echo " Results: $LOG_DIR/${PROFILE}_*_hard_small.csv"
+echo " Small done. Starting cross-size eval (train small → eval medium)"
+echo "============================================================"
+
+# ── Step 3: Cross-size eval — load small-trained model, eval on medium ────
+for MODEL in "${MODELS[@]}"; do
+  TAG="${PROFILE}_${MODEL}"
+  MODEL_PATH="$MODEL_DIR/vhat_${TAG}.npz"
+  OUT_CSV="$LOG_DIR/${TAG}_hard_medium.csv"
+
+  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
+    echo "[cross] SKIP (exists) $OUT_CSV"
+    continue
+  fi
+
+  if [[ ! -f "$MODEL_PATH" ]]; then
+    echo "[cross] SKIP (no model yet) $MODEL_PATH"
+    continue
+  fi
+
+  MODEL_ARGS=""
+  case "$MODEL" in
+    mlp|poly_mlp|factored_mlp) MODEL_ARGS="--mlp-max-epochs $MLP_EPOCHS --mlp-patience $MLP_PATIENCE" ;;
+    poly)                       MODEL_ARGS="--l2 1e-3" ;;
+  esac
+
+  echo "[cross] $MODEL  small→medium  →  $OUT_CSV"
+  $PYTHON_BIN sandbox/eval_pooled_vhat.py \
+    --daily-price-profile "$PROFILE" \
+    --model-type "$MODEL" \
+    --pmax "$PMAX" \
+    --target-util "$TARGET_UTIL" \
+    --load-model "$MODEL_PATH" \
+    --eval-seeds "$MED_EVAL_SEEDS" \
+    --eval-D-range "$MED_EVAL_D_RANGE" --eval-N-range "$MED_EVAL_N_RANGE" \
+    --beams "$BEAMS" \
+    --workers "$WORKERS" \
+    --dp-time-limit "$MED_DP_TIME_LIMIT" \
+    --out-csv "$OUT_CSV" \
+    $FEAT_FLAGS $MODEL_ARGS \
+    2>&1 | tee "$LOG_DIR/${TAG}_hard_medium.log"
+done
+
+echo ""
+echo "============================================================"
+echo " Done: $PROFILE"
+echo " small (in-domain): $LOG_DIR/${PROFILE}_*_hard_small.csv"
+echo " medium (cross-sz): $LOG_DIR/${PROFILE}_*_hard_medium.csv"
 echo "============================================================"
