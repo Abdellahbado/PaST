@@ -52,7 +52,7 @@ FEAT_FLAGS="--feat-len-hist --feat-price-shape --feat-meta --feat-extra --normal
 
 # ── Training: HARD small instances ──────────────────────────────────────
 TRAIN_SEEDS="0-199"
-SAMPLES=5000
+SAMPLES=3000
 TRAIN_D_RANGE="3-5"
 TRAIN_N_RANGE="8-20"
 DP_TIME_LIMIT="${DP_TIME_LIMIT:-120}"

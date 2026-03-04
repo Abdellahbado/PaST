@@ -40,7 +40,7 @@ BEAMS="2,5,10"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
-SAMPLES=5000
+SAMPLES=3000
 
 # ── Size configs ─────────────────────────────────────────────────────
 SMALL_D="4" ; SMALL_N="20" ; SMALL_PMAX="5"

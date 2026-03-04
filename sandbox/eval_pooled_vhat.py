@@ -2499,13 +2499,23 @@ def main() -> None:
             if save_pooled_data_path:
                 save_pool_p = Path(save_pooled_data_path)
                 save_pool_p.parent.mkdir(parents=True, exist_ok=True)
-                np.savez(
-                    save_pool_p,
-                    X_pool=np.asarray(X_pool),
-                    y_pool=np.asarray(y_pool, dtype=np.float64),
-                    model_variant=str(requested_model_type),
-                    pmax=np.int64(int(args.pmax)),
-                )
+                tmp_p = save_pool_p.with_suffix(save_pool_p.suffix + ".tmp")
+                try:
+                    np.savez_compressed(
+                        tmp_p,
+                        X_pool=np.asarray(X_pool, dtype=np.float32),
+                        y_pool=np.asarray(y_pool, dtype=np.float64),
+                        model_variant=str(requested_model_type),
+                        pmax=np.int64(int(args.pmax)),
+                    )
+                    tmp_p.replace(save_pool_p)
+                finally:
+                    if tmp_p.exists() and tmp_p != save_pool_p:
+                        try:
+                            tmp_p.unlink()
+                        except OSError:
+                            pass
+
                 print(f"[pool] Saved pooled dataset: {save_pool_p}")
                 if getattr(args, "save_pooled_data_only", False):
                     print(

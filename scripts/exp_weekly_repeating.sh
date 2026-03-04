@@ -49,7 +49,7 @@ BEAMS="2,5,10"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
-SAMPLES=5000
+SAMPLES=3000
 
 # ── Size configs (D must be multiples-of-7 friendly) ────────────────────
 # Small: 1-2 weeks  (D in 7-14, T in 140-280)
