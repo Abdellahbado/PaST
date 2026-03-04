@@ -143,10 +143,13 @@ fi
 for MODEL in "${MODELS[@]}"; do
   TAG="${PROFILE}_${MODEL}"
   OUT_CSV="$LOG_DIR/${TAG}_hard_small.csv"
+  MODEL_SAVE_PATH="$MODEL_DIR/vhat_${TAG}.npz"
 
-  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
+  if [[ -f "$OUT_CSV" && -f "$MODEL_SAVE_PATH" && "$RESUME" == "1" ]]; then
     echo "[run] SKIP (exists) $OUT_CSV"
     continue
+  elif [[ -f "$OUT_CSV" && ! -f "$MODEL_SAVE_PATH" && "$RESUME" == "1" ]]; then
+    echo "[run] CSV exists but model missing — retraining to recover model: $MODEL_SAVE_PATH"
   fi
 
   MODEL_ARGS=""
@@ -167,7 +170,7 @@ for MODEL in "${MODELS[@]}"; do
     --eval-D-range "$EVAL_D_RANGE" --eval-N-range "$EVAL_N_RANGE" \
     --beams "$BEAMS" \
     --workers "$WORKERS" \
-    --save-model "$MODEL_DIR/vhat_${TAG}.npz" \
+    --save-model "$MODEL_SAVE_PATH" \
     --out-csv "$OUT_CSV" \
     $FEAT_FLAGS $MODEL_ARGS \
     2>&1 | tee "$LOG_DIR/${TAG}_hard_small.log"
