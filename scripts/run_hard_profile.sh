@@ -217,9 +217,125 @@ for MODEL in "${MODELS[@]}"; do
     2>&1 | tee "$LOG_DIR/${TAG}_hard_medium.log"
 done
 
+SKIP_NOISE="${SKIP_NOISE:-0}"
+
+if [[ "$SKIP_NOISE" != "1" ]]; then
+
+echo ""
+echo "============================================================"
+echo " Noise evals (train small → eval small with noise)"
+echo "============================================================"
+
+# ── Step 4: forecast_realized (AR(1) noise on realized prices) ─────────────
+for MODEL in "${MODELS[@]}"; do
+  TAG="${PROFILE}_${MODEL}"
+  MODEL_PATH="$MODEL_DIR/vhat_${TAG}.npz"
+  OUT_CSV="$LOG_DIR/${TAG}_hard_noise_ar1.csv"
+
+  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
+    echo "[noise-ar1] SKIP (exists) $OUT_CSV"
+    continue
+  fi
+  if [[ ! -f "$MODEL_PATH" ]]; then
+    echo "[noise-ar1] SKIP (no model) $MODEL_PATH"
+    continue
+  fi
+
+  echo "[noise-ar1] $MODEL  →  $OUT_CSV"
+  $PYTHON_BIN sandbox/eval_pooled_vhat.py \
+    --daily-price-profile "$PROFILE" \
+    --model-type "$MODEL" \
+    --pmax "$PMAX" \
+    --target-util "$TARGET_UTIL" \
+    --load-model "$MODEL_PATH" \
+    --eval-seeds "$EVAL_SEEDS" \
+    --eval-D-range "$EVAL_D_RANGE" --eval-N-range "$EVAL_N_RANGE" \
+    --beams "$BEAMS" \
+    --workers "$WORKERS" \
+    --eval-price-mode forecast_realized \
+    --eval-price-noise-sigma 0.3 \
+    --eval-price-noise-rho 0.9 \
+    --out-csv "$OUT_CSV" \
+    $FEAT_FLAGS \
+    2>&1 | tee "$LOG_DIR/${TAG}_hard_noise_ar1.log"
+done
+
+# ── Step 5: drifting_amplitude (per-day multiplicative drift) ──────────────
+for MODEL in "${MODELS[@]}"; do
+  TAG="${PROFILE}_${MODEL}"
+  MODEL_PATH="$MODEL_DIR/vhat_${TAG}.npz"
+  OUT_CSV="$LOG_DIR/${TAG}_hard_noise_drift.csv"
+
+  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
+    echo "[noise-drift] SKIP (exists) $OUT_CSV"
+    continue
+  fi
+  if [[ ! -f "$MODEL_PATH" ]]; then
+    echo "[noise-drift] SKIP (no model) $MODEL_PATH"
+    continue
+  fi
+
+  echo "[noise-drift] $MODEL  →  $OUT_CSV"
+  $PYTHON_BIN sandbox/eval_pooled_vhat.py \
+    --daily-price-profile "$PROFILE" \
+    --model-type "$MODEL" \
+    --pmax "$PMAX" \
+    --target-util "$TARGET_UTIL" \
+    --load-model "$MODEL_PATH" \
+    --eval-seeds "$EVAL_SEEDS" \
+    --eval-D-range "$EVAL_D_RANGE" --eval-N-range "$EVAL_N_RANGE" \
+    --beams "$BEAMS" \
+    --workers "$WORKERS" \
+    --eval-price-mode drifting_amplitude \
+    --eval-price-drift-sigma 0.3 \
+    --eval-price-drift-rho 0.9 \
+    --out-csv "$OUT_CSV" \
+    $FEAT_FLAGS \
+    2>&1 | tee "$LOG_DIR/${TAG}_hard_noise_drift.log"
+done
+
+# ── Step 6: forecast_bias (forecast underpredicts peak, shifted timing) ─────
+for MODEL in "${MODELS[@]}"; do
+  TAG="${PROFILE}_${MODEL}"
+  MODEL_PATH="$MODEL_DIR/vhat_${TAG}.npz"
+  OUT_CSV="$LOG_DIR/${TAG}_hard_noise_bias.csv"
+
+  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
+    echo "[noise-bias] SKIP (exists) $OUT_CSV"
+    continue
+  fi
+  if [[ ! -f "$MODEL_PATH" ]]; then
+    echo "[noise-bias] SKIP (no model) $MODEL_PATH"
+    continue
+  fi
+
+  echo "[noise-bias] $MODEL  →  $OUT_CSV"
+  $PYTHON_BIN sandbox/eval_pooled_vhat.py \
+    --daily-price-profile "$PROFILE" \
+    --model-type "$MODEL" \
+    --pmax "$PMAX" \
+    --target-util "$TARGET_UTIL" \
+    --load-model "$MODEL_PATH" \
+    --eval-seeds "$EVAL_SEEDS" \
+    --eval-D-range "$EVAL_D_RANGE" --eval-N-range "$EVAL_N_RANGE" \
+    --beams "$BEAMS" \
+    --workers "$WORKERS" \
+    --eval-price-mode forecast_bias \
+    --eval-price-bias-factor 0.2 \
+    --eval-price-bias-shift 1 \
+    --out-csv "$OUT_CSV" \
+    $FEAT_FLAGS \
+    2>&1 | tee "$LOG_DIR/${TAG}_hard_noise_bias.log"
+done
+
+fi  # SKIP_NOISE
+
 echo ""
 echo "============================================================"
 echo " Done: $PROFILE"
-echo " small (in-domain): $LOG_DIR/${PROFILE}_*_hard_small.csv"
-echo " medium (cross-sz): $LOG_DIR/${PROFILE}_*_hard_medium.csv"
+echo " small (in-domain):   $LOG_DIR/${PROFILE}_*_hard_small.csv"
+echo " medium (cross-sz):   $LOG_DIR/${PROFILE}_*_hard_medium.csv"
+echo " noise AR(1):         $LOG_DIR/${PROFILE}_*_hard_noise_ar1.csv"
+echo " noise drift:         $LOG_DIR/${PROFILE}_*_hard_noise_drift.csv"
+echo " noise bias:          $LOG_DIR/${PROFILE}_*_hard_noise_bias.csv"
 echo "============================================================"
