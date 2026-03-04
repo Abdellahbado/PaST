@@ -33,7 +33,8 @@ WORKERS_MEDIUM="${WORKERS_MEDIUM:-16}"
 LOG_DIR="ADP/logs/exp_nr_honest"
 MODEL_DIR="ADP/models/exp_nr_honest"
 MODEL_DIR_REP="ADP/models/exp_hard_profile_sweep"   # repeating models for I2
-mkdir -p "$LOG_DIR" "$MODEL_DIR"
+DATA_DIR="ADP/data/exp_nr_honest"
+mkdir -p "$LOG_DIR" "$MODEL_DIR" "$DATA_DIR"
 
 TARGET_UTIL="0.95"
 FEAT_FLAGS="--feat-len-hist --feat-price-shape --feat-meta --feat-extra --normalize --normalize-labels"
@@ -46,7 +47,7 @@ BEAMS="5,10,20"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
-SAMPLES=10000
+SAMPLES=1000
 
 # ── Size configs ─────────────────────────────────────────────────────────
 # Small
@@ -68,40 +69,30 @@ echo " Experiment I — NR-Honest Features (corrected non-repeating)"
 echo " Models: ${MODELS[*]}"
 echo "============================================================"
 
-# Helper: run one train+eval
-run_one() {
-  local TAG="$1" SIZE="$2" MODEL="$3"
+# Collect training data once per size and cache to DATA_DIR.
+collect_data() {
+  local SIZE="$1"
+  local CACHE="$DATA_DIR/pooled_non_repeating_${SIZE}.npz"
 
-  local W
+  if [[ -f "$CACHE" && "$RESUME" == "1" ]]; then
+    echo "  DATA (cached) $CACHE"; return 0
+  fi
+
+  local D N PMAX TDR TNR LABEL W
   if [[ "$SIZE" == "small" ]]; then
     D=$SMALL_D; N=$SMALL_N; PMAX=$SMALL_PMAX
     TDR=$SMALL_TRAIN_D_RANGE; TNR=$SMALL_TRAIN_N_RANGE
-    EDR=$SMALL_EVAL_D_RANGE;  ENR=$SMALL_EVAL_N_RANGE
-    LABEL="$LABEL_SMALL"
-    W="$WORKERS_SMALL"
+    LABEL="$LABEL_SMALL"; W="$WORKERS_SMALL"
   else
     D=$MED_D; N=$MED_N; PMAX=$MED_PMAX
     TDR=$MED_TRAIN_D_RANGE; TNR=$MED_TRAIN_N_RANGE
-    EDR=$MED_EVAL_D_RANGE;  ENR=$MED_EVAL_N_RANGE
-    LABEL="$LABEL_MEDIUM"
-    W="$WORKERS_MEDIUM"
+    LABEL="$LABEL_MEDIUM"; W="$WORKERS_MEDIUM"
   fi
 
-  MODEL_ARGS=""
-  case "$MODEL" in
-    mlp|poly_mlp|factored_mlp) MODEL_ARGS="--mlp-max-epochs $MLP_EPOCHS --mlp-patience $MLP_PATIENCE" ;;
-    poly)       MODEL_ARGS="--l2 1e-3" ;;
-  esac
-
-  OUT_CSV="$LOG_DIR/${TAG}.csv"
-  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
-    echo "  SKIP (exists) $OUT_CSV"; return 0
-  fi
-
-  echo "  RUN $TAG : $MODEL / $SIZE  (workers=$W)"
+  echo "  DATA non_repeating/$SIZE  (workers=$W, samples=$SAMPLES/inst) → $CACHE"
   $PYTHON_BIN sandbox/eval_pooled_vhat.py \
     --daily-price-profile non_repeating \
-    --model-type "$MODEL" \
+    --model-type mlp \
     --D "$D" --N "$N" --pmax "$PMAX" \
     --target-util "$TARGET_UTIL" \
     --train-seeds "$TRAIN_SEEDS" \
@@ -109,6 +100,48 @@ run_one() {
     --samples-per-instance "$SAMPLES" \
     $LABEL \
     --dp-time-limit "$DP_TIME_LIMIT" --require-optimal-labels \
+    --workers "$W" \
+    --save-pooled-data "$CACHE" \
+    --save-pooled-data-only \
+    $FEAT_FLAGS \
+    2>&1 | tee "$DATA_DIR/collect_non_repeating_${SIZE}.log"
+}
+
+# Helper: train one model using cached pooled data + run beam eval.
+run_one() {
+  local TAG="$1" SIZE="$2" MODEL="$3"
+  local CACHE="$DATA_DIR/pooled_non_repeating_${SIZE}.npz"
+
+  local D N PMAX EDR ENR W
+  if [[ "$SIZE" == "small" ]]; then
+    D=$SMALL_D; N=$SMALL_N; PMAX=$SMALL_PMAX
+    EDR=$SMALL_EVAL_D_RANGE; ENR=$SMALL_EVAL_N_RANGE
+    W="$WORKERS_SMALL"
+  else
+    D=$MED_D; N=$MED_N; PMAX=$MED_PMAX
+    EDR=$MED_EVAL_D_RANGE; ENR=$MED_EVAL_N_RANGE
+    W="$WORKERS_MEDIUM"
+  fi
+
+  MODEL_ARGS=""
+  case "$MODEL" in
+    mlp|poly_mlp|factored_mlp) MODEL_ARGS="--mlp-max-epochs $MLP_EPOCHS --mlp-patience $MLP_PATIENCE" ;;
+    poly) MODEL_ARGS="--l2 1e-3" ;;
+  esac
+
+  OUT_CSV="$LOG_DIR/${TAG}.csv"
+  if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
+    echo "  SKIP (exists) $OUT_CSV"; return 0
+  fi
+
+  echo "  RUN $TAG : $MODEL / $SIZE  (from cache)"
+  $PYTHON_BIN sandbox/eval_pooled_vhat.py \
+    --daily-price-profile non_repeating \
+    --model-type "$MODEL" \
+    --D "$D" --N "$N" --pmax "$PMAX" \
+    --target-util "$TARGET_UTIL" \
+    --train-seeds "$TRAIN_SEEDS" \
+    --load-pooled-data "$CACHE" \
     --eval-seeds "$EVAL_SEEDS" \
     --eval-D-range "$EDR" --eval-N-range "$ENR" \
     --beams "$BEAMS" \
@@ -162,6 +195,8 @@ run_eval_only() {
 echo ""
 echo ">>> I1: Train NR-honest → Eval NR-honest"
 for SIZE in small medium; do
+  # Collect data once per size, shared by all models
+  collect_data "$SIZE"
   for MODEL in "${MODELS[@]}"; do
     run_one "I1_${SIZE}_${MODEL}" "$SIZE" "$MODEL"
   done

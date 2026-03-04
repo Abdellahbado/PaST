@@ -1830,6 +1830,16 @@ def main() -> None:
             "Optional output .npz path to save pooled arrays (X_pool, y_pool) after collection."
         ),
     )
+    ap.add_argument(
+        "--save-pooled-data-only",
+        action="store_true",
+        default=False,
+        help=(
+            "If set alongside --save-pooled-data, exit immediately after saving the .npz "
+            "without proceeding to model fitting or evaluation.  Useful for a dedicated "
+            "data-collection pass that is shared across multiple model runs."
+        ),
+    )
 
     # Eval for different sizes (optional overrides for eval phase)
     ap.add_argument(
@@ -2497,6 +2507,11 @@ def main() -> None:
                     pmax=np.int64(int(args.pmax)),
                 )
                 print(f"[pool] Saved pooled dataset: {save_pool_p}")
+                if getattr(args, "save_pooled_data_only", False):
+                    print(
+                        "[pool] --save-pooled-data-only set: exiting after data collection."
+                    )
+                    return
 
         # ============== Model-specific training ==============
         fit_t0 = time.perf_counter()
