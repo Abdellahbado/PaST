@@ -29,6 +29,7 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
+NO_COLLECT="${NO_COLLECT:-0}"
 WORKERS="${WORKERS:-16}"
 
 LOG_DIR="ADP/logs/exp_hard_profile_sweep"
@@ -90,8 +91,11 @@ collect_data() {
   local PROFILE="$1"
   local CACHE="$DATA_DIR/pooled_${PROFILE}_small.npz"
 
-  if [[ -f "$CACHE" && "$RESUME" == "1" ]]; then
+  if [[ -f "$CACHE" ]]; then
     echo "  DATA (cached) $CACHE"; return 0
+  fi
+  if [[ "$NO_COLLECT" == "1" ]]; then
+    echo "  ERROR: missing cache $CACHE (NO_COLLECT=1)"; return 1
   fi
 
   echo "  DATA $PROFILE/small  (workers=$WORKERS, samples=$SAMPLES/inst) → $CACHE"

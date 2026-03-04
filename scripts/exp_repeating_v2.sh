@@ -18,6 +18,7 @@ cd "$(dirname "$0")/.."
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
+NO_COLLECT="${NO_COLLECT:-0}"
 WORKERS_SMALL="${WORKERS_SMALL:-64}"
 WORKERS_MEDIUM="${WORKERS_MEDIUM:-16}"
 
@@ -63,8 +64,11 @@ collect_data() {
   local PROFILE="$1" SIZE="$2"
   local CACHE="$DATA_DIR/pooled_${PROFILE}_${SIZE}.npz"
 
-  if [[ -f "$CACHE" && "$RESUME" == "1" ]]; then
+  if [[ -f "$CACHE" ]]; then
     echo "  DATA (cached) $CACHE"; return 0
+  fi
+  if [[ "$NO_COLLECT" == "1" ]]; then
+    echo "  ERROR: missing cache $CACHE (NO_COLLECT=1)"; return 1
   fi
 
   local D N PMAX TDR TNR LABEL W
