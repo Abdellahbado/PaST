@@ -30,6 +30,7 @@ cd "$(dirname "$0")/.."
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
 NO_COLLECT="${NO_COLLECT:-0}"
+CACHE_ONLY="${CACHE_ONLY:-0}"
 WORKERS="${WORKERS:-16}"
 
 LOG_DIR="ADP/logs/exp_hard_profile_sweep"
@@ -123,6 +124,10 @@ for PROFILE in "${PROFILES[@]}"; do
   CACHE="$DATA_DIR/pooled_${PROFILE}_small.npz"
   collect_data "$PROFILE"
 
+  if [[ "$CACHE_ONLY" == "1" ]]; then
+    continue
+  fi
+
   for MODEL in "${MODELS[@]}"; do
     RUN_IDX=$(( RUN_IDX + 1 ))
     TAG="${PROFILE}_${MODEL}"
@@ -185,6 +190,14 @@ for PROFILE in "${PROFILES[@]}"; do
 
   done
 done
+
+if [[ "$CACHE_ONLY" == "1" ]]; then
+  echo ""
+  echo "============================================================"
+  echo " Experiment B-hard cache-only complete.  Cached data: $DATA_DIR/"
+  echo "============================================================"
+  exit 0
+fi
 
 echo ""
 echo "============================================================"

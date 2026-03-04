@@ -28,6 +28,7 @@ cd "$(dirname "$0")/.."
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
 NO_COLLECT="${NO_COLLECT:-0}"
+CACHE_ONLY="${CACHE_ONLY:-0}"
 WORKERS_SMALL="${WORKERS_SMALL:-64}"
 WORKERS_MEDIUM="${WORKERS_MEDIUM:-16}"
 
@@ -198,10 +199,21 @@ echo ">>> J1: Train weekly → Eval weekly"
 for SIZE in small medium; do
   # Collect data once per size, shared by all models
   collect_data "$SIZE"
+  if [[ "$CACHE_ONLY" == "1" ]]; then
+    continue
+  fi
   for MODEL in "${MODELS[@]}"; do
     run_one "J1_${SIZE}_${MODEL}" "$SIZE" "$MODEL"
   done
 done
+
+if [[ "$CACHE_ONLY" == "1" ]]; then
+  echo ""
+  echo "============================================================"
+  echo " Experiment J cache-only complete.  Cached data: $DATA_DIR/"
+  echo "============================================================"
+  exit 0
+fi
 
 # ────────────────────────────────────────────────────────────────────────
 # J2: Eval daily-repeating-trained models on weekly (zero-shot transfer)

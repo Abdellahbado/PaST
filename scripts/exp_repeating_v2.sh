@@ -19,6 +19,7 @@ cd "$(dirname "$0")/.."
 PYTHON_BIN="${PYTHON_BIN:-python}"
 RESUME="${RESUME:-1}"
 NO_COLLECT="${NO_COLLECT:-0}"
+CACHE_ONLY="${CACHE_ONLY:-0}"
 WORKERS_SMALL="${WORKERS_SMALL:-64}"
 WORKERS_MEDIUM="${WORKERS_MEDIUM:-16}"
 
@@ -180,10 +181,16 @@ for PROFILE in "${PROFILES[@]}"; do
   for SIZE in small medium; do
     # Collect data once for this (profile, size), shared by all models
     collect_data "$PROFILE" "$SIZE"
+    if [[ "$CACHE_ONLY" == "1" ]]; then
+      continue
+    fi
     for MODEL in "${MODELS[@]}"; do
       run_one "B2_${PROFILE}_${SIZE}_${MODEL}" "$SIZE" "$MODEL" "$PROFILE"
     done
   done
+  if [[ "$CACHE_ONLY" == "1" ]]; then
+    continue
+  fi
   # Cross-size
   for MODEL in "${MODELS[@]}"; do
     MP="$MODEL_DIR/vhat_B2_${PROFILE}_small_${MODEL}.npz"
