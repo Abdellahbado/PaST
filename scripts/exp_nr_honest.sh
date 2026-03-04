@@ -47,7 +47,7 @@ BEAMS="2,5,10"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
-SAMPLES=1000
+SAMPLES=5000
 
 # ── Size configs ─────────────────────────────────────────────────────────
 # Small
@@ -207,7 +207,7 @@ done
 # ────────────────────────────────────────────────────────────────────────
 echo ""
 echo ">>> I2: Zero-shot repeating → NR-honest"
-REPEAT_PROFILES=("ramp" "double_peak" "daily_tou")
+REPEAT_PROFILES=("double_peak" "daily_tou")
 for SIZE in small medium; do
   for SRC in "${REPEAT_PROFILES[@]}"; do
     for MODEL in "${MODELS[@]}"; do

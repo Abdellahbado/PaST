@@ -33,13 +33,14 @@ WORKERS="${WORKERS:-16}"
 
 LOG_DIR="ADP/logs/exp_hard_profile_sweep"
 MODEL_DIR="ADP/models/exp_hard_profile_sweep"
-mkdir -p "$LOG_DIR" "$MODEL_DIR"
+DATA_DIR="ADP/data/exp_hard_profile_sweep"
+mkdir -p "$LOG_DIR" "$MODEL_DIR" "$DATA_DIR"
 
 PMAX=12
 TARGET_UTIL="0.95"
 
 # ── Profiles (only the ones that showed non-trivial gaps in round 1) ────
-PROFILES=("ramp" "double_peak" "generate_data" "daily_tou" "two_block")
+PROFILES=("double_peak" "generate_data" "daily_tou" "two_block")
 
 # ── Models (top performers from round 1 + lightweight baseline) ─────────
 MODELS=("mlp" "poly" "elasticnet")
@@ -84,10 +85,40 @@ echo " Eval medium: D∈[$EVAL_D_RANGE_MEDIUM] N∈[$EVAL_N_RANGE_MEDIUM]"
 echo " Total runs: $(( ${#PROFILES[@]} * ${#MODELS[@]} ))"
 echo "============================================================"
 
+# Collect training data once per profile and cache to DATA_DIR.
+collect_data() {
+  local PROFILE="$1"
+  local CACHE="$DATA_DIR/pooled_${PROFILE}_small.npz"
+
+  if [[ -f "$CACHE" && "$RESUME" == "1" ]]; then
+    echo "  DATA (cached) $CACHE"; return 0
+  fi
+
+  echo "  DATA $PROFILE/small  (workers=$WORKERS, samples=$SAMPLES/inst) → $CACHE"
+  $PYTHON_BIN sandbox/eval_pooled_vhat.py \
+    --daily-price-profile "$PROFILE" \
+    --model-type mlp \
+    --pmax "$PMAX" \
+    --target-util "$TARGET_UTIL" \
+    --train-seeds "$TRAIN_SEEDS" \
+    --train-D-range "$TRAIN_D_RANGE" --train-N-range "$TRAIN_N_RANGE" \
+    --samples-per-instance "$SAMPLES" \
+    --label-mode subproblem \
+    --dp-time-limit "$DP_TIME_LIMIT" --require-optimal-labels \
+    --workers "$WORKERS" \
+    --save-pooled-data "$CACHE" \
+    --save-pooled-data-only \
+    $FEAT_FLAGS \
+    2>&1 | tee "$DATA_DIR/collect_${PROFILE}_small.log"
+}
+
 RUN_IDX=0
 TOTAL=$(( ${#PROFILES[@]} * ${#MODELS[@]} ))
 
 for PROFILE in "${PROFILES[@]}"; do
+  CACHE="$DATA_DIR/pooled_${PROFILE}_small.npz"
+  collect_data "$PROFILE"
+
   for MODEL in "${MODELS[@]}"; do
     RUN_IDX=$(( RUN_IDX + 1 ))
     TAG="${PROFILE}_${MODEL}"
@@ -100,22 +131,19 @@ for PROFILE in "${PROFILES[@]}"; do
       poly)       MODEL_ARGS="--l2 1e-3" ;;
     esac
 
-    # ── Train on hard-small, eval on hard-small ────────────────────
+    # ── Train on hard-small from cache, eval on hard-small ────────────────────
     OUT_CSV="$LOG_DIR/${TAG}_hard_small.csv"
     if [[ -f "$OUT_CSV" && "$RESUME" == "1" ]]; then
       echo "[$RUN_IDX/$TOTAL] SKIP (exists) $OUT_CSV"
     else
-      echo "[$RUN_IDX/$TOTAL] TRAIN hard-small → EVAL hard-small : $TAG"
+      echo "[$RUN_IDX/$TOTAL] TRAIN hard-small → EVAL hard-small : $TAG  (from cache)"
       $PYTHON_BIN sandbox/eval_pooled_vhat.py \
         --daily-price-profile "$PROFILE" \
         --model-type "$MODEL" \
         --pmax "$PMAX" \
         --target-util "$TARGET_UTIL" \
         --train-seeds "$TRAIN_SEEDS" \
-        --train-D-range "$TRAIN_D_RANGE" --train-N-range "$TRAIN_N_RANGE" \
-        --samples-per-instance "$SAMPLES" \
-        --label-mode subproblem \
-        --dp-time-limit "$DP_TIME_LIMIT" --require-optimal-labels \
+        --load-pooled-data "$CACHE" \
         --eval-seeds "$EVAL_SEEDS_SMALL" \
         --eval-D-range "$EVAL_D_RANGE_SMALL" --eval-N-range "$EVAL_N_RANGE_SMALL" \
         --beams "$BEAMS" \

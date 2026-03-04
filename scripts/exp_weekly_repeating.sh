@@ -47,7 +47,7 @@ BEAMS="2,5,10"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
-SAMPLES=1000
+SAMPLES=5000
 
 # ── Size configs (D must be multiples-of-7 friendly) ────────────────────
 # Small: 1-2 weeks  (D in 7-14, T in 140-280)
@@ -204,7 +204,7 @@ done
 # ────────────────────────────────────────────────────────────────────────
 echo ""
 echo ">>> J2: Zero-shot daily → weekly"
-DAILY_PROFILES=("ramp" "double_peak" "daily_tou")
+DAILY_PROFILES=("double_peak" "daily_tou")
 for SRC in "${DAILY_PROFILES[@]}"; do
   for MODEL in "${MODELS[@]}"; do
     MP="$MODEL_DIR_DAILY/vhat_${SRC}_${MODEL}.npz"

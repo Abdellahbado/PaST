@@ -33,12 +33,12 @@ LABEL_MEDIUM="--label-mode optimal_path --optimal-path-n-paths 2 --optimal-path-
 DP_TIME_LIMIT="${DP_TIME_LIMIT:-120}"
 
 MODELS=("mlp" "poly" "poly_mlp" "factored_mlp")
-PROFILES=("ramp" "double_peak" "daily_tou" "generate_data")
+PROFILES=("double_peak" "daily_tou" "generate_data")
 BEAMS="2,5,10"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
-SAMPLES=1000
+SAMPLES=5000
 
 # ── Size configs ─────────────────────────────────────────────────────
 SMALL_D="4" ; SMALL_N="20" ; SMALL_PMAX="5"
