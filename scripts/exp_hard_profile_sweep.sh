@@ -65,7 +65,7 @@ EVAL_D_RANGE_MEDIUM="6-8"
 EVAL_N_RANGE_MEDIUM="15-28"
 DP_TIME_LIMIT_MEDIUM="${DP_TIME_LIMIT_MEDIUM:-300}"
 
-BEAMS="5,10,20"
+BEAMS="2,5,10"
 
 # ── Model-specific defaults ─────────────────────────────────────────────
 EN_ALPHA="1e-3"

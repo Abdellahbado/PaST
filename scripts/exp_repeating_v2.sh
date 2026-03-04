@@ -34,7 +34,7 @@ DP_TIME_LIMIT="${DP_TIME_LIMIT:-120}"
 
 MODELS=("mlp" "poly" "poly_mlp" "factored_mlp")
 PROFILES=("ramp" "double_peak" "daily_tou" "generate_data")
-BEAMS="5,10,20"
+BEAMS="2,5,10"
 
 TRAIN_SEEDS="0-299"
 EVAL_SEEDS="500-549"
