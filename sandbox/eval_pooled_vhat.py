@@ -2499,7 +2499,11 @@ def main() -> None:
             if save_pooled_data_path:
                 save_pool_p = Path(save_pooled_data_path)
                 save_pool_p.parent.mkdir(parents=True, exist_ok=True)
-                tmp_p = save_pool_p.with_suffix(save_pool_p.suffix + ".tmp")
+                # NOTE: numpy.savez* appends ".npz" if the provided filename does not end with ".npz".
+                # Use a tmp filename that *still* ends with ".npz" to avoid surprises.
+                tmp_p = save_pool_p.with_name(
+                    save_pool_p.stem + ".tmp" + save_pool_p.suffix
+                )
                 try:
                     np.savez_compressed(
                         tmp_p,
