@@ -891,3 +891,410 @@ def solve_sparse_dp_python_beam(
 def is_numba_available() -> bool:
     """Check if Numba is available and working."""
     return NUMBA_AVAILABLE
+
+
+# =====================================================================
+# Machine-states-aware sparse DP  (SPACES-based, event-driven)
+# =====================================================================
+
+
+def solve_sparse_dp_python_states(
+    lengths: np.ndarray,
+    totals: np.ndarray,
+    prefix_proc: np.ndarray,
+    T: int,
+    radices: np.ndarray,
+    mult: np.ndarray,
+    K: int,
+    final_state: int,
+    c_star: np.ndarray,
+    c_start: np.ndarray,
+    c_end: np.ndarray,
+    early: int,
+    late: int,
+    max_gap: int = -1,
+    time_limit: float = -1.0,
+    tie_break: str = "early",
+    track_schedule: bool = True,
+    max_states: int = 0,
+    known_upper_bound: float = -1.0,
+) -> Tuple[float, int, Dict, bool, Optional[Tuple[int, int, float]]]:
+    """Sparse DP with machine-state switching costs (SPACES-based).
+
+    This is an event-driven DP that eliminates per-timestep idle transitions.
+    Instead, the DP jumps from one job-end time to the next job-start time,
+    paying the precomputed optimal switching cost c*(t_end, t_start) for the
+    gap between consecutive jobs.
+
+    Layer semantics:
+        dp_layers[t_end][state] = (cost, pen, rw, jd)
+        means: all jobs encoded in `state` are scheduled, the last job ended
+        at time t_end, and `cost` includes startup + all switching + all
+        processing costs up to (but not including) shutdown.
+
+    Final answer:
+        min over t_end: dp_layers[t_end][final_state].cost + c_end[t_end]
+
+    Parent tracking:
+        parent[(t_end, new_state)] = (prev_t_end, prev_state, L, t_start)
+        Stores the previous job-end time, the job length, and the start time
+        for full schedule reconstruction.
+
+    Args:
+        lengths: Array of K distinct processing times.
+        totals: Array of job counts for each processing time.
+        prefix_proc: Prefix sums of prices * P_proc (from build_proc_prefix).
+        T: Time horizon (number of intervals).
+        radices, mult, K, final_state: State encoding parameters (same as
+            the stateless DP).
+        c_star: SPACES switching costs.  If max_gap == -1, shape (h+1, h+1)
+            with c_star[i, j] = cost from proc@i to proc@j.
+            If max_gap > 0, shape (h+1, max_gap+1) banded storage where
+            c_star[i, dt] = cost for gap of size dt.
+        c_start: Startup costs, shape (h+1,).
+        c_end: Shutdown costs, shape (h+1,).
+        early: Earliest proc-feasible interval.
+        late: Latest proc-feasible interval.
+        max_gap: If > 0, banded c_star; gaps beyond this use c_end+c_start.
+        time_limit: Wall-clock limit in seconds (-1 = unlimited).
+        tie_break: "cost" or "early".
+        track_schedule: Whether to store parent pointers.
+        max_states: Per-layer state count limit (0 = unlimited).
+        known_upper_bound: If > 0, prune states with cost >= this.
+
+    Returns:
+        (best_cost, best_finish_time, parent_dict, timed_out, best_partial)
+        best_cost includes shutdown cost.
+        parent_dict maps (t_end, new_state) -> (prev_t_end, prev_state, L, t_start).
+    """
+    start_time_wall = time.perf_counter()
+
+    lengths_list = [int(x) for x in lengths]
+    totals_list = [int(t) for t in totals]
+    total_jobs = sum(totals_list)
+    max_job_len = max(lengths_list) if lengths_list else 1
+
+    inc = [int(m) for m in mult]
+    radices_list = [int(r) for r in radices]
+
+    # Total remaining work at initial state
+    total_rw = sum(totals_list[i] * lengths_list[i] for i in range(K))
+
+    # Effective gap limit
+    banded = max_gap > 0
+    if not banded:
+        eff_max_gap = T
+    else:
+        eff_max_gap = max_gap
+
+    # ── Admissible lower bound (block-based) ──────────────────────
+    # Sort prices*P_proc in suffix blocks for fast LB queries.
+    _LB_BLOCK = 20
+    proc_prices = np.diff(
+        prefix_proc
+    )  # proc_prices[i] = prefix_proc[i+1] - prefix_proc[i]
+    _lb_blocks: Dict[int, np.ndarray] = {}
+    for b in range(0, T + 1, _LB_BLOCK):
+        if b < T:
+            sp = np.sort(proc_prices[b:])
+            cs = np.empty(len(sp) + 1, dtype=np.float64)
+            cs[0] = 0.0
+            cs[1:] = np.cumsum(sp)
+            _lb_blocks[b] = cs
+        else:
+            _lb_blocks[b] = np.zeros(1, dtype=np.float64)
+
+    # Minimum shutdown cost from any time >= 0
+    min_c_end = float(np.min(c_end[c_end < _INF])) if np.any(c_end < _INF) else 0.0
+
+    def _lb_proc_cost(t: int, rw: int) -> float:
+        """Admissible LB: cheapest rw processing slots from block boundary <= t."""
+        b = (t // _LB_BLOCK) * _LB_BLOCK
+        arr = _lb_blocks.get(b)
+        if arr is None:
+            return _INF
+        if rw >= len(arr):
+            return _INF
+        return float(arr[rw])
+
+    # ── DP layers ─────────────────────────────────────────────────
+    # dp_layers[t_end][state] = (cost, pen, rw, jd)
+    # cost = total cost so far (startup + switching + processing), excluding shutdown
+    dp_layers: List[Dict[int, Tuple[float, int, int, int]]] = [
+        dict() for _ in range(T + 1)
+    ]
+
+    # Parent pointers: (t_end, new_state) -> (prev_t_end, prev_state, L, t_start)
+    parent: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {}
+
+    best_final_cost = _INF  # includes shutdown
+    best_final_pen = 2**63 - 1
+    best_final_time = -1
+    timed_out = False
+
+    # Track best partial for timeout fallback
+    best_partial_jobs = 0
+    best_partial_cost = _INF
+    best_partial_time = 0
+    best_partial_state = 0
+
+    use_early = tie_break == "early"
+
+    # ── Initialization: schedule the first job ────────────────────
+    # For each possible first-job start time and each job type,
+    # compute startup + processing cost and seed the DP.
+    for t_s in range(early, late + 1):
+        startup = float(c_start[t_s])
+        if startup >= _INF:
+            continue
+        for i in range(K):
+            L = lengths_list[i]
+            t_end = t_s + L
+            if t_end > T or t_s + L > late + 1:
+                continue
+
+            job_cost = float(prefix_proc[t_end] - prefix_proc[t_s])
+            cost = startup + job_cost
+            new_state = inc[i]  # one job of type i
+            new_rw = total_rw - L
+            pen = t_s if use_early else 0
+
+            # LB pruning
+            lb = cost + _lb_proc_cost(t_end, new_rw) + min_c_end
+            if known_upper_bound > 0 and lb > known_upper_bound + _EPS:
+                continue
+            if lb > best_final_cost + _EPS:
+                continue
+
+            prev = dp_layers[t_end].get(new_state)
+            if prev is None:
+                dp_layers[t_end][new_state] = (cost, pen, new_rw, 1)
+                if track_schedule:
+                    parent[(t_end, new_state)] = (-1, 0, L, t_s)
+            else:
+                better = cost < prev[0]
+                if use_early and not better and abs(cost - prev[0]) <= _EPS:
+                    better = pen < prev[1]
+                if better:
+                    dp_layers[t_end][new_state] = (cost, pen, new_rw, 1)
+                    if track_schedule:
+                        parent[(t_end, new_state)] = (-1, 0, L, t_s)
+
+    # ── Main DP: iterate over job-end times ───────────────────────
+    for t_end in range(1, T + 1):
+        if time_limit > 0 and (time.perf_counter() - start_time_wall) > time_limit:
+            timed_out = True
+            break
+
+        layer = dp_layers[t_end]
+        if not layer:
+            continue
+
+        # Memory guardrail
+        if max_states > 0 and len(layer) > max_states:
+            timed_out = True
+            break
+
+        # Update best partial
+        for state, (cost, pen, rw, jd) in layer.items():
+            if jd > best_partial_jobs or (
+                jd == best_partial_jobs and cost < best_partial_cost
+            ):
+                best_partial_jobs = jd
+                best_partial_cost = cost
+                best_partial_time = t_end
+                best_partial_state = state
+
+        # Check for final state
+        v_final = layer.get(final_state)
+        if v_final is not None:
+            c_with_shutdown = float(v_final[0]) + float(c_end[t_end])
+            p_final = int(v_final[1])
+            better = c_with_shutdown < best_final_cost
+            if (
+                use_early
+                and not better
+                and abs(c_with_shutdown - best_final_cost) <= _EPS
+            ):
+                better = p_final < best_final_pen or (
+                    p_final == best_final_pen and t_end < best_final_time
+                )
+            if better:
+                best_final_cost = c_with_shutdown
+                best_final_pen = p_final
+                best_final_time = t_end
+
+        # ── Expand: try all gap + next-job combinations ───────────
+        for state, (c0, p0, rw, jd) in layer.items():
+            if rw == 0:
+                continue  # All jobs done, no more transitions
+
+            # For each gap start time t_s >= t_end
+            gap_limit = min(t_end + eff_max_gap, late + 1)
+            for t_s in range(t_end, gap_limit):
+                # Compute switching cost
+                if t_s == t_end:
+                    gap_cost = 0.0  # Consecutive processing
+                elif banded:
+                    dt = t_s - t_end
+                    gap_cost = float(c_star[t_end, dt])
+                else:
+                    gap_cost = float(c_star[t_end, t_s])
+
+                if gap_cost >= _INF:
+                    continue
+
+                base_cost = c0 + gap_cost
+
+                # Try each available job type
+                for i in range(K):
+                    # Inline decode: extract used_i from state
+                    # We need used_i for job type i
+                    x_tmp = state
+                    for j in range(i):
+                        x_tmp //= radices_list[j]
+                    used_i = x_tmp % radices_list[i]
+
+                    if used_i >= totals_list[i]:
+                        continue
+
+                    L = lengths_list[i]
+                    t_job_end = t_s + L
+                    if t_job_end > T or t_s + L > late + 1:
+                        continue
+
+                    new_state = state + inc[i]
+                    new_rw = rw - L
+                    new_jd = jd + 1
+                    cand_cost = base_cost + float(
+                        prefix_proc[t_job_end] - prefix_proc[t_s]
+                    )
+                    cand_pen = p0 + t_s if use_early else p0
+
+                    # LB pruning
+                    lb = cand_cost + _lb_proc_cost(t_job_end, new_rw) + min_c_end
+                    if known_upper_bound > 0 and lb > known_upper_bound + _EPS:
+                        continue
+                    if lb > best_final_cost + _EPS:
+                        continue
+
+                    target_layer = dp_layers[t_job_end]
+                    prev = target_layer.get(new_state)
+                    if prev is None:
+                        target_layer[new_state] = (cand_cost, cand_pen, new_rw, new_jd)
+                        if track_schedule:
+                            parent[(t_job_end, new_state)] = (t_end, state, L, t_s)
+                    else:
+                        better = cand_cost < prev[0]
+                        if (
+                            use_early
+                            and not better
+                            and abs(cand_cost - prev[0]) <= _EPS
+                        ):
+                            better = cand_pen < prev[1]
+                        if better:
+                            target_layer[new_state] = (
+                                cand_cost,
+                                cand_pen,
+                                new_rw,
+                                new_jd,
+                            )
+                            if track_schedule:
+                                parent[(t_job_end, new_state)] = (t_end, state, L, t_s)
+
+            # Also try gaps beyond eff_max_gap when banded:
+            # decompose as c_end[t_end] + c_start[t_s]
+            if banded and gap_limit < late + 1:
+                c_end_here = float(c_end[t_end])
+                if c_end_here < _INF:
+                    for t_s in range(gap_limit, late + 1):
+                        startup_cost = float(c_start[t_s])
+                        if startup_cost >= _INF:
+                            continue
+                        gap_cost = c_end_here + startup_cost
+                        base_cost = c0 + gap_cost
+
+                        for i in range(K):
+                            x_tmp = state
+                            for j in range(i):
+                                x_tmp //= radices_list[j]
+                            used_i = x_tmp % radices_list[i]
+
+                            if used_i >= totals_list[i]:
+                                continue
+
+                            L = lengths_list[i]
+                            t_job_end = t_s + L
+                            if t_job_end > T or t_s + L > late + 1:
+                                continue
+
+                            new_state = state + inc[i]
+                            new_rw = rw - L
+                            new_jd = jd + 1
+                            cand_cost = base_cost + float(
+                                prefix_proc[t_job_end] - prefix_proc[t_s]
+                            )
+                            cand_pen = p0 + t_s if use_early else p0
+
+                            lb = (
+                                cand_cost + _lb_proc_cost(t_job_end, new_rw) + min_c_end
+                            )
+                            if known_upper_bound > 0 and lb > known_upper_bound + _EPS:
+                                continue
+                            if lb > best_final_cost + _EPS:
+                                continue
+
+                            target_layer = dp_layers[t_job_end]
+                            prev = target_layer.get(new_state)
+                            if prev is None:
+                                target_layer[new_state] = (
+                                    cand_cost,
+                                    cand_pen,
+                                    new_rw,
+                                    new_jd,
+                                )
+                                if track_schedule:
+                                    parent[(t_job_end, new_state)] = (
+                                        t_end,
+                                        state,
+                                        L,
+                                        t_s,
+                                    )
+                            else:
+                                better = cand_cost < prev[0]
+                                if (
+                                    use_early
+                                    and not better
+                                    and abs(cand_cost - prev[0]) <= _EPS
+                                ):
+                                    better = cand_pen < prev[1]
+                                if better:
+                                    target_layer[new_state] = (
+                                        cand_cost,
+                                        cand_pen,
+                                        new_rw,
+                                        new_jd,
+                                    )
+                                    if track_schedule:
+                                        parent[(t_job_end, new_state)] = (
+                                            t_end,
+                                            state,
+                                            L,
+                                            t_s,
+                                        )
+
+        # Free old layers to save memory
+        freed_t = t_end - max_job_len - eff_max_gap
+        if freed_t >= 0:
+            dp_layers[freed_t] = {}
+
+    # Return best partial if timed out without complete solution
+    best_partial_result = None
+    if timed_out and best_final_time < 0 and best_partial_jobs > 0:
+        best_partial_result = (
+            best_partial_time,
+            best_partial_state,
+            best_partial_cost,
+        )
+
+    return best_final_cost, best_final_time, parent, timed_out, best_partial_result

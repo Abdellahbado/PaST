@@ -28,9 +28,16 @@ set(SOURCES
 
 add_executable(compare ${SOURCES})
 
+add_executable(
+  stateful_compare
+  stateful_dp_solver.cpp
+  stateful_compare.cpp
+)
+
 # Warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
   target_compile_options(compare PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(stateful_compare PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # LTO disabled: adds 2-5min link time for ~10% runtime benefit, not worth it during dev.

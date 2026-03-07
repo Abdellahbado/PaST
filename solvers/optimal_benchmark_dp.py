@@ -80,11 +80,40 @@ try:
     from PaST.solvers.optimal_benchmark_dp_numba import (
         solve_sparse_dp_python,
         solve_sparse_dp_python_beam,
+        solve_sparse_dp_python_states,
     )
 
     _ACCEL_AVAILABLE = True
 except ImportError:
-    _ACCEL_AVAILABLE = False
+    try:
+        from solvers.optimal_benchmark_dp_numba import (
+            solve_sparse_dp_python,
+            solve_sparse_dp_python_beam,
+            solve_sparse_dp_python_states,
+        )
+
+        _ACCEL_AVAILABLE = True
+    except ImportError:
+        _ACCEL_AVAILABLE = False
+
+# Machine-states support
+try:
+    from PaST.solvers.machine_states import (
+        MachineStateConfig,
+        SPACESResult,
+        build_proc_prefix,
+        compute_spaces,
+    )
+except ImportError:
+    try:
+        from solvers.machine_states import (
+            MachineStateConfig,
+            SPACESResult,
+            build_proc_prefix,
+            compute_spaces,
+        )
+    except ImportError:
+        MachineStateConfig = None  # type: ignore[assignment,misc]
 
 
 _EPS = 1e-12
@@ -515,6 +544,238 @@ def _solve_sparse_dp_inline(
     return best_final_cost, best_final_time, parent, timed_out, best_partial
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Machine-states-aware solver (SPACES + event-driven DP)
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _solve_with_machine_states(
+    p_list: List[int],
+    prices: np.ndarray,
+    ids: List[int],
+    machine_config: "MachineStateConfig",
+    tie_break: str = "cost",
+    time_limit: float = -1.0,
+    track_schedule: bool = True,
+    max_states: int = 0,
+) -> DPResult:
+    """Solve 1,TOU|states|TEC using SPACES preprocessing + states-aware DP.
+
+    This implements the full pipeline:
+    1. Run SPACES to precompute c_star, c_start, c_end.
+    2. Build processing-cost prefix array (prices * P_proc).
+    3. Dispatch to solve_sparse_dp_python_states.
+    4. Backtrack and reconstruct the schedule.
+    """
+    n_jobs = len(p_list)
+    T = int(len(prices))
+    total_p = int(sum(p_list))
+
+    tie_break = str(tie_break).strip().lower()
+    if tie_break not in {"cost", "early"}:
+        raise ValueError("tie_break must be 'cost' or 'early'")
+
+    if not _ACCEL_AVAILABLE:
+        raise RuntimeError(
+            "Machine-states DP requires PaST.solvers.optimal_benchmark_dp_numba "
+            "to be importable."
+        )
+    if MachineStateConfig is None:
+        raise RuntimeError(
+            "Machine-states DP requires PaST.solvers.machine_states "
+            "to be importable."
+        )
+
+    # ── Step 1: SPACES preprocessing ────────────────────────────
+    spaces = compute_spaces(prices, machine_config)
+
+    # Feasibility: total processing time must fit within [early, late]
+    available_proc_slots = spaces.late - spaces.early + 1
+    if total_p > available_proc_slots or total_p > T:
+        return DPResult(False, float("inf"), (), 0)
+
+    # ── Step 2: Build prefix array for processing cost ──────────
+    prefix_proc = build_proc_prefix(prices, spaces.P_proc)
+
+    # ── Step 3: Compute mixed-radix encoding ────────────────────
+    lengths, inv = np.unique(np.asarray(p_list, dtype=np.int64), return_inverse=True)
+    lengths = lengths.astype(np.int64, copy=False)
+    K = int(len(lengths))
+    if K == 0:
+        return DPResult(True, 0.0, (), 0)
+    totals = np.bincount(inv, minlength=K).astype(np.int64, copy=False)
+
+    radices = (totals + 1).astype(np.int64)
+    mult = np.ones(K, dtype=np.int64)
+    for i in range(1, K):
+        mult[i] = mult[i - 1] * int(radices[i - 1])
+    final_state = int(np.sum(totals * mult))
+
+    lengths_list = [int(x) for x in lengths.tolist()]
+    inc = [int(m) for m in mult.tolist()]
+
+    # For job-ID assignment
+    ids_by_len: Dict[int, List[int]] = {}
+    for jid, p in zip(ids, p_list):
+        ids_by_len.setdefault(int(p), []).append(int(jid))
+    for v in ids_by_len.values():
+        v.sort(reverse=True)
+
+    # ── Step 4: Two-pass exact DP ───────────────────────────────
+    # Pass 1: cost-only (no parent pointers) to find optimal cost.
+    # Pass 2: with tight upper-bound pruning and parent tracking.
+    if track_schedule:
+        # Pass 1 — cost only
+        _ms_p1 = max_states * max(2, 1 + T // 15) if max_states > 0 else max_states
+        p1_cost, p1_time, _, p1_to, p1_partial = solve_sparse_dp_python_states(
+            lengths=lengths,
+            totals=totals,
+            prefix_proc=prefix_proc,
+            T=T,
+            radices=radices,
+            mult=mult,
+            K=K,
+            final_state=final_state,
+            c_star=spaces.c_star,
+            c_start=spaces.c_start,
+            c_end=spaces.c_end,
+            early=spaces.early,
+            late=spaces.late,
+            max_gap=spaces.max_gap,
+            time_limit=time_limit,
+            tie_break=tie_break,
+            track_schedule=False,
+            max_states=_ms_p1,
+        )
+
+        if np.isfinite(p1_cost) and p1_time >= 0:
+            # Pass 2 — with parent tracking and tight UB pruning
+            best_cost, best_time, parent, timed_out, best_partial = (
+                solve_sparse_dp_python_states(
+                    lengths=lengths,
+                    totals=totals,
+                    prefix_proc=prefix_proc,
+                    T=T,
+                    radices=radices,
+                    mult=mult,
+                    K=K,
+                    final_state=final_state,
+                    c_star=spaces.c_star,
+                    c_start=spaces.c_start,
+                    c_end=spaces.c_end,
+                    early=spaces.early,
+                    late=spaces.late,
+                    max_gap=spaces.max_gap,
+                    time_limit=time_limit,
+                    tie_break=tie_break,
+                    track_schedule=True,
+                    max_states=max_states,
+                    known_upper_bound=p1_cost,
+                )
+            )
+            if not (np.isfinite(best_cost) and best_time >= 0):
+                # Pass 2 timed out; return cost-only
+                return DPResult(
+                    True,
+                    float(p1_cost),
+                    (),
+                    int(p1_time),
+                    is_optimal=True,
+                    timed_out=True,
+                )
+        else:
+            # Pass 1 failed
+            best_cost = p1_cost
+            best_time = p1_time
+            parent = {}
+            timed_out = p1_to
+            best_partial = p1_partial
+    else:
+        # Single pass, cost-only
+        best_cost, best_time, parent, timed_out, best_partial = (
+            solve_sparse_dp_python_states(
+                lengths=lengths,
+                totals=totals,
+                prefix_proc=prefix_proc,
+                T=T,
+                radices=radices,
+                mult=mult,
+                K=K,
+                final_state=final_state,
+                c_star=spaces.c_star,
+                c_start=spaces.c_start,
+                c_end=spaces.c_end,
+                early=spaces.early,
+                late=spaces.late,
+                max_gap=spaces.max_gap,
+                time_limit=time_limit,
+                tie_break=tie_break,
+                track_schedule=False,
+                max_states=max_states,
+            )
+        )
+
+    # ── Step 5: Reconstruct schedule ────────────────────────────
+    if np.isfinite(best_cost) and best_time >= 0:
+        if not track_schedule:
+            return DPResult(
+                True,
+                float(best_cost),
+                (),
+                int(best_time),
+                is_optimal=True,
+                timed_out=timed_out,
+            )
+
+        # Backtrack: parent[(t_end, state)] = (prev_t_end, prev_state, L, t_start)
+        segments: List[Tuple[int, int, int]] = []  # (t_start, L, t_end)
+        t = best_time
+        s = final_state
+        while True:
+            par = parent.get((t, s))
+            if par is None:
+                break
+            prev_t_end, prev_state, L, t_start = par
+            segments.append((t_start, int(L), t))
+            if prev_t_end < 0:
+                # This was the first job
+                break
+            t = prev_t_end
+            s = prev_state
+        segments.reverse()
+
+        sched: List[Tuple[int, int, int]] = []
+        for t_start, L, t_end in segments:
+            jid = ids_by_len[int(L)].pop()
+            sched.append((jid, int(t_start), int(t_end)))
+
+        finish_time = max((e for _, _, e in sched), default=0) if sched else 0
+
+        return DPResult(
+            True,
+            float(best_cost),
+            tuple(sched),
+            int(finish_time),
+            is_optimal=True,
+            timed_out=timed_out,
+        )
+
+    # ── Timeout / partial fallback ──────────────────────────────
+    if timed_out and best_partial is not None:
+        partial_time, partial_state, partial_cost = best_partial
+        return DPResult(
+            True,
+            float(partial_cost),
+            (),
+            int(partial_time),
+            is_optimal=False,
+            timed_out=True,
+        )
+
+    # Complete failure — shouldn't happen for feasible instances
+    return DPResult(False, float("inf"), (), 0, timed_out=timed_out)
+
+
 def solve_optimal_benchmark_dp(
     processing_times: Iterable[int],
     prices: np.ndarray,
@@ -529,6 +790,7 @@ def solve_optimal_benchmark_dp(
     vhat_batch: Optional[callable] = None,
     track_schedule: bool = True,
     max_states: int = 0,
+    machine_config: Optional["MachineStateConfig"] = None,
 ) -> DPResult:
     """Solve the simplified benchmark exactly.
 
@@ -559,6 +821,19 @@ def solve_optimal_benchmark_dp(
 
     if n_jobs == 0:
         return DPResult(True, 0.0, (), 0)
+
+    # ── Machine-states-aware path ─────────────────────────────────
+    if machine_config is not None and not machine_config.is_trivial():
+        return _solve_with_machine_states(
+            p_list=p_list,
+            prices=prices,
+            ids=ids,
+            machine_config=machine_config,
+            tie_break=tie_break,
+            time_limit=time_limit,
+            track_schedule=track_schedule,
+            max_states=max_states,
+        )
 
     tie_break = str(tie_break).strip().lower()
     if tie_break not in {"cost", "early"}:
