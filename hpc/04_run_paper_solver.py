@@ -17,7 +17,8 @@ Sections:
   Drops ablation:  240 instances (benedikt2025b_drops, TWOSBY)
   GCD analysis:      1 instance  (benedikt2025b_gcd, NOSBY)
 
-Note: Only B&B-SPACES is used (pure C#, no Gurobi dependency).
+Note: B&B-SPACES uses a pre-built C++ binary (BranchAndBoundJob) that
+      needs libgurobi.so + libcplex2212.so at runtime.
       Synthetic instances are only in our solver (paper didn't test on those).
 
 Usage:
@@ -45,6 +46,47 @@ PAPER_ROOT = (
 )
 PAPER_DATA = PAPER_ROOT / "data"
 EXPERIMENTS_PROJECT = PAPER_ROOT / "Iirc.EnergyStatesAndCostsScheduling.Experiments"
+
+
+def _solver_env() -> dict:
+    """Build environment dict with LD_LIBRARY_PATH for Gurobi/CPLEX."""
+    env = os.environ.copy()
+    env["DOTNET_EnableUnsafeBinaryFormatterSerialization"] = "true"
+
+    # The pre-built C++ BranchAndBoundJob binary links against libgurobi.so
+    # and libcplex2212.so.  Discover library paths automatically.
+    extra_paths: list[str] = []
+
+    # Gurobi: check GUROBI_HOME env, common module paths
+    gurobi_home = os.environ.get("GUROBI_HOME", "")
+    if gurobi_home:
+        extra_paths.append(os.path.join(gurobi_home, "lib"))
+
+    # CPLEX: check CPLEX_STUDIO_DIR* env vars, common module paths
+    for var in sorted(os.environ):
+        if var.startswith("CPLEX_STUDIO_DIR"):
+            cplex_base = os.environ[var]
+            cplex_lib = os.path.join(cplex_base, "cplex", "bin", "x86-64_linux")
+            if os.path.isdir(cplex_lib):
+                extra_paths.append(cplex_lib)
+            cplex_lib2 = os.path.join(cplex_base, "cplex", "lib", "x86-64_linux", "static_pic")
+            if os.path.isdir(cplex_lib2):
+                extra_paths.append(cplex_lib2)
+
+    # Search common HPC paths
+    for pattern in [
+        "/opt/gurobi*/linux64/lib",
+        "/opt/ibm/ILOG/CPLEX_Studio*/cplex/bin/x86-64_linux",
+    ]:
+        import glob as _glob
+        for p in _glob.glob(pattern):
+            extra_paths.append(p)
+
+    if extra_paths:
+        existing = os.environ.get("LD_LIBRARY_PATH", "")
+        env["LD_LIBRARY_PATH"] = ":".join(extra_paths + ([existing] if existing else []))
+
+    return env
 
 CSV_HEADER = (
     "section,dataset,instance_id,n_jobs,horizon,ub,lb,gap_pct,"
@@ -249,9 +291,7 @@ def run_paper_experiments(
         # Cap at 2M seconds (~23 days) to avoid OverflowError in poll() syscall
         # (Python converts to milliseconds internally; >2^31 ms overflows)
         overall_timeout = min(max(time_limit_sec * 100 + 7200, 86400), 2_000_000)
-        # .NET 8 blocks BinaryFormatter at runtime; re-enable it
-        run_env = os.environ.copy()
-        run_env["DOTNET_EnableUnsafeBinaryFormatterSerialization"] = "true"
+        run_env = _solver_env()
         proc = subprocess.run(
             cmd,
             capture_output=True,
@@ -294,6 +334,9 @@ def run_paper_experiments(
 
     if results_dir.exists():
         for result_file in sorted(results_dir.glob("*.json")):
+            # Skip macOS resource-fork files (._0.json etc.)
+            if result_file.name.startswith("._"):
+                continue
             idx = int(result_file.stem)
             try:
                 with open(result_file) as f:
@@ -410,7 +453,8 @@ def warmup_dotnet(logfile=None):
     t0 = time.monotonic()
     try:
         subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, cwd=str(PAPER_ROOT)
+            cmd, capture_output=True, text=True, timeout=120,
+            cwd=str(PAPER_ROOT), env=_solver_env(),
         )
     except subprocess.TimeoutExpired:
         pass

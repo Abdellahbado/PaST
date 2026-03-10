@@ -2,11 +2,20 @@
 ###############################################################################
 # 02_build_paper_solver.sh — Build the paper's C# B&B-SPACES solver
 #
-# Requires: .NET 8 SDK
+# Requires: .NET 8 SDK, Gurobi libs, CPLEX libs (for C++ B&B binary)
 # Usage:    bash hpc/02_build_paper_solver.sh
 #
-# This script is idempotent: it will re-clone the paper repo if missing,
-# patch sources for .NET 8 / no-Gurobi, and build from clean state.
+# The paper's solver has two parts:
+#   1. C# Experiments runner — orchestrates solving, reads/writes results
+#   2. C++ BranchAndBoundJob binary — the actual B&B-SPACES solver
+#      (pre-built Linux ELF in the repo, needs libgurobi.so + libcplex2212.so)
+#
+# This script:
+#   - Clones the paper repo if missing
+#   - Patches for .NET 8 / no-Gurobi (C# side only — removes Gurobi C# wrapper)
+#   - Builds the C# Experiments project
+#   - Places the pre-built C++ binary where C# expects it (cpp/bin/)
+#   - Installs pre-generated datasets from tarball (repo doesn't include them)
 ###############################################################################
 set -euo pipefail
 
@@ -38,7 +47,7 @@ if [ ! -d "$BAB_DIR" ]; then
     echo ""
 fi
 
-# ── Remove Gurobi (not needed for B&B experiments) ─────────────────────────
+# ── Remove Gurobi C# wrapper (not needed — we use pre-built C++ binary) ────
 GUROBI_DIR="$BAB_DIR/Iirc.Utils.Gurobi"
 if [ -d "$GUROBI_DIR" ]; then
     echo "Removing Iirc.Utils.Gurobi directory..."
@@ -53,7 +62,7 @@ find "$BAB_DIR" -name '*.csproj.bak' -delete 2>/dev/null || true
 SHARED_SOLVERS="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Shared/Solvers"
 for f in BaseMilpSolver.cs IlpRef.cs; do
     if [ -f "$SHARED_SOLVERS/$f" ]; then
-        echo "  Removing $f (requires Gurobi)..."
+        echo "  Removing $f (requires Gurobi C# bindings)..."
         rm -f "$SHARED_SOLVERS/$f"
     fi
 done
@@ -65,9 +74,6 @@ find "$BAB_DIR" -name '*.csproj' -exec \
 find "$BAB_DIR" -name '*.csproj.bak' -delete 2>/dev/null || true
 
 # ── Enable BinaryFormatter at runtime (.NET 8 blocks it by default) ─────────
-# The paper's code uses BinaryFormatter for serialization. .NET 8 blocks it.
-# We inject the EnableUnsafeBinaryFormatterSerialization property into .csproj
-# files so it gets baked into runtimeconfig.json.
 echo "Enabling BinaryFormatter in .csproj files (required by JsonInputWriter)..."
 for csproj in $(find "$BAB_DIR" -name '*.csproj'); do
     if ! grep -q 'EnableUnsafeBinaryFormatterSerialization' "$csproj"; then
@@ -80,9 +86,7 @@ done
 echo "Cleaning stale build caches..."
 find "$BAB_DIR" -type d \( -name obj -o -name bin \) -exec rm -rf {} + 2>/dev/null || true
 
-# ── Build ───────────────────────────────────────────────────────────────────
-# /p:NoWarn=SYSLIB0011 — BinaryFormatter became a hard error in .NET 8;
-# the library uses it for deep-cloning but B&B never hits that path.
+# ── Build C# Experiments project ────────────────────────────────────────────
 echo ""
 echo "--- Building Experiments project ---"
 cd "$PAPER_ROOT"
@@ -92,11 +96,53 @@ dotnet build \
     /p:NoWarn=SYSLIB0011 \
     2>&1
 
+# ── Place pre-built C++ B&B binary where C# expects it ─────────────────────
+# BaseCppSolver.cs looks for: {DLL_DIR}/cpp/bin/BranchAndBoundJob
+# The paper repo ships pre-built Linux ELF binaries in Shared/cpp/
+CPP_SRC="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Shared/cpp"
+DLL_DIR="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Experiments/bin/Release/net8.0"
+CPP_BIN_TARGET="$DLL_DIR/cpp/bin"
+
+echo ""
+echo "--- Installing C++ B&B-SPACES binary ---"
+mkdir -p "$CPP_BIN_TARGET"
+for solver in BranchAndBoundJob ConstructiveHeuristic GeneticAlgorithm; do
+    if [ -f "$CPP_SRC/$solver" ]; then
+        cp "$CPP_SRC/$solver" "$CPP_BIN_TARGET/$solver"
+        chmod +x "$CPP_BIN_TARGET/$solver"
+        echo "  Installed $solver"
+    fi
+done
+
+# Verify the B&B binary is in place
+if [ ! -f "$CPP_BIN_TARGET/BranchAndBoundJob" ]; then
+    echo "ERROR: BranchAndBoundJob binary not found in paper repo."
+    exit 1
+fi
+
+# Check if the binary can actually run (needs libgurobi.so + libcplex2212.so)
+echo ""
+echo "--- Checking C++ binary runtime dependencies ---"
+if command -v ldd &>/dev/null; then
+    MISSING_LIBS=$(ldd "$CPP_BIN_TARGET/BranchAndBoundJob" 2>&1 | grep "not found" || true)
+    if [ -n "$MISSING_LIBS" ]; then
+        echo "WARNING: Missing shared libraries for BranchAndBoundJob:"
+        echo "$MISSING_LIBS"
+        echo ""
+        echo "The C++ B&B solver needs libgurobi.so and libcplex2212.so at runtime."
+        echo "Try: module load gurobi cplex    (or set LD_LIBRARY_PATH)"
+        echo "The solver will crash at runtime if these are not available."
+    else
+        echo "  All shared libraries found."
+    fi
+else
+    echo "  ldd not available; skipping dependency check."
+fi
+
 # ── Install pre-generated datasets ───────────────────────────────────────────
-# The paper's DatasetGenerators have a NullReferenceException bug in the
-# Benedikt2020b generator when HopsCount > 0 (benedikt2025b_drops prescription).
-# The datasets are NOT stored in the paper's git repo (gitignored), so we ship
-# the pre-generated datasets as a tarball in our repo and extract them here.
+# Datasets are NOT in the paper's git repo. The DatasetGenerators have a bug
+# in Benedikt2020b when HopsCount > 0 (NullReferenceException). We ship
+# pre-generated datasets as a tarball (1.7MB, 11 datasets, 1434 instances).
 DATA_DIR="$PAPER_ROOT/data"
 DATASETS_DIR="$DATA_DIR/datasets"
 DATASETS_TARBALL="$ROOT/data/paper_datasets.tar.gz"
@@ -117,14 +163,31 @@ else
     echo "Datasets directory already populated ($(ls "$DATASETS_DIR" | wc -l) datasets)"
 fi
 
-# ── Verify ──────────────────────────────────────────────────────────────────
-EXPERIMENTS_DLL="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll"
+# ── Final verification ──────────────────────────────────────────────────────
+EXPERIMENTS_DLL="$DLL_DIR/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll"
 
 echo ""
-if [ -f "$EXPERIMENTS_DLL" ]; then
-    echo "OK: $EXPERIMENTS_DLL"
-else
-    echo "ERROR: Experiments binary not found at expected path."
+echo "--- Verification ---"
+PASS=true
+for check_file in \
+    "$EXPERIMENTS_DLL" \
+    "$CPP_BIN_TARGET/BranchAndBoundJob" \
+    "$DATASETS_DIR/aghelinejad2017a_1/0.json" \
+    "$DATASETS_DIR/benedikt2025b_drops/0.json"; do
+    if [ -f "$check_file" ]; then
+        echo "  OK: $(basename "$(dirname "$check_file")")/$(basename "$check_file")"
+    else
+        echo "  MISSING: $check_file"
+        PASS=false
+    fi
+done
+
+echo "  Datasets: $(ls "$DATASETS_DIR" | wc -l) directories"
+echo "  Instances: $(find "$DATASETS_DIR" -name '*.json' | wc -l) files"
+
+if [ "$PASS" = false ]; then
+    echo ""
+    echo "ERROR: Some files are missing. Build incomplete."
     exit 1
 fi
 
