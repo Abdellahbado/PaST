@@ -351,7 +351,7 @@ def print_comparison(ours: list[dict], paper: list[dict], out):
     )
     out.write(f"  {'-'*75}\n")
 
-    for sec in ["table2", "fig9", "drops", "gcd"]:
+    for sec in ["table1", "table2", "fig9", "drops", "gcd"]:
         our_s = by_section_ours.get(sec, [])
         pap_s = by_section_paper.get(sec, [])
         if not our_s or not pap_s:

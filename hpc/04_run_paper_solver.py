@@ -10,8 +10,18 @@ The paper's solver uses the Experiments runner which:
 We run it on the same instances as our solver, then parse the result JSONs
 into a unified CSV for comparison.
 
+Sections:
+  Table 1 (§5.1):   72 instances (6 datasets, NOSBY+TWOSBY)
+  Table 2 (§5.2):  560 instances (benedikt2025b_groups, TWOSBY)
+  Figure 9 (§5.3): 560 instances (benedikt2025_groups, TWOSBY)
+  Drops ablation:  240 instances (benedikt2025b_drops, TWOSBY)
+  GCD analysis:      1 instance  (benedikt2025b_gcd, NOSBY)
+
+Note: Only B&B-SPACES is used (pure C#, no Gurobi dependency).
+      Synthetic instances are only in our solver (paper didn't test on those).
+
 Usage:
-  python3 hpc/04_run_paper_solver.py [--section all|table2|fig9] \\
+  python3 hpc/04_run_paper_solver.py [--section all|table1|table2|fig9|drops|gcd] \\
                                      [--time-limit 600] \\
                                      [--output-dir hpc/results_paper]
 """
@@ -22,6 +32,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -33,13 +44,27 @@ PAPER_ROOT = (
     ROOT / "data" / "green-scheduling-bab" / "Iirc.EnergyStatesAndCostsScheduling"
 )
 PAPER_DATA = PAPER_ROOT / "data"
-SOLVER_CLI_PROJECT = PAPER_ROOT / "Iirc.EnergyStatesAndCostsScheduling.SolverCli"
 EXPERIMENTS_PROJECT = PAPER_ROOT / "Iirc.EnergyStatesAndCostsScheduling.Experiments"
 
 CSV_HEADER = (
     "section,dataset,instance_id,n_jobs,horizon,ub,lb,gap_pct,"
     "feasible,is_optimal,timed_out,runtime_sec,status,running_time_raw"
 )
+
+# ── Table 1 datasets ────────────────────────────────────────────────────
+# The paper's repo uses benedikt2025a_* (same instances as our benedikt2020a_*
+# in data/paper_instances/datasets — verified byte-identical).
+# We use the paper's naming so both solvers produce matching instance_ids.
+# The paper uses 3600s for large, 600s for medium/prelim.
+TABLE1_DATASETS = [
+    # (dataset_name, solver_type, time_limit_override_sec)
+    ("benedikt2025a_large_nosby", "BAB", 3600),
+    ("benedikt2025a_large_twosby", "BAB", 3600),
+    ("benedikt2025a_medium_nosby", "BAB", 600),
+    ("benedikt2025a_medium_twosby", "BAB", 600),
+    ("benedikt2025a_prelim", "BAB", 600),
+    ("aghelinejad2017a_1", "BAB", 600),
+]
 
 
 def log(msg: str, logfile=None):
@@ -211,8 +236,6 @@ def run_paper_experiments(
     ]
 
     # Copy prescription to the experiments-prescriptions dir so it can be found
-    import shutil
-
     target_presc = PAPER_DATA / "experiments-prescriptions" / presc_path.name
     shutil.copy2(presc_path, target_presc)
 
@@ -331,157 +354,6 @@ def run_paper_experiments(
     return all_results
 
 
-def run_paper_single_instance(
-    instance_path: Path,
-    config_path: Path,
-    section_name: str,
-    dataset_name: str,
-    logfile=None,
-) -> dict | None:
-    """Run paper's SolverCli on a single instance (fallback approach)."""
-    idx = int(instance_path.stem)
-    inst_info = load_instance_info(instance_path)
-
-    wall_start = time.monotonic()
-    try:
-        proc = subprocess.run(
-            [
-                "dotnet",
-                "run",
-                "--project",
-                str(SOLVER_CLI_PROJECT),
-                "-c",
-                "Release",
-                "--",
-                str(config_path),
-                str(instance_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=900,
-            cwd=str(PAPER_ROOT),
-        )
-        wall_elapsed = time.monotonic() - wall_start
-    except subprocess.TimeoutExpired:
-        wall_elapsed = time.monotonic() - wall_start
-        return {
-            "section": section_name,
-            "dataset": dataset_name,
-            "instance_id": f"{dataset_name}/{idx}",
-            "n_jobs": inst_info["n_jobs"],
-            "horizon": inst_info["horizon"],
-            "ub": -1.0,
-            "lb": -1.0,
-            "gap_pct": 0.0,
-            "feasible": 0,
-            "is_optimal": 0,
-            "timed_out": 1,
-            "runtime_sec": wall_elapsed,
-            "status": "Timeout",
-            "running_time_raw": f"{wall_elapsed:.3f}s",
-        }
-
-    # Parse stdout
-    runtime = wall_elapsed
-    status = "Unknown"
-    ub = -1.0
-    lb = -1.0
-    for line in proc.stdout.split("\n"):
-        if line.startswith("Running time:"):
-            rt_str = line.split(":", 1)[1].strip()
-            runtime = parse_timespan(rt_str)
-        elif line.startswith("Status:"):
-            status = line.split(":", 1)[1].strip()
-        elif line.startswith("TEC from solver:"):
-            ub = float(line.split(":", 1)[1].strip())
-        elif line.startswith("Lower bound:"):
-            lb = float(line.split(":", 1)[1].strip())
-
-    feasible = 1 if status in ("Optimal", "Heuristic") else 0
-    is_optimal = 1 if status == "Optimal" else 0
-    gap_pct = 0.0
-    if feasible and lb > 0 and ub > 0:
-        gap_pct = 100.0 * (ub - lb) / lb
-
-    return {
-        "section": section_name,
-        "dataset": dataset_name,
-        "instance_id": f"{dataset_name}/{idx}",
-        "n_jobs": inst_info["n_jobs"],
-        "horizon": inst_info["horizon"],
-        "ub": ub,
-        "lb": lb,
-        "gap_pct": gap_pct,
-        "feasible": feasible,
-        "is_optimal": is_optimal,
-        "timed_out": 0,
-        "runtime_sec": runtime,
-        "status": status,
-        "running_time_raw": f"{runtime:.6f}s",
-    }
-
-
-def run_single_instance_batch(
-    dataset_name: str,
-    section_name: str,
-    time_limit_sec: int,
-    solver_type: str,
-    logfile=None,
-) -> list[dict]:
-    """
-    Fallback: solve each instance individually via SolverCli.
-    Use this if the Experiments runner doesn't work.
-    """
-    instance_dir = PAPER_DATA / "datasets" / dataset_name
-    if not instance_dir.exists():
-        log(f"  Dataset dir not found: {instance_dir}", logfile)
-        return []
-
-    # Create solver config
-    hours = time_limit_sec // 3600
-    mins = (time_limit_sec % 3600) // 60
-    secs = time_limit_sec % 60
-    time_str = f"{hours:02d}:{mins:02d}:{secs:02d}"
-
-    if solver_type in ("BAB", "BAB_fig9"):
-        config = {
-            "randomSeed": 41,
-            "timeLimit": time_str,
-            "numWorkers": 0,
-            "useSerializedExtendedInstance": False,
-            "solverName": "BranchAndBoundJob",
-            "specializedSolverConfig": {
-                "usePrimalHeuristicBlockDetection": True,
-                "usePrimalHeuristicPackToBlocksByCp": solver_type == "BAB",
-                "primalHeuristicPackToBlocksByCpAllJobs": solver_type == "BAB",
-                "jobsJoiningOnGcd": "WholeTree",
-            },
-        }
-    else:
-        raise ValueError(f"Unknown solver_type: {solver_type}")
-
-    config_path = Path(f"/tmp/hpc_config_{dataset_name}.json")
-    with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
-
-    json_files = sorted(instance_dir.glob("*.json"), key=lambda p: int(p.stem))
-    n = len(json_files)
-    log(f"  Running SolverCli on {n} instances from {dataset_name}", logfile)
-
-    results = []
-    for i, jf in enumerate(json_files):
-        r = run_paper_single_instance(
-            jf, config_path, section_name, dataset_name, logfile
-        )
-        if r:
-            results.append(r)
-        if (i + 1) % 20 == 0 or (i + 1) == n:
-            log(f"    Progress: {i+1}/{n}", logfile)
-
-    config_path.unlink(missing_ok=True)
-    return results
-
-
 def write_csv(results: list[dict], path: Path):
     with open(path, "w") as f:
         f.write(CSV_HEADER + "\n")
@@ -495,25 +367,85 @@ def write_csv(results: list[dict], path: Path):
             )
 
 
+def warmup_dotnet(logfile=None):
+    """Run a single trivial instance to warm up .NET JIT before timing."""
+    log("--- Warm-up: running one trivial instance to prime .NET JIT ---", logfile)
+
+    warmup_ds = "aghelinejad2017a_1"
+    warmup_inst = PAPER_DATA / "datasets" / warmup_ds / "0.json"
+    if not warmup_inst.exists():
+        for ds in sorted(PAPER_DATA.glob("datasets/*/0.json")):
+            warmup_ds = ds.parent.name
+            warmup_inst = ds
+            break
+
+    if not warmup_inst.exists():
+        log("  Warm-up skipped: no instance found", logfile)
+        return
+
+    presc_path = create_experiment_prescription(warmup_ds, 10, "BAB")
+    target_presc = PAPER_DATA / "experiments-prescriptions" / presc_path.name
+    shutil.copy2(presc_path, target_presc)
+
+    cmd = [
+        "dotnet",
+        "run",
+        "--project",
+        str(EXPERIMENTS_PROJECT),
+        "-c",
+        "Release",
+        "--",
+        str(PAPER_DATA),
+        presc_path.name,
+    ]
+
+    t0 = time.monotonic()
+    try:
+        subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120, cwd=str(PAPER_ROOT)
+        )
+    except subprocess.TimeoutExpired:
+        pass
+    t1 = time.monotonic()
+
+    target_presc.unlink(missing_ok=True)
+
+    # Clean up warm-up results
+    warmup_results = PAPER_DATA / "results" / warmup_ds / "BAB"
+    if warmup_results.exists():
+        shutil.rmtree(warmup_results, ignore_errors=True)
+
+    log(f"  Warm-up done in {t1 - t0:.1f}s (JIT compiled, caches hot)", logfile)
+
+
 def main():
-    ap = argparse.ArgumentParser(description="Run paper's solver on all instances")
+    ap = argparse.ArgumentParser(description="Run paper's B&B-SPACES solver on all instances")
     ap.add_argument(
-        "--section", default="all", choices=["all", "table2", "fig9", "drops", "gcd"]
+        "--section",
+        default="all",
+        choices=["all", "table1", "1", "table2", "2", "fig9", "drops", "gcd"],
     )
     ap.add_argument(
         "--time-limit",
         type=int,
         default=600,
-        help="Time limit per instance in seconds (default: 600)",
+        help="Default time limit per instance in seconds (default: 600). "
+        "Table 1 large datasets override to 3600s to match the paper.",
     )
     ap.add_argument("--output-dir", default=str(ROOT / "hpc" / "results_paper"))
     ap.add_argument(
-        "--method",
-        default="experiments",
-        choices=["experiments", "single"],
-        help="'experiments' uses the batch runner, 'single' solves one-by-one",
+        "--skip-warmup",
+        action="store_true",
+        help="Skip the .NET JIT warm-up run",
     )
     args = ap.parse_args()
+
+    # Normalize section aliases
+    section = args.section
+    if section == "1":
+        section = "table1"
+    elif section == "2":
+        section = "table2"
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -524,8 +456,8 @@ def main():
     log("=" * 80, logfile)
     log(" PaST HPC Benchmark — Paper's Solver (B&B-SPACES)", logfile)
     log(f" {time.strftime('%Y-%m-%d %H:%M:%S')}", logfile)
-    log(f" Time limit: {args.time_limit}s per instance", logfile)
-    log(f" Method: {args.method}", logfile)
+    log(f" Time limit: {args.time_limit}s per instance (default)", logfile)
+    log(f" Method: Experiments runner only (pure B&B, no Gurobi/SolverCli)", logfile)
     log("=" * 80, logfile)
     log("", logfile)
     log("--- System Info ---", logfile)
@@ -537,22 +469,46 @@ def main():
         r = subprocess.run(["dotnet", "--version"], capture_output=True, text=True)
         log(f".NET SDK: {r.stdout.strip()}", logfile)
     except FileNotFoundError:
-        log("ERROR: dotnet not found. Run: bash hpc/02_build_paper_solver.sh", logfile)
+        log("ERROR: dotnet not found. Run: bash hpc/00_install_deps.sh", logfile)
         sys.exit(1)
+
+    # Warm up .NET JIT to eliminate cold-start effects
+    if not args.skip_warmup:
+        warmup_dotnet(logfile)
+    log("", logfile)
 
     grand_start = time.monotonic()
     all_results = []
 
-    # Datasets to run
-    sections = {
+    # ── Table 1 (§5.1) ──────────────────────────────────────────────────
+    if section in ("table1", "all"):
+        log(f"\n{'#'*80}", logfile)
+        log(f"# TABLE 1 (§5.1) — 72 instances (NOSBY + TWOSBY)", logfile)
+        log(f"# Paper uses 3600s for large, 600s for medium/prelim", logfile)
+        log(f"{'#'*80}", logfile)
+
+        for ds_name, solver_type, tl_override in TABLE1_DATASETS:
+            results = run_paper_experiments(
+                ds_name, "table1", solver_type, tl_override, out_dir, logfile
+            )
+            all_results.extend(results)
+
+        table1_results = [r for r in all_results if r["section"] == "table1"]
+        write_csv(table1_results, out_dir / "table1_results.csv")
+        n = len(table1_results)
+        n_opt = sum(1 for r in table1_results if r["is_optimal"])
+        log(f"  Table 1 total: {n_opt}/{n} optimal", logfile)
+
+    # ── Table 2, Figure 9, Drops, GCD ────────────────────────────────────
+    sections_map = {
         "table2": [("benedikt2025b_groups", "BAB")],
         "fig9": [("benedikt2025_groups", "BAB_fig9")],
         "drops": [("benedikt2025b_drops", "BAB")],
         "gcd": [("benedikt2025b_gcd", "BAB")],
     }
 
-    for sec_name, datasets in sections.items():
-        if args.section not in (sec_name, "all"):
+    for sec_name, datasets in sections_map.items():
+        if section not in (sec_name, "all"):
             continue
 
         log(f"\n{'#'*80}", logfile)
@@ -560,15 +516,9 @@ def main():
         log(f"{'#'*80}", logfile)
 
         for ds_name, solver_type in datasets:
-            if args.method == "experiments":
-                results = run_paper_experiments(
-                    ds_name, sec_name, solver_type, args.time_limit, out_dir, logfile
-                )
-            else:
-                results = run_single_instance_batch(
-                    ds_name, sec_name, args.time_limit, solver_type, logfile
-                )
-
+            results = run_paper_experiments(
+                ds_name, sec_name, solver_type, args.time_limit, out_dir, logfile
+            )
             all_results.extend(results)
             write_csv(results, out_dir / f"{sec_name}_results.csv")
 

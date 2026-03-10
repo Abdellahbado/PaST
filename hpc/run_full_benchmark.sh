@@ -72,8 +72,7 @@ if [ "$SKIP_PAPER" = false ]; then
     python3 hpc/04_run_paper_solver.py \
         --section all \
         --time-limit "$TIME_LIMIT" \
-        --output-dir hpc/results_paper \
-        --method single
+        --output-dir hpc/results_paper
 else
     echo ""
     echo ">>> Step 4: SKIPPED (--skip-paper)"

@@ -34,8 +34,10 @@ from pathlib import Path
 # ── Paths ────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
 SOLVER = ROOT / "solvers" / "cpp" / "build" / "stateful_compare"
-TABLE1_DATA = ROOT / "data" / "paper_instances" / "datasets"
-TABLE2_DATA = (
+# Both Table 1 and Table 2+ datasets live in the paper's data directory.
+# Table 1 datasets are named benedikt2025a_* in the paper's repo
+# (same instances as our benedikt2020a_* — verified byte-identical).
+PAPER_DATASETS = (
     ROOT
     / "data"
     / "green-scheduling-bab"
@@ -493,16 +495,29 @@ def main():
     log(get_system_info(), logfile)
     log("", logfile)
 
+    # Warm-up: run one trivial instance to prime CPU caches and OS scheduler
+    log("--- Warm-up: running one trivial instance to prime caches ---", logfile)
+    warmup_inst = {
+        "instance_id": "warmup",
+        "prices": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+        "jobs": [2, 3],
+        "machine_type": "nosby",
+    }
+    warmup_pairs = [("warmup", warmup_inst)]
+    solve_batch(warmup_pairs, solver_path, 10)
+    log("  Warm-up done (caches hot)", logfile)
+    log("", logfile)
+
     grand_start = time.monotonic()
     all_results = []
 
     # ── Table 1 ──────────────────────────────────────────────────────────
     table1_datasets = [
-        "benedikt2020a_large_nosby",
-        "benedikt2020a_large_twosby",
-        "benedikt2020a_medium_nosby",
-        "benedikt2020a_medium_twosby",
-        "benedikt2020a_prelim",
+        "benedikt2025a_large_nosby",
+        "benedikt2025a_large_twosby",
+        "benedikt2025a_medium_nosby",
+        "benedikt2025a_medium_twosby",
+        "benedikt2025a_prelim",
         "aghelinejad2017a_1",
     ]
 
@@ -514,7 +529,7 @@ def main():
         results = run_paper_datasets(
             "table1",
             table1_datasets,
-            TABLE1_DATA,
+            PAPER_DATASETS,
             solver_path,
             args.time_limit,
             args.batch_size,
@@ -558,7 +573,7 @@ def main():
         results = run_paper_datasets(
             "table2",
             ["benedikt2025b_groups"],
-            TABLE2_DATA,
+            PAPER_DATASETS,
             solver_path,
             args.time_limit,
             args.batch_size,
@@ -577,7 +592,7 @@ def main():
         results = run_paper_datasets(
             "fig9",
             ["benedikt2025_groups"],
-            TABLE2_DATA,
+            PAPER_DATASETS,
             solver_path,
             args.time_limit,
             args.batch_size,
@@ -596,7 +611,7 @@ def main():
         results = run_paper_datasets(
             "drops",
             ["benedikt2025b_drops"],
-            TABLE2_DATA,
+            PAPER_DATASETS,
             solver_path,
             args.time_limit,
             args.batch_size,
@@ -615,7 +630,7 @@ def main():
         results = run_paper_datasets(
             "gcd",
             ["benedikt2025b_gcd"],
-            TABLE2_DATA,
+            PAPER_DATASETS,
             solver_path,
             args.time_limit,
             args.batch_size,

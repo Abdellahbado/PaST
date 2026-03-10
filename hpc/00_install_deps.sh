@@ -99,9 +99,32 @@ fi
 echo -n ".NET SDK: "
 if command -v dotnet &>/dev/null; then
     echo "$(dotnet --version)"
+elif [[ -x "$HOME/.dotnet/dotnet" ]]; then
+    export PATH="$HOME/.dotnet:$PATH"
+    echo "$($HOME/.dotnet/dotnet --version) [user install]"
 else
-    echo "NOT FOUND"
-    MISSING+=("dotnet SDK 8.0")
+    echo "NOT FOUND — installing .NET 8 SDK to ~/.dotnet ..."
+    if command -v wget &>/dev/null; then
+        wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh
+    elif command -v curl &>/dev/null; then
+        curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+    else
+        echo "ERROR: neither wget nor curl available to download .NET installer"
+        MISSING+=("dotnet SDK 8.0 (and wget or curl to install it)")
+    fi
+    if [[ -f /tmp/dotnet-install.sh ]]; then
+        chmod +x /tmp/dotnet-install.sh
+        /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet" 2>&1
+        export PATH="$HOME/.dotnet:$PATH"
+        if command -v dotnet &>/dev/null; then
+            echo ".NET $(dotnet --version) installed to $HOME/.dotnet"
+            echo "  Add to your shell: export PATH=\$HOME/.dotnet:\$PATH"
+        else
+            echo "ERROR: .NET installation failed"
+            MISSING+=("dotnet SDK 8.0")
+        fi
+        rm -f /tmp/dotnet-install.sh
+    fi
 fi
 
 # --------------------------------------------------------------------------
