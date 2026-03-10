@@ -88,7 +88,7 @@ dotnet build \
     2>&1
 
 # ── Generate datasets if missing ────────────────────────────────────────────
-DATA_DIR="$BAB_DIR/data"
+DATA_DIR="$PAPER_ROOT/data"
 DATASETS_DIR="$DATA_DIR/datasets"
 PRESCRIPTIONS_DIR="$DATA_DIR/dataset-generators-prescriptions"
 GENERATOR_PROJ="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators.csproj"
@@ -105,7 +105,6 @@ if [ ! -d "$DATASETS_DIR" ] || [ -z "$(ls -A "$DATASETS_DIR" 2>/dev/null)" ]; th
         else
             echo "  Generating $dname ..."
             dotnet run --project "$GENERATOR_PROJ" -c Release --no-build \
-                /p:NoWarn=SYSLIB0011 \
                 -- "$DATA_DIR" "$pname" 2>&1
         fi
     done
