@@ -83,6 +83,7 @@ find "$BAB_DIR" -type d \( -name obj -o -name bin \) -exec rm -rf {} + 2>/dev/nu
 # ── Build ───────────────────────────────────────────────────────────────────
 # /p:NoWarn=SYSLIB0011 — BinaryFormatter became a hard error in .NET 8;
 # the library uses it for deep-cloning but B&B never hits that path.
+echo ""
 echo "--- Building Experiments project ---"
 cd "$PAPER_ROOT"
 dotnet build \
@@ -91,39 +92,27 @@ dotnet build \
     /p:NoWarn=SYSLIB0011 \
     2>&1
 
-echo ""
-echo "--- Building DatasetGenerators project ---"
-dotnet build \
-    Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators.csproj \
-    -c Release \
-    /p:NoWarn=SYSLIB0011 \
-    2>&1
-
-# ── Generate datasets if missing ────────────────────────────────────────────
+# ── Install pre-generated datasets ───────────────────────────────────────────
+# The paper's DatasetGenerators have a NullReferenceException bug in the
+# Benedikt2020b generator when HopsCount > 0 (benedikt2025b_drops prescription).
+# The datasets are NOT stored in the paper's git repo (gitignored), so we ship
+# the pre-generated datasets as a tarball in our repo and extract them here.
 DATA_DIR="$PAPER_ROOT/data"
 DATASETS_DIR="$DATA_DIR/datasets"
-PRESCRIPTIONS_DIR="$DATA_DIR/dataset-generators-prescriptions"
-GENERATOR_PROJ="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators.csproj"
+DATASETS_TARBALL="$ROOT/data/paper_datasets.tar.gz"
 
 if [ ! -d "$DATASETS_DIR" ] || [ -z "$(ls -A "$DATASETS_DIR" 2>/dev/null)" ]; then
     echo ""
-    echo "--- Generating datasets from prescriptions ---"
+    echo "--- Installing pre-generated datasets ---"
     mkdir -p "$DATASETS_DIR"
-    for prescription in "$PRESCRIPTIONS_DIR"/*.json; do
-        pname="$(basename "$prescription")"
-        dname="${pname%.json}"
-        if [ -d "$DATASETS_DIR/$dname" ]; then
-            echo "  $dname: already exists, skipping"
-        else
-            echo "  Generating $dname ..."
-            if ! DOTNET_EnableUnsafeBinaryFormatterSerialization=true \
-                dotnet run --project "$GENERATOR_PROJ" -c Release --no-build \
-                    -- "$DATA_DIR" "$pname" 2>&1; then
-                echo "  WARNING: $dname generation failed (non-zero exit), skipping"
-            fi
-        fi
-    done
-    echo "  Datasets generated: $(ls "$DATASETS_DIR" | wc -l) directories"
+    if [ -f "$DATASETS_TARBALL" ]; then
+        tar xzf "$DATASETS_TARBALL" -C "$DATASETS_DIR"
+        echo "  Extracted $(ls "$DATASETS_DIR" | wc -l) datasets from tarball"
+    else
+        echo "ERROR: Datasets tarball not found at $DATASETS_TARBALL"
+        echo "       This file should be in the PaST repo under data/paper_datasets.tar.gz"
+        exit 1
+    fi
 else
     echo "Datasets directory already populated ($(ls "$DATASETS_DIR" | wc -l) datasets)"
 fi
