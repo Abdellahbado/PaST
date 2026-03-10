@@ -2,19 +2,23 @@
 ###############################################################################
 # 02_build_paper_solver.sh — Build the paper's C# B&B-SPACES solver
 #
-# Requires: .NET 8 SDK, Gurobi libs, CPLEX libs (for C++ B&B binary)
+# Requires: .NET 8 SDK, g++ (for C++ compilation), cmake
 # Usage:    bash hpc/02_build_paper_solver.sh
 #
 # The paper's solver has two parts:
 #   1. C# Experiments runner — orchestrates solving, reads/writes results
 #   2. C++ BranchAndBoundJob binary — the actual B&B-SPACES solver
-#      (pre-built Linux ELF in the repo, needs libgurobi.so + libcplex2212.so)
+#
+# The pre-built C++ binary needs Gurobi + CPLEX (commercial) at runtime.
+# Since these are not available on HPC, we patch the source to stub out
+# the two optional heuristics (BlockFinding → Gurobi, PackToBlocksByCp → CPLEX)
+# and compile from source with just g++ + OpenMP.
 #
 # This script:
 #   - Clones the paper repo if missing
 #   - Patches for .NET 8 / no-Gurobi (C# side only — removes Gurobi C# wrapper)
 #   - Builds the C# Experiments project
-#   - Places the pre-built C++ binary where C# expects it (cpp/bin/)
+#   - Patches C++ source to remove Gurobi/CPLEX deps, compiles from source
 #   - Installs pre-generated datasets from tarball (repo doesn't include them)
 ###############################################################################
 set -euo pipefail
@@ -96,144 +100,198 @@ dotnet build \
     /p:NoWarn=SYSLIB0011 \
     2>&1
 
-# ── Place pre-built C++ B&B binary where C# expects it ─────────────────────
-# BaseCppSolver.cs looks for: {DLL_DIR}/cpp/bin/BranchAndBoundJob
-# The paper repo ships pre-built Linux ELF binaries in Shared/cpp/
-CPP_SRC="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Shared/cpp"
+# ── Build C++ B&B-SPACES binaries from source (no Gurobi/CPLEX) ─────────────
+# The pre-built binaries in the repo need libgurobi.so + libcplex2212.so +
+# a Gurobi license at runtime.  The HPC has none of these.
+#
+# Gurobi & CPLEX are used for two OPTIONAL primal heuristics:
+#   - BlockFinding (Gurobi MIP) — guarded by mBlockFinding config
+#   - PackToBlocksByCp (CPLEX CP Optimizer) — guarded by usePrimalHeuristicPackToBlocksByCp
+#
+# The core B&B algorithm doesn't need either.  We patch the source to
+# stub out these two heuristics, then compile with g++ + OpenMP only.
+CPP_SRC_DIR="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Shared/cpp"
 DLL_DIR="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Experiments/bin/Release/net8.0"
 CPP_BIN_TARGET="$DLL_DIR/cpp/bin"
 
 echo ""
-echo "--- Installing C++ B&B-SPACES binary ---"
+echo "--- Patching C++ source (removing Gurobi/CPLEX dependencies) ---"
+
+# 1) Stub BlockFinding.h — remove Gurobi header and GRBEnv member
+cat > "$CPP_SRC_DIR/src/algorithms/BlockFinding.h" << 'STUBEOF'
+#ifndef ENERGYSTATESANDCOSTSSCHEDULING_BLOCKFINDING_H
+#define ENERGYSTATESANDCOSTSSCHEDULING_BLOCKFINDING_H
+#include <map>
+#include "../datastructs/Block.h"
+#include "../datastructs/FixedPermCostComputation.h"
+namespace escs {
+    class BlockFinding {
+    public:
+        enum BlockFindingStrategy { MinimizeLengthDifference = 0 };
+        vector<int> mAssignments;
+        bool mSolutionSameAsBlocks;
+        BlockFinding() : mSolutionSameAsBlocks(true) {}
+        void solve(BlockFindingStrategy, const Instance&, const vector<Block>&,
+                   optional<chrono::milliseconds>) {
+            mAssignments.clear();
+            mSolutionSameAsBlocks = true;
+        }
+    };
+}
+#endif
+STUBEOF
+echo "  Stubbed BlockFinding.h (no Gurobi)"
+
+# 2) Stub BlockFinding.cpp — empty (all logic is now inline in header)
+cat > "$CPP_SRC_DIR/src/algorithms/BlockFinding.cpp" << 'STUBEOF'
+#include "BlockFinding.h"
+STUBEOF
+echo "  Stubbed BlockFinding.cpp"
+
+# 3) Stub PackToBlocksByCp.cpp — returns false (no CPLEX)
+cat > "$CPP_SRC_DIR/src/algorithms/PackToBlocksByCp.cpp" << 'STUBEOF'
+#include "PackToBlocksByCp.h"
+namespace escs {
+    PackToBlocksByCp::PackToBlocksByCp() {}
+    bool PackToBlocksByCp::solve(
+            const vector<Block>&, const vector<int>&,
+            optional<chrono::milliseconds>) {
+        mPermStartTimes.clear();
+        mPermProcTimes.clear();
+        return false;
+    }
+}
+STUBEOF
+echo "  Stubbed PackToBlocksByCp.cpp (no CPLEX)"
+
+# 4) Stub PackToBlocksByCp.h — remove <ilcp/cp.h> include
+cat > "$CPP_SRC_DIR/src/algorithms/PackToBlocksByCp.h" << 'STUBEOF'
+#ifndef ENERGYSTATESANDCOSTSSCHEDULING_PACKTOBLOCKSBYCP_H
+#define ENERGYSTATESANDCOSTSSCHEDULING_PACKTOBLOCKSBYCP_H
+#include <map>
+#include "../datastructs/Block.h"
+#include "../datastructs/FixedPermCostComputation.h"
+namespace escs {
+    class PackToBlocksByCp {
+    public:
+        vector<int> mPermProcTimes;
+        vector<int> mPermStartTimes;
+        PackToBlocksByCp();
+        bool solve(const vector<Block> &blocks, const vector<int> &procTimes,
+                   optional<chrono::milliseconds> timeLimit);
+    };
+}
+#endif
+STUBEOF
+echo "  Stubbed PackToBlocksByCp.h (no CPLEX)"
+
+# 5) Patch BranchAndBoundJob.h — remove #include <gurobi_c++.h> and GRBEnv member
+sed -i.bak '/#include <gurobi_c++.h>/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h"
+sed -i.bak '/const GRBEnv mEnv;/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h"
+rm -f "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h.bak"
+echo "  Patched BranchAndBoundJob.h (removed GRBEnv)"
+
+# 6) Patch BranchAndBoundJob.cpp — remove gurobi include, fix BlockFinding call
+sed -i.bak '/#include <gurobi_c++.h>/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp"
+sed -i.bak 's/BlockFinding blockFinding(mEnv)/BlockFinding blockFinding()/g' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp"
+rm -f "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp.bak"
+echo "  Patched BranchAndBoundJob.cpp (removed Gurobi refs)"
+
+# 7) Patch ConstructiveHeuristic.cpp — remove CPLEX include
+sed -i.bak 's|#include <ilcp/cp.h>|// #include <ilcp/cp.h>  // stubbed out|' "$CPP_SRC_DIR/src/solvers/ConstructiveHeuristic.cpp"
+rm -f "$CPP_SRC_DIR/src/solvers/ConstructiveHeuristic.cpp.bak"
+echo "  Patched ConstructiveHeuristic.cpp (removed CPLEX include)"
+
+# 8) Write new CMakeLists.txt — no Gurobi, no CPLEX, just g++ + OpenMP
+cat > "$CPP_SRC_DIR/CMakeLists.txt" << 'CMAKEOF'
+cmake_minimum_required(VERSION 3.10)
+project(EnergyStatesAndCostsScheduling)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(OpenMP)
+if (OPENMP_FOUND)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+endif()
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pedantic -Wall -Wextra")
+IF(CMAKE_BUILD_TYPE MATCHES Release)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
+ENDIF()
+
+set(LIB_SRC
+    src/datastructs/FixedPermCostComputation.cpp
+    src/datastructs/GcdOfValues.cpp
+    src/algorithms/PackToBlocksByCp.cpp
+    src/algorithms/BlockFinding.cpp
+    src/input/Instance.cpp
+    src/input/Job.cpp
+    src/input/Interval.cpp
+    src/input/readers/CppInputReader.cpp
+    src/output/Result.cpp
+    src/solvers/SolverConfig.cpp
+    src/utils/Stopwatch.cpp
+)
+
+add_executable(BranchAndBoundJob src/solvers/BranchAndBoundJob.cpp ${LIB_SRC})
+add_executable(ConstructiveHeuristic src/solvers/ConstructiveHeuristic.cpp ${LIB_SRC})
+add_executable(GeneticAlgorithm src/solvers/GeneticAlgorithm.cpp ${LIB_SRC})
+
+target_link_libraries(BranchAndBoundJob ${CMAKE_DL_LIBS})
+target_link_libraries(ConstructiveHeuristic ${CMAKE_DL_LIBS})
+target_link_libraries(GeneticAlgorithm ${CMAKE_DL_LIBS})
+CMAKEOF
+echo "  Wrote new CMakeLists.txt (no Gurobi/CPLEX)"
+
+# 9) Compile from source
+echo ""
+echo "--- Compiling C++ solvers from source ---"
+CPP_BUILD_DIR="$CPP_SRC_DIR/build_nogurobi"
+rm -rf "$CPP_BUILD_DIR"
+mkdir -p "$CPP_BUILD_DIR"
+cd "$CPP_BUILD_DIR"
+
+cmake "$CPP_SRC_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    2>&1
+
+make -j"$(nproc 2>/dev/null || echo 4)" 2>&1
+
+# 10) Install compiled binaries where C# expects them
 mkdir -p "$CPP_BIN_TARGET"
 for solver in BranchAndBoundJob ConstructiveHeuristic GeneticAlgorithm; do
-    if [ -f "$CPP_SRC/$solver" ]; then
-        cp "$CPP_SRC/$solver" "$CPP_BIN_TARGET/$solver"
+    SRC_BIN="$CPP_SRC_DIR/bin/$solver"
+    if [ -f "$SRC_BIN" ]; then
+        cp "$SRC_BIN" "$CPP_BIN_TARGET/$solver"
         chmod +x "$CPP_BIN_TARGET/$solver"
-        echo "  Installed $solver"
+        echo "  Installed $solver (compiled from source)"
+    else
+        echo "  WARNING: $solver not produced by build"
     fi
 done
 
-# Verify the B&B binary is in place
+cd "$PAPER_ROOT"
+
 if [ ! -f "$CPP_BIN_TARGET/BranchAndBoundJob" ]; then
-    echo "ERROR: BranchAndBoundJob binary not found in paper repo."
+    echo "ERROR: BranchAndBoundJob failed to compile."
     exit 1
 fi
 
-# ── Provide missing shared libraries (libgurobi.so, libcplex2212.so, libgomp) ─
-# The pre-built C++ binary was compiled on the paper author's machine with
-# Gurobi 10.0.3 and CPLEX 22.1.2.  On our HPC we have:
-#   - libgurobi100.so from the Gurobi NuGet package (ABI-compatible with 10.0.3)
-#   - NO CPLEX at all
-#   - libgomp may or may not be on the default library path
-#
-# Strategy:
-#   1. libgurobi.so → symlink to libgurobi100.so from NuGet
-#   2. libcplex2212.so → empty stub .so (CPLEX is only used by the
-#      PackToBlocksByCp primal heuristic, which we disable in the
-#      experiment prescription — with lazy binding the stub is never called)
-#   3. libgomp.so.1 → symlink to system copy (or install via conda)
-#   4. Write env.sh that sets LD_LIBRARY_PATH
-CPP_LIB="$DLL_DIR/cpp/lib"
-mkdir -p "$CPP_LIB"
-
-echo ""
-echo "--- Setting up shared libraries for C++ binary ---"
-
-# 1) libgurobi.so — find libgurobi100.so from NuGet or system
-GUROBI_SO=""
-for candidate in \
-    "$HOME/.nuget/packages/gurobi.optimizer/10.0.0/runtimes/linux-x64/libgurobi100.so" \
-    "$HOME/.nuget/packages/gurobi.optimizer/10.0.0/runtimes/linux-x64/native/libgurobi100.so" \
-    "$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Shared/bin/Release/net8.0/libgurobi100.so"; do
-    if [ -f "$candidate" ]; then
-        GUROBI_SO="$candidate"
-        break
-    fi
-done
-# Also search broadly
-if [ -z "$GUROBI_SO" ]; then
-    GUROBI_SO=$(find "$HOME" /opt /usr/lib* -name 'libgurobi100.so' 2>/dev/null | head -1 || true)
-fi
-
-if [ -n "$GUROBI_SO" ]; then
-    cp "$GUROBI_SO" "$CPP_LIB/libgurobi100.so"
-    ln -sf libgurobi100.so "$CPP_LIB/libgurobi.so"
-    echo "  libgurobi.so → libgurobi100.so (from $GUROBI_SO)"
-else
-    echo "  WARNING: libgurobi100.so not found anywhere."
-    echo "           The solver will fail at runtime."
-fi
-
-# 2) libcplex2212.so — create a minimal stub
-# The binary uses lazy binding (default), and we disable the CPLEX code path
-# in the experiment prescription (usePrimalHeuristicPackToBlocksByCp: false).
-# So CPLEX symbols are never resolved; we just need the .so to exist.
-if command -v gcc &>/dev/null; then
-    echo 'void __cplex_stub__(void){}' | gcc -shared -x c - -o "$CPP_LIB/libcplex2212.so" \
-        -Wl,-soname,libcplex2212.so 2>/dev/null
-    echo "  libcplex2212.so → stub (CPLEX heuristic disabled in prescription)"
-elif command -v cc &>/dev/null; then
-    echo 'void __cplex_stub__(void){}' | cc -shared -x c - -o "$CPP_LIB/libcplex2212.so" \
-        -Wl,-soname,libcplex2212.so 2>/dev/null
-    echo "  libcplex2212.so → stub (CPLEX heuristic disabled in prescription)"
-else
-    echo "  WARNING: No C compiler found; cannot create libcplex2212.so stub."
-    echo "           Install gcc or provide CPLEX libraries."
-fi
-
-# 3) libgomp.so.1 — OpenMP runtime from GCC
-GOMP_SO=""
-for candidate in \
-    /usr/lib/x86_64-linux-gnu/libgomp.so.1 \
-    /usr/lib64/libgomp.so.1 \
-    /lib/x86_64-linux-gnu/libgomp.so.1; do
-    if [ -f "$candidate" ]; then
-        GOMP_SO="$candidate"
-        break
-    fi
-done
-if [ -z "$GOMP_SO" ]; then
-    GOMP_SO=$(find /usr /lib /opt "$CONDA_PREFIX" -name 'libgomp.so.1' 2>/dev/null | head -1 || true)
-fi
-
-if [ -n "$GOMP_SO" ]; then
-    ln -sf "$GOMP_SO" "$CPP_LIB/libgomp.so.1"
-    echo "  libgomp.so.1 → $GOMP_SO"
-else
-    echo "  WARNING: libgomp.so.1 not found. Trying conda install..."
-    if command -v conda &>/dev/null; then
-        conda install -y -q libgomp 2>/dev/null || true
-        GOMP_SO=$(find "$CONDA_PREFIX" -name 'libgomp.so.1' 2>/dev/null | head -1 || true)
-        if [ -n "$GOMP_SO" ]; then
-            ln -sf "$GOMP_SO" "$CPP_LIB/libgomp.so.1"
-            echo "  libgomp.so.1 → $GOMP_SO (installed via conda)"
-        fi
-    fi
-fi
-
-# 4) Write env.sh for runtime use
-cat > "$DLL_DIR/cpp/env.sh" << ENVEOF
-# Source this file before running the paper's solver.
-# Auto-generated by 02_build_paper_solver.sh
-export LD_LIBRARY_PATH="$CPP_LIB\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
-ENVEOF
-echo "  env.sh written to $DLL_DIR/cpp/env.sh"
-
-# 5) Verify with ldd
+# Verify no missing libraries
 echo ""
 echo "--- Checking C++ binary runtime dependencies ---"
 if command -v ldd &>/dev/null; then
-    export LD_LIBRARY_PATH="$CPP_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     MISSING_LIBS=$(ldd "$CPP_BIN_TARGET/BranchAndBoundJob" 2>&1 | grep "not found" || true)
     if [ -n "$MISSING_LIBS" ]; then
-        echo "WARNING: Still missing shared libraries:"
+        echo "WARNING: Missing shared libraries:"
         echo "$MISSING_LIBS"
     else
-        echo "  All shared libraries resolved."
+        echo "  All shared libraries resolved — no Gurobi/CPLEX needed."
     fi
-else
-    echo "  ldd not available; skipping dependency check."
 fi
 
 # ── Install pre-generated datasets ───────────────────────────────────────────

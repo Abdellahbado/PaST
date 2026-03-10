@@ -48,29 +48,10 @@ PAPER_DATA = PAPER_ROOT / "data"
 EXPERIMENTS_PROJECT = PAPER_ROOT / "Iirc.EnergyStatesAndCostsScheduling.Experiments"
 
 
-# Path to the stub/symlink libraries created by 02_build_paper_solver.sh
-_CPP_LIB = (
-    PAPER_ROOT
-    / "Iirc.EnergyStatesAndCostsScheduling.Experiments"
-    / "bin" / "Release" / "net8.0" / "cpp" / "lib"
-)
-
-
 def _solver_env() -> dict:
-    """Build environment dict with LD_LIBRARY_PATH for the C++ B&B binary."""
+    """Build environment dict for the paper's solver."""
     env = os.environ.copy()
     env["DOTNET_EnableUnsafeBinaryFormatterSerialization"] = "true"
-
-    # cpp/lib/ contains: libgurobi.so (symlink), libcplex2212.so (stub),
-    # libgomp.so.1 (symlink) — all set up by 02_build_paper_solver.sh.
-    extra_paths: list[str] = []
-    if _CPP_LIB.is_dir():
-        extra_paths.append(str(_CPP_LIB))
-
-    if extra_paths:
-        existing = os.environ.get("LD_LIBRARY_PATH", "")
-        env["LD_LIBRARY_PATH"] = ":".join(extra_paths + ([existing] if existing else []))
-
     return env
 
 CSV_HEADER = (
@@ -165,17 +146,6 @@ def create_experiment_prescription(
 ) -> Path:
     """Create an experiment prescription JSON for the paper's Experiments runner."""
 
-    # CPLEX is not available on HPC — the pre-built binary links against
-    # a stub libcplex2212.so.  Disable the CPLEX-based primal heuristic
-    # (PackToBlocksByCp) so the stub symbols are never called at runtime.
-    has_cplex = _CPP_LIB.is_dir() and not (
-        _CPP_LIB / "libcplex2212.so"
-    ).is_symlink()  # stub is a regular file, real install would be a symlink or bigger
-    # Simple size check: real libcplex2212.so is multi-MB; our stub is < 10KB
-    _cplex_path = _CPP_LIB / "libcplex2212.so"
-    if _cplex_path.exists() and _cplex_path.stat().st_size < 50_000:
-        has_cplex = False
-
     if solver_type == "BAB":
         # BranchAndBoundJob — the paper's main solver
         solver_config = {
@@ -184,8 +154,8 @@ def create_experiment_prescription(
             "substractExtendedInstanceGenerationFromTimeLimit": True,
             "specializedSolverConfig": {
                 "usePrimalHeuristicBlockDetection": True,
-                "usePrimalHeuristicPackToBlocksByCp": has_cplex,
-                "primalHeuristicPackToBlocksByCpAllJobs": has_cplex,
+                "usePrimalHeuristicPackToBlocksByCp": False,
+                "primalHeuristicPackToBlocksByCpAllJobs": False,
                 "jobsJoiningOnGcd": "WholeTree",
             },
         }
