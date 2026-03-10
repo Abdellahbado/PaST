@@ -65,13 +65,13 @@ CSV_HEADER = (
 # We use the paper's naming so both solvers produce matching instance_ids.
 # The paper uses 3600s for large, 600s for medium/prelim.
 TABLE1_DATASETS = [
-    # (dataset_name, solver_type, time_limit_override_sec)
-    ("benedikt2025a_large_nosby", "BAB", 3600),
-    ("benedikt2025a_large_twosby", "BAB", 3600),
-    ("benedikt2025a_medium_nosby", "BAB", 600),
-    ("benedikt2025a_medium_twosby", "BAB", 600),
-    ("benedikt2025a_prelim", "BAB", 600),
-    ("aghelinejad2017a_1", "BAB", 600),
+    # (dataset_name, solver_type) — time limit comes from --time-limit flag
+    ("benedikt2025a_large_nosby", "BAB"),
+    ("benedikt2025a_large_twosby", "BAB"),
+    ("benedikt2025a_medium_nosby", "BAB"),
+    ("benedikt2025a_medium_twosby", "BAB"),
+    ("benedikt2025a_prelim", "BAB"),
+    ("aghelinejad2017a_1", "BAB"),
 ]
 
 
@@ -449,8 +449,8 @@ def main():
         "--time-limit",
         type=int,
         default=600,
-        help="Default time limit per instance in seconds (default: 600). "
-        "Table 1 large datasets override to 3600s to match the paper.",
+        help="Time limit per instance in seconds (default: 600). "
+        "Applied uniformly to all sections for fair comparison.",
     )
     ap.add_argument("--output-dir", default=str(ROOT / "hpc" / "results_paper"))
     ap.add_argument(
@@ -504,12 +504,12 @@ def main():
     if section in ("table1", "all"):
         log(f"\n{'#'*80}", logfile)
         log(f"# TABLE 1 (§5.1) — 72 instances (NOSBY + TWOSBY)", logfile)
-        log(f"# Paper uses 3600s for large, 600s for medium/prelim", logfile)
+        log(f"# Time limit: {args.time_limit}s per instance", logfile)
         log(f"{'#'*80}", logfile)
 
-        for ds_name, solver_type, tl_override in TABLE1_DATASETS:
+        for ds_name, solver_type in TABLE1_DATASETS:
             results = run_paper_experiments(
-                ds_name, "table1", solver_type, tl_override, out_dir, logfile
+                ds_name, "table1", solver_type, args.time_limit, out_dir, logfile
             )
             all_results.extend(results)
 

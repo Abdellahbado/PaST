@@ -250,6 +250,10 @@ echo "  Wrote new CMakeLists.txt (no Gurobi/CPLEX)"
 # 9) Compile from source
 echo ""
 echo "--- Compiling C++ solvers from source ---"
+
+# Remove stale CMakeCache.txt from repo (points to original author's paths)
+rm -f "$CPP_SRC_DIR/CMakeCache.txt"
+
 CPP_BUILD_DIR="$CPP_SRC_DIR/build_nogurobi"
 rm -rf "$CPP_BUILD_DIR"
 mkdir -p "$CPP_BUILD_DIR"
