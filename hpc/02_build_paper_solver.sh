@@ -59,6 +59,17 @@ find "$ROOT/data/green-scheduling-bab" -name '*.csproj' -exec \
     sed -i.bak 's|<TargetFramework>net6\.0</TargetFramework>|<TargetFramework>net8.0</TargetFramework>|g' {} \;
 find "$ROOT/data/green-scheduling-bab" -name '*.csproj.bak' -delete 2>/dev/null || true
 
+# ── Suppress BinaryFormatter obsolete error (SYSLIB0011) ───────────────────
+# BinaryFormatter was a hard error starting in .NET 8.  The Iirc.Utils library
+# uses it for deep-cloning but the B&B solver never hits that path at runtime.
+echo "Suppressing SYSLIB0011 (BinaryFormatter obsolete) in all .csproj files..."
+find "$ROOT/data/green-scheduling-bab" -name '*.csproj' -print0 | while IFS= read -r -d '' csproj; do
+    if ! grep -q 'SYSLIB0011' "$csproj"; then
+        sed -i.bak 's|</PropertyGroup>|<NoWarn>$(NoWarn);SYSLIB0011</NoWarn></PropertyGroup>|' "$csproj"
+    fi
+done
+find "$ROOT/data/green-scheduling-bab" -name '*.csproj.bak' -delete 2>/dev/null || true
+
 # Clean stale build caches that may reference removed projects
 echo "Cleaning stale build caches..."
 find "$ROOT/data/green-scheduling-bab" -type d -name obj -exec rm -rf {} + 2>/dev/null || true
