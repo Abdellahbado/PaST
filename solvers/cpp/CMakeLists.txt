@@ -30,6 +30,7 @@ add_executable(compare ${SOURCES})
 
 add_executable(
   stateful_compare
+  dp_solver.cpp
   stateful_dp_solver.cpp
   stateful_compare.cpp
 )
