@@ -80,13 +80,13 @@ dotnet build \
     2>&1
 
 # ── Verify ──────────────────────────────────────────────────────────────────
-EXPERIMENTS=$(find . -path "*/Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll" | head -1)
+EXPERIMENTS_DLL="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll"
 
 echo ""
-if [ -n "$EXPERIMENTS" ]; then
-    echo "OK: Experiments binary: $EXPERIMENTS"
+if [ -f "$EXPERIMENTS_DLL" ]; then
+    echo "OK: $EXPERIMENTS_DLL"
 else
-    echo "ERROR: Experiments binary not found — build may have failed."
+    echo "ERROR: Experiments binary not found at expected path."
     exit 1
 fi
 
