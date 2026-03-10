@@ -419,7 +419,9 @@ def warmup_dotnet(logfile=None):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Run paper's B&B-SPACES solver on all instances")
+    ap = argparse.ArgumentParser(
+        description="Run paper's B&B-SPACES solver on all instances"
+    )
     ap.add_argument(
         "--section",
         default="all",
