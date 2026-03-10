@@ -64,6 +64,18 @@ find "$BAB_DIR" -name '*.csproj' -exec \
     sed -i.bak 's|<TargetFramework>net6\.0</TargetFramework>|<TargetFramework>net8.0</TargetFramework>|g' {} \;
 find "$BAB_DIR" -name '*.csproj.bak' -delete 2>/dev/null || true
 
+# ── Enable BinaryFormatter at runtime (.NET 8 blocks it by default) ─────────
+# The paper's code uses BinaryFormatter for serialization. .NET 8 blocks it.
+# We inject the EnableUnsafeBinaryFormatterSerialization property into .csproj
+# files so it gets baked into runtimeconfig.json.
+echo "Enabling BinaryFormatter in .csproj files (required by JsonInputWriter)..."
+for csproj in $(find "$BAB_DIR" -name '*.csproj'); do
+    if ! grep -q 'EnableUnsafeBinaryFormatterSerialization' "$csproj"; then
+        sed -i.bak 's|<TargetFramework>net8\.0</TargetFramework>|<TargetFramework>net8.0</TargetFramework>\n    <EnableUnsafeBinaryFormatterSerialization>true</EnableUnsafeBinaryFormatterSerialization>|g' "$csproj"
+        rm -f "${csproj}.bak"
+    fi
+done
+
 # ── Clean stale build caches ────────────────────────────────────────────────
 echo "Cleaning stale build caches..."
 find "$BAB_DIR" -type d \( -name obj -o -name bin \) -exec rm -rf {} + 2>/dev/null || true
@@ -104,6 +116,7 @@ if [ ! -d "$DATASETS_DIR" ] || [ -z "$(ls -A "$DATASETS_DIR" 2>/dev/null)" ]; th
             echo "  $dname: already exists, skipping"
         else
             echo "  Generating $dname ..."
+            DOTNET_EnableUnsafeBinaryFormatterSerialization=true \
             dotnet run --project "$GENERATOR_PROJ" -c Release --no-build \
                 -- "$DATA_DIR" "$pname" 2>&1
         fi

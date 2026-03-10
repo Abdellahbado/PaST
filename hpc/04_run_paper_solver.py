@@ -248,12 +248,16 @@ def run_paper_experiments(
         # Cap at 2M seconds (~23 days) to avoid OverflowError in poll() syscall
         # (Python converts to milliseconds internally; >2^31 ms overflows)
         overall_timeout = min(max(time_limit_sec * 100 + 7200, 86400), 2_000_000)
+        # .NET 8 blocks BinaryFormatter at runtime; re-enable it
+        run_env = os.environ.copy()
+        run_env["DOTNET_EnableUnsafeBinaryFormatterSerialization"] = "true"
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=overall_timeout,
             cwd=str(PAPER_ROOT),
+            env=run_env,
         )
         wall_elapsed = time.monotonic() - wall_start
         log(f"  Wall time: {wall_elapsed:.1f}s", logfile)
