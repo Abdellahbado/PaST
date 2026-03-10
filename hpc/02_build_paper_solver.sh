@@ -79,6 +79,41 @@ dotnet build \
     /p:NoWarn=SYSLIB0011 \
     2>&1
 
+echo ""
+echo "--- Building DatasetGenerators project ---"
+dotnet build \
+    Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators.csproj \
+    -c Release \
+    /p:NoWarn=SYSLIB0011 \
+    2>&1
+
+# ── Generate datasets if missing ────────────────────────────────────────────
+DATA_DIR="$PAPER_ROOT/data"
+DATASETS_DIR="$DATA_DIR/datasets"
+PRESCRIPTIONS_DIR="$DATA_DIR/dataset-generators-prescriptions"
+GENERATOR_PROJ="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators/Iirc.EnergyStatesAndCostsScheduling.DatasetGenerators.csproj"
+
+if [ ! -d "$DATASETS_DIR" ] || [ -z "$(ls -A "$DATASETS_DIR" 2>/dev/null)" ]; then
+    echo ""
+    echo "--- Generating datasets from prescriptions ---"
+    mkdir -p "$DATASETS_DIR"
+    for prescription in "$PRESCRIPTIONS_DIR"/*.json; do
+        pname="$(basename "$prescription")"
+        dname="${pname%.json}"
+        if [ -d "$DATASETS_DIR/$dname" ]; then
+            echo "  $dname: already exists, skipping"
+        else
+            echo "  Generating $dname ..."
+            dotnet run --project "$GENERATOR_PROJ" -c Release --no-build \
+                /p:NoWarn=SYSLIB0011 \
+                -- "$DATA_DIR" "$pname" 2>&1
+        fi
+    done
+    echo "  Datasets generated: $(ls "$DATASETS_DIR" | wc -l) directories"
+else
+    echo "Datasets directory already populated ($(ls "$DATASETS_DIR" | wc -l) datasets)"
+fi
+
 # ── Verify ──────────────────────────────────────────────────────────────────
 EXPERIMENTS_DLL="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll"
 
