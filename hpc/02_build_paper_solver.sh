@@ -27,56 +27,30 @@ fi
 echo ".NET version: $(dotnet --version)"
 echo ""
 
-# Build the solution
+# Build only the Experiments project (it has no Gurobi dependency).
+# We skip the full .sln build because Iirc.Utils.Gurobi requires a licensed
+# Gurobi installation that is not present on the HPC.  The runner script
+# (04_run_paper_solver.py) uses the Experiments project exclusively.
 echo "--- Building Experiments project ---"
 cd "$PAPER_ROOT"
-dotnet build Iirc.EnergyStatesAndCostsScheduling.sln -c Release 2>&1
-
-echo ""
-echo "--- Building SolverCli project ---"
-dotnet build Iirc.EnergyStatesAndCostsScheduling.SolverCli/Iirc.EnergyStatesAndCostsScheduling.SolverCli.csproj -c Release 2>&1
-
-echo ""
-echo "--- Building Experiments project ---"
 dotnet build Iirc.EnergyStatesAndCostsScheduling.Experiments/Iirc.EnergyStatesAndCostsScheduling.Experiments.csproj -c Release 2>&1
 
-# Verify builds
-SOLVER_CLI=$(find . -path "*/SolverCli/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.SolverCli" -o -path "*/SolverCli/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.SolverCli.dll" | head -1)
+# Verify build
 EXPERIMENTS=$(find . -path "*/Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments" -o -path "*/Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll" | head -1)
 
 echo ""
-echo "--- Smoke test (SolverCli) ---"
-# Quick test on a small instance
-SMALL_INST="$PAPER_ROOT/data/datasets/benedikt2025b_groups/0.json"
-if [ -f "$SMALL_INST" ]; then
-    echo "Testing on instance 0 with 10s time limit..."
-    # Create a temporary config for smoke test
-    TMPCONFIG=$(mktemp /tmp/smoke_config_XXXXXX.json)
-    cat > "$TMPCONFIG" <<'SMOKE_EOF'
-{
-  "randomSeed": 41,
-  "timeLimit": "00:00:10",
-  "numWorkers": 0,
-  "useSerializedExtendedInstance": false,
-  "solverName": "BranchAndBoundJob",
-  "specializedSolverConfig": {
-    "usePrimalHeuristicBlockDetection": true,
-    "usePrimalHeuristicPackToBlocksByCp": true,
-    "primalHeuristicPackToBlocksByCpAllJobs": true,
-    "jobsJoiningOnGcd": "WholeTree"
-  }
-}
-SMOKE_EOF
-    cd "$PAPER_ROOT"
-    dotnet run --project Iirc.EnergyStatesAndCostsScheduling.SolverCli -c Release -- "$TMPCONFIG" "$SMALL_INST" 2>&1 || echo "(smoke test may fail if Gurobi is needed for some configs — B&B solver should not need it)"
-    rm -f "$TMPCONFIG"
+echo "--- Verifying Experiments build ---"
+if [ -n "$EXPERIMENTS" ]; then
+    echo "Experiments binary: $EXPERIMENTS"
 else
-    echo "Skipping smoke test (instance not found)"
+    echo "WARNING: Experiments binary not found at expected path, but build reported success."
 fi
 
 echo ""
 echo "============================================================"
-echo " Paper solver build complete."
+echo " Paper solver build complete (Experiments project only)."
+echo " Note: Iirc.Utils.Gurobi / SolverCli skipped — no Gurobi"
+echo " license on this machine; Experiments does not need Gurobi."
 echo "============================================================"
 echo ""
-echo "Next step: bash hpc/03_run_our_solver.sh"
+echo "Next step: python3 hpc/03_run_our_solver.py"
