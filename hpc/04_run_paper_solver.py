@@ -245,7 +245,9 @@ def run_paper_experiments(
     )
 
     try:
-        overall_timeout = max(time_limit_sec * 700, 86400)  # generous timeout
+        # Cap at 2M seconds (~23 days) to avoid OverflowError in poll() syscall
+        # (Python converts to milliseconds internally; >2^31 ms overflows)
+        overall_timeout = min(max(time_limit_sec * 100 + 7200, 86400), 2_000_000)
         proc = subprocess.run(
             cmd,
             capture_output=True,

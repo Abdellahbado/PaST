@@ -27,16 +27,33 @@ fi
 echo ".NET version: $(dotnet --version)"
 echo ""
 
-# Build only the Experiments project (it has no Gurobi dependency).
-# We skip the full .sln build because Iirc.Utils.Gurobi requires a licensed
-# Gurobi installation that is not present on the HPC.  The runner script
-# (04_run_paper_solver.py) uses the Experiments project exclusively.
+# ── Remove Iirc.Utils.Gurobi (requires Gurobi license, not needed for B&B) ──
+# Even though Experiments.csproj doesn't reference it, stale NuGet caches or
+# implicit solution-level resolution can pull it in and cause build failures.
+GUROBI_DIR="$ROOT/data/green-scheduling-bab/Iirc.Utils.Gurobi"
+if [ -d "$GUROBI_DIR" ]; then
+    echo "Removing Iirc.Utils.Gurobi (not needed for B&B experiments)..."
+    rm -rf "$GUROBI_DIR"
+fi
+
+# Also strip the Gurobi ProjectReference from SolverCli (belt-and-suspenders)
+SOLVERCLI="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.SolverCli/Iirc.EnergyStatesAndCostsScheduling.SolverCli.csproj"
+if [ -f "$SOLVERCLI" ]; then
+    sed -i.bak '/Iirc\.Utils\.Gurobi/d' "$SOLVERCLI" && rm -f "${SOLVERCLI}.bak"
+fi
+
+# Clean stale build caches that may reference removed projects
+echo "Cleaning stale build caches..."
+find "$ROOT/data/green-scheduling-bab" -type d -name obj -exec rm -rf {} + 2>/dev/null || true
+find "$ROOT/data/green-scheduling-bab" -type d -name bin -exec rm -rf {} + 2>/dev/null || true
+
+# Build only the Experiments project (pure B&B, no Gurobi dependency).
 echo "--- Building Experiments project ---"
 cd "$PAPER_ROOT"
 dotnet build Iirc.EnergyStatesAndCostsScheduling.Experiments/Iirc.EnergyStatesAndCostsScheduling.Experiments.csproj -c Release 2>&1
 
-# Verify build
-EXPERIMENTS=$(find . -path "*/Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments" -o -path "*/Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll" | head -1)
+# Verify build (net6.0 or net8.0 depending on the project's TargetFramework)
+EXPERIMENTS=$(find . -path "*/Experiments/bin/Release/*/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll" | head -1)
 
 echo ""
 echo "--- Verifying Experiments build ---"
