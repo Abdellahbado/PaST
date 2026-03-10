@@ -185,11 +185,13 @@ namespace escs {
 STUBEOF
 echo "  Stubbed PackToBlocksByCp.h (no CPLEX)"
 
-# 5) Patch BranchAndBoundJob.h — remove #include <gurobi_c++.h> and GRBEnv member
+# 5) Patch BranchAndBoundJob.h — remove #include <gurobi_c++.h>, GRBEnv member,
+#    and add <iomanip> (setw was transitively included via gurobi header)
 sed -i.bak '/#include <gurobi_c++.h>/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h"
 sed -i.bak '/const GRBEnv mEnv;/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h"
+sed -i.bak 's|#include <functional>|#include <functional>\n#include <iomanip>|' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h"
 rm -f "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h.bak"
-echo "  Patched BranchAndBoundJob.h (removed GRBEnv)"
+echo "  Patched BranchAndBoundJob.h (removed GRBEnv, added iomanip)"
 
 # 6) Patch BranchAndBoundJob.cpp — remove Gurobi/CPLEX includes, add fstream+cassert,
 #    fix BlockFinding constructor, stub out PerformPrimalHeuristicPackToBlocksByCp
