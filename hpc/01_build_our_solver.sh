@@ -44,7 +44,7 @@ echo "--- Smoke test ---"
 echo ""
 echo "--- Binary info ---"
 ls -lh "$BINARY"
-file "$BINARY"
+file "$BINARY" 2>/dev/null || true
 
 echo ""
 echo "============================================================"
