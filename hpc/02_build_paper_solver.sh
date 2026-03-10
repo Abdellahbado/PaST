@@ -53,6 +53,12 @@ for f in BaseMilpSolver.cs IlpRef.cs; do
     fi
 done
 
+# ── Retarget net6.0 → net8.0 (HPC only has .NET 8 runtime) ─────────────────
+echo "Retargeting projects from net6.0 to net8.0..."
+find "$ROOT/data/green-scheduling-bab" -name '*.csproj' -exec \
+    sed -i.bak 's|<TargetFramework>net6\.0</TargetFramework>|<TargetFramework>net8.0</TargetFramework>|g' {} \;
+find "$ROOT/data/green-scheduling-bab" -name '*.csproj.bak' -delete 2>/dev/null || true
+
 # Clean stale build caches that may reference removed projects
 echo "Cleaning stale build caches..."
 find "$ROOT/data/green-scheduling-bab" -type d -name obj -exec rm -rf {} + 2>/dev/null || true
@@ -63,8 +69,8 @@ echo "--- Building Experiments project ---"
 cd "$PAPER_ROOT"
 dotnet build Iirc.EnergyStatesAndCostsScheduling.Experiments/Iirc.EnergyStatesAndCostsScheduling.Experiments.csproj -c Release 2>&1
 
-# Verify build (net6.0 or net8.0 depending on the project's TargetFramework)
-EXPERIMENTS=$(find . -path "*/Experiments/bin/Release/*/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll" | head -1)
+# Verify build
+EXPERIMENTS=$(find . -path "*/Experiments/bin/Release/net8.0/Iirc.EnergyStatesAndCostsScheduling.Experiments.dll" | head -1)
 
 echo ""
 echo "--- Verifying Experiments build ---"
