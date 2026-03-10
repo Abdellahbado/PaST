@@ -116,9 +116,11 @@ if [ ! -d "$DATASETS_DIR" ] || [ -z "$(ls -A "$DATASETS_DIR" 2>/dev/null)" ]; th
             echo "  $dname: already exists, skipping"
         else
             echo "  Generating $dname ..."
-            DOTNET_EnableUnsafeBinaryFormatterSerialization=true \
-            dotnet run --project "$GENERATOR_PROJ" -c Release --no-build \
-                -- "$DATA_DIR" "$pname" 2>&1
+            if ! DOTNET_EnableUnsafeBinaryFormatterSerialization=true \
+                dotnet run --project "$GENERATOR_PROJ" -c Release --no-build \
+                    -- "$DATA_DIR" "$pname" 2>&1; then
+                echo "  WARNING: $dname generation failed (non-zero exit), skipping"
+            fi
         fi
     done
     echo "  Datasets generated: $(ls "$DATASETS_DIR" | wc -l) directories"
