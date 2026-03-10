@@ -51,10 +51,16 @@ MISSING=()
 # 3. C++ toolchain (for our solver)
 # --------------------------------------------------------------------------
 echo -n "C++ compiler (g++ or clang++): "
+# Also check conda-prefixed compiler (gxx_linux-64 installs as x86_64-conda-linux-gnu-g++)
+_CONDA_GXX="${CONDA_PREFIX:-}/bin/x86_64-conda-linux-gnu-g++"
 if command -v g++ &>/dev/null; then
     echo "$(g++ --version | head -1)"
 elif command -v clang++ &>/dev/null; then
     echo "$(clang++ --version | head -1)"
+elif [[ -x "$_CONDA_GXX" ]]; then
+    echo "$(${_CONDA_GXX} --version | head -1)  [conda, creating symlink g++]"
+    ln -sf "$_CONDA_GXX" "${CONDA_PREFIX}/bin/g++"
+    ln -sf "${CONDA_PREFIX}/bin/x86_64-conda-linux-gnu-gcc" "${CONDA_PREFIX}/bin/gcc" 2>/dev/null || true
 else
     echo "NOT FOUND"
     MISSING+=("C++ compiler (g++ >= 10 or clang++ >= 13)")

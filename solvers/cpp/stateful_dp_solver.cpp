@@ -8,6 +8,7 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <climits>
 #include <stdexcept>
 #include <unordered_map>
 
