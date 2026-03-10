@@ -27,20 +27,31 @@ fi
 echo ".NET version: $(dotnet --version)"
 echo ""
 
-# ── Remove Iirc.Utils.Gurobi (requires Gurobi license, not needed for B&B) ──
-# Even though Experiments.csproj doesn't reference it, stale NuGet caches or
-# implicit solution-level resolution can pull it in and cause build failures.
+# ── Surgically remove ALL Gurobi references from the codebase ──────────────
+# The Shared project has a ProjectReference to Iirc.Utils.Gurobi AND two .cs
+# files (BaseMilpSolver.cs, IlpRef.cs) that "using Iirc.Utils.Gurobi".
+# None of these are needed for the pure B&B experiments.
+
 GUROBI_DIR="$ROOT/data/green-scheduling-bab/Iirc.Utils.Gurobi"
 if [ -d "$GUROBI_DIR" ]; then
-    echo "Removing Iirc.Utils.Gurobi (not needed for B&B experiments)..."
+    echo "Removing Iirc.Utils.Gurobi directory..."
     rm -rf "$GUROBI_DIR"
 fi
 
-# Also strip the Gurobi ProjectReference from SolverCli (belt-and-suspenders)
-SOLVERCLI="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.SolverCli/Iirc.EnergyStatesAndCostsScheduling.SolverCli.csproj"
-if [ -f "$SOLVERCLI" ]; then
-    sed -i.bak '/Iirc\.Utils\.Gurobi/d' "$SOLVERCLI" && rm -f "${SOLVERCLI}.bak"
-fi
+# Strip Gurobi ProjectReference from EVERY .csproj that has one
+echo "Stripping Gurobi references from .csproj files..."
+find "$ROOT/data/green-scheduling-bab" -name '*.csproj' -exec \
+    sed -i.bak '/Iirc\.Utils\.Gurobi/d' {} \;
+find "$ROOT/data/green-scheduling-bab" -name '*.csproj.bak' -delete 2>/dev/null || true
+
+# Remove the two Shared source files that "using Iirc.Utils.Gurobi"
+SHARED_SOLVERS="$PAPER_ROOT/Iirc.EnergyStatesAndCostsScheduling.Shared/Solvers"
+for f in BaseMilpSolver.cs IlpRef.cs; do
+    if [ -f "$SHARED_SOLVERS/$f" ]; then
+        echo "  Removing $f (requires Gurobi, not needed for B&B)..."
+        rm -f "$SHARED_SOLVERS/$f"
+    fi
+done
 
 # Clean stale build caches that may reference removed projects
 echo "Cleaning stale build caches..."
