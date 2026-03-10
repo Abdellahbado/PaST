@@ -191,16 +191,64 @@ sed -i.bak '/const GRBEnv mEnv;/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h
 rm -f "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.h.bak"
 echo "  Patched BranchAndBoundJob.h (removed GRBEnv)"
 
-# 6) Patch BranchAndBoundJob.cpp — remove gurobi include, fix BlockFinding call
-sed -i.bak '/#include <gurobi_c++.h>/d' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp"
-sed -i.bak 's/BlockFinding blockFinding(mEnv)/BlockFinding blockFinding()/g' "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp"
-rm -f "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp.bak"
-echo "  Patched BranchAndBoundJob.cpp (removed Gurobi refs)"
+# 6) Patch BranchAndBoundJob.cpp — remove Gurobi/CPLEX includes, add fstream+cassert,
+#    fix BlockFinding constructor, stub out PerformPrimalHeuristicPackToBlocksByCp
+#    (that function uses IloEnv/IloModel/IloCP etc. directly — won't compile without CPLEX)
+python3 - "$CPP_SRC_DIR/src/solvers/BranchAndBoundJob.cpp" << 'PYEOF'
+import sys
+fpath = sys.argv[1]
+with open(fpath) as f:
+    lines = f.readlines()
+new_lines = []
+for line in lines:
+    if '#include <gurobi_c++.h>' in line:
+        continue
+    if '#include <ilcp/cp.h>' in line:
+        new_lines.append('#include <fstream>\n')
+        new_lines.append('#include <cassert>\n')
+        continue
+    line = line.replace('BlockFinding blockFinding(mEnv)', 'BlockFinding blockFinding')
+    new_lines.append(line)
+src = ''.join(new_lines)
+all_lines = src.split('\n')
+start = None
+for i, line in enumerate(all_lines):
+    if 'bool BranchAndBoundOnJob::PerformPrimalHeuristicPackToBlocksByCp(' in line:
+        start = i
+        break
+if start is not None:
+    depth = 0
+    opened = False
+    end = None
+    for i in range(start, len(all_lines)):
+        depth += all_lines[i].count('{') - all_lines[i].count('}')
+        if depth > 0:
+            opened = True
+        if opened and depth == 0:
+            end = i
+            break
+    if end is not None:
+        stub = [
+            '    bool BranchAndBoundOnJob::PerformPrimalHeuristicPackToBlocksByCp(',
+            '            vector<vector<int>> &/*fixedProcTimesBlocks*/,',
+            '            map<int, int> &/*remainingProcTimeCounts*/,',
+            '            int /*remainingProcTime*/,',
+            '            FixedPermCostComputation &/*fixedPermCostComputation*/)',
+            '    {',
+            '        return false;',
+            '    }',
+        ]
+        all_lines = all_lines[:start] + stub + all_lines[end+1:]
+with open(fpath, 'w') as f:
+    f.write('\n'.join(all_lines))
+PYEOF
+echo "  Patched BranchAndBoundJob.cpp (removed Gurobi/CPLEX, stubbed PackToBlocks)"
 
-# 7) Patch ConstructiveHeuristic.cpp — remove CPLEX include
-sed -i.bak 's|#include <ilcp/cp.h>|// #include <ilcp/cp.h>  // stubbed out|' "$CPP_SRC_DIR/src/solvers/ConstructiveHeuristic.cpp"
+# 7) Patch ConstructiveHeuristic.cpp — replace CPLEX include with fstream
+#    (fstream was transitively included via ilcp/cp.h, needed for ifstream usage)
+sed -i.bak 's|#include <ilcp/cp.h>|#include <fstream>|' "$CPP_SRC_DIR/src/solvers/ConstructiveHeuristic.cpp"
 rm -f "$CPP_SRC_DIR/src/solvers/ConstructiveHeuristic.cpp.bak"
-echo "  Patched ConstructiveHeuristic.cpp (removed CPLEX include)"
+echo "  Patched ConstructiveHeuristic.cpp (replaced CPLEX include with fstream)"
 
 # 8) Write new CMakeLists.txt — no Gurobi, no CPLEX, just g++ + OpenMP
 cat > "$CPP_SRC_DIR/CMakeLists.txt" << 'CMAKEOF'
