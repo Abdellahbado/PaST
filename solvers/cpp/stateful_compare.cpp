@@ -82,6 +82,206 @@ namespace
     }
 
     // ---------------------------------------------------------------------------
+    // Ablation configuration — controls which components are active.
+    // ---------------------------------------------------------------------------
+    struct AblationConfig
+    {
+        bool use_banded_spaces = true;   // false → full O(h²) SPACES
+        bool use_heuristics = true;      // false → skip Steps 2-5 (no primal heuristics)
+        bool use_relaxation_lb = true;   // false → skip Steps 1,4,5 LB computation
+        // When both use_heuristics=false and use_relaxation_lb=false,
+        // we get exact-DP-only (baseline).
+    };
+
+    using Clock = std::chrono::steady_clock;
+    using Dur = std::chrono::duration<double>;
+
+    // ---------------------------------------------------------------------------
+    // Ablation-aware solver. Returns a structured CSV row with per-step timing.
+    // ---------------------------------------------------------------------------
+    std::string solve_one_ablation(
+        const std::string &instance_id,
+        const std::vector<double> &prices,
+        const std::vector<int> &jobs,
+        const std::string &machine_type,
+        const AblationConfig &ab)
+    {
+        auto t0_total = Clock::now();
+
+        std::map<int, int> cnt;
+        for (int p : jobs)
+            cnt[p]++;
+        std::vector<int> lens, tots;
+        for (auto &kv : cnt)
+        {
+            lens.push_back(kv.first);
+            tots.push_back(kv.second);
+        }
+
+        auto cfg = (machine_type == "twosby") ? dp::make_paper_twosby_config()
+                                              : dp::make_paper_nosby_config();
+
+        // --- SPACES preprocessing ---
+        auto t0_spaces = Clock::now();
+        int mg;
+        if (ab.use_banded_spaces)
+            mg = dp::auto_max_gap(cfg, (int)prices.size(), prices);
+        else
+            mg = -1; // full O(h²) SPACES
+        auto spaces = dp::compute_spaces(prices, cfg, mg);
+        double t_spaces = Dur(Clock::now() - t0_spaces).count();
+
+        auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
+        int T = (int)prices.size();
+
+        int total_rw = 0;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+            total_rw += lens[i] * tots[i];
+
+        double ub = dp::kInf;
+        double lb = 0.0;
+        auto gap_closed = [&]()
+        { return std::fabs(ub - lb) < 0.01; };
+
+        double t_fwd_relax = 0, t_heuristic = 0, t_local_search = 0;
+        double t_bwd_relax = 0, t_two_class = 0, t_exact = 0;
+        std::string step_reached = "none";
+
+        // --- Step 1: Forward relaxed DP with bin-packing (LB + UB) ---
+        if (ab.use_relaxation_lb || ab.use_heuristics)
+        {
+            auto t0 = Clock::now();
+            auto fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+            t_fwd_relax = Dur(Clock::now() - t0).count();
+            if (ab.use_relaxation_lb)
+                lb = fwd.lb;
+            if (fwd.bin_pack_ub < ub)
+                ub = fwd.bin_pack_ub;
+            step_reached = "fwd_relax";
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 2: Heuristic UB (SPT/LPT/alternating/K!/random) ---
+        if (ab.use_heuristics)
+        {
+            auto t0 = Clock::now();
+            double heur_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces, 50, lb);
+            t_heuristic = Dur(Clock::now() - t0).count();
+            if (heur_ub < ub)
+                ub = heur_ub;
+            step_reached = "heuristic_ub";
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 3: Local search from SPT + LPT ---
+        if (ab.use_heuristics)
+        {
+            auto t0 = Clock::now();
+            std::vector<int> all_jobs;
+            for (std::size_t i = 0; i < lens.size(); ++i)
+                for (int j = 0; j < tots[i]; ++j)
+                    all_jobs.push_back(lens[i]);
+
+            std::vector<int> seq = all_jobs;
+            std::sort(seq.begin(), seq.end());
+            double spt_cost = dp::solve_fixed_sequence(seq, prefix, T, spaces);
+            double ls_cost = dp::local_search_ub(seq, spt_cost, prefix, T, spaces, 3);
+            if (ls_cost < ub)
+                ub = ls_cost;
+
+            std::sort(seq.begin(), seq.end(), std::greater<int>());
+            double lpt_cost = dp::solve_fixed_sequence(seq, prefix, T, spaces);
+            ls_cost = dp::local_search_ub(seq, lpt_cost, prefix, T, spaces, 3);
+            if (ls_cost < ub)
+                ub = ls_cost;
+            t_local_search = Dur(Clock::now() - t0).count();
+            step_reached = "local_search";
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 4: Backward relaxed LB ---
+        if (ab.use_heuristics && ab.use_relaxation_lb)
+        {
+            auto t0 = Clock::now();
+            double lb_back = dp::solve_relaxed_dp_lb_backward(lens, total_rw, prefix, T, spaces, cfg);
+            t_bwd_relax = Dur(Clock::now() - t0).count();
+            if (lb_back > lb)
+                lb = lb_back;
+            step_reached = "bwd_relax";
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 5: Two-class relaxed LB ---
+        if (ab.use_heuristics && ab.use_relaxation_lb && (ub - lb > 0.5))
+        {
+            auto t0 = Clock::now();
+            double lb2 = dp::solve_relaxed_dp_lb_two_class(lens, tots, prefix, T, spaces, 2);
+            t_two_class = Dur(Clock::now() - t0).count();
+            if (lb2 > lb)
+                lb = lb2;
+            step_reached = "two_class";
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 6+7: Exact DP ---
+        {
+            auto t0 = Clock::now();
+            double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub);
+            if (exact < dp::kInf)
+            {
+                if (exact < ub)
+                    ub = exact;
+                lb = ub;
+            }
+            if (!gap_closed())
+            {
+                exact = dp::solve_sparse_exact_multiset_dp(lens, tots, prefix, T, spaces, ub, 300.0);
+                if (exact < dp::kInf)
+                {
+                    if (exact < ub)
+                        ub = exact;
+                    lb = ub;
+                }
+            }
+            t_exact = Dur(Clock::now() - t0).count();
+            step_reached = "exact";
+        }
+
+    done:
+        bool feasible = (ub < dp::kInf * 0.5);
+        bool proven_optimal = feasible && gap_closed();
+        double elapsed = Dur(Clock::now() - t0_total).count();
+        double gap_pct = (lb > 0 && feasible) ? 100.0 * (ub - lb) / lb : 0.0;
+
+        std::ostringstream row;
+        row << instance_id << ","
+            << (int)jobs.size() << ","
+            << prices.size() << ","
+            << std::fixed << std::setprecision(6) << (feasible ? ub : -1.0) << ","
+            << std::fixed << std::setprecision(6) << (feasible ? lb : -1.0) << ","
+            << std::fixed << std::setprecision(4) << gap_pct << ","
+            << (feasible ? 1 : 0) << ","
+            << (proven_optimal ? 1 : 0) << ","
+            << 0 << ","
+            << std::fixed << std::setprecision(4) << elapsed << ","
+            << std::fixed << std::setprecision(4) << t_spaces << ","
+            << std::fixed << std::setprecision(4) << t_fwd_relax << ","
+            << std::fixed << std::setprecision(4) << t_heuristic << ","
+            << std::fixed << std::setprecision(4) << t_local_search << ","
+            << std::fixed << std::setprecision(4) << t_bwd_relax << ","
+            << std::fixed << std::setprecision(4) << t_two_class << ","
+            << std::fixed << std::setprecision(4) << t_exact << ","
+            << step_reached << ","
+            << (spaces.banded ? spaces.max_gap : -1);
+        return row.str();
+    }
+
+    // ---------------------------------------------------------------------------
     // Core solver helper — called by all modes.
     // Returns one CSV data row (no header): instance_id,n_jobs,horizon,cost,...
     // ---------------------------------------------------------------------------
@@ -332,6 +532,79 @@ int main(int argc, char **argv)
     }
 
     // -----------------------------------------------------------------------
+    // MODE: ablation-stdin
+    // Like solve-stdin, but accepts an ablation config as argv[2]:
+    //   "full"         — default (banded SPACES + full bound-and-refine)
+    //   "full_spaces"  — full O(h²) SPACES + full bound-and-refine
+    //   "exact_only"   — banded SPACES + exact DP only (no heuristics/relaxations)
+    //   "baseline"     — full O(h²) SPACES + exact DP only
+    //
+    // Output CSV has extra columns for per-step timing.
+    // Usage: cat instances.jsonl | stateful_compare ablation-stdin <config>
+    // -----------------------------------------------------------------------
+    if (mode == "ablation-stdin")
+    {
+        std::string ab_mode = (argc > 2 ? argv[2] : "full");
+        AblationConfig ab;
+        if (ab_mode == "full")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = true;
+            ab.use_relaxation_lb = true;
+        }
+        else if (ab_mode == "full_spaces")
+        {
+            ab.use_banded_spaces = false;
+            ab.use_heuristics = true;
+            ab.use_relaxation_lb = true;
+        }
+        else if (ab_mode == "exact_only")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = false;
+        }
+        else if (ab_mode == "baseline")
+        {
+            ab.use_banded_spaces = false;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = false;
+        }
+        else
+        {
+            std::cerr << "Unknown ablation config: " << ab_mode << "\n";
+            return 1;
+        }
+
+        std::cout << "instance_id,n_jobs,horizon,ub,lb,gap_pct,feasible,is_optimal,"
+                  << "timed_out,runtime_sec,t_spaces,t_fwd_relax,t_heuristic,"
+                  << "t_local_search,t_bwd_relax,t_two_class,t_exact,"
+                  << "step_reached,max_gap\n";
+        std::cout.flush();
+
+        std::string line;
+        while (std::getline(std::cin, line))
+        {
+            if (line.empty() || line.front() != '{')
+                continue;
+            auto prices = json_parse_double_array(line, "prices");
+            auto jobs = json_parse_int_array(line, "jobs");
+            auto iid = json_parse_string(line, "instance_id");
+            auto machine = json_parse_string(line, "machine");
+            if (machine.empty())
+                machine = "nosby";
+            if (prices.empty() || jobs.empty())
+            {
+                std::cerr << "warn: skipping malformed line: " << line.substr(0, 80) << "\n";
+                continue;
+            }
+            std::cout << solve_one_ablation(iid, prices, jobs, machine, ab) << "\n";
+            std::cout.flush();
+        }
+        return 0;
+    }
+
+    // -----------------------------------------------------------------------
     // MODE: solve-stdin
     // Reads one JSON object per line from stdin, solves each, emits CSV rows.
     // JSON format: {"instance_id":"...","prices":[...],"jobs":[...]}
@@ -470,6 +743,9 @@ int main(int argc, char **argv)
               << "      reads one JSON line per instance from stdin:\n"
               << "      {\"instance_id\":\"...\",\"prices\":[...],\"jobs\":[...]}\n"
               << "      used by the Python parallel launcher (run_cpp_benchmark.py)\n"
+              << "  stateful_compare ablation-stdin <config>\n"
+              << "      config: full | full_spaces | exact_only | baseline\n"
+              << "      reads JSONL from stdin, outputs CSV with per-step timing\n"
               << "  stateful_compare benchmark [n_csv] [lambda_csv] [seeds_csv] [time_limit_sec]\n"
               << "      single-process sweep (parallel: use Python launcher instead)\n"
               << "      e.g.:  benchmark 150,170,190 1.3,1.6,1.9,2.2 42 3600\n";

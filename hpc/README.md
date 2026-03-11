@@ -40,6 +40,8 @@ All scripts are in `hpc/` and numbered in execution order:
 | 03 | `03_run_our_solver.py` | Run our solver on all 1,517+ instances |
 | 04 | `04_run_paper_solver.py` | Run paper's solver on all instances |
 | 05 | `05_analyze_results.py` | Aggregate, compare, generate tables & plots |
+| 06 | `06_ablation_study.py` | Ablation: Banded SPACES vs Bound-and-Refine |
+| 07 | `07_analyze_ablation.py` | Analyze ablation results, generate LaTeX + plots |
 | — | `run_full_benchmark.sh` | Master wrapper: runs 00–05 in sequence |
 | — | `slurm_full.sbatch` | SLURM job: both solvers |
 | — | `slurm_ours_only.sbatch` | SLURM job: our solver only |
@@ -83,31 +85,48 @@ After a full run:
 
 ```
 hpc/
-├── results_ours/
-│   ├── all_results.csv        # Combined CSV (all sections)
-│   ├── section_table1.csv     # Table 1 results
-│   ├── section_table2.csv     # Table 2 results
-│   ├── section_fig9.csv       # Figure 9 results
-│   ├── section_drops.csv      # Drops results
-│   ├── section_gcd.csv        # GCD results
-│   ├── section_synthetic.csv  # Synthetic results
-│   ├── run_log.txt            # Detailed execution log
-│   └── system_info.json       # Hardware/OS/compiler info
-│
-├── results_paper/
-│   ├── all_results.csv        # Same format, paper's solver
-│   ├── section_*.csv
-│   ├── run_log.txt
-│   └── system_info.json
-│
-├── analysis/
-│   ├── analysis_report.txt    # Human-readable summary
-│   ├── comparison.csv         # Side-by-side per-instance
-│   ├── latex_tables.tex       # LaTeX-ready tables
-│   └── scatter_timing.png     # Our time vs paper's time
-│
-└── slurm_logs/                # SLURM stdout/stderr
+├── results_ours/          # Our solver results (03_run_our_solver.py)
+├── results_paper/         # Paper's solver results (04_run_paper_solver.py)
+├── results_ablation/      # Ablation study (06_ablation_study.py)
+│   ├── ablation_combined.csv
+│   ├── ablation_{full,full_spaces,exact_only,baseline}.csv
+│   ├── ablation_log.txt
+│   └── analysis/
+│       ├── ablation_report.txt
+│       ├── ablation_tables.tex
+│       ├── ablation_speedup.pdf
+│       └── ablation_steps.pdf
+├── analysis/              # Comparison analysis (05_analyze_results.py)
+└── slurm_logs/
 ```
+
+## Ablation Study
+
+The ablation study isolates the contribution of each algorithmic component:
+
+| Config | Banded SPACES | Bound-and-Refine | Tests |
+|--------|:---:|:---:|---|
+| A: Full method | ✓ | ✓ | Complete system |
+| B: Full SPACES | ✗ | ✓ | Banded SPACES contribution |
+| C: Exact only + banded | ✓ | ✗ | Bound-and-Refine contribution |
+| D: Baseline | ✗ | ✗ | Neither optimization |
+
+```bash
+# Run all 4 configs on Table 2 + Figure 9 instances:
+python3 hpc/06_ablation_study.py --section all --time-limit 600
+
+# Run only on Table 2 instances:
+python3 hpc/06_ablation_study.py --section 2
+
+# Run a single config:
+python3 hpc/06_ablation_study.py --config full
+
+# Analyze results and generate paper tables + figures:
+python3 hpc/07_analyze_ablation.py --input-dir hpc/results_ablation
+```
+
+**Comparison matrix:** A vs B = Banded SPACES speedup, A vs C = Bound-and-Refine speedup,
+A vs D = combined speedup. Per-step timing breakdown shows where time is spent.
 
 ## CSV Format
 
