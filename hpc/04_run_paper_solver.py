@@ -54,6 +54,7 @@ def _solver_env() -> dict:
     env["DOTNET_EnableUnsafeBinaryFormatterSerialization"] = "true"
     return env
 
+
 CSV_HEADER = (
     "section,dataset,instance_id,n_jobs,horizon,ub,lb,gap_pct,"
     "feasible,is_optimal,timed_out,runtime_sec,status,running_time_raw"
@@ -188,7 +189,7 @@ def create_experiment_prescription(
         "datasetNames": [dataset_name],
         "globalConfig": {
             "randomSeed": 41,
-            "numWorkers": 0,
+            "numWorkers": 1,
             "timeLimit": time_str,
         },
         "solvers": [solver_config],
@@ -212,109 +213,96 @@ def run_paper_experiments(
     logfile=None,
 ) -> list[dict]:
     """
-    Run the paper's Experiments runner on a dataset.
+    Run the paper's Experiments runner on a dataset, ONE INSTANCE AT A TIME.
 
-    The runner writes result.json files per instance.
-    We then parse those into our unified CSV format.
+    Per-instance execution isolates C++ crashes: if the solver segfaults or
+    throws on one instance, only that instance is lost — the rest continue.
+    Each instance runs in its own dotnet process via a temporary single-instance
+    dataset directory.
     """
-    # Create prescription
-    presc_path = create_experiment_prescription(
-        dataset_name, time_limit_sec, solver_type
-    )
     solver_id = "BAB" if solver_type == "BAB" else "BAB_default"
-
-    log(
-        f"  Running paper solver on {dataset_name} ({solver_type}, {time_limit_sec}s limit)",
-        logfile,
-    )
-
-    # Run the Experiments project
-    wall_start = time.monotonic()
-
-    cmd = [
-        "dotnet",
-        "run",
-        "--project",
-        str(EXPERIMENTS_PROJECT),
-        "-c",
-        "Release",
-        "--no-build",
-        "--",
-        str(PAPER_DATA),
-        presc_path.name,
-    ]
-
-    # Copy prescription to the experiments-prescriptions dir so it can be found
-    target_presc = PAPER_DATA / "experiments-prescriptions" / presc_path.name
-    shutil.copy2(presc_path, target_presc)
-
-    log(
-        f"  Command: dotnet run --project ...Experiments -c Release -- {PAPER_DATA} {presc_path.name}",
-        logfile,
-    )
-
-    try:
-        # Cap at 2M seconds (~23 days) to avoid OverflowError in poll() syscall
-        # (Python converts to milliseconds internally; >2^31 ms overflows)
-        overall_timeout = min(max(time_limit_sec * 100 + 7200, 86400), 2_000_000)
-        run_env = _solver_env()
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=overall_timeout,
-            cwd=str(PAPER_ROOT),
-            env=run_env,
-        )
-        wall_elapsed = time.monotonic() - wall_start
-        log(f"  Wall time: {wall_elapsed:.1f}s", logfile)
-
-        if proc.stdout:
-            # Print last 20 lines of stdout
-            stdout_lines = proc.stdout.strip().split("\n")
-            for line in stdout_lines[-20:]:
-                log(f"    [C#] {line}", logfile)
-
-        if proc.returncode != 0 and proc.stderr:
-            log(f"  Solver stderr: {proc.stderr[:500]}", logfile)
-    except subprocess.TimeoutExpired:
-        wall_elapsed = time.monotonic() - wall_start
-        log(f"  TIMEOUT after {wall_elapsed:.1f}s", logfile)
-
-    # Clean up temp prescription
-    target_presc.unlink(missing_ok=True)
-
-    # Parse results from the results directory
-    results_dir = PAPER_DATA / "results" / dataset_name / solver_id
-    if not results_dir.exists():
-        # Some C# runners put results in a different location
-        results_dir = PAPER_DATA / "datasets" / dataset_name
-        # Actually the Experiments runner creates: data/results/{dataset}/{solver_id}/
-        # Let's check
-        alt_results = PAPER_DATA / "results"
-        if alt_results.exists():
-            log(f"  Results dir structure: {list(alt_results.iterdir())}", logfile)
-
     instance_dir = PAPER_DATA / "datasets" / dataset_name
-    all_results = []
 
-    if results_dir.exists():
-        for result_file in sorted(results_dir.glob("*.json")):
-            # Skip macOS resource-fork files (._0.json etc.)
-            if result_file.name.startswith("._"):
-                continue
-            idx = int(result_file.stem)
+    # Discover all instance files
+    instance_files = sorted(
+        [f for f in instance_dir.glob("*.json") if not f.name.startswith("._")],
+        key=lambda f: int(f.stem),
+    )
+
+    log(
+        f"  Running paper solver on {dataset_name} "
+        f"({solver_type}, {time_limit_sec}s limit) "
+        f"-- {len(instance_files)} instances, per-instance mode",
+        logfile,
+    )
+
+    # Temp single-instance dataset dir (inside paper's data/datasets/ so the
+    # Experiments runner can discover it)
+    TEMP_DS = "_hpc_single"
+    temp_ds_dir = PAPER_DATA / "datasets" / TEMP_DS
+    temp_results_base = PAPER_DATA / "results" / TEMP_DS
+
+    all_results: list[dict] = []
+
+    for inst_file in instance_files:
+        idx = int(inst_file.stem)
+        inst_info = load_instance_info(inst_file)
+
+        # ── Set up temp single-instance dataset ──────────────────────────
+        if temp_ds_dir.exists():
+            shutil.rmtree(temp_ds_dir)
+        temp_ds_dir.mkdir(parents=True)
+        shutil.copy2(inst_file, temp_ds_dir / inst_file.name)
+
+        # Clean stale results for temp dataset
+        if temp_results_base.exists():
+            shutil.rmtree(temp_results_base)
+
+        # Create prescription pointing to temp dataset
+        presc_path = create_experiment_prescription(
+            TEMP_DS, time_limit_sec, solver_type
+        )
+        presc_dest = PAPER_DATA / "experiments-prescriptions" / presc_path.name
+        shutil.copy2(presc_path, presc_dest)
+
+        cmd = [
+            "dotnet", "run",
+            "--project", str(EXPERIMENTS_PROJECT),
+            "-c", "Release", "--no-build", "--",
+            str(PAPER_DATA), presc_path.name,
+        ]
+
+        # ── Run solver on single instance ────────────────────────────────
+        t0 = time.monotonic()
+        proc_ok = True
+        stderr_msg = ""
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=time_limit_sec + 120,   # generous wall-clock padding
+                cwd=str(PAPER_ROOT),
+                env=_solver_env(),
+            )
+            if proc.returncode != 0:
+                proc_ok = False
+                stderr_msg = (proc.stderr or "")[:300].strip()
+        except subprocess.TimeoutExpired:
+            proc_ok = False
+            stderr_msg = "wall-clock timeout"
+
+        elapsed = time.monotonic() - t0
+
+        # ── Parse result (may exist even if process crashed) ─────────────
+        result_json = temp_results_base / solver_id / f"{idx}.json"
+        parsed = False
+
+        if result_json.exists():
             try:
-                with open(result_file) as f:
+                with open(result_json) as f:
                     rd = json.load(f)
-
-                # Load instance info
-                inst_path = instance_dir / f"{idx}.json"
-                inst_info = (
-                    load_instance_info(inst_path)
-                    if inst_path.exists()
-                    else {"n_jobs": 0, "horizon": 0}
-                )
 
                 status = rd.get("Status", "Unknown")
                 rt_str = rd.get("RunningTime", "00:00:00")
@@ -323,50 +311,84 @@ def run_paper_experiments(
                 lb = rd.get("LowerBound")
                 tlr = rd.get("TimeLimitReached", False)
 
-                ub = float(obj) if obj is not None else -1.0
+                ub_val = float(obj) if obj is not None else -1.0
                 lb_val = float(lb) if lb is not None else -1.0
                 feasible = 1 if status in ("Optimal", "Heuristic") else 0
                 is_optimal = 1 if status == "Optimal" else 0
                 timed_out = 1 if tlr else 0
                 gap_pct = 0.0
-                if feasible and lb_val > 0 and ub > 0:
-                    gap_pct = 100.0 * (ub - lb_val) / lb_val
+                if feasible and lb_val > 0 and ub_val > 0:
+                    gap_pct = 100.0 * (ub_val - lb_val) / lb_val
 
-                all_results.append(
-                    {
-                        "section": section_name,
-                        "dataset": dataset_name,
-                        "instance_id": f"{dataset_name}/{idx}",
-                        "n_jobs": inst_info["n_jobs"],
-                        "horizon": inst_info["horizon"],
-                        "ub": ub,
-                        "lb": lb_val,
-                        "gap_pct": gap_pct,
-                        "feasible": feasible,
-                        "is_optimal": is_optimal,
-                        "timed_out": timed_out,
-                        "runtime_sec": runtime,
-                        "status": status,
-                        "running_time_raw": str(rt_str),
-                    }
+                all_results.append({
+                    "section": section_name,
+                    "dataset": dataset_name,
+                    "instance_id": f"{dataset_name}/{idx}",
+                    "n_jobs": inst_info["n_jobs"],
+                    "horizon": inst_info["horizon"],
+                    "ub": ub_val,
+                    "lb": lb_val,
+                    "gap_pct": gap_pct,
+                    "feasible": feasible,
+                    "is_optimal": is_optimal,
+                    "timed_out": timed_out,
+                    "runtime_sec": runtime,
+                    "status": status,
+                    "running_time_raw": str(rt_str),
+                })
+                parsed = True
+
+                sym = "OK" if is_optimal else ("TL" if timed_out else "??")
+                log(
+                    f"    {idx}: {sym} {status} {runtime:.1f}s "
+                    f"(ub={ub_val:.0f} lb={lb_val:.0f})",
+                    logfile,
                 )
             except Exception as e:
-                log(f"  Error parsing {result_file}: {e}", logfile)
+                log(f"    {idx}: result parse error -- {e}", logfile)
 
-        n = len(all_results)
-        n_opt = sum(1 for r in all_results if r["is_optimal"])
-        n_tlr = sum(1 for r in all_results if r["timed_out"])
-        total_t = sum(r["runtime_sec"] for r in all_results)
-        max_t = max((r["runtime_sec"] for r in all_results), default=0)
-        log(
-            f"  => {n_opt}/{n} optimal, {n_tlr} timeouts, max={max_t:.1f}s, total={total_t:.1f}s",
-            logfile,
-        )
-    else:
-        log(f"  WARNING: Results dir not found: {results_dir}", logfile)
-        log(f"  The paper's Experiments runner may write results elsewhere.", logfile)
-        log(f"  Check: {PAPER_DATA / 'results'}", logfile)
+        if not parsed:
+            # Record as crashed / no result
+            all_results.append({
+                "section": section_name,
+                "dataset": dataset_name,
+                "instance_id": f"{dataset_name}/{idx}",
+                "n_jobs": inst_info["n_jobs"],
+                "horizon": inst_info["horizon"],
+                "ub": -1.0,
+                "lb": -1.0,
+                "gap_pct": 0.0,
+                "feasible": 0,
+                "is_optimal": 0,
+                "timed_out": 0,
+                "runtime_sec": elapsed,
+                "status": "Crashed",
+                "running_time_raw": "",
+            })
+            short_err = stderr_msg.split("\n")[0][:100] if stderr_msg else "no result"
+            log(f"    {idx}: CRASHED {elapsed:.1f}s -- {short_err}", logfile)
 
+        # Clean up prescription
+        presc_dest.unlink(missing_ok=True)
+
+    # Final cleanup of temp dirs
+    if temp_ds_dir.exists():
+        shutil.rmtree(temp_ds_dir, ignore_errors=True)
+    if temp_results_base.exists():
+        shutil.rmtree(temp_results_base, ignore_errors=True)
+
+    # ── Summary ──────────────────────────────────────────────────────────
+    n = len(all_results)
+    n_opt = sum(1 for r in all_results if r["is_optimal"])
+    n_crash = sum(1 for r in all_results if r["status"] == "Crashed")
+    n_tlr = sum(1 for r in all_results if r["timed_out"])
+    total_t = sum(r["runtime_sec"] for r in all_results)
+    max_t = max((r["runtime_sec"] for r in all_results), default=0)
+    log(
+        f"  => {n_opt}/{n} optimal, {n_crash} crashed, "
+        f"{n_tlr} timeouts, total={total_t:.1f}s",
+        logfile,
+    )
     return all_results
 
 
@@ -419,8 +441,12 @@ def warmup_dotnet(logfile=None):
     t0 = time.monotonic()
     try:
         subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120,
-            cwd=str(PAPER_ROOT), env=_solver_env(),
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(PAPER_ROOT),
+            env=_solver_env(),
         )
     except subprocess.TimeoutExpired:
         pass
