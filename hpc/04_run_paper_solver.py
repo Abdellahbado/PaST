@@ -241,7 +241,18 @@ def run_paper_experiments(
     # Experiments runner can discover it)
     TEMP_DS = "_hpc_single"
     temp_ds_dir = PAPER_DATA / "datasets" / TEMP_DS
-    temp_results_base = PAPER_DATA / "results" / TEMP_DS
+
+    # The Experiments runner writes results to:
+    #   {DATA_ROOT}/results/{prescription_stem}/{datasetName}/{solverId}/
+    # Compute the prescription once (same file for all instances in this batch).
+    presc_path = create_experiment_prescription(TEMP_DS, time_limit_sec, solver_type)
+    presc_dest = PAPER_DATA / "experiments-prescriptions" / presc_path.name
+    presc_stem = presc_path.stem   # e.g. "hpc_prescription__hpc_single_BAB"
+    temp_results_base = PAPER_DATA / "results" / presc_stem / TEMP_DS
+
+    # Ensure experiments-prescriptions dir exists and install the prescription
+    presc_dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(presc_path, presc_dest)
 
     all_results: list[dict] = []
 
@@ -255,16 +266,9 @@ def run_paper_experiments(
         temp_ds_dir.mkdir(parents=True)
         shutil.copy2(inst_file, temp_ds_dir / inst_file.name)
 
-        # Clean stale results for temp dataset
+        # Clean stale results for this temp dataset
         if temp_results_base.exists():
             shutil.rmtree(temp_results_base)
-
-        # Create prescription pointing to temp dataset
-        presc_path = create_experiment_prescription(
-            TEMP_DS, time_limit_sec, solver_type
-        )
-        presc_dest = PAPER_DATA / "experiments-prescriptions" / presc_path.name
-        shutil.copy2(presc_path, presc_dest)
 
         cmd = [
             "dotnet", "run",
@@ -366,17 +370,25 @@ def run_paper_experiments(
                 "status": "Crashed",
                 "running_time_raw": "",
             })
-            short_err = stderr_msg.split("\n")[0][:100] if stderr_msg else "no result"
+            # Log both stdout and stderr for diagnostics
+            out_snippet = ""
+            if "proc" in dir() and hasattr(proc, "stdout") and proc.stdout:
+                out_snippet = proc.stdout.strip().split("\n")[-1][:120]
+            short_err = (
+                stderr_msg.split("\n")[0][:100] if stderr_msg
+                else (out_snippet or f"result not found at {result_json}")
+            )
             log(f"    {idx}: CRASHED {elapsed:.1f}s -- {short_err}", logfile)
-
-        # Clean up prescription
-        presc_dest.unlink(missing_ok=True)
 
     # Final cleanup of temp dirs
     if temp_ds_dir.exists():
         shutil.rmtree(temp_ds_dir, ignore_errors=True)
-    if temp_results_base.exists():
-        shutil.rmtree(temp_results_base, ignore_errors=True)
+    # Remove the entire prescription-scoped results subtree
+    presc_results_dir = PAPER_DATA / "results" / presc_stem
+    if presc_results_dir.exists():
+        shutil.rmtree(presc_results_dir, ignore_errors=True)
+    # Clean up installed prescription
+    presc_dest.unlink(missing_ok=True)
 
     # ── Summary ──────────────────────────────────────────────────────────
     n = len(all_results)
