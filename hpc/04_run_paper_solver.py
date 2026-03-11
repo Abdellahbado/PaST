@@ -157,6 +157,7 @@ def create_experiment_prescription(
                 "usePrimalHeuristicBlockDetection": True,
                 "usePrimalHeuristicPackToBlocksByCp": False,
                 "primalHeuristicPackToBlocksByCpAllJobs": False,
+                "primalHeuristicBlockFinding": "Off",
                 "jobsJoiningOnGcd": "WholeTree",
             },
         }
@@ -170,8 +171,8 @@ def create_experiment_prescription(
                 "usePrimalHeuristicBlockDetection": True,
                 "usePrimalHeuristicPackToBlocksByCp": False,
                 "primalHeuristicPackToBlocksByCpAllJobs": False,
+                "primalHeuristicBlockFinding": "Off",
                 "UseIterativeDeepening": False,
-                "PrimalHeuristicBlockFinding": True,
                 "BranchPriority": "ForcedSpace",
                 "jobsJoiningOnGcd": "WholeTree",
             },

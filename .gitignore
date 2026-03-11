@@ -52,6 +52,16 @@ logs/
 *.pkl
 *.json
 
+# Cloned external repos (downloaded by hpc/02_build_paper_solver.sh)
+data/green-scheduling-bab/
+
+# Pre-generated paper datasets tarball and extracted instances (large files)
+data/paper_instances/
+
+# HPC run results
+hpc/results_ours/
+hpc/results_paper/
+
 # Models
 models/
 *.pth
