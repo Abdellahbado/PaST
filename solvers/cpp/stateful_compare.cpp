@@ -129,6 +129,50 @@ namespace
         return auto_gap;
     }
 
+    int64_t estimate_nc_product(const std::vector<int> &totals)
+    {
+        int64_t nc_est = 1;
+        for (int total : totals)
+        {
+            nc_est *= static_cast<int64_t>(total + 1);
+            if (nc_est > 50'000)
+                break;
+        }
+        return nc_est;
+    }
+
+    bool is_small_exact_shortcut_candidate(int64_t nc_est, int horizon)
+    {
+        return nc_est < 50'000 &&
+               nc_est * static_cast<int64_t>(horizon + 2) <= 600'000'000LL;
+    }
+
+    bool is_large_unresolved_tail_for_exact(
+        int n_jobs,
+        int horizon,
+        const dp::RelaxedDPResult &fwd)
+    {
+        // These thresholds are intentionally conservative: they target the
+        // 200-job / ~2350-horizon tail where the "less exact" pipeline spent
+        // over a minute in heuristics + local search + smart reconstruction
+        // before exact still had to finish the proof.
+        return n_jobs >= 180 &&
+               horizon >= 2200 &&
+               fwd.states_reached >= 1'000'000 &&
+               fwd.block_count >= 175 &&
+               fwd.merged_block_count >= 5;
+    }
+
+    bool should_shortcut_to_exact(
+        int64_t nc_est,
+        int n_jobs,
+        int horizon,
+        const dp::RelaxedDPResult &fwd)
+    {
+        return is_small_exact_shortcut_candidate(nc_est, horizon) ||
+               is_large_unresolved_tail_for_exact(n_jobs, horizon, fwd);
+    }
+
     // ---------------------------------------------------------------------------
     // Ablation configuration — controls which components are active.
     // ---------------------------------------------------------------------------
@@ -185,18 +229,9 @@ namespace
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
 
-        int64_t NC_est = 1;
+        int64_t NC_est = estimate_nc_product(tots);
+
         bool use_exact_shortcut = false;
-        for (std::size_t i = 0; i < lens.size(); ++i)
-        {
-            NC_est *= (tots[i] + 1);
-            if (NC_est > 50'000)
-                break;
-        }
-        if (ab.use_exact_shortcut &&
-            NC_est < 50'000 &&
-            NC_est * static_cast<int64_t>(T + 2) <= 600'000'000LL)
-            use_exact_shortcut = true;
 
         double t_fwd_relax = 0, t_heuristic = 0, t_local_search = 0;
         double t_bwd_relax = 0, t_two_class = 0, t_exact = 0;
@@ -236,6 +271,12 @@ namespace
             }
         }
 
+        use_exact_shortcut = ab.use_exact_shortcut &&
+                             should_shortcut_to_exact(
+                                 NC_est,
+                                 static_cast<int>(jobs.size()),
+                                 T,
+                                 fwd);
         if (use_exact_shortcut)
             goto exact_dp;
 
@@ -256,7 +297,28 @@ namespace
             }
         }
 
-        // --- Step 3: Local search from SPT + LPT ---
+        // --- Step 3: Smart reconstruction (count-aware search on relaxed DP table) ---
+        if (ab.use_smart_recon && !fwd.rdp.empty())
+        {
+            auto t0 = Clock::now();
+            double sr_cost = dp::smart_reconstruct(
+                fwd.rdp, fwd.RW,
+                lens, tots, prefix, T, spaces,
+                ub, 30.0);
+            t_smart_recon = Dur(Clock::now() - t0).count();
+            if (sr_cost < ub)
+                ub = sr_cost;
+            if (sr_cost < dp::kInf)
+                lb = ub; // proven optimal
+            step_reached = "smart_recon";
+            if (gap_closed())
+            {
+                winner_detail = "smart_recon";
+                goto done;
+            }
+        }
+
+        // --- Step 4: Local search from SPT + LPT ---
         if (ab.use_heuristics)
         {
             auto t0 = Clock::now();
@@ -287,7 +349,7 @@ namespace
             }
         }
 
-        // --- Step 4: R_feas LB (transition-feasibility filter) ---
+        // --- Step 5: R_feas LB (transition-feasibility filter) ---
         if (ab.use_heuristics && ab.use_relaxation_lb)
         {
             auto t0 = Clock::now();
@@ -304,7 +366,7 @@ namespace
             }
         }
 
-        // --- Step 5: R_feas+Lagr LB (combined bound) ---
+        // --- Step 6: R_feas+Lagr LB (combined bound) ---
         if (ab.use_heuristics && ab.use_relaxation_lb && (ub - lb > 0.5))
         {
             auto t0 = Clock::now();
@@ -322,28 +384,7 @@ namespace
             }
         }
 
-        // --- Step 5.5: Smart reconstruction (count-aware search on relaxed DP table) ---
-        if (ab.use_smart_recon && !fwd.rdp.empty())
-        {
-            auto t0 = Clock::now();
-            double sr_cost = dp::smart_reconstruct(
-                fwd.rdp, fwd.RW,
-                lens, tots, prefix, T, spaces,
-                ub, 30.0);
-            t_smart_recon = Dur(Clock::now() - t0).count();
-            if (sr_cost < ub)
-                ub = sr_cost;
-            if (sr_cost < dp::kInf)
-                lb = ub; // proven optimal
-            step_reached = "smart_recon";
-            if (gap_closed())
-            {
-                winner_detail = "smart_recon";
-                goto done;
-            }
-        }
-
-        // --- Step 6+7: Exact DP ---
+        // --- Step 7+8: Exact DP ---
     exact_dp:
         {
             auto t0 = Clock::now();
@@ -455,18 +496,9 @@ namespace
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
 
-        // Compute NC to decide whether to skip expensive heuristics
-        int64_t NC_est = 1;
-        bool use_exact_shortcut = false;
-        for (std::size_t i = 0; i < lens.size(); ++i)
-        {
-            NC_est *= (tots[i] + 1);
-            if (NC_est > 50'000)
-                break;
-        }
-        if (NC_est < 50'000 && NC_est * (int64_t)(T + 2) <= 600'000'000LL)
-            use_exact_shortcut = true;
+        int64_t NC_est = estimate_nc_product(tots);
 
+        bool use_exact_shortcut = false;
         int64_t states_fwd_reached = 0, states_fwd_expanded = 0;
 
         // --- Step 1: Forward relaxed DP with bin-packing (single pass) ---
@@ -480,8 +512,15 @@ namespace
         if (gap_closed())
             goto done;
 
-        // If NC is small, skip Steps 2-5 (expensive heuristics) and go straight
-        // to Step 6 (exact DP) which will solve it quickly.
+        use_exact_shortcut = should_shortcut_to_exact(
+            NC_est,
+            static_cast<int>(jobs.size()),
+            T,
+            fwd);
+
+        // Either exact is genuinely small, or Step 1 already shows that this is
+        // one of the large unresolved tail instances where the intermediate
+        // stack is usually slower than solving the proof directly.
         if (use_exact_shortcut)
             goto exact_dp;
 
@@ -494,7 +533,22 @@ namespace
                 goto done;
         }
 
-        // --- Step 3: Local search from SPT + LPT ---
+        // --- Step 3: Smart reconstruction (count-aware search on relaxed DP table) ---
+        if (!fwd.rdp.empty())
+        {
+            double sr_cost = dp::smart_reconstruct(
+                fwd.rdp, fwd.RW,
+                lens, tots, prefix, T, spaces,
+                ub, 30.0);
+            if (sr_cost < ub)
+                ub = sr_cost;
+            if (sr_cost < dp::kInf)
+                lb = ub; // proven optimal
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 4: Local search from SPT + LPT ---
         {
             std::vector<int> all_jobs;
             for (std::size_t i = 0; i < lens.size(); ++i)
@@ -519,7 +573,7 @@ namespace
                 goto done;
         }
 
-        // --- Step 4: R_feas LB (transition-feasibility filter) ---
+        // --- Step 5: R_feas LB (transition-feasibility filter) ---
         {
             double lb_feas = dp::solve_relaxed_dp_lb_feas(lens, tots, prefix, T, spaces);
             if (lb_feas > lb)
@@ -528,7 +582,7 @@ namespace
                 goto done;
         }
 
-        // --- Step 5: R_feas+Lagr LB (combined bound) ---
+        // --- Step 6: R_feas+Lagr LB (combined bound) ---
         {
             double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(lens, tots, prefix, T, spaces, 50, 10.0);
             if (lb_fl > lb)
@@ -537,22 +591,7 @@ namespace
                 goto done;
         }
 
-        // --- Step 5.5: Smart reconstruction (count-aware search on relaxed DP table) ---
-        if (!fwd.rdp.empty())
-        {
-            double sr_cost = dp::smart_reconstruct(
-                fwd.rdp, fwd.RW,
-                lens, tots, prefix, T, spaces,
-                ub, 30.0);
-            if (sr_cost < ub)
-                ub = sr_cost;
-            if (sr_cost < dp::kInf)
-                lb = ub; // proven optimal
-            if (gap_closed())
-                goto done;
-        }
-
-        // --- Step 6: Exact multiset DP (for small K, e.g., K=2 or K=3) ---
+        // --- Step 7: Exact multiset DP (for small K, e.g., K=2 or K=3) ---
         // Dense (t, c0, c1, ...) DP. Gives exact optimal = both LB and UB.
     exact_dp:
     {
@@ -568,7 +607,7 @@ namespace
         if (gap_closed())
             goto done;
 
-        // --- Step 7: Sparse exact DP (fallback for larger state spaces) ---
+        // --- Step 8: Sparse exact DP (fallback for larger state spaces) ---
         {
             double exact = dp::solve_sparse_exact_multiset_dp(
                 lens, tots, prefix, T, spaces, ub, 300.0);
