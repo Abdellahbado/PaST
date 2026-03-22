@@ -17,6 +17,7 @@
 #include <climits>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <unistd.h>
 
 namespace dp
@@ -1644,6 +1645,10 @@ namespace dp
 
                 bool exact_pack_decided = false;
                 bool want_external_exact = (pack_solver != "default");
+                bool native_exact_first =
+                    (std::getenv("PAST_RELAXED_BINPACK_NATIVE_FIRST") != nullptr);
+                bool allow_small_nc =
+                    (std::getenv("PAST_RELAXED_BINPACK_ALLOW_SMALL_NC") != nullptr);
 
                 // Start with the cheap in-process packers. For the ablation we still
                 // expose the external exact solver, but only after the fast packers
@@ -1726,38 +1731,11 @@ namespace dp
                         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_pack).count();
                 }
 
-                if (want_external_exact && bp_ub >= kInf * 0.5)
+                auto run_native_exact = [&]()
                 {
-                    auto ext = exact_pack_via_ortools(orig_cap, lengths, totals);
-                    if (ext.solver != "disabled")
-                        pack_solver = ext.solver;
-                    t_pack_external = ext.runtime_sec;
-                    if (ext.status == ExternalPackStatus::Feasible)
-                    {
-                        pack_external_status = "feasible";
-                        note_pack_candidate("external_" + ext.solver,
-                                            solve_fixed_sequence(ext.sequence, prefix_proc, T, spaces));
-                        exact_pack_decided = true;
-                    }
-                    else if (ext.status == ExternalPackStatus::Infeasible)
-                    {
-                        pack_external_status = "infeasible";
-                        pack_method = "external_" + ext.solver;
-                        pack_outcome = "infeasible";
-                        exact_pack_decided = true;
-                    }
-                    else if (ext.status == ExternalPackStatus::Error)
-                    {
-                        pack_external_status = "error";
-                    }
-                }
+                    if (exact_pack_decided || bp_ub < kInf * 0.5)
+                        return;
 
-                // 6) Backtracking block assignment search
-                //    Enumerates valid type-compositions per block, then DFS
-                //    to find a feasible assignment of jobs to blocks.
-                //    Skip if NC is small (dense exact DP will handle it efficiently).
-                if (!exact_pack_decided && bp_ub >= kInf * 0.5)
-                {
                     int64_t NC_est = 1;
                     for (int i = 0; i < K; ++i)
                     {
@@ -1766,7 +1744,7 @@ namespace dp
                             break;
                     }
 
-                    if (NC_est >= 50'000)
+                    if (allow_small_nc || NC_est >= 50'000)
                     {
                         std::vector<std::vector<std::vector<int>>> block_comps(nB);
                         for (size_t b = 0; b < nB; ++b)
@@ -1874,163 +1852,174 @@ namespace dp
                                                 solve_fixed_sequence(seq, prefix_proc, T, spaces));
                         }
 
-                        // 7) Block-level feasibility DP (systematic search)
-                        //    If DFS failed, use a layered DP over blocks with
-                        //    state = remaining inventory (mixed-radix encoded).
+                        // 7) Sparse block-level feasibility DP (systematic search)
+                        //    If DFS failed, use a sparse layered DP over blocks.
+                        //    State = remaining inventory (mixed-radix encoded).
+                        //    Only reachable states are tracked (unordered_set),
+                        //    so there is no NC cap — works for any number of types.
                         //    Guaranteed to find a valid assignment if one exists.
                         if (bp_ub >= kInf * 0.5)
                         {
-                            std::vector<int> bp_strides(K);
-                            int bp_NC = 1;
-                            bool nc_ok = true;
+                            std::vector<int64_t> bp_strides(K);
+                            int64_t bp_NC = 1;
                             for (int i = 0; i < K; ++i)
                             {
                                 bp_strides[i] = bp_NC;
-                                if (static_cast<int64_t>(bp_NC) * (totals[i] + 1) > 2'000'000LL)
-                                {
-                                    nc_ok = false;
-                                    break;
-                                }
                                 bp_NC *= (totals[i] + 1);
                             }
 
-                            if (nc_ok)
+                            auto t0_block_dp = std::chrono::steady_clock::now();
+                            int64_t initial_st = 0;
+                            for (int i = 0; i < K; ++i)
+                                initial_st += static_cast<int64_t>(totals[i]) * bp_strides[i];
+
+                            // Compute total work for an encoded state on demand
+                            auto compute_work = [&](int64_t s) -> int
                             {
-                                auto t0_block_dp = std::chrono::steady_clock::now();
-                                int initial_st = 0;
+                                int work = 0;
+                                int64_t tmp = s;
                                 for (int i = 0; i < K; ++i)
-                                    initial_st += totals[i] * bp_strides[i];
-
-                                struct BComp
                                 {
-                                    int delta;
-                                    int counts[8];
-                                };
-                                int nBlk = static_cast<int>(nB);
-                                std::vector<std::vector<BComp>> bcomps(nBlk);
-                                for (int b = 0; b < nBlk; ++b)
-                                {
-                                    int cap = orig_cap[b];
-                                    std::vector<int> cc(K, 0);
-                                    std::function<void(int, int)> en = [&](int ti, int r)
-                                    {
-                                        if (ti == K)
-                                        {
-                                            if (r == 0)
-                                            {
-                                                BComp bc;
-                                                bc.delta = 0;
-                                                for (int i = 0; i < K; ++i)
-                                                {
-                                                    bc.counts[i] = cc[i];
-                                                    bc.delta += cc[i] * bp_strides[i];
-                                                }
-                                                bcomps[b].push_back(bc);
-                                            }
-                                            return;
-                                        }
-                                        int L = lengths[ti];
-                                        int mx = std::min(totals[ti], r / L);
-                                        for (int c = mx; c >= 0; --c)
-                                        {
-                                            cc[ti] = c;
-                                            en(ti + 1, r - c * L);
-                                        }
-                                    };
-                                    en(0, cap);
+                                    int rv = static_cast<int>(tmp % (totals[i] + 1));
+                                    tmp /= (totals[i] + 1);
+                                    work += rv * lengths[i];
                                 }
+                                return work;
+                            };
 
-                                std::vector<std::vector<uint8_t>> reach(
-                                    nBlk + 1, std::vector<uint8_t>(bp_NC, 0));
-                                reach[0][initial_st] = 1;
-
-                                for (int bi = 0; bi < nBlk; ++bi)
+                            // Decode per-type remaining counts from state
+                            auto decode_state = [&](int64_t s, int r[8])
+                            {
+                                int64_t tmp = s;
+                                for (int i = 0; i < K; ++i)
                                 {
-                                    int b = border[bi];
-                                    auto &comps_b = bcomps[b];
-                                    auto &cur = reach[bi];
-                                    auto &nxt = reach[bi + 1];
-                                    for (int s = 0; s < bp_NC; ++s)
+                                    r[i] = static_cast<int>(tmp % (totals[i] + 1));
+                                    tmp /= (totals[i] + 1);
+                                }
+                            };
+
+                            struct BComp
+                            {
+                                int64_t delta;
+                                int counts[8];
+                            };
+                            int nBlk = static_cast<int>(nB);
+                            std::vector<std::vector<BComp>> bcomps(nBlk);
+                            for (int b = 0; b < nBlk; ++b)
+                            {
+                                int cap = orig_cap[b];
+                                std::vector<int> cc(K, 0);
+                                std::function<void(int, int)> en = [&](int ti, int r)
+                                {
+                                    if (ti == K)
                                     {
-                                        if (!cur[s])
-                                            continue;
-                                        int tmp_s = s;
-                                        int r[8];
+                                        if (r == 0)
+                                        {
+                                            BComp bc;
+                                            bc.delta = 0;
+                                            for (int i = 0; i < K; ++i)
+                                            {
+                                                bc.counts[i] = cc[i];
+                                                bc.delta += static_cast<int64_t>(cc[i]) * bp_strides[i];
+                                            }
+                                            bcomps[b].push_back(bc);
+                                        }
+                                        return;
+                                    }
+                                    int L = lengths[ti];
+                                    int mx = std::min(totals[ti], r / L);
+                                    for (int c = mx; c >= 0; --c)
+                                    {
+                                        cc[ti] = c;
+                                        en(ti + 1, r - c * L);
+                                    }
+                                };
+                                en(0, cap);
+                            }
+
+                            // Sparse forward pass: only track reachable states
+                            std::vector<std::unordered_set<int64_t>> reach(nBlk + 1);
+                            reach[0].insert(initial_st);
+
+                            for (int bi = 0; bi < nBlk; ++bi)
+                            {
+                                int b = border[bi];
+                                auto &comps_b = bcomps[b];
+                                int required_work = suffix_cap[bi];
+                                for (int64_t s : reach[bi])
+                                {
+                                    if (compute_work(s) != required_work)
+                                        continue;
+                                    int r[8];
+                                    decode_state(s, r);
+                                    for (auto &bc : comps_b)
+                                    {
+                                        bool ok = true;
                                         for (int i = 0; i < K; ++i)
                                         {
-                                            r[i] = tmp_s % (totals[i] + 1);
-                                            tmp_s /= (totals[i] + 1);
-                                        }
-                                        for (auto &bc : comps_b)
-                                        {
-                                            bool ok = true;
-                                            for (int i = 0; i < K; ++i)
+                                            if (bc.counts[i] > r[i])
                                             {
-                                                if (bc.counts[i] > r[i])
-                                                {
-                                                    ok = false;
-                                                    break;
-                                                }
-                                            }
-                                            if (ok)
-                                                nxt[s - bc.delta] = 1;
-                                        }
-                                    }
-                                }
-
-                                if (reach[nBlk][0])
-                                {
-                                    std::vector<std::vector<int>> asgn(nBlk);
-                                    int s = initial_st;
-                                    for (int bi = 0; bi < nBlk; ++bi)
-                                    {
-                                        int b = border[bi];
-                                        for (auto &bc : bcomps[b])
-                                        {
-                                            int tmp_s = s;
-                                            bool ok = true;
-                                            for (int i = 0; i < K; ++i)
-                                            {
-                                                int rv = tmp_s % (totals[i] + 1);
-                                                if (bc.counts[i] > rv)
-                                                {
-                                                    ok = false;
-                                                    break;
-                                                }
-                                                tmp_s /= (totals[i] + 1);
-                                            }
-                                            if (!ok)
-                                                continue;
-                                            int ns = s - bc.delta;
-                                            if (reach[bi + 1][ns])
-                                            {
-                                                asgn[b].assign(bc.counts, bc.counts + K);
-                                                s = ns;
+                                                ok = false;
                                                 break;
                                             }
                                         }
+                                        if (ok)
+                                            reach[bi + 1].insert(s - bc.delta);
                                     }
-                                    std::vector<int> seq;
-                                    for (int b = 0; b < nBlk; ++b)
-                                    {
-                                        for (int i = 0; i < K; ++i)
-                                            for (int j = 0; j < asgn[b][i]; ++j)
-                                                seq.push_back(lengths[i]);
-                                    }
-                                    note_pack_candidate("block_dp_exact",
-                                                        solve_fixed_sequence(seq, prefix_proc, T, spaces));
                                 }
-                                else
-                                {
-                                    pack_outcome = "infeasible";
-                                }
-                                t_pack_block_dp =
-                                    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_block_dp).count();
                             }
-                            else if (pack_outcome != "feasible")
+
+                            if (reach[nBlk].count(0))
                             {
-                                pack_outcome = "skipped_large_state";
+                                // Backtrack to recover the assignment
+                                std::vector<std::vector<int>> asgn(nBlk);
+                                int64_t s = initial_st;
+                                for (int bi = 0; bi < nBlk; ++bi)
+                                {
+                                    int b = border[bi];
+                                    // Safety: skip should never happen on a valid path
+                                    if (compute_work(s) != suffix_cap[bi])
+                                        continue;
+                                    int r[8];
+                                    decode_state(s, r);
+                                    for (auto &bc : bcomps[b])
+                                    {
+                                        bool ok = true;
+                                        for (int i = 0; i < K; ++i)
+                                        {
+                                            if (bc.counts[i] > r[i])
+                                            {
+                                                ok = false;
+                                                break;
+                                            }
+                                        }
+                                        if (!ok)
+                                            continue;
+                                        int64_t ns = s - bc.delta;
+                                        if (reach[bi + 1].count(ns))
+                                        {
+                                            asgn[b].assign(bc.counts, bc.counts + K);
+                                            s = ns;
+                                            break;
+                                        }
+                                    }
+                                }
+                                std::vector<int> seq;
+                                for (int b = 0; b < nBlk; ++b)
+                                {
+                                    for (int i = 0; i < K; ++i)
+                                        for (int j = 0; j < asgn[b][i]; ++j)
+                                            seq.push_back(lengths[i]);
+                                }
+                                note_pack_candidate("block_dp_exact",
+                                                    solve_fixed_sequence(seq, prefix_proc, T, spaces));
                             }
+                            else
+                            {
+                                pack_outcome = "infeasible";
+                            }
+                            t_pack_block_dp =
+                                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_block_dp).count();
                         }
                         else if (dfs_capped && pack_outcome != "feasible")
                         {
@@ -2041,7 +2030,39 @@ namespace dp
                     {
                         pack_outcome = "skipped_small_nc";
                     }
+                };
+
+                if (native_exact_first)
+                    run_native_exact();
+
+                if (want_external_exact && bp_ub >= kInf * 0.5)
+                {
+                    auto ext = exact_pack_via_ortools(orig_cap, lengths, totals);
+                    if (ext.solver != "disabled")
+                        pack_solver = ext.solver;
+                    t_pack_external = ext.runtime_sec;
+                    if (ext.status == ExternalPackStatus::Feasible)
+                    {
+                        pack_external_status = "feasible";
+                        note_pack_candidate("external_" + ext.solver,
+                                            solve_fixed_sequence(ext.sequence, prefix_proc, T, spaces));
+                        exact_pack_decided = true;
+                    }
+                    else if (ext.status == ExternalPackStatus::Infeasible)
+                    {
+                        pack_external_status = "infeasible";
+                        pack_method = "external_" + ext.solver;
+                        pack_outcome = "infeasible";
+                        exact_pack_decided = true;
+                    }
+                    else if (ext.status == ExternalPackStatus::Error)
+                    {
+                        pack_external_status = "error";
+                    }
                 }
+
+                if (!native_exact_first)
+                    run_native_exact();
             }
             else
             {

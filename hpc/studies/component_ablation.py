@@ -29,6 +29,15 @@ CONFIGS = {
         "ab_mode": "full",
         "pack_solver": "ortools",
     },
+    "full_blockdp_first_pack": {
+        "label": "Full pipeline + native exact block certifier before OR-Tools",
+        "ab_mode": "full",
+        "pack_solver": "ortools",
+        "extra_env": {
+            "PAST_RELAXED_BINPACK_NATIVE_FIRST": "1",
+            "PAST_RELAXED_BINPACK_ALLOW_SMALL_NC": "1",
+        },
+    },
     "no_smart_recon": {
         "label": "Exact pack, no smart reconstruction",
         "ab_mode": "no_smart_recon",
@@ -203,6 +212,7 @@ def main():
                 cfg["ab_mode"],
                 cfg["pack_solver"],
                 args.time_limit,
+                extra_env=cfg.get("extra_env"),
                 logfile=logfile,
             )
             for row in batch_rows:
