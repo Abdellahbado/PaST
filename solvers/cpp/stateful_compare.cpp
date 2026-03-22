@@ -308,7 +308,7 @@ namespace
             t_smart_recon = Dur(Clock::now() - t0).count();
             if (sr_cost < ub)
                 ub = sr_cost;
-            if (sr_cost < dp::kInf)
+            if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
                 lb = ub; // proven optimal
             step_reached = "smart_recon";
             if (gap_closed())
@@ -542,7 +542,7 @@ namespace
                 ub, 30.0);
             if (sr_cost < ub)
                 ub = sr_cost;
-            if (sr_cost < dp::kInf)
+            if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
                 lb = ub; // proven optimal
             if (gap_closed())
                 goto done;
