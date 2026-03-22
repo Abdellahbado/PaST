@@ -138,7 +138,6 @@ namespace
         bool use_heuristics = true;    // false → skip Steps 2-5 (no primal heuristics)
         bool use_relaxation_lb = true; // false → skip Steps 1,4,5 LB computation
         bool use_smart_recon = true;   // false → skip Step 5.5
-        bool use_exact_shortcut = true;
         // When both use_heuristics=false and use_relaxation_lb=false,
         // we get exact-DP-only (baseline).
     };
@@ -185,19 +184,6 @@ namespace
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
 
-        int64_t NC_est = 1;
-        bool use_exact_shortcut = false;
-        for (std::size_t i = 0; i < lens.size(); ++i)
-        {
-            NC_est *= (tots[i] + 1);
-            if (NC_est > 50'000)
-                break;
-        }
-        if (ab.use_exact_shortcut &&
-            NC_est < 50'000 &&
-            NC_est * static_cast<int64_t>(T + 2) <= 600'000'000LL)
-            use_exact_shortcut = true;
-
         double t_fwd_relax = 0, t_heuristic = 0, t_local_search = 0;
         double t_bwd_relax = 0, t_two_class = 0, t_exact = 0;
         std::string step_reached = "none";
@@ -235,9 +221,6 @@ namespace
                 goto done;
             }
         }
-
-        if (use_exact_shortcut)
-            goto exact_dp;
 
         // --- Step 2: Heuristic UB (SPT/LPT/alternating/K!/random) ---
         if (ab.use_heuristics)
@@ -344,7 +327,6 @@ namespace
         }
 
         // --- Step 6+7: Exact DP ---
-    exact_dp:
         {
             auto t0 = Clock::now();
             double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub);
@@ -455,18 +437,6 @@ namespace
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
 
-        // Compute NC to decide whether to skip expensive heuristics
-        int64_t NC_est = 1;
-        bool use_exact_shortcut = false;
-        for (std::size_t i = 0; i < lens.size(); ++i)
-        {
-            NC_est *= (tots[i] + 1);
-            if (NC_est > 50'000)
-                break;
-        }
-        if (NC_est < 50'000 && NC_est * (int64_t)(T + 2) <= 600'000'000LL)
-            use_exact_shortcut = true;
-
         int64_t states_fwd_reached = 0, states_fwd_expanded = 0;
 
         // --- Step 1: Forward relaxed DP with bin-packing (single pass) ---
@@ -479,11 +449,6 @@ namespace
         states_fwd_expanded = fwd.states_expanded;
         if (gap_closed())
             goto done;
-
-        // If NC is small, skip Steps 2-5 (expensive heuristics) and go straight
-        // to Step 6 (exact DP) which will solve it quickly.
-        if (use_exact_shortcut)
-            goto exact_dp;
 
         // --- Step 2: Heuristic UB (SPT/LPT/alternating/K! perms/random) ---
         {
@@ -554,7 +519,6 @@ namespace
 
         // --- Step 6: Exact multiset DP (for small K, e.g., K=2 or K=3) ---
         // Dense (t, c0, c1, ...) DP. Gives exact optimal = both LB and UB.
-    exact_dp:
     {
         double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub);
         if (exact < dp::kInf)
