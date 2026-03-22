@@ -1974,14 +1974,18 @@ namespace dp
                                 // Backtrack to recover the assignment
                                 std::vector<std::vector<int>> asgn(nBlk);
                                 int64_t s = initial_st;
+                                bool reconstruction_ok = true;
                                 for (int bi = 0; bi < nBlk; ++bi)
                                 {
                                     int b = border[bi];
-                                    // Safety: skip should never happen on a valid path
                                     if (compute_work(s) != suffix_cap[bi])
-                                        continue;
+                                    {
+                                        reconstruction_ok = false;
+                                        break;
+                                    }
                                     int r[8];
                                     decode_state(s, r);
+                                    bool found = false;
                                     for (auto &bc : bcomps[b])
                                     {
                                         bool ok = true;
@@ -2000,19 +2004,28 @@ namespace dp
                                         {
                                             asgn[b].assign(bc.counts, bc.counts + K);
                                             s = ns;
+                                            found = true;
                                             break;
                                         }
                                     }
+                                    if (!found)
+                                    {
+                                        reconstruction_ok = false;
+                                        break;
+                                    }
                                 }
-                                std::vector<int> seq;
-                                for (int b = 0; b < nBlk; ++b)
+                                if (reconstruction_ok)
                                 {
-                                    for (int i = 0; i < K; ++i)
-                                        for (int j = 0; j < asgn[b][i]; ++j)
-                                            seq.push_back(lengths[i]);
+                                    std::vector<int> seq;
+                                    for (int b = 0; b < nBlk; ++b)
+                                    {
+                                        for (int i = 0; i < K; ++i)
+                                            for (int j = 0; j < asgn[b][i]; ++j)
+                                                seq.push_back(lengths[i]);
+                                    }
+                                    note_pack_candidate("block_dp_exact",
+                                                        solve_fixed_sequence(seq, prefix_proc, T, spaces));
                                 }
-                                note_pack_candidate("block_dp_exact",
-                                                    solve_fixed_sequence(seq, prefix_proc, T, spaces));
                             }
                             else
                             {
