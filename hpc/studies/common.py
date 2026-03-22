@@ -67,6 +67,7 @@ def load_instances(section: str, dataset_substr: str = "", logfile=None):
         ds_dir = PAPER_DATASETS / ds_name
         if not ds_dir.exists():
             log(f"  WARNING: dataset not found: {ds_dir}", logfile)
+            log("           Run: bash hpc/setup_benchmark_data.sh", logfile)
             continue
         json_files = sorted(ds_dir.glob("*.json"), key=lambda p: int(p.stem))
         for jf in json_files:

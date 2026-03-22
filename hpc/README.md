@@ -13,15 +13,18 @@ Benedikt et al. (2025), plus dedicated study runners for:
 # 1. Prepare environment
 bash hpc/setup_hpc_env.sh
 
-# 2. Build our solver
+# 2. Install benchmark data
+bash hpc/setup_benchmark_data.sh
+
+# 3. Build our solver
 bash hpc/build_solver.sh
 
-# 3. Run one study
+# 4. Run one study
 bash hpc/run_component_ablation.sh
 bash hpc/run_spaces_ablation.sh
 bash hpc/run_g_sweep.sh
 
-# 4. Or run the full regression benchmark
+# 5. Or run the full regression benchmark
 bash hpc/run_full_benchmark.sh --skip-paper
 ```
 
@@ -43,6 +46,7 @@ Run `bash hpc/setup_hpc_env.sh` for the recommended setup path.
 | Script | Purpose |
 |---|---|
 | `setup_hpc_env.sh` | Install/check dependencies and free Python backends |
+| `setup_benchmark_data.sh` | Clone upstream benchmark repo and install datasets from tarball |
 | `build_solver.sh` | Build our C++ solver |
 | `00_install_deps.sh` | Lower-level dependency checker |
 | `01_build_our_solver.sh` | Lower-level C++ build script |
@@ -83,7 +87,8 @@ Older study runners live in [deprecated/README.md](/Users/mac/Documents/Study/PF
 ## Running Individual Sections
 
 ```bash
-# Build first
+# Prepare benchmark data and build first
+bash hpc/setup_benchmark_data.sh
 bash hpc/01_build_our_solver.sh
 
 # Run only Table 1 instances
@@ -157,6 +162,26 @@ Each directory contains:
 - one CSV per configuration
 - `report.md`
 - `run.log`
+
+## Benchmark Data Layout
+
+Our benchmark and study runners expect the paper datasets at:
+
+```text
+data/green-scheduling-bab/Iirc.EnergyStatesAndCostsScheduling/data/datasets/
+```
+
+A fresh upstream clone does not include those dataset directories. Use:
+
+```bash
+bash hpc/setup_benchmark_data.sh
+```
+
+This script:
+
+- clones `CTU-IIG/green-scheduling-bab` if missing
+- extracts the benchmark datasets from `data/paper_datasets.tar.gz`
+- verifies that `benedikt2025b_groups` matches the corrected local regeneration
 
 ## CSV Format
 

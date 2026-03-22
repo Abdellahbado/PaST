@@ -23,4 +23,6 @@ python3 -m pip install --user --upgrade pandas matplotlib
 
 echo ""
 echo "Setup complete."
-echo "Next step: bash hpc/build_solver.sh"
+echo "Next steps:"
+echo "  1. bash hpc/setup_benchmark_data.sh"
+echo "  2. bash hpc/build_solver.sh"
