@@ -155,6 +155,7 @@ def solve_batch(
     instances: list[tuple[str, dict]],
     solver_path: Path,
     time_limit: float,
+    relaxed_binpack_solver: str = "default",
     logfile=None,
 ) -> list[dict]:
     """Solve a batch of instances via solve-stdin, return parsed results."""
@@ -187,6 +188,14 @@ def solve_batch(
             capture_output=True,
             text=True,
             timeout=int(batch_timeout),
+            env={
+                **os.environ,
+                **(
+                    {"PAST_RELAXED_BINPACK_SOLVER": relaxed_binpack_solver}
+                    if relaxed_binpack_solver and relaxed_binpack_solver != "default"
+                    else {}
+                ),
+            },
         )
     except subprocess.TimeoutExpired:
         log(f"  WARNING: Batch timeout after {batch_timeout}s", logfile)
@@ -240,6 +249,7 @@ def run_paper_datasets(
     solver_path: Path,
     time_limit: float,
     batch_size: int,
+    relaxed_binpack_solver: str = "default",
     logfile=None,
 ) -> list[dict]:
     """Run solver on paper benchmark datasets (JSON instances)."""
@@ -267,7 +277,13 @@ def run_paper_datasets(
         ds_results = []
         for start in range(0, n, batch_size):
             batch = instances[start : start + batch_size]
-            batch_results = solve_batch(batch, solver_path, time_limit, logfile)
+            batch_results = solve_batch(
+                batch,
+                solver_path,
+                time_limit,
+                relaxed_binpack_solver,
+                logfile,
+            )
             ds_results.extend(batch_results)
             done = start + len(batch)
             if n > batch_size:
@@ -346,7 +362,12 @@ def gen_synthetic_instance(
     }
 
 
-def run_synthetic(solver_path: Path, time_limit: float, logfile=None) -> list[dict]:
+def run_synthetic(
+    solver_path: Path,
+    time_limit: float,
+    relaxed_binpack_solver: str = "default",
+    logfile=None,
+) -> list[dict]:
     """Generate and solve hard synthetic instances."""
     seeds = [42, 123, 456]
     machines = ["nosby", "twosby"]
@@ -378,7 +399,13 @@ def run_synthetic(solver_path: Path, time_limit: float, logfile=None) -> list[di
 
     # Solve all
     pairs = [(inst["instance_id"], inst) for inst in all_instances]
-    results = solve_batch(pairs, solver_path, time_limit, logfile)
+    results = solve_batch(
+        pairs,
+        solver_path,
+        time_limit,
+        relaxed_binpack_solver,
+        logfile,
+    )
 
     # Tag
     for r in results:
@@ -470,6 +497,12 @@ def main():
     )
     ap.add_argument("--output-dir", default=str(ROOT / "hpc" / "results_ours"))
     ap.add_argument("--batch-size", type=int, default=50)
+    ap.add_argument(
+        "--relaxed-binpack-solver",
+        choices=["default", "constraint", "ortools", "z3"],
+        default="default",
+        help="Optional exact solver-backed packer for the relaxed blocks in Step 1.",
+    )
     args = ap.parse_args()
 
     solver_path = Path(args.solver)
@@ -504,7 +537,7 @@ def main():
         "machine_type": "nosby",
     }
     warmup_pairs = [("warmup", warmup_inst)]
-    solve_batch(warmup_pairs, solver_path, 10)
+    solve_batch(warmup_pairs, solver_path, 10, args.relaxed_binpack_solver)
     log("  Warm-up done (caches hot)", logfile)
     log("", logfile)
 
@@ -533,6 +566,7 @@ def main():
             solver_path,
             args.time_limit,
             args.batch_size,
+            args.relaxed_binpack_solver,
             logfile,
         )
         all_results.extend(results)
@@ -577,6 +611,7 @@ def main():
             solver_path,
             args.time_limit,
             args.batch_size,
+            args.relaxed_binpack_solver,
             logfile,
         )
         all_results.extend(results)
@@ -596,6 +631,7 @@ def main():
             solver_path,
             args.time_limit,
             args.batch_size,
+            args.relaxed_binpack_solver,
             logfile,
         )
         all_results.extend(results)
@@ -615,6 +651,7 @@ def main():
             solver_path,
             args.time_limit,
             args.batch_size,
+            args.relaxed_binpack_solver,
             logfile,
         )
         all_results.extend(results)
@@ -634,6 +671,7 @@ def main():
             solver_path,
             args.time_limit,
             args.batch_size,
+            args.relaxed_binpack_solver,
             logfile,
         )
         all_results.extend(results)
@@ -646,7 +684,12 @@ def main():
         log("#" * 80, logfile)
         log("# HARD SYNTHETIC — 84 instances (stress test)", logfile)
         log("#" * 80, logfile)
-        results = run_synthetic(solver_path, args.time_limit, logfile)
+        results = run_synthetic(
+            solver_path,
+            args.time_limit,
+            args.relaxed_binpack_solver,
+            logfile,
+        )
         all_results.extend(results)
         write_csv(results, out_dir / "synthetic_results.csv")
         print_section_summary("SYNTHETIC", results, logfile)

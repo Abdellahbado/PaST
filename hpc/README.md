@@ -1,20 +1,28 @@
 # HPC Benchmark Suite — PaST 1||TEC Solver
 
 Full regression + head-to-head comparison on all **1,517+ instances** from
-Benedikt et al. (2025), plus 84 hard synthetic instances.
+Benedikt et al. (2025), plus dedicated study runners for:
+
+- component ablation
+- banded-vs-full SPACES
+- `G` parameter sweeps
 
 ## Quick Start
 
 ```bash
-# One-command full run (both solvers, all instances):
-bash hpc/run_full_benchmark.sh
+# 1. Prepare environment
+bash hpc/setup_hpc_env.sh
 
-# Or just our solver (regression check):
+# 2. Build our solver
+bash hpc/build_solver.sh
+
+# 3. Run one study
+bash hpc/run_component_ablation.sh
+bash hpc/run_spaces_ablation.sh
+bash hpc/run_g_sweep.sh
+
+# 4. Or run the full regression benchmark
 bash hpc/run_full_benchmark.sh --skip-paper
-
-# On SLURM:
-sbatch hpc/slurm_full.sbatch       # both solvers
-sbatch hpc/slurm_ours_only.sbatch  # our solver only
 ```
 
 ## Prerequisites
@@ -26,25 +34,39 @@ sbatch hpc/slurm_ours_only.sbatch  # our solver only
 | Python 3 | ≥ 3.8 | Runner scripts |
 | .NET SDK | 8.0 | Paper's C# solver (optional) |
 
-Run `bash hpc/00_install_deps.sh` to check/install all dependencies.
+Run `bash hpc/setup_hpc_env.sh` for the recommended setup path.
 
 ## Scripts
 
-All scripts are in `hpc/` and numbered in execution order:
+### Main setup / benchmark scripts
 
-| # | Script | Purpose |
-|---|--------|---------|
-| 00 | `00_install_deps.sh` | Check & install dependencies |
-| 01 | `01_build_our_solver.sh` | CMake Release build of our C++ solver |
-| 02 | `02_build_paper_solver.sh` | `dotnet build` of paper's C# solver |
-| 03 | `03_run_our_solver.py` | Run our solver on all 1,517+ instances |
-| 04 | `04_run_paper_solver.py` | Run paper's solver on all instances |
-| 05 | `05_analyze_results.py` | Aggregate, compare, generate tables & plots |
-| 06 | `06_ablation_study.py` | Ablation: Banded SPACES vs Bound-and-Refine |
-| 07 | `07_analyze_ablation.py` | Analyze ablation results, generate LaTeX + plots |
-| — | `run_full_benchmark.sh` | Master wrapper: runs 00–05 in sequence |
-| — | `slurm_full.sbatch` | SLURM job: both solvers |
-| — | `slurm_ours_only.sbatch` | SLURM job: our solver only |
+| Script | Purpose |
+|---|---|
+| `setup_hpc_env.sh` | Install/check dependencies and free Python backends |
+| `build_solver.sh` | Build our C++ solver |
+| `00_install_deps.sh` | Lower-level dependency checker |
+| `01_build_our_solver.sh` | Lower-level C++ build script |
+| `02_build_paper_solver.sh` | Build the paper's solver |
+| `03_run_our_solver.py` | Run our solver on the main benchmark |
+| `04_run_paper_solver.py` | Run the paper's solver on the main benchmark |
+| `05_analyze_results.py` | Aggregate and compare benchmark results |
+| `run_full_benchmark.sh` | Master wrapper for the full regression run |
+
+### Study runners
+
+| Script | Purpose |
+|---|---|
+| `run_component_ablation.sh` | Exact bin-packing + smart-reconstruction study |
+| `run_spaces_ablation.sh` | Banded SPACES vs full SPACES |
+| `run_g_sweep.sh` | `G` parameter sweep around the automatic value |
+| `studies/component_ablation.py` | Study implementation |
+| `studies/spaces_ablation.py` | Study implementation |
+| `studies/g_sweep.py` | Study implementation |
+| `studies/common.py` | Shared study utilities |
+
+### Deprecated study scripts
+
+Older study runners live in [deprecated/README.md](/Users/mac/Documents/Study/PFE/PaST/hpc/deprecated/README.md).
 
 ## Instance Breakdown
 
@@ -87,46 +109,54 @@ After a full run:
 hpc/
 ├── results_ours/          # Our solver results (03_run_our_solver.py)
 ├── results_paper/         # Paper's solver results (04_run_paper_solver.py)
-├── results_ablation/      # Ablation study (06_ablation_study.py)
-│   ├── ablation_combined.csv
-│   ├── ablation_{full,full_spaces,exact_only,baseline}.csv
-│   ├── ablation_log.txt
-│   └── analysis/
-│       ├── ablation_report.txt
-│       ├── ablation_tables.tex
-│       ├── ablation_speedup.pdf
-│       └── ablation_steps.pdf
+├── results_studies/
+│   ├── component_ablation/
+│   │   ├── combined.csv
+│   │   ├── report.md
+│   │   └── run.log
+│   ├── spaces_ablation/
+│   │   ├── combined.csv
+│   │   ├── report.md
+│   │   └── run.log
+│   └── g_sweep/
+│       ├── combined.csv
+│       ├── report.md
+│       └── run.log
 ├── analysis/              # Comparison analysis (05_analyze_results.py)
+├── deprecated/            # Older study runners kept for reference
 └── slurm_logs/
 ```
 
-## Ablation Study
-
-The ablation study isolates the contribution of each algorithmic component:
-
-| Config | Banded SPACES | Bound-and-Refine | Tests |
-|--------|:---:|:---:|---|
-| A: Full method | ✓ | ✓ | Complete system |
-| B: Full SPACES | ✗ | ✓ | Banded SPACES contribution |
-| C: Exact only + banded | ✓ | ✗ | Bound-and-Refine contribution |
-| D: Baseline | ✗ | ✗ | Neither optimization |
+## Study Commands
 
 ```bash
-# Run all 4 configs on Table 2 + Figure 9 instances:
-python3 hpc/06_ablation_study.py --section all --time-limit 600
+# Component ablation
+bash hpc/run_component_ablation.sh
 
-# Run only on Table 2 instances:
-python3 hpc/06_ablation_study.py --section 2
+# Banded SPACES vs full SPACES
+bash hpc/run_spaces_ablation.sh
 
-# Run a single config:
-python3 hpc/06_ablation_study.py --config full
+# G sweep (safe values only)
+bash hpc/run_g_sweep.sh
 
-# Analyze results and generate paper tables + figures:
-python3 hpc/07_analyze_ablation.py --input-dir hpc/results_ablation
+# G sweep with exploratory below-auto values
+bash hpc/run_g_sweep.sh --include-unsafe
 ```
 
-**Comparison matrix:** A vs B = Banded SPACES speedup, A vs C = Bound-and-Refine speedup,
-A vs D = combined speedup. Per-step timing breakdown shows where time is spent.
+Default study outputs:
+
+```text
+hpc/results_studies/component_ablation/
+hpc/results_studies/spaces_ablation/
+hpc/results_studies/g_sweep/
+```
+
+Each directory contains:
+
+- `combined.csv`
+- one CSV per configuration
+- `report.md`
+- `run.log`
 
 ## CSV Format
 
@@ -210,6 +240,9 @@ Before submitting:
 - Build: CMake Release with `-O3 -DNDEBUG -march=native -ffast-math`
 - Algorithm: 7-step cascade (relaxed DP → heuristic → local search → backward LB
   → two-class LB → exact multiset DP → sparse exact DP)
+- SPACES controls:
+  - `PAST_MAX_GAP_OVERRIDE=full|auto|<int>`
+  - `PAST_MAX_GAP_SCALE=<float>`
 
 ### Paper's Solver (C# B&B)
 - Solution: `data/green-scheduling-bab/Iirc.EnergyStatesAndCostsScheduling/`

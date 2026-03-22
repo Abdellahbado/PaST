@@ -81,14 +81,64 @@ namespace
         return s.substr(q1 + 1, q2 - q1 - 1);
     }
 
+    int resolve_max_gap(
+        const dp::MachineStateConfig &cfg,
+        const std::vector<double> &prices,
+        bool use_banded_spaces)
+    {
+        if (!use_banded_spaces)
+            return -1;
+
+        int T = static_cast<int>(prices.size());
+        int auto_gap = dp::auto_max_gap(cfg, T, prices);
+
+        if (const char *override_v = std::getenv("PAST_MAX_GAP_OVERRIDE"))
+        {
+            std::string s(override_v);
+            if (s == "full")
+                return -1;
+            if (s == "auto" || s.empty())
+                return auto_gap;
+            try
+            {
+                int v = std::stoi(s);
+                return std::min(T, std::max(v, 0));
+            }
+            catch (const std::exception &)
+            {
+                return auto_gap;
+            }
+        }
+
+        if (const char *scale_v = std::getenv("PAST_MAX_GAP_SCALE"))
+        {
+            try
+            {
+                double scale = std::stod(scale_v);
+                if (scale > 0.0)
+                {
+                    int scaled = static_cast<int>(std::ceil(auto_gap * scale));
+                    return std::min(T, std::max(scaled, 1));
+                }
+            }
+            catch (const std::exception &)
+            {
+            }
+        }
+
+        return auto_gap;
+    }
+
     // ---------------------------------------------------------------------------
     // Ablation configuration — controls which components are active.
     // ---------------------------------------------------------------------------
     struct AblationConfig
     {
-        bool use_banded_spaces = true;   // false → full O(h²) SPACES
-        bool use_heuristics = true;      // false → skip Steps 2-5 (no primal heuristics)
-        bool use_relaxation_lb = true;   // false → skip Steps 1,4,5 LB computation
+        bool use_banded_spaces = true; // false → full O(h²) SPACES
+        bool use_heuristics = true;    // false → skip Steps 2-5 (no primal heuristics)
+        bool use_relaxation_lb = true; // false → skip Steps 1,4,5 LB computation
+        bool use_smart_recon = true;   // false → skip Step 5.5
+        bool use_exact_shortcut = true;
         // When both use_heuristics=false and use_relaxation_lb=false,
         // we get exact-DP-only (baseline).
     };
@@ -123,44 +173,71 @@ namespace
 
         // --- SPACES preprocessing ---
         auto t0_spaces = Clock::now();
-        int mg;
-        if (ab.use_banded_spaces)
-            mg = dp::auto_max_gap(cfg, (int)prices.size(), prices);
-        else
-            mg = -1; // full O(h²) SPACES
+        int mg = resolve_max_gap(cfg, prices, ab.use_banded_spaces);
         auto spaces = dp::compute_spaces(prices, cfg, mg);
         double t_spaces = Dur(Clock::now() - t0_spaces).count();
 
         auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
         int T = (int)prices.size();
 
-        int total_rw = 0;
-        for (std::size_t i = 0; i < lens.size(); ++i)
-            total_rw += lens[i] * tots[i];
-
         double ub = dp::kInf;
         double lb = 0.0;
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
 
+        int64_t NC_est = 1;
+        bool use_exact_shortcut = false;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+        {
+            NC_est *= (tots[i] + 1);
+            if (NC_est > 50'000)
+                break;
+        }
+        if (ab.use_exact_shortcut &&
+            NC_est < 50'000 &&
+            NC_est * static_cast<int64_t>(T + 2) <= 600'000'000LL)
+            use_exact_shortcut = true;
+
         double t_fwd_relax = 0, t_heuristic = 0, t_local_search = 0;
         double t_bwd_relax = 0, t_two_class = 0, t_exact = 0;
         std::string step_reached = "none";
+
+        // Per-step LB/UB tracking (for diagnostics)
+        double lb_after_fwd = 0, lb_after_feas = 0, lb_after_fl = 0;
+        double ub_after_fwd = dp::kInf, ub_after_heur = dp::kInf, ub_after_ls = dp::kInf;
+        int64_t states_fwd_reached = 0, states_fwd_expanded = 0;
+        double t_smart_recon = 0;
+        std::string winner_detail = "none";
+
+        // Declare fwd outside block so we can reuse rdp table in smart_reconstruct
+        dp::RelaxedDPResult fwd;
 
         // --- Step 1: Forward relaxed DP with bin-packing (LB + UB) ---
         if (ab.use_relaxation_lb || ab.use_heuristics)
         {
             auto t0 = Clock::now();
-            auto fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+            fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
             t_fwd_relax = Dur(Clock::now() - t0).count();
             if (ab.use_relaxation_lb)
                 lb = fwd.lb;
             if (fwd.bin_pack_ub < ub)
                 ub = fwd.bin_pack_ub;
+            states_fwd_reached = fwd.states_reached;
+            states_fwd_expanded = fwd.states_expanded;
             step_reached = "fwd_relax";
+            lb_after_fwd = lb;
+            ub_after_fwd = ub;
             if (gap_closed())
+            {
+                winner_detail = (fwd.pack_method != "none")
+                                    ? ("fwd_relax:" + fwd.pack_method)
+                                    : "fwd_relax";
                 goto done;
+            }
         }
+
+        if (use_exact_shortcut)
+            goto exact_dp;
 
         // --- Step 2: Heuristic UB (SPT/LPT/alternating/K!/random) ---
         if (ab.use_heuristics)
@@ -171,8 +248,12 @@ namespace
             if (heur_ub < ub)
                 ub = heur_ub;
             step_reached = "heuristic_ub";
+            ub_after_heur = ub;
             if (gap_closed())
+            {
+                winner_detail = "heuristic_ub";
                 goto done;
+            }
         }
 
         // --- Step 3: Local search from SPT + LPT ---
@@ -198,37 +279,72 @@ namespace
                 ub = ls_cost;
             t_local_search = Dur(Clock::now() - t0).count();
             step_reached = "local_search";
+            ub_after_ls = ub;
             if (gap_closed())
+            {
+                winner_detail = "local_search";
                 goto done;
+            }
         }
 
-        // --- Step 4: Backward relaxed LB ---
+        // --- Step 4: R_feas LB (transition-feasibility filter) ---
         if (ab.use_heuristics && ab.use_relaxation_lb)
         {
             auto t0 = Clock::now();
-            double lb_back = dp::solve_relaxed_dp_lb_backward(lens, total_rw, prefix, T, spaces, cfg);
-            t_bwd_relax = Dur(Clock::now() - t0).count();
-            if (lb_back > lb)
-                lb = lb_back;
-            step_reached = "bwd_relax";
+            double lb_feas = dp::solve_relaxed_dp_lb_feas(lens, tots, prefix, T, spaces);
+            t_bwd_relax = Dur(Clock::now() - t0).count(); // reuse column for R_feas
+            if (lb_feas > lb)
+                lb = lb_feas;
+            lb_after_feas = lb;
+            step_reached = "r_feas";
             if (gap_closed())
+            {
+                winner_detail = "r_feas";
                 goto done;
+            }
         }
 
-        // --- Step 5: Two-class relaxed LB ---
+        // --- Step 5: R_feas+Lagr LB (combined bound) ---
         if (ab.use_heuristics && ab.use_relaxation_lb && (ub - lb > 0.5))
         {
             auto t0 = Clock::now();
-            double lb2 = dp::solve_relaxed_dp_lb_two_class(lens, tots, prefix, T, spaces, 2);
-            t_two_class = Dur(Clock::now() - t0).count();
-            if (lb2 > lb)
-                lb = lb2;
-            step_reached = "two_class";
+            double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(
+                lens, tots, prefix, T, spaces, 50, 10.0);
+            t_two_class = Dur(Clock::now() - t0).count(); // reuse column for R_feas+Lagr
+            if (lb_fl > lb)
+                lb = lb_fl;
+            lb_after_fl = lb;
+            step_reached = "r_feas_lagr";
             if (gap_closed())
+            {
+                winner_detail = "r_feas_lagr";
                 goto done;
+            }
+        }
+
+        // --- Step 5.5: Smart reconstruction (count-aware search on relaxed DP table) ---
+        if (ab.use_smart_recon && !fwd.rdp.empty())
+        {
+            auto t0 = Clock::now();
+            double sr_cost = dp::smart_reconstruct(
+                fwd.rdp, fwd.RW,
+                lens, tots, prefix, T, spaces,
+                ub, 30.0);
+            t_smart_recon = Dur(Clock::now() - t0).count();
+            if (sr_cost < ub)
+                ub = sr_cost;
+            if (sr_cost < dp::kInf)
+                lb = ub; // proven optimal
+            step_reached = "smart_recon";
+            if (gap_closed())
+            {
+                winner_detail = "smart_recon";
+                goto done;
+            }
         }
 
         // --- Step 6+7: Exact DP ---
+    exact_dp:
         {
             auto t0 = Clock::now();
             double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub);
@@ -250,6 +366,7 @@ namespace
             }
             t_exact = Dur(Clock::now() - t0).count();
             step_reached = "exact";
+            winner_detail = "exact";
         }
 
     done:
@@ -257,6 +374,8 @@ namespace
         bool proven_optimal = feasible && gap_closed();
         double elapsed = Dur(Clock::now() - t0_total).count();
         double gap_pct = (lb > 0 && feasible) ? 100.0 * (ub - lb) / lb : 0.0;
+        if (winner_detail == "none")
+            winner_detail = step_reached;
 
         std::ostringstream row;
         row << instance_id << ","
@@ -275,9 +394,29 @@ namespace
             << std::fixed << std::setprecision(4) << t_local_search << ","
             << std::fixed << std::setprecision(4) << t_bwd_relax << ","
             << std::fixed << std::setprecision(4) << t_two_class << ","
+            << std::fixed << std::setprecision(4) << t_smart_recon << ","
             << std::fixed << std::setprecision(4) << t_exact << ","
             << step_reached << ","
-            << (spaces.banded ? spaces.max_gap : -1);
+            << (spaces.banded ? spaces.max_gap : -1) << ","
+            << std::fixed << std::setprecision(6) << lb_after_fwd << ","
+            << std::fixed << std::setprecision(6) << lb_after_feas << ","
+            << std::fixed << std::setprecision(6) << lb_after_fl << ","
+            << std::fixed << std::setprecision(6) << ub_after_fwd << ","
+            << std::fixed << std::setprecision(6) << ub_after_heur << ","
+            << std::fixed << std::setprecision(6) << ub_after_ls << ","
+            << states_fwd_reached << ","
+            << states_fwd_expanded << ","
+            << winner_detail << ","
+            << fwd.block_count << ","
+            << fwd.merged_block_count << ","
+            << fwd.pack_solver << ","
+            << fwd.pack_external_status << ","
+            << fwd.pack_method << ","
+            << fwd.pack_outcome << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_external << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_heuristic << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_dfs << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_block_dp;
         return row.str();
     }
 
@@ -306,14 +445,10 @@ namespace
 
         auto cfg = (machine_type == "twosby") ? dp::make_paper_twosby_config()
                                               : dp::make_paper_nosby_config();
-        int mg = dp::auto_max_gap(cfg, (int)prices.size(), prices);
+        int mg = resolve_max_gap(cfg, prices, true);
         auto spaces = dp::compute_spaces(prices, cfg, mg);
         auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
         int T = (int)prices.size();
-
-        int total_rw = 0;
-        for (std::size_t i = 0; i < lens.size(); ++i)
-            total_rw += lens[i] * tots[i];
 
         double ub = dp::kInf;
         double lb = 0.0;
@@ -332,12 +467,16 @@ namespace
         if (NC_est < 50'000 && NC_est * (int64_t)(T + 2) <= 600'000'000LL)
             use_exact_shortcut = true;
 
+        int64_t states_fwd_reached = 0, states_fwd_expanded = 0;
+
         // --- Step 1: Forward relaxed DP with bin-packing (single pass) ---
         // Gets both LB and bin-pack UB from one DP computation.
         auto fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
         lb = fwd.lb;
         if (fwd.bin_pack_ub < ub)
             ub = fwd.bin_pack_ub;
+        states_fwd_reached = fwd.states_reached;
+        states_fwd_expanded = fwd.states_expanded;
         if (gap_closed())
             goto done;
 
@@ -380,21 +519,35 @@ namespace
                 goto done;
         }
 
-        // --- Step 4: Backward relaxed LB ---
+        // --- Step 4: R_feas LB (transition-feasibility filter) ---
         {
-            double lb_back = dp::solve_relaxed_dp_lb_backward(lens, total_rw, prefix, T, spaces, cfg);
-            if (lb_back > lb)
-                lb = lb_back;
+            double lb_feas = dp::solve_relaxed_dp_lb_feas(lens, tots, prefix, T, spaces);
+            if (lb_feas > lb)
+                lb = lb_feas;
             if (gap_closed())
                 goto done;
         }
 
-        // --- Step 5: Two-class relaxed LB (if gap still open) ---
-        if (ub - lb > 0.5)
+        // --- Step 5: R_feas+Lagr LB (combined bound) ---
         {
-            double lb2 = dp::solve_relaxed_dp_lb_two_class(lens, tots, prefix, T, spaces, 2);
-            if (lb2 > lb)
-                lb = lb2;
+            double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(lens, tots, prefix, T, spaces, 50, 10.0);
+            if (lb_fl > lb)
+                lb = lb_fl;
+            if (gap_closed())
+                goto done;
+        }
+
+        // --- Step 5.5: Smart reconstruction (count-aware search on relaxed DP table) ---
+        if (!fwd.rdp.empty())
+        {
+            double sr_cost = dp::smart_reconstruct(
+                fwd.rdp, fwd.RW,
+                lens, tots, prefix, T, spaces,
+                ub, 30.0);
+            if (sr_cost < ub)
+                ub = sr_cost;
+            if (sr_cost < dp::kInf)
+                lb = ub; // proven optimal
             if (gap_closed())
                 goto done;
         }
@@ -443,7 +596,9 @@ namespace
             << (feasible ? 1 : 0) << ","
             << (proven_optimal ? 1 : 0) << ","
             << 0 << ","
-            << std::fixed << std::setprecision(4) << elapsed;
+            << std::fixed << std::setprecision(4) << elapsed << ","
+            << states_fwd_reached << ","
+            << states_fwd_expanded;
         return row.str();
     }
 
@@ -452,6 +607,121 @@ namespace
 int main(int argc, char **argv)
 {
     std::string mode = (argc > 1 ? argv[1] : "paper-example");
+
+    // -----------------------------------------------------------------------
+    // MODE: dump-schedule
+    // Reads one JSON object from stdin, solves it with full schedule tracking,
+    // and outputs a JSON object containing the schedule (processing segments),
+    // the proven optimal cost, and the raw prices/jobs — ready for Layer 2+3
+    // verification with  scripts/verify/tec_verifier.py verify <output.json>
+    //
+    // Input  (stdin, one line):
+    //   {"instance_id":"...","prices":[...],"jobs":[...],"machine":"twosby"}
+    //
+    // Output (stdout):
+    //   {
+    //     "instance_id": "...",
+    //     "machine":     "twosby",
+    //     "cost":        12288440.000000,
+    //     "lb":          12288440.000000,
+    //     "is_optimal":  1,
+    //     "n_jobs":      150,
+    //     "horizon":     1768,
+    //     "jobs":        [8,8,...,10,10,...],
+    //     "prices":      [1200.5,...],
+    //     "schedule":    [{"start":42,"length":8},...]
+    //   }
+    //
+    // Usage:
+    //   echo '{"instance_id":"test","prices":[...],"jobs":[...],"machine":"twosby"}' \
+    //     | ./stateful_compare dump-schedule
+    //
+    //   # Or pipe from the Python instance loader:
+    //   python3 hpc/03_run_our_solver.py --dump-jsonl groups/348 \
+    //     | ./stateful_compare dump-schedule > schedule_348.json
+    // -----------------------------------------------------------------------
+    if (mode == "dump-schedule")
+    {
+        std::string line;
+        if (!std::getline(std::cin, line) || line.empty() || line.front() != '{')
+        {
+            std::cerr << "dump-schedule: expected JSON object on stdin\n";
+            return 1;
+        }
+
+        auto prices  = json_parse_double_array(line, "prices");
+        auto jobs    = json_parse_int_array(line, "jobs");
+        auto iid     = json_parse_string(line, "instance_id");
+        auto machine = json_parse_string(line, "machine");
+        if (machine.empty()) machine = "nosby";
+        if (prices.empty() || jobs.empty())
+        {
+            std::cerr << "dump-schedule: could not parse prices or jobs\n";
+            return 1;
+        }
+
+        // Build lens/tots
+        std::map<int,int> cnt;
+        for (int p : jobs) cnt[p]++;
+        std::vector<int> lens, tots;
+        for (auto &kv : cnt) { lens.push_back(kv.first); tots.push_back(kv.second); }
+
+        // Machine config
+        auto cfg = (machine == "twosby") ? dp::make_paper_twosby_config()
+                                         : dp::make_paper_nosby_config();
+        int mg = resolve_max_gap(cfg, prices, true);
+        auto spaces = dp::compute_spaces(prices, cfg, mg);
+        auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
+        int T = (int)prices.size();
+
+        // Solve with schedule tracking enabled
+        dp::DPParams params;
+        params.track_schedule  = true;
+        params.early_tie_break = true;
+
+        auto res = dp::solve_sparse_dp_stateful(lens, tots, prefix, T, spaces, params);
+
+        if (!res.feasible)
+        {
+            std::cerr << "dump-schedule: instance is infeasible\n";
+            return 1;
+        }
+
+        // ── Emit JSON ──────────────────────────────────────────────────
+        std::cout << "{\n";
+        std::cout << "  \"instance_id\": \"" << iid << "\",\n";
+        std::cout << "  \"machine\": \""     << machine << "\",\n";
+        std::cout << std::fixed << std::setprecision(6);
+        std::cout << "  \"cost\": "          << res.cost  << ",\n";
+        std::cout << "  \"lb\": "            << res.cost  << ",\n";
+        std::cout << "  \"is_optimal\": "    << (res.timed_out ? 0 : 1) << ",\n";
+        std::cout << "  \"n_jobs\": "        << (int)jobs.size()   << ",\n";
+        std::cout << "  \"horizon\": "       << T                   << ",\n";
+
+        // jobs array
+        std::cout << "  \"jobs\": [";
+        for (std::size_t i = 0; i < jobs.size(); ++i)
+            std::cout << (i ? "," : "") << jobs[i];
+        std::cout << "],\n";
+
+        // prices array (abbreviated — full array needed by verifier)
+        std::cout << "  \"prices\": [";
+        for (std::size_t i = 0; i < prices.size(); ++i)
+            std::cout << (i ? "," : "") << std::setprecision(4) << prices[i];
+        std::cout << "],\n";
+
+        // schedule: list of {start, length} objects
+        std::cout << "  \"schedule\": [";
+        for (std::size_t i = 0; i < res.segments.size(); ++i)
+        {
+            if (i) std::cout << ",";
+            std::cout << "\n    {\"start\":" << res.segments[i].start
+                      << ",\"length\":"       << res.segments[i].length << "}";
+        }
+        std::cout << "\n  ]\n";
+        std::cout << "}\n";
+        return 0;
+    }
 
     // -----------------------------------------------------------------------
     // MODE: paper-example
@@ -473,7 +743,7 @@ int main(int argc, char **argv)
         }
 
         auto cfg = dp::make_paper_nosby_config();
-        int mg = dp::auto_max_gap(cfg, (int)prices.size(), prices);
+        int mg = resolve_max_gap(cfg, prices, true);
         auto spaces = dp::compute_spaces(prices, cfg, mg);
         auto prefix_proc = dp::build_proc_prefix(prices, spaces.p_proc);
 
@@ -535,6 +805,7 @@ int main(int argc, char **argv)
     // MODE: ablation-stdin
     // Like solve-stdin, but accepts an ablation config as argv[2]:
     //   "full"         — default (banded SPACES + full bound-and-refine)
+    //   "no_smart_recon" — full pipeline without Step 5.5
     //   "full_spaces"  — full O(h²) SPACES + full bound-and-refine
     //   "exact_only"   — banded SPACES + exact DP only (no heuristics/relaxations)
     //   "baseline"     — full O(h²) SPACES + exact DP only
@@ -551,6 +822,13 @@ int main(int argc, char **argv)
             ab.use_banded_spaces = true;
             ab.use_heuristics = true;
             ab.use_relaxation_lb = true;
+        }
+        else if (ab_mode == "no_smart_recon")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = true;
+            ab.use_relaxation_lb = true;
+            ab.use_smart_recon = false;
         }
         else if (ab_mode == "full_spaces")
         {
@@ -578,8 +856,10 @@ int main(int argc, char **argv)
 
         std::cout << "instance_id,n_jobs,horizon,ub,lb,gap_pct,feasible,is_optimal,"
                   << "timed_out,runtime_sec,t_spaces,t_fwd_relax,t_heuristic,"
-                  << "t_local_search,t_bwd_relax,t_two_class,t_exact,"
-                  << "step_reached,max_gap\n";
+                  << "t_local_search,t_r_feas,t_r_feas_lagr,t_smart_recon,t_exact,"
+                  << "step_reached,max_gap,lb_after_fwd,lb_after_feas,lb_after_fl,ub_after_fwd,ub_after_heur,ub_after_ls,states_fwd_reached,states_fwd_expanded,"
+                  << "winner_detail,fwd_block_count,fwd_merged_block_count,fwd_pack_solver,fwd_pack_external_status,fwd_pack_method,fwd_pack_outcome,"
+                  << "t_fwd_pack_external,t_fwd_pack_heuristic,t_fwd_pack_dfs,t_fwd_pack_block_dp\n";
         std::cout.flush();
 
         std::string line;
@@ -619,7 +899,7 @@ int main(int argc, char **argv)
     {
         double time_limit = (argc > 2 ? std::stod(argv[2]) : -1.0);
 
-        std::cout << "instance_id,n_jobs,horizon,ub,lb,gap_pct,feasible,is_optimal,timed_out,runtime_sec\n";
+        std::cout << "instance_id,n_jobs,horizon,ub,lb,gap_pct,feasible,is_optimal,timed_out,runtime_sec,states_fwd_reached,states_fwd_expanded\n";
         std::cout.flush();
 
         std::string line;

@@ -164,30 +164,32 @@ def run_ablation_config(
                     if iid == inst_id:
                         sec, ds = s, d
                         break
-                results.append({
-                    "config": config_name,
-                    "section": sec,
-                    "dataset": ds,
-                    "instance_id": inst_id,
-                    "n_jobs": int(parts[1]),
-                    "horizon": int(parts[2]),
-                    "ub": float(parts[3]),
-                    "lb": float(parts[4]),
-                    "gap_pct": float(parts[5]),
-                    "feasible": int(parts[6]),
-                    "is_optimal": int(parts[7]),
-                    "timed_out": int(parts[8]),
-                    "runtime_sec": float(parts[9]),
-                    "t_spaces": float(parts[10]),
-                    "t_fwd_relax": float(parts[11]),
-                    "t_heuristic": float(parts[12]),
-                    "t_local_search": float(parts[13]),
-                    "t_bwd_relax": float(parts[14]),
-                    "t_two_class": float(parts[15]),
-                    "t_exact": float(parts[16]),
-                    "step_reached": parts[17],
-                    "max_gap": parts[18],
-                })
+                results.append(
+                    {
+                        "config": config_name,
+                        "section": sec,
+                        "dataset": ds,
+                        "instance_id": inst_id,
+                        "n_jobs": int(parts[1]),
+                        "horizon": int(parts[2]),
+                        "ub": float(parts[3]),
+                        "lb": float(parts[4]),
+                        "gap_pct": float(parts[5]),
+                        "feasible": int(parts[6]),
+                        "is_optimal": int(parts[7]),
+                        "timed_out": int(parts[8]),
+                        "runtime_sec": float(parts[9]),
+                        "t_spaces": float(parts[10]),
+                        "t_fwd_relax": float(parts[11]),
+                        "t_heuristic": float(parts[12]),
+                        "t_local_search": float(parts[13]),
+                        "t_bwd_relax": float(parts[14]),
+                        "t_two_class": float(parts[15]),
+                        "t_exact": float(parts[16]),
+                        "step_reached": parts[17],
+                        "max_gap": parts[18],
+                    }
+                )
 
         done = start + len(batch)
         if len(instances) > batch_size:
@@ -224,19 +226,32 @@ def print_config_summary(config_name, results, logfile=None):
 
     # Per-step averages
     avg_steps = {}
-    for key in ["t_spaces", "t_fwd_relax", "t_heuristic", "t_local_search",
-                "t_bwd_relax", "t_two_class", "t_exact"]:
+    for key in [
+        "t_spaces",
+        "t_fwd_relax",
+        "t_heuristic",
+        "t_local_search",
+        "t_bwd_relax",
+        "t_two_class",
+        "t_exact",
+    ]:
         avg_steps[key] = sum(r[key] for r in results) / max(n, 1)
 
-    log(f"  [{config_name:>12}]  {n_opt:>4}/{n:<4} opt  "
-        f"avg={avg_t:>8.4f}s  max={max_t:>8.3f}s  total={total_t:>8.1f}s", logfile)
-    log(f"    Per-step avg: SPACES={avg_steps['t_spaces']:.4f}  "
+    log(
+        f"  [{config_name:>12}]  {n_opt:>4}/{n:<4} opt  "
+        f"avg={avg_t:>8.4f}s  max={max_t:>8.3f}s  total={total_t:>8.1f}s",
+        logfile,
+    )
+    log(
+        f"    Per-step avg: SPACES={avg_steps['t_spaces']:.4f}  "
         f"fwd_relax={avg_steps['t_fwd_relax']:.4f}  "
         f"heur={avg_steps['t_heuristic']:.4f}  "
         f"local={avg_steps['t_local_search']:.4f}  "
         f"bwd={avg_steps['t_bwd_relax']:.4f}  "
         f"2class={avg_steps['t_two_class']:.4f}  "
-        f"exact={avg_steps['t_exact']:.4f}", logfile)
+        f"exact={avg_steps['t_exact']:.4f}",
+        logfile,
+    )
 
 
 def print_comparison(all_results: dict[str, list[dict]], logfile=None):
@@ -252,9 +267,9 @@ def print_comparison(all_results: dict[str, list[dict]], logfile=None):
         runtimes[cfg] = {r["instance_id"]: r["runtime_sec"] for r in results}
 
     pairs = [
-        ("full", "full_spaces",  "Banded SPACES contribution (A vs B)"),
-        ("full", "exact_only",   "Bound-and-refine contribution (A vs C)"),
-        ("full", "baseline",     "Total speedup: both components (A vs D)"),
+        ("full", "full_spaces", "Banded SPACES contribution (A vs B)"),
+        ("full", "exact_only", "Bound-and-refine contribution (A vs C)"),
+        ("full", "baseline", "Total speedup: both components (A vs D)"),
         ("full_spaces", "baseline", "Bound-and-refine when SPACES is full (B vs D)"),
     ]
 
@@ -286,18 +301,35 @@ def print_comparison(all_results: dict[str, list[dict]], logfile=None):
 
         log(f"\n  {label}", logfile)
         log(f"    Instances: {len(common)}", logfile)
-        log(f"    Aggregate speedup: {agg_su:.2f}x  "
-            f"(total: {t_fast_total:.1f}s vs {t_slow_total:.1f}s)", logfile)
-        log(f"    Per-instance:  avg={avg_su:.2f}x  med={med_su:.2f}x  "
-            f"min={min_su:.2f}x  max={max_su:.2f}x", logfile)
+        log(
+            f"    Aggregate speedup: {agg_su:.2f}x  "
+            f"(total: {t_fast_total:.1f}s vs {t_slow_total:.1f}s)",
+            logfile,
+        )
+        log(
+            f"    Per-instance:  avg={avg_su:.2f}x  med={med_su:.2f}x  "
+            f"min={min_su:.2f}x  max={max_su:.2f}x",
+            logfile,
+        )
 
     # Step-time comparison table
     log("\n" + "-" * 90, logfile)
     log("  PER-STEP AVERAGE TIMES (seconds)", logfile)
     log("-" * 90, logfile)
-    steps = ["t_spaces", "t_fwd_relax", "t_heuristic", "t_local_search",
-             "t_bwd_relax", "t_two_class", "t_exact"]
-    header = f"  {'Config':>12}" + "".join(f"  {s.replace('t_',''):>10}" for s in steps) + f"  {'TOTAL':>10}"
+    steps = [
+        "t_spaces",
+        "t_fwd_relax",
+        "t_heuristic",
+        "t_local_search",
+        "t_bwd_relax",
+        "t_two_class",
+        "t_exact",
+    ]
+    header = (
+        f"  {'Config':>12}"
+        + "".join(f"  {s.replace('t_',''):>10}" for s in steps)
+        + f"  {'TOTAL':>10}"
+    )
     log(header, logfile)
     log("  " + "-" * (len(header) - 2), logfile)
 
@@ -308,16 +340,27 @@ def print_comparison(all_results: dict[str, list[dict]], logfile=None):
         n = len(results)
         avgs = [sum(r[s] for r in results) / n for s in steps]
         total = sum(avgs)
-        row = f"  {cfg:>12}" + "".join(f"  {a:>10.4f}" for a in avgs) + f"  {total:>10.4f}"
+        row = (
+            f"  {cfg:>12}"
+            + "".join(f"  {a:>10.4f}" for a in avgs)
+            + f"  {total:>10.4f}"
+        )
         log(row, logfile)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Ablation study: Banded SPACES vs Bound-and-Refine")
-    ap.add_argument("--section", default="all", choices=["all", "1", "2", "fig9", "table1"])
-    ap.add_argument("--config", default="all",
-                    choices=["all"] + ABLATION_CONFIGS,
-                    help="Which ablation config to run (default: all)")
+    ap = argparse.ArgumentParser(
+        description="Ablation study: Banded SPACES vs Bound-and-Refine"
+    )
+    ap.add_argument(
+        "--section", default="all", choices=["all", "1", "2", "fig9", "table1"]
+    )
+    ap.add_argument(
+        "--config",
+        default="all",
+        choices=["all"] + ABLATION_CONFIGS,
+        help="Which ablation config to run (default: all)",
+    )
     ap.add_argument("--time-limit", type=float, default=600)
     ap.add_argument("--output-dir", default=str(ROOT / "hpc" / "results_ablation"))
     ap.add_argument("--batch-size", type=int, default=50)
@@ -326,7 +369,9 @@ def main():
     solver_path = Path(args.solver) if hasattr(args, "solver") else SOLVER
     if not solver_path.exists():
         print(f"ERROR: Solver not found: {solver_path}")
-        print("  Run: cd solvers/cpp/build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j")
+        print(
+            "  Run: cd solvers/cpp/build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j"
+        )
         sys.exit(1)
 
     out_dir = Path(args.output_dir)
@@ -381,7 +426,10 @@ def main():
         elapsed = time.monotonic() - t0
 
         all_config_results[cfg] = results
-        log(f"\n  Config '{cfg}' done in {elapsed:.1f}s ({len(results)} results)", logfile)
+        log(
+            f"\n  Config '{cfg}' done in {elapsed:.1f}s ({len(results)} results)",
+            logfile,
+        )
         print_config_summary(cfg, results, logfile)
 
         # Write per-config CSV

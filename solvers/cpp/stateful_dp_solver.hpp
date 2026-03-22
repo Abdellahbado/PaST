@@ -101,6 +101,21 @@ namespace dp
     {
         double lb;
         double bin_pack_ub;
+        int64_t states_reached = 0;
+        int64_t states_expanded = 0;
+        // Expose relaxed DP cost table for smart reconstruction
+        std::vector<double> rdp;  // dp[(T+2) * RW], flattened 2D array
+        int RW = 0;               // row width = total_rw + 1
+        int block_count = 0;
+        int merged_block_count = 0;
+        std::string pack_solver = "default";
+        std::string pack_external_status = "disabled";
+        std::string pack_method = "none";
+        std::string pack_outcome = "not_attempted";
+        double t_pack_external = 0.0;
+        double t_pack_heuristic = 0.0;
+        double t_pack_dfs = 0.0;
+        double t_pack_block_dp = 0.0;
     };
     RelaxedDPResult solve_relaxed_dp_with_binpack(
         const std::vector<int> &lengths,
@@ -127,6 +142,20 @@ namespace dp
         const std::vector<double> &prefix_proc,
         int T,
         const SPACESResult &spaces);
+
+    // Smart reconstruction: count-aware path search using rdp table for pruning.
+    // Searches for count-feasible paths through the relaxed DP cost table.
+    // Returns the cost of the best count-feasible schedule, or kInf if none found.
+    double smart_reconstruct(
+        const std::vector<double> &rdp,
+        int RW,
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        double known_ub = kInf,
+        double time_limit_sec = 30.0);
 
     // Local search: pairwise swap hill climbing on a sequence.
     // Modifies best_seq in place. Returns improved cost.
@@ -172,5 +201,51 @@ namespace dp
         const SPACESResult &spaces,
         double known_ub = kInf,
         double time_limit_sec = 300.0);
+
+    // ── New LB hierarchy bounds ──────────────────────────────────────────
+
+    // R_feas: relaxed DP (t, rw) with bounded-knapsack transition filter.
+    // At state (t, rw), type j is allowed only if (W - rw) ∈ A_j^-, where
+    // A_j^- = {w : ∃ allocation summing to w with a_j ≤ n_j - 1}.
+    // Strictly tighter than R_semi when finite counts exclude transitions.
+    // Precomputation: O(K^2 * W). Per-transition overhead: O(1) lookup.
+    double solve_relaxed_dp_lb_feas(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces);
+
+    // R_Lagr: Lagrangian relaxation of per-type count constraints.
+    // Penalizes over-use of each type via multipliers λ_j ≥ 0.
+    // Each iteration solves a modified R_semi with per-type cost offsets.
+    // Converges to the tightest bound achievable from (t, rw) state space.
+    double solve_relaxed_dp_lb_lagrangian(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        int max_iters = 50,
+        double time_limit_sec = 5.0);
+
+    // R_feas+Lagr: Combined bound — Lagrangian relaxation with
+    // transition-feasibility filtering. Strictly dominates both R_feas
+    // and R_Lagr individually.
+    double solve_relaxed_dp_lb_feas_lagrangian(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        int max_iters = 50,
+        double time_limit_sec = 5.0);
+
+    // Precompute bounded-knapsack feasibility sets A_j^- for each type j.
+    // A_j^-[w] = true iff work amount w is achievable with a_j ≤ n_j - 1.
+    // Returns K vectors of size (W+1).
+    std::vector<std::vector<bool>> compute_feas_sets(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals);
 
 } // namespace dp

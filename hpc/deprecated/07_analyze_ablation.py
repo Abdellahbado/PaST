@@ -25,17 +25,22 @@ from statistics import mean, median
 ROOT = Path(__file__).resolve().parent.parent
 
 CONFIG_LABELS = {
-    "full":         "Full method (A)",
-    "full_spaces":  "Full SPACES (B)",
-    "exact_only":   "Exact only + banded (C)",
-    "baseline":     "Baseline (D)",
+    "full": "Full method (A)",
+    "full_spaces": "Full SPACES (B)",
+    "exact_only": "Exact only + banded (C)",
+    "baseline": "Baseline (D)",
 }
 
 CONFIG_ORDER = ["full", "full_spaces", "exact_only", "baseline"]
 
 STEP_KEYS = [
-    "t_spaces", "t_fwd_relax", "t_heuristic", "t_local_search",
-    "t_bwd_relax", "t_two_class", "t_exact",
+    "t_spaces",
+    "t_fwd_relax",
+    "t_heuristic",
+    "t_local_search",
+    "t_bwd_relax",
+    "t_two_class",
+    "t_exact",
 ]
 STEP_LABELS = {
     "t_spaces": "SPACES",
@@ -91,9 +96,9 @@ def compute_speedups(results: dict[str, list[dict]]) -> dict:
         runtimes[cfg] = {r["instance_id"]: r["runtime_sec"] for r in rows}
 
     pairs = [
-        ("full", "full_spaces",  "Banded SPACES", "A vs B"),
-        ("full", "exact_only",   "Bound-and-Refine", "A vs C"),
-        ("full", "baseline",     "Both components", "A vs D"),
+        ("full", "full_spaces", "Banded SPACES", "A vs B"),
+        ("full", "exact_only", "Bound-and-Refine", "A vs C"),
+        ("full", "baseline", "Both components", "A vs D"),
         ("full_spaces", "baseline", "B&R (full SPACES)", "B vs D"),
     ]
 
@@ -114,20 +119,22 @@ def compute_speedups(results: dict[str, list[dict]]) -> dict:
         t_fast_total = sum(runtimes[fast][iid] for iid in common)
         t_slow_total = sum(runtimes[slow][iid] for iid in common)
 
-        speedup_data.append({
-            "label": label,
-            "tag": tag,
-            "fast": fast,
-            "slow": slow,
-            "n": len(common),
-            "agg_speedup": t_slow_total / max(t_fast_total, 1e-9),
-            "mean_speedup": mean(su_list),
-            "median_speedup": median(su_list),
-            "min_speedup": min(su_list),
-            "max_speedup": max(su_list),
-            "t_fast_total": t_fast_total,
-            "t_slow_total": t_slow_total,
-        })
+        speedup_data.append(
+            {
+                "label": label,
+                "tag": tag,
+                "fast": fast,
+                "slow": slow,
+                "n": len(common),
+                "agg_speedup": t_slow_total / max(t_fast_total, 1e-9),
+                "mean_speedup": mean(su_list),
+                "median_speedup": median(su_list),
+                "min_speedup": min(su_list),
+                "max_speedup": max(su_list),
+                "t_fast_total": t_fast_total,
+                "t_slow_total": t_slow_total,
+            }
+        )
 
     return speedup_data
 
@@ -141,7 +148,9 @@ def generate_summary_table(results: dict[str, list[dict]]) -> str:
     lines.append(r"\label{tab:ablation-summary}")
     lines.append(r"\begin{tabular}{l r r r r r}")
     lines.append(r"\toprule")
-    lines.append(r"Configuration & Instances & Optimal & Avg (s) & Max (s) & Total (s) \\")
+    lines.append(
+        r"Configuration & Instances & Optimal & Avg (s) & Max (s) & Total (s) \\"
+    )
     lines.append(r"\midrule")
 
     for cfg in CONFIG_ORDER:
@@ -154,7 +163,9 @@ def generate_summary_table(results: dict[str, list[dict]]) -> str:
         avg = total / max(n, 1)
         mx = max(r["runtime_sec"] for r in rows)
         label = CONFIG_LABELS[cfg]
-        lines.append(f"  {label} & {n} & {n_opt} & {avg:.3f} & {mx:.3f} & {total:.1f} \\\\")
+        lines.append(
+            f"  {label} & {n} & {n_opt} & {avg:.3f} & {mx:.3f} & {total:.1f} \\\\"
+        )
 
     lines.append(r"\bottomrule")
     lines.append(r"\end{tabular}")
@@ -171,7 +182,9 @@ def generate_speedup_table(speedup_data: list[dict]) -> str:
     lines.append(r"\label{tab:ablation-speedup}")
     lines.append(r"\begin{tabular}{l l r r r r}")
     lines.append(r"\toprule")
-    lines.append(r"Comparison & Component & Agg.\ $\times$ & Med.\ $\times$ & Mean $\times$ & Max $\times$ \\")
+    lines.append(
+        r"Comparison & Component & Agg.\ $\times$ & Med.\ $\times$ & Mean $\times$ & Max $\times$ \\"
+    )
     lines.append(r"\midrule")
 
     for sd in speedup_data:
@@ -192,7 +205,9 @@ def generate_step_time_table(results: dict[str, list[dict]]) -> str:
     lines = []
     lines.append(r"\begin{table}[t]")
     lines.append(r"\centering")
-    lines.append(r"\caption{Ablation study: per-step average timing breakdown (seconds).}")
+    lines.append(
+        r"\caption{Ablation study: per-step average timing breakdown (seconds).}"
+    )
     lines.append(r"\label{tab:ablation-steps}")
 
     cols = "l" + " r" * len(STEP_KEYS) + " r"
@@ -226,7 +241,9 @@ def generate_step_time_table(results: dict[str, list[dict]]) -> str:
     return "\n".join(lines)
 
 
-def generate_text_report(results: dict[str, list[dict]], speedup_data: list[dict]) -> str:
+def generate_text_report(
+    results: dict[str, list[dict]], speedup_data: list[dict]
+) -> str:
     """Generate detailed text report."""
     lines = []
     lines.append("=" * 90)
@@ -236,7 +253,9 @@ def generate_text_report(results: dict[str, list[dict]], speedup_data: list[dict
     # Per-config summary
     lines.append("\n1. PER-CONFIGURATION SUMMARY")
     lines.append("-" * 90)
-    lines.append(f"  {'Config':>20} {'N':>6} {'Opt':>6} {'Avg(s)':>10} {'Max(s)':>10} {'Total(s)':>10}")
+    lines.append(
+        f"  {'Config':>20} {'N':>6} {'Opt':>6} {'Avg(s)':>10} {'Max(s)':>10} {'Total(s)':>10}"
+    )
     lines.append("  " + "-" * 70)
 
     for cfg in CONFIG_ORDER:
@@ -248,7 +267,9 @@ def generate_text_report(results: dict[str, list[dict]], speedup_data: list[dict
         total = sum(r["runtime_sec"] for r in rows)
         avg = total / max(n, 1)
         mx = max(r["runtime_sec"] for r in rows)
-        lines.append(f"  {CONFIG_LABELS[cfg]:>20} {n:>6} {n_opt:>6} {avg:>10.4f} {mx:>10.3f} {total:>10.1f}")
+        lines.append(
+            f"  {CONFIG_LABELS[cfg]:>20} {n:>6} {n_opt:>6} {avg:>10.4f} {mx:>10.3f} {total:>10.1f}"
+        )
 
     # Speedup decomposition
     lines.append("\n2. SPEEDUP DECOMPOSITION")
@@ -257,11 +278,15 @@ def generate_text_report(results: dict[str, list[dict]], speedup_data: list[dict
     for sd in speedup_data:
         lines.append(f"\n  {sd['tag']}: {sd['label']}")
         lines.append(f"    Instances:          {sd['n']}")
-        lines.append(f"    Aggregate speedup:  {sd['agg_speedup']:.2f}x "
-                     f"({sd['t_fast_total']:.1f}s vs {sd['t_slow_total']:.1f}s)")
-        lines.append(f"    Per-instance:       mean={sd['mean_speedup']:.2f}x  "
-                     f"med={sd['median_speedup']:.2f}x  "
-                     f"min={sd['min_speedup']:.2f}x  max={sd['max_speedup']:.2f}x")
+        lines.append(
+            f"    Aggregate speedup:  {sd['agg_speedup']:.2f}x "
+            f"({sd['t_fast_total']:.1f}s vs {sd['t_slow_total']:.1f}s)"
+        )
+        lines.append(
+            f"    Per-instance:       mean={sd['mean_speedup']:.2f}x  "
+            f"med={sd['median_speedup']:.2f}x  "
+            f"min={sd['min_speedup']:.2f}x  max={sd['max_speedup']:.2f}x"
+        )
 
     # Per-step timing
     lines.append("\n3. PER-STEP AVERAGE TIMING (seconds)")
@@ -296,9 +321,13 @@ def generate_text_report(results: dict[str, list[dict]], speedup_data: list[dict
         dist = defaultdict(int)
         for r in rows:
             dist[r["step_reached"]] += 1
-        lines.append(f"  {cfg:>20}: " + "  ".join(
-            f"{step}={count}" for step, count in sorted(dist.items(), key=lambda x: -x[1])
-        ))
+        lines.append(
+            f"  {cfg:>20}: "
+            + "  ".join(
+                f"{step}={count}"
+                for step, count in sorted(dist.items(), key=lambda x: -x[1])
+            )
+        )
 
     # Key findings
     lines.append("\n5. KEY FINDINGS")
@@ -310,32 +339,47 @@ def generate_text_report(results: dict[str, list[dict]], speedup_data: list[dict
         total = next((s for s in speedup_data if s["tag"] == "A vs D"), None)
 
         if banded and bnr and total:
-            lines.append(f"  - Banded SPACES alone provides {banded['agg_speedup']:.1f}x aggregate speedup")
-            lines.append(f"  - Bound-and-Refine alone provides {bnr['agg_speedup']:.1f}x aggregate speedup")
-            lines.append(f"  - Combined, both components provide {total['agg_speedup']:.1f}x aggregate speedup")
+            lines.append(
+                f"  - Banded SPACES alone provides {banded['agg_speedup']:.1f}x aggregate speedup"
+            )
+            lines.append(
+                f"  - Bound-and-Refine alone provides {bnr['agg_speedup']:.1f}x aggregate speedup"
+            )
+            lines.append(
+                f"  - Combined, both components provide {total['agg_speedup']:.1f}x aggregate speedup"
+            )
 
             # Multiplicative decomposition
-            mult = banded['agg_speedup'] * bnr['agg_speedup']
-            if total['agg_speedup'] > 0:
-                synergy = total['agg_speedup'] / mult
+            mult = banded["agg_speedup"] * bnr["agg_speedup"]
+            if total["agg_speedup"] > 0:
+                synergy = total["agg_speedup"] / mult
                 if synergy > 1.05:
-                    lines.append(f"  - Synergy: Combined speedup is {synergy:.2f}x more than "
-                                 "the product of individual speedups (positive interaction)")
+                    lines.append(
+                        f"  - Synergy: Combined speedup is {synergy:.2f}x more than "
+                        "the product of individual speedups (positive interaction)"
+                    )
                 elif synergy < 0.95:
-                    lines.append(f"  - Overlap: Combined speedup is {synergy:.2f}x of "
-                                 "the product (diminishing returns)")
+                    lines.append(
+                        f"  - Overlap: Combined speedup is {synergy:.2f}x of "
+                        "the product (diminishing returns)"
+                    )
                 else:
-                    lines.append(f"  - Components are roughly independent "
-                                 f"(combined/product ratio: {synergy:.2f})")
+                    lines.append(
+                        f"  - Components are roughly independent "
+                        f"(combined/product ratio: {synergy:.2f})"
+                    )
 
     lines.append("")
     return "\n".join(lines)
 
 
-def try_generate_figure(results: dict[str, list[dict]], speedup_data: list[dict], out_dir: Path):
+def try_generate_figure(
+    results: dict[str, list[dict]], speedup_data: list[dict], out_dir: Path
+):
     """Generate a bar chart if matplotlib is available."""
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import numpy as np
@@ -363,9 +407,14 @@ def try_generate_figure(results: dict[str, list[dict]], speedup_data: list[dict]
     ax.set_ylim(bottom=0)
 
     for bar in bars1:
-        ax.annotate(f"{bar.get_height():.1f}×",
-                    xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-                    xytext=(0, 3), textcoords="offset points", ha="center", fontsize=9)
+        ax.annotate(
+            f"{bar.get_height():.1f}×",
+            xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+            xytext=(0, 3),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+        )
 
     fig.tight_layout()
     fig.savefig(out_dir / "ablation_speedup.pdf", dpi=150, bbox_inches="tight")
@@ -379,7 +428,15 @@ def try_generate_figure(results: dict[str, list[dict]], speedup_data: list[dict]
     n_cfgs = len(cfgs)
     bottoms = np.zeros(n_cfgs)
 
-    colors = ["#E53935", "#FB8C00", "#43A047", "#1E88E5", "#8E24AA", "#00ACC1", "#6D4C41"]
+    colors = [
+        "#E53935",
+        "#FB8C00",
+        "#43A047",
+        "#1E88E5",
+        "#8E24AA",
+        "#00ACC1",
+        "#6D4C41",
+    ]
 
     for i, sk in enumerate(STEP_KEYS):
         vals = []
@@ -388,8 +445,13 @@ def try_generate_figure(results: dict[str, list[dict]], speedup_data: list[dict]
             n = max(len(rows), 1)
             vals.append(sum(r[sk] for r in rows) / n)
         vals = np.array(vals)
-        ax2.bar(range(n_cfgs), vals, bottom=bottoms, label=STEP_LABELS[sk],
-                color=colors[i % len(colors)])
+        ax2.bar(
+            range(n_cfgs),
+            vals,
+            bottom=bottoms,
+            label=STEP_LABELS[sk],
+            color=colors[i % len(colors)],
+        )
         bottoms += vals
 
     ax2.set_ylabel("Average time (s)")
@@ -408,8 +470,11 @@ def try_generate_figure(results: dict[str, list[dict]], speedup_data: list[dict]
 def main():
     ap = argparse.ArgumentParser(description="Analyze ablation study results")
     ap.add_argument("--input-dir", default=str(ROOT / "hpc" / "results_ablation"))
-    ap.add_argument("--output-dir", default=None,
-                    help="Output directory for analysis (default: <input-dir>/analysis)")
+    ap.add_argument(
+        "--output-dir",
+        default=None,
+        help="Output directory for analysis (default: <input-dir>/analysis)",
+    )
     args = ap.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -462,7 +527,9 @@ def main():
     print("  ablation_report.txt   — Detailed text report")
     print("  ablation_tables.tex   — LaTeX tables for paper")
     print("  ablation_speedup.pdf  — Speedup bar chart (if matplotlib available)")
-    print("  ablation_steps.pdf    — Per-step timing breakdown (if matplotlib available)")
+    print(
+        "  ablation_steps.pdf    — Per-step timing breakdown (if matplotlib available)"
+    )
 
 
 if __name__ == "__main__":
