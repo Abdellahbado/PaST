@@ -23,6 +23,7 @@ bash hpc/build_solver.sh
 bash hpc/run_component_ablation.sh
 bash hpc/run_spaces_ablation.sh
 bash hpc/run_g_sweep.sh
+bash hpc/run_relaxation_quality.sh
 
 # 5. Or run the full regression benchmark
 bash hpc/run_full_benchmark.sh --skip-paper
@@ -63,9 +64,11 @@ Run `bash hpc/setup_hpc_env.sh` for the recommended setup path.
 | `run_component_ablation.sh` | Exact bin-packing + smart-reconstruction study |
 | `run_spaces_ablation.sh` | Banded SPACES vs full SPACES |
 | `run_g_sweep.sh` | `G` parameter sweep around the automatic value |
+| `run_relaxation_quality.sh` | Unit vs GCD vs semigroup relaxation-quality study |
 | `studies/component_ablation.py` | Study implementation |
 | `studies/spaces_ablation.py` | Study implementation |
 | `studies/g_sweep.py` | Study implementation |
+| `studies/relaxation_quality.py` | Study implementation |
 | `studies/common.py` | Shared study utilities |
 
 ### Deprecated study scripts
@@ -144,6 +147,9 @@ bash hpc/run_spaces_ablation.sh
 # G sweep (safe values only)
 bash hpc/run_g_sweep.sh
 
+# Relaxation quality: unit vs GCD vs semigroup
+bash hpc/run_relaxation_quality.sh
+
 # G sweep with exploratory below-auto values
 bash hpc/run_g_sweep.sh --include-unsafe
 ```
@@ -154,6 +160,7 @@ Default study outputs:
 hpc/results_studies/component_ablation/
 hpc/results_studies/spaces_ablation/
 hpc/results_studies/g_sweep/
+hpc/results_studies/relaxation_quality/
 ```
 
 Each directory contains:

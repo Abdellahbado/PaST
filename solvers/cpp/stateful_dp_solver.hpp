@@ -10,6 +10,13 @@
 namespace dp
 {
 
+    enum class RelaxationMode
+    {
+        Unit,
+        Gcd,
+        Semigroup,
+    };
+
     struct MachineStateConfig
     {
         std::vector<std::string> states;
@@ -93,7 +100,8 @@ namespace dp
         int total_rw,
         const std::vector<double> &prefix_proc,
         int T,
-        const SPACESResult &spaces);
+        const SPACESResult &spaces,
+        RelaxationMode mode = RelaxationMode::Semigroup);
 
     // Combined: forward relaxed DP LB + bin-packing UB in a single pass.
     // Saves one full relaxed DP computation vs running them separately.

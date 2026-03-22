@@ -602,6 +602,84 @@ namespace
         return row.str();
     }
 
+    std::vector<std::string> split_csv_fields(const std::string &line)
+    {
+        std::vector<std::string> out;
+        std::istringstream ss(line);
+        std::string tok;
+        while (std::getline(ss, tok, ','))
+            out.push_back(tok);
+        return out;
+    }
+
+    std::string solve_relaxation_profile(
+        const std::string &instance_id,
+        const std::vector<double> &prices,
+        const std::vector<int> &jobs,
+        double time_limit,
+        const std::string &machine_type = "nosby")
+    {
+        std::map<int, int> cnt;
+        for (int p : jobs)
+            cnt[p]++;
+        std::vector<int> lens, tots;
+        for (auto &kv : cnt)
+        {
+            lens.push_back(kv.first);
+            tots.push_back(kv.second);
+        }
+
+        auto cfg = (machine_type == "twosby") ? dp::make_paper_twosby_config()
+                                              : dp::make_paper_nosby_config();
+        int mg = resolve_max_gap(cfg, prices, true);
+        auto spaces = dp::compute_spaces(prices, cfg, mg);
+        auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
+        int T = static_cast<int>(prices.size());
+
+        int total_rw = 0;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+            total_rw += lens[i] * tots[i];
+
+        auto run_relax = [&](dp::RelaxationMode mode) -> std::pair<double, double>
+        {
+            auto t0 = Clock::now();
+            double lb = dp::solve_relaxed_dp_lb(lens, total_rw, prefix, T, spaces, mode);
+            double elapsed = Dur(Clock::now() - t0).count();
+            return {lb, elapsed};
+        };
+
+        auto [lb_unit, t_unit] = run_relax(dp::RelaxationMode::Unit);
+        auto [lb_gcd, t_gcd] = run_relax(dp::RelaxationMode::Gcd);
+        auto [lb_semi, t_semi] = run_relax(dp::RelaxationMode::Semigroup);
+
+        std::string full_row = solve_one(instance_id, prices, jobs, time_limit, machine_type);
+        auto fields = split_csv_fields(full_row);
+        double opt = -1.0;
+        int is_optimal = 0;
+        double t_opt = 0.0;
+        if (fields.size() >= 10)
+        {
+            opt = std::stod(fields[3]);
+            is_optimal = std::stoi(fields[7]);
+            t_opt = std::stod(fields[9]);
+        }
+
+        std::ostringstream row;
+        row << instance_id << ","
+            << static_cast<int>(jobs.size()) << ","
+            << prices.size() << ","
+            << std::fixed << std::setprecision(6) << lb_unit << ","
+            << std::fixed << std::setprecision(6) << lb_gcd << ","
+            << std::fixed << std::setprecision(6) << lb_semi << ","
+            << std::fixed << std::setprecision(6) << opt << ","
+            << is_optimal << ","
+            << std::fixed << std::setprecision(4) << t_unit << ","
+            << std::fixed << std::setprecision(4) << t_gcd << ","
+            << std::fixed << std::setprecision(4) << t_semi << ","
+            << std::fixed << std::setprecision(4) << t_opt;
+        return row.str();
+    }
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -885,6 +963,43 @@ int main(int argc, char **argv)
     }
 
     // -----------------------------------------------------------------------
+    // MODE: relaxation-stdin
+    // Reads one JSON object per line from stdin and reports the three relaxed
+    // lower bounds: unit, gcd, and semigroup, plus the full solver optimum.
+    //
+    // Usage: cat instances.jsonl | stateful_compare relaxation-stdin [time_limit_sec]
+    // -----------------------------------------------------------------------
+    if (mode == "relaxation-stdin")
+    {
+        double time_limit = (argc > 2 ? std::stod(argv[2]) : -1.0);
+
+        std::cout << "instance_id,n_jobs,horizon,lb_unit,lb_gcd,lb_semi,opt,is_optimal,"
+                  << "t_unit,t_gcd,t_semi,t_opt\n";
+        std::cout.flush();
+
+        std::string line;
+        while (std::getline(std::cin, line))
+        {
+            if (line.empty() || line.front() != '{')
+                continue;
+            auto prices = json_parse_double_array(line, "prices");
+            auto jobs = json_parse_int_array(line, "jobs");
+            auto iid = json_parse_string(line, "instance_id");
+            auto machine = json_parse_string(line, "machine");
+            if (machine.empty())
+                machine = "nosby";
+            if (prices.empty() || jobs.empty())
+            {
+                std::cerr << "warn: skipping malformed line: " << line.substr(0, 80) << "\n";
+                continue;
+            }
+            std::cout << solve_relaxation_profile(iid, prices, jobs, time_limit, machine) << "\n";
+            std::cout.flush();
+        }
+        return 0;
+    }
+
+    // -----------------------------------------------------------------------
     // MODE: solve-stdin
     // Reads one JSON object per line from stdin, solves each, emits CSV rows.
     // JSON format: {"instance_id":"...","prices":[...],"jobs":[...]}
@@ -1023,6 +1138,8 @@ int main(int argc, char **argv)
               << "      reads one JSON line per instance from stdin:\n"
               << "      {\"instance_id\":\"...\",\"prices\":[...],\"jobs\":[...]}\n"
               << "      used by the Python parallel launcher (run_cpp_benchmark.py)\n"
+              << "  stateful_compare relaxation-stdin [time_limit_sec]\n"
+              << "      reads JSONL from stdin, outputs unit/gcd/semigroup relaxed LBs\n"
               << "  stateful_compare ablation-stdin <config>\n"
               << "      config: full | full_spaces | exact_only | baseline\n"
               << "      reads JSONL from stdin, outputs CSV with per-step timing\n"

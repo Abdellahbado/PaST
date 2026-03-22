@@ -161,6 +161,53 @@ def run_ablation_batch(
     return rows
 
 
+def run_relaxation_batch(
+    batch: list[tuple[str, str, str, dict]],
+    solver_path: Path,
+    time_limit: float,
+    logfile=None,
+) -> list[dict]:
+    lines = []
+    meta = {}
+    for section, dataset, inst_id, inst in batch:
+        meta[inst_id] = (section, dataset)
+        payload = {
+            "instance_id": inst_id,
+            "prices": inst["prices"],
+            "jobs": inst["jobs"],
+            "machine": inst["machine_type"],
+        }
+        lines.append(json.dumps(payload))
+
+    proc = subprocess.run(
+        [str(solver_path), "relaxation-stdin", str(time_limit)],
+        input="\n".join(lines) + "\n",
+        capture_output=True,
+        text=True,
+        timeout=max(int(time_limit * len(batch) + 300), 7200),
+    )
+    if proc.returncode != 0 and proc.stderr:
+        log(f"  Solver stderr (relaxation study): {proc.stderr[:300]}", logfile)
+
+    rows = []
+    header = None
+    for line in proc.stdout.strip().splitlines():
+        if not line.strip():
+            continue
+        if header is None:
+            header = line.split(",")
+            continue
+        parts = line.split(",")
+        if len(parts) < len(header):
+            continue
+        row = dict(zip(header, parts))
+        section, dataset = meta.get(row["instance_id"], ("", ""))
+        row["section"] = section
+        row["dataset"] = dataset
+        rows.append(row)
+    return rows
+
+
 def speedup_report(fast_rows: list[dict], slow_rows: list[dict]) -> tuple[float, float, float]:
     fast = {r["instance_id"]: as_float(r, "runtime_sec") for r in fast_rows}
     slow = {r["instance_id"]: as_float(r, "runtime_sec") for r in slow_rows}

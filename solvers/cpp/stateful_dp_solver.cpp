@@ -125,6 +125,30 @@ namespace dp
             return std::max(0, (h - 2) - shutdown);
         }
 
+        int gcd_all(const std::vector<int> &vals)
+        {
+            int g = 0;
+            for (int v : vals)
+                g = std::gcd(g, v);
+            return std::max(g, 1);
+        }
+
+        std::vector<int> relaxation_chunk_lengths(
+            const std::vector<int> &lengths,
+            RelaxationMode mode)
+        {
+            if (mode == RelaxationMode::Unit)
+                return {1};
+
+            if (mode == RelaxationMode::Gcd)
+                return {gcd_all(lengths)};
+
+            std::vector<int> out = lengths;
+            std::sort(out.begin(), out.end());
+            out.erase(std::unique(out.begin(), out.end()), out.end());
+            return out;
+        }
+
         enum class ExternalPackStatus
         {
             Disabled,
@@ -1219,9 +1243,11 @@ namespace dp
         int total_rw,
         const std::vector<double> &prefix_proc,
         int T,
-        const SPACESResult &spaces)
+        const SPACESResult &spaces,
+        RelaxationMode mode)
     {
-        int K = static_cast<int>(lengths.size());
+        std::vector<int> allowed_lengths = relaxation_chunk_lengths(lengths, mode);
+        int K = static_cast<int>(allowed_lengths.size());
         int eff_max_gap = spaces.banded ? spaces.max_gap : T;
 
         // dp[rw] at time t_end = min cost with (total_rw - rw) work placed, last job ending at t_end
@@ -1240,7 +1266,7 @@ namespace dp
                 continue;
             for (int j = 0; j < K; ++j)
             {
-                int L = lengths[j];
+                int L = allowed_lengths[j];
                 if (L > total_rw)
                     continue;
                 int t_e = t_s + L;
@@ -1282,7 +1308,7 @@ namespace dp
                     double base = bank[rw] + start_cost;
                     for (int j = 0; j < K; ++j)
                     {
-                        int L = lengths[j];
+                        int L = allowed_lengths[j];
                         if (L > rw)
                             continue;
                         int t_e = t_end + L;
@@ -1315,7 +1341,7 @@ namespace dp
                     double base = sv_cost + gap;
                     for (int j = 0; j < K; ++j)
                     {
-                        int L = lengths[j];
+                        int L = allowed_lengths[j];
                         if (L > rw)
                             continue;
                         int t_e = t_s + L;
