@@ -38,6 +38,16 @@ CONFIGS = {
             "PAST_RELAXED_BINPACK_ALLOW_SMALL_NC": "1",
         },
     },
+    "full_blockdp_only_pack": {
+        "label": "Full pipeline + block-DP certifier before OR-Tools (DFS disabled)",
+        "ab_mode": "full",
+        "pack_solver": "ortools",
+        "extra_env": {
+            "PAST_RELAXED_BINPACK_NATIVE_FIRST": "1",
+            "PAST_RELAXED_BINPACK_ALLOW_SMALL_NC": "1",
+            "PAST_RELAXED_BINPACK_DISABLE_DFS_EXACT": "1",
+        },
+    },
     "no_smart_recon": {
         "label": "Exact pack, no smart reconstruction",
         "ab_mode": "no_smart_recon",

@@ -1649,6 +1649,8 @@ namespace dp
                     (std::getenv("PAST_RELAXED_BINPACK_NATIVE_FIRST") != nullptr);
                 bool allow_small_nc =
                     (std::getenv("PAST_RELAXED_BINPACK_ALLOW_SMALL_NC") != nullptr);
+                bool disable_dfs_exact =
+                    (std::getenv("PAST_RELAXED_BINPACK_DISABLE_DFS_EXACT") != nullptr);
 
                 // Start with the cheap in-process packers. For the ablation we still
                 // expose the external exact solver, but only after the fast packers
@@ -1836,20 +1838,24 @@ namespace dp
                             return false;
                         };
 
-                        bool dfs_found = dfs(0);
-                        t_pack_dfs =
-                            std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_dfs).count();
-                        if (dfs_found)
+                        bool dfs_found = false;
+                        if (!disable_dfs_exact)
                         {
-                            std::vector<int> seq;
-                            for (size_t b = 0; b < nB; ++b)
+                            dfs_found = dfs(0);
+                            t_pack_dfs =
+                                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_dfs).count();
+                            if (dfs_found)
                             {
-                                for (int i = 0; i < K; ++i)
-                                    for (int j = 0; j < assign[b][i]; ++j)
-                                        seq.push_back(lengths[i]);
+                                std::vector<int> seq;
+                                for (size_t b = 0; b < nB; ++b)
+                                {
+                                    for (int i = 0; i < K; ++i)
+                                        for (int j = 0; j < assign[b][i]; ++j)
+                                            seq.push_back(lengths[i]);
+                                }
+                                note_pack_candidate("dfs_exact",
+                                                    solve_fixed_sequence(seq, prefix_proc, T, spaces));
                             }
-                            note_pack_candidate("dfs_exact",
-                                                solve_fixed_sequence(seq, prefix_proc, T, spaces));
                         }
 
                         // 7) Sparse block-level feasibility DP (systematic search)
