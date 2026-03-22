@@ -228,10 +228,24 @@ namespace dp
                 f << "}";
             }
 
-            std::string cmd = "python3 \"" + script.string() + "\" \"" +
-                              input.string() + "\" \"" + output.string() + "\"";
+            double time_limit_sec = 20.0;
+            if (const char *limit_v = std::getenv("PAST_RELAXED_BINPACK_TIME_LIMIT_SEC"))
+            {
+                try
+                {
+                    time_limit_sec = std::max(0.0, std::stod(limit_v));
+                }
+                catch (const std::exception &)
+                {
+                }
+            }
+
+            std::ostringstream cmd;
+            cmd << "python3 \"" << script.string() << "\" \"" << input.string()
+                << "\" \"" << output.string() << "\" \"" << std::fixed << std::setprecision(3)
+                << time_limit_sec << "\"";
             auto t0 = std::chrono::steady_clock::now();
-            int rc = std::system(cmd.c_str());
+            int rc = std::system(cmd.str().c_str());
             out.runtime_sec =
                 std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
             if (rc != 0 || !std::filesystem::exists(output))
@@ -1629,32 +1643,11 @@ namespace dp
                     orig_cap[i] = merged[i].length;
 
                 bool exact_pack_decided = false;
-                {
-                    auto ext = exact_pack_via_ortools(orig_cap, lengths, totals);
-                    if (ext.solver != "disabled")
-                        pack_solver = ext.solver;
-                    t_pack_external = ext.runtime_sec;
-                    if (ext.status == ExternalPackStatus::Feasible)
-                    {
-                        pack_external_status = "feasible";
-                        note_pack_candidate("external_" + ext.solver,
-                                            solve_fixed_sequence(ext.sequence, prefix_proc, T, spaces));
-                        exact_pack_decided = true;
-                    }
-                    else if (ext.status == ExternalPackStatus::Infeasible)
-                    {
-                        pack_external_status = "infeasible";
-                        pack_method = "external_" + ext.solver;
-                        pack_outcome = "infeasible";
-                        exact_pack_decided = true;
-                    }
-                    else if (ext.status == ExternalPackStatus::Error)
-                    {
-                        pack_external_status = "error";
-                    }
-                }
+                bool want_external_exact = (pack_solver != "default");
 
-                if (!exact_pack_decided)
+                // Start with the cheap in-process packers. For the ablation we still
+                // expose the external exact solver, but only after the fast packers
+                // fail to certify the recovered block structure.
                 {
                     auto t0_pack = std::chrono::steady_clock::now();
 
@@ -1731,6 +1724,32 @@ namespace dp
 
                     t_pack_heuristic =
                         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_pack).count();
+                }
+
+                if (want_external_exact && bp_ub >= kInf * 0.5)
+                {
+                    auto ext = exact_pack_via_ortools(orig_cap, lengths, totals);
+                    if (ext.solver != "disabled")
+                        pack_solver = ext.solver;
+                    t_pack_external = ext.runtime_sec;
+                    if (ext.status == ExternalPackStatus::Feasible)
+                    {
+                        pack_external_status = "feasible";
+                        note_pack_candidate("external_" + ext.solver,
+                                            solve_fixed_sequence(ext.sequence, prefix_proc, T, spaces));
+                        exact_pack_decided = true;
+                    }
+                    else if (ext.status == ExternalPackStatus::Infeasible)
+                    {
+                        pack_external_status = "infeasible";
+                        pack_method = "external_" + ext.solver;
+                        pack_outcome = "infeasible";
+                        exact_pack_decided = true;
+                    }
+                    else if (ext.status == ExternalPackStatus::Error)
+                    {
+                        pack_external_status = "error";
+                    }
                 }
 
                 // 6) Backtracking block assignment search

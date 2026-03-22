@@ -27,12 +27,12 @@ CONFIGS = {
     "full_exact_pack": {
         "label": "Full pipeline + exact relaxed-block packing",
         "ab_mode": "full",
-        "pack_solver": "constraint",
+        "pack_solver": "ortools",
     },
     "no_smart_recon": {
         "label": "Exact pack, no smart reconstruction",
         "ab_mode": "no_smart_recon",
-        "pack_solver": "constraint",
+        "pack_solver": "ortools",
     },
     "exact_only": {
         "label": "Exact-only baseline",
