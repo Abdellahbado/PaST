@@ -139,6 +139,7 @@ namespace
         bool use_relaxation_lb = true; // false → skip Steps 1,4,5 LB computation
         bool use_smart_recon = true;   // false → skip Step 5.5
         bool use_exact_shortcut = true;
+        bool use_exact_dp = true;
         // When both use_heuristics=false and use_relaxation_lb=false,
         // we get exact-DP-only (baseline).
     };
@@ -333,7 +334,7 @@ namespace
             t_smart_recon = Dur(Clock::now() - t0).count();
             if (sr_cost < ub)
                 ub = sr_cost;
-            if (sr_cost < dp::kInf)
+            if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
                 lb = ub; // proven optimal
             step_reached = "smart_recon";
             if (gap_closed())
@@ -344,6 +345,8 @@ namespace
         }
 
         // --- Step 6+7: Exact DP ---
+        if (!ab.use_exact_dp)
+            goto done;
     exact_dp:
         {
             auto t0 = Clock::now();
@@ -546,7 +549,7 @@ namespace
                 ub, 30.0);
             if (sr_cost < ub)
                 ub = sr_cost;
-            if (sr_cost < dp::kInf)
+            if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
                 lb = ub; // proven optimal
             if (gap_closed())
                 goto done;
@@ -913,6 +916,15 @@ int main(int argc, char **argv)
             ab.use_banded_spaces = false;
             ab.use_heuristics = true;
             ab.use_relaxation_lb = true;
+        }
+        else if (ab_mode == "step1_only")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = true;
+            ab.use_smart_recon = false;
+            ab.use_exact_shortcut = false;
+            ab.use_exact_dp = false;
         }
         else if (ab_mode == "exact_only")
         {

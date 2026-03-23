@@ -19,6 +19,11 @@ from common import (
 )
 
 CONFIGS = {
+    "step1_only_default": {
+        "label": "Step 1 only (heuristic packing only)",
+        "ab_mode": "step1_only",
+        "pack_solver": "default",
+    },
     "full_default": {
         "label": "Full pipeline (default Step 1)",
         "ab_mode": "full",
