@@ -31,6 +31,12 @@ EC_CONFIGS = [
     {"from_date": "2019-01-21T00:00:00", "repeat_count": 4},
 ]
 
+FORMAL_EC_CONFIGS = [
+    {"from_date": "2019-01-21T00:00:00", "repeat_count": 1},
+    {"from_date": "2019-04-08T00:00:00", "repeat_count": 1},
+    {"from_date": "2019-01-21T00:00:00", "repeat_count": 1},
+]
+
 OFF_ON_TIME = [4, 3, 2]
 ON_OFF_TIME = [1, 1, 1]
 OFF_ON_POWER = [15, 13, 12]
@@ -169,7 +175,7 @@ def gen_scalability_suite() -> list[dict]:
     instances = []
     for n in [300, 400, 500, 600, 750, 1000]:
         for sidx in range(3):
-            ec = EC_CONFIGS[sidx % len(EC_CONFIGS)]
+            ec = FORMAL_EC_CONFIGS[sidx % len(FORMAL_EC_CONFIGS)]
             seed = 1000 + 37 * sidx + n
             rng = random.Random(seed)
             jobs = [rng.choice([8, 10]) for _ in range(n)]
@@ -195,7 +201,7 @@ def gen_backup_suite() -> list[dict]:
     ]
     for family_tag, group, n_total, scarce, seeds in configs:
         for sidx in seeds:
-            ec = EC_CONFIGS[sidx % len(EC_CONFIGS)]
+            ec = FORMAL_EC_CONFIGS[sidx % len(FORMAL_EC_CONFIGS)]
             seed = 4000 + 89 * sidx + 17 * n_total + sum(group)
             rng = random.Random(seed)
             jobs_by_type = [0] * len(group)
@@ -237,18 +243,18 @@ def gen_k_boundary_suite() -> list[dict]:
     families = [
         ("K_contig", [7, 8, 9], [100, 200, 300]),
         ("K_contig", [7, 8, 9, 10], [100, 200, 300]),
-        ("K_contig", [7, 8, 9, 10, 11], [100, 200, 300]),
-        ("K_contig", [7, 8, 9, 10, 11, 12], [100, 200]),
-        ("K_contig", [7, 8, 9, 10, 11, 12, 13], [100, 200]),
-        ("K_contig", [7, 8, 9, 10, 11, 12, 13, 14], [100, 200]),
+        ("K_contig", [7, 8, 9, 10, 11], [100, 200]),
+        ("K_contig", [7, 8, 9, 10, 11, 12], [100, 150]),
+        ("K_contig", [7, 8, 9, 10, 11, 12, 13], [100]),
+        ("K_contig", [7, 8, 9, 10, 11, 12, 13, 14], [100]),
         ("K_moderate_spread", [3, 5, 6, 7], [100, 200, 300]),
         ("K_moderate_spread", [5, 7, 9, 11, 13], [100, 200]),
-        ("K_moderate_spread", [4, 5, 6, 8, 9, 11, 12], [100, 200]),
+        ("K_moderate_spread", [4, 5, 6, 8, 9, 11, 12], [100]),
     ]
     for family, group, n_values in families:
         for n in n_values:
             for sidx in range(3):
-                ec = EC_CONFIGS[sidx % len(EC_CONFIGS)]
+                ec = FORMAL_EC_CONFIGS[sidx % len(FORMAL_EC_CONFIGS)]
                 seed = 8000 + 97 * sidx + 31 * n + sum(group) + 17 * len(group)
                 rng = random.Random(seed)
                 jobs = [rng.choice(group) for _ in range(n)]

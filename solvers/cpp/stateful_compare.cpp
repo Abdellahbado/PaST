@@ -453,7 +453,7 @@ namespace
         const std::string &instance_id,
         const std::vector<double> &prices,
         const std::vector<int> &jobs,
-        double /*time_limit*/,
+        double time_limit,
         const std::string &machine_type = "nosby")
     {
         auto t0_total = std::chrono::steady_clock::now();
@@ -477,8 +477,28 @@ namespace
 
         double ub = dp::kInf;
         double lb = 0.0;
+        bool timed_out = false;
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
+        auto elapsed_sec = [&]()
+        {
+            return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_total).count();
+        };
+        auto remaining_sec = [&]()
+        {
+            if (time_limit <= 0.0)
+                return 1.0e18;
+            return std::max(0.0, time_limit - elapsed_sec());
+        };
+        auto out_of_time = [&]()
+        {
+            if (time_limit > 0.0 && elapsed_sec() >= time_limit)
+            {
+                timed_out = true;
+                return true;
+            }
+            return false;
+        };
 
         // Compute NC to decide whether to skip expensive heuristics
         int64_t NC_est = 1;
@@ -504,6 +524,8 @@ namespace
         states_fwd_expanded = fwd.states_expanded;
         if (gap_closed())
             goto done;
+        if (out_of_time())
+            goto done;
 
         // If NC is small, skip Steps 2-5 (expensive heuristics) and go straight
         // to Step 6 (exact DP) which will solve it quickly.
@@ -516,6 +538,8 @@ namespace
             if (heur_ub < ub)
                 ub = heur_ub;
             if (gap_closed())
+                goto done;
+            if (out_of_time())
                 goto done;
         }
 
@@ -542,6 +566,8 @@ namespace
                 ub = ls_cost;
             if (gap_closed())
                 goto done;
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 4: R_feas LB (transition-feasibility filter) ---
@@ -551,41 +577,70 @@ namespace
                 lb = lb_feas;
             if (gap_closed())
                 goto done;
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 4.5: R_partial LB (partial count-vector tracking) ---
         // Tracks 1-2 scarcest types exactly; usually 10-30× faster than Lagrangian
         // and often produces tighter or equal bounds.
         {
+            double budget = std::min(20.0, remaining_sec());
+            if (budget <= 0.0)
+            {
+                timed_out = true;
+                goto done;
+            }
             double lb_par = dp::solve_relaxed_dp_lb_partial(
-                lens, tots, prefix, T, spaces, {}, 20.0);
+                lens, tots, prefix, T, spaces, {}, budget);
             if (lb_par > lb)
                 lb = lb_par;
             if (gap_closed())
+                goto done;
+            if (out_of_time())
                 goto done;
         }
 
         // --- Step 5: R_feas+Lagr LB (combined bound) ---
         {
-            double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(lens, tots, prefix, T, spaces, 50, 10.0);
-            if (lb_fl > lb)
-                lb = lb_fl;
-            if (gap_closed())
+            double budget = std::min(10.0, remaining_sec());
+            if (budget > 0.0)
+            {
+                double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(lens, tots, prefix, T, spaces, 50, budget);
+                if (lb_fl > lb)
+                    lb = lb_fl;
+                if (gap_closed())
+                    goto done;
+                if (out_of_time())
+                    goto done;
+            }
+            else
+            {
+                timed_out = true;
                 goto done;
+            }
         }
 
         // --- Step 5.5: Smart reconstruction (count-aware search on relaxed DP table) ---
         if (!fwd.rdp.empty())
         {
+            double budget = std::min(30.0, remaining_sec());
+            if (budget <= 0.0)
+            {
+                timed_out = true;
+                goto done;
+            }
             double sr_cost = dp::smart_reconstruct(
                 fwd.rdp, fwd.RW,
                 lens, tots, prefix, T, spaces,
-                ub, 30.0);
+                ub, budget);
             if (sr_cost < ub)
                 ub = sr_cost;
             if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
                 lb = ub; // proven optimal
             if (gap_closed())
+                goto done;
+            if (out_of_time())
                 goto done;
         }
 
@@ -593,7 +648,13 @@ namespace
         // Dense (t, c0, c1, ...) DP. Gives exact optimal = both LB and UB.
     exact_dp:
     {
-        double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub);
+        double budget = remaining_sec();
+        if (budget <= 0.0)
+        {
+            timed_out = true;
+            goto done;
+        }
+        double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub, budget);
         if (exact < dp::kInf)
         {
             // Exact DP completed: exact cost is both a valid UB and LB
@@ -604,11 +665,19 @@ namespace
     }
         if (gap_closed())
             goto done;
+        if (out_of_time())
+            goto done;
 
         // --- Step 7: Sparse exact DP (fallback for larger state spaces) ---
         {
+            double budget = remaining_sec();
+            if (budget <= 0.0)
+            {
+                timed_out = true;
+                goto done;
+            }
             double exact = dp::solve_sparse_exact_multiset_dp(
-                lens, tots, prefix, T, spaces, ub, 300.0);
+                lens, tots, prefix, T, spaces, ub, budget);
             if (exact < dp::kInf)
             {
                 if (exact < ub)
@@ -632,7 +701,7 @@ namespace
             << std::fixed << std::setprecision(4) << gap_pct << ","
             << (feasible ? 1 : 0) << ","
             << (proven_optimal ? 1 : 0) << ","
-            << 0 << ","
+            << (timed_out ? 1 : 0) << ","
             << std::fixed << std::setprecision(4) << elapsed << ","
             << states_fwd_reached << ","
             << states_fwd_expanded;
@@ -714,6 +783,63 @@ namespace
             << std::fixed << std::setprecision(4) << t_gcd << ","
             << std::fixed << std::setprecision(4) << t_semi << ","
             << std::fixed << std::setprecision(4) << t_opt;
+        return row.str();
+    }
+
+    std::string solve_relaxation_feas_profile(
+        const std::string &instance_id,
+        const std::vector<double> &prices,
+        const std::vector<int> &jobs,
+        const std::string &machine_type = "nosby")
+    {
+        std::map<int, int> cnt;
+        for (int p : jobs)
+            cnt[p]++;
+        std::vector<int> lens, tots;
+        for (auto &kv : cnt)
+        {
+            lens.push_back(kv.first);
+            tots.push_back(kv.second);
+        }
+
+        auto cfg = (machine_type == "twosby") ? dp::make_paper_twosby_config()
+                                              : dp::make_paper_nosby_config();
+        int mg = resolve_max_gap(cfg, prices, true);
+        auto spaces = dp::compute_spaces(prices, cfg, mg);
+        auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
+        int T = static_cast<int>(prices.size());
+
+        int total_rw = 0;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+            total_rw += lens[i] * tots[i];
+
+        auto time_call = [&](auto &&fn) -> std::pair<double, double>
+        {
+            auto t0 = Clock::now();
+            double val = fn();
+            double elapsed = Dur(Clock::now() - t0).count();
+            return {val, elapsed};
+        };
+
+        auto [lb_semi, t_semi] = time_call([&]()
+        {
+            return dp::solve_relaxed_dp_lb(
+                lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+        });
+
+        auto [lb_feas, t_feas] = time_call([&]()
+        {
+            return dp::solve_relaxed_dp_lb_feas(lens, tots, prefix, T, spaces);
+        });
+
+        std::ostringstream row;
+        row << instance_id << ","
+            << static_cast<int>(jobs.size()) << ","
+            << prices.size() << ","
+            << std::fixed << std::setprecision(6) << lb_semi << ","
+            << std::fixed << std::setprecision(6) << lb_feas << ","
+            << std::fixed << std::setprecision(4) << t_semi << ","
+            << std::fixed << std::setprecision(4) << t_feas;
         return row.str();
     }
 
@@ -1317,6 +1443,41 @@ int main(int argc, char **argv)
     }
 
     // -----------------------------------------------------------------------
+    // MODE: relax-feas-stdin
+    // Reads one JSON object per line and reports only semigroup and R_feas
+    // lower bounds. This is lighter than the full hierarchy and lighter than
+    // packability recovery, and is intended for paper-facing structure studies.
+    //
+    // Usage: cat instances.jsonl | stateful_compare relax-feas-stdin
+    // -----------------------------------------------------------------------
+    if (mode == "relax-feas-stdin")
+    {
+        std::cout << "instance_id,n_jobs,horizon,lb_semi,lb_feas,t_semi,t_feas\n";
+        std::cout.flush();
+
+        std::string line;
+        while (std::getline(std::cin, line))
+        {
+            if (line.empty() || line.front() != '{')
+                continue;
+            auto prices = json_parse_double_array(line, "prices");
+            auto jobs = json_parse_int_array(line, "jobs");
+            auto iid = json_parse_string(line, "instance_id");
+            auto machine = json_parse_string(line, "machine");
+            if (machine.empty())
+                machine = "nosby";
+            if (prices.empty() || jobs.empty())
+            {
+                std::cerr << "warn: skipping malformed line: " << line.substr(0, 80) << "\n";
+                continue;
+            }
+            std::cout << solve_relaxation_feas_profile(iid, prices, jobs, machine) << "\n";
+            std::cout.flush();
+        }
+        return 0;
+    }
+
+    // -----------------------------------------------------------------------
     // MODE: relax-hierarchy-stdin
     // Reads one JSON object per line from stdin and reports the main lower-bound
     // hierarchy used in the project, including the partial variants.
@@ -1538,6 +1699,8 @@ int main(int argc, char **argv)
               << "      used by the Python parallel launcher (run_cpp_benchmark.py)\n"
               << "  stateful_compare relaxation-stdin [time_limit_sec]\n"
               << "      reads JSONL from stdin, outputs unit/gcd/semigroup relaxed LBs\n"
+              << "  stateful_compare relax-feas-stdin\n"
+              << "      reads JSONL from stdin, outputs semigroup and R_feas lower bounds\n"
               << "  stateful_compare relax-hierarchy-stdin [exact_time_limit_sec]\n"
               << "      reads JSONL from stdin, outputs the project lower-bound hierarchy\n"
               << "  stateful_compare relax-pack-stdin\n"

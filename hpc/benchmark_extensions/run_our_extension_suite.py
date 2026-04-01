@@ -322,7 +322,7 @@ def run_backup(data_dir: Path, out: Path, timeout: int, exact_time_limit: float,
 def run_k_boundary(data_dir: Path, out: Path, time_limit: float, timeout: int, exact_time_limit: float, batch_size: int) -> None:
     json_files, payload, manifest = suite_payload(data_dir)
     ab_rows = call_solver_batched("solve-stdin", payload, timeout, batch_size, extra_arg=str(time_limit))
-    hier_rows = call_solver_batched("relax-hierarchy-stdin", payload, timeout, batch_size, extra_arg=str(exact_time_limit))
+    hier_rows = call_solver_batched("relax-feas-stdin", payload, timeout, batch_size)
     ab_by = {r["instance_id"]: r for r in ab_rows}
     hier_by = {r["instance_id"]: r for r in hier_rows}
 
@@ -347,7 +347,8 @@ def run_k_boundary(data_dir: Path, out: Path, time_limit: float, timeout: int, e
                 "winner_detail": a.get("winner_detail", "default_production"),
                 "lb_semi": h.get("lb_semi", ""),
                 "lb_feas": h.get("lb_feas", ""),
-                "opt": h.get("opt", ""),
+                "t_semi": h.get("t_semi", ""),
+                "t_feas": h.get("t_feas", ""),
                 "is_optimal": a.get("is_optimal", ""),
                 "timed_out": a.get("timed_out", ""),
             }
@@ -378,7 +379,7 @@ def main() -> None:
         ensure_solver_modes(["relax-pack-stdin", "relax-hierarchy-stdin"])
         run_backup(data_dir, args.out, args.solver_timeout, args.exact_time_limit, args.batch_size)
     elif args.suite == "k_boundary":
-        ensure_solver_modes(["solve-stdin", "relax-hierarchy-stdin"])
+        ensure_solver_modes(["solve-stdin", "relax-feas-stdin"])
         run_k_boundary(data_dir, args.out, args.time_limit, args.solver_timeout, args.exact_time_limit, args.batch_size)
 
     print(f"CSV: {args.out}")
