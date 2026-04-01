@@ -6,6 +6,7 @@ Benedikt et al. (2025), plus dedicated study runners for:
 - component ablation
 - banded-vs-full SPACES
 - `G` parameter sweeps
+- formal paper-facing benchmark extensions
 
 ## Quick Start
 
@@ -24,6 +25,7 @@ bash hpc/run_component_ablation.sh
 bash hpc/run_spaces_ablation.sh
 bash hpc/run_g_sweep.sh
 bash hpc/run_relaxation_quality.sh
+bash hpc/benchmark_extensions/00_setup_extension_benchmarks.sh
 
 # 5. Or run the full regression benchmark
 bash hpc/run_full_benchmark.sh --skip-paper
@@ -56,6 +58,7 @@ Run `bash hpc/setup_hpc_env.sh` for the recommended setup path.
 | `04_run_paper_solver.py` | Run the paper's solver on the main benchmark |
 | `05_analyze_results.py` | Aggregate and compare benchmark results |
 | `run_full_benchmark.sh` | Master wrapper for the full regression run |
+| `benchmark_extensions/` | Formal large-`n`, backup, and `K`-boundary benchmark package |
 
 ### Study runners
 
