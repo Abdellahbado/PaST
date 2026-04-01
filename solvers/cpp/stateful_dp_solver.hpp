@@ -132,6 +132,31 @@ namespace dp
         int T,
         const SPACESResult &spaces);
 
+    // Same as solve_relaxed_dp_with_binpack, but the relaxed path is computed
+    // with the strengthened R_feas transition filter instead of plain
+    // semigroup reachability. This is useful when the question is not only
+    // "how strong is the lower bound?" but also "does the recovered relaxed
+    // block profile pack with the real multiset?".
+    RelaxedDPResult solve_relaxed_dp_lb_feas_with_binpack(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces);
+
+    // One-tracked-type version of R_partial with recovered-block packability.
+    // The tracked type is chosen explicitly or via the same automatic
+    // critical-type selector used by solve_relaxed_dp_lb_partial.
+    RelaxedDPResult solve_relaxed_dp_lb_partial_with_binpack(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        std::vector<int> tracked_types = {},
+        int max_auto_tracked = 1,
+        bool use_remainder_feas = true);
+
     // Backward relaxed LB: reverse time, take max(forward, backward).
     // Accepts fwd_config to generically reverse any machine (not just NOSBY).
     double solve_relaxed_dp_lb_backward(
@@ -212,11 +237,15 @@ namespace dp
 
     // ── New LB hierarchy bounds ──────────────────────────────────────────
 
-    // R_feas: relaxed DP (t, rw) with bounded-knapsack transition filter.
-    // At state (t, rw), type j is allowed only if (W - rw) ∈ A_j^-, where
-    // A_j^- = {w : ∃ allocation summing to w with a_j ≤ n_j - 1}.
-    // Strictly tighter than R_semi when finite counts exclude transitions.
-    // Precomputation: O(K^2 * W). Per-transition overhead: O(1) lookup.
+    // R_feas: relaxed DP (t, rw) with bounded-work and two-sided
+    // transition-feasibility filtering.
+    // At state (t, rw), a transition by type j is allowed only if:
+    //   1) the already-placed work W-rw is reachable with bounded counts,
+    //   2) it can be explained while leaving one type-j job unused, and
+    //   3) after taking type j, the remaining work rw-L_j is still achievable
+    //      under the residual bounded counts.
+    // This remains a lower bound (still merges count vectors), but is
+    // strictly tighter than the original one-sided R_feas.
     double solve_relaxed_dp_lb_feas(
         const std::vector<int> &lengths,
         const std::vector<int> &totals,
@@ -249,10 +278,48 @@ namespace dp
         int max_iters = 50,
         double time_limit_sec = 5.0);
 
+    // R_partial: Partial count-vector relaxation.
+    // Tracks 1-2 critical type counts exactly while relaxing the rest
+    // to remaining work. The relaxed remainder is still filtered through
+    // bounded/two-sided feasibility checks, yielding a tighter hybrid
+    // relaxation than plain R_partial or R_feas alone.
+    //
+    // State: (t_end, c_tracked[0], [c_tracked[1],] rw_rest)
+    //   - c_tracked[i] is the exact count of tracked type i placed so far
+    //   - rw_rest is the remaining work from non-tracked types
+    //
+    // Hierarchy:  R_feas ≤ R_partial(1) ≤ R_partial(2) ≤ Exact
+    //
+    // tracked_types: indices of types to track exactly.
+    //   If empty, auto-selects up to max_auto_tracked critical types using
+    //   one relaxed overuse diagnostic pass, then falls back to scarcity.
+    //   If size 1: state is 3D (t, c, rw_rest)
+    //   If size 2: state is 4D (t, c0, c1, rw_rest)
+    //   Max 2 tracked types supported.
+    // use_remainder_feas controls whether the untracked remainder uses the
+    // bounded/two-sided feasibility filter (true) or plain remaining-work
+    // transitions (false).
+    double solve_relaxed_dp_lb_partial(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        std::vector<int> tracked_types = {},
+        double time_limit_sec = 20.0,
+        int max_auto_tracked = 2,
+        bool use_remainder_feas = true);
+
     // Precompute bounded-knapsack feasibility sets A_j^- for each type j.
     // A_j^-[w] = true iff work amount w is achievable with a_j ≤ n_j - 1.
     // Returns K vectors of size (W+1).
     std::vector<std::vector<bool>> compute_feas_sets(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals);
+
+    // Precompute the bounded achievable-work set
+    // A = {w : ∃ allocation summing to w with a_i ≤ n_i}.
+    std::vector<bool> compute_bounded_work_set(
         const std::vector<int> &lengths,
         const std::vector<int> &totals);
 

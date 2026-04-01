@@ -388,6 +388,12 @@ namespace dp
                      const std::vector<double> &prices)
     {
         int n_s = static_cast<int>(config.states.size());
+        if (prices.empty() || h <= 0)
+            return 0;
+
+        std::vector<double> prefix(h + 1, 0.0);
+        for (int i = 0; i < h; ++i)
+            prefix[i + 1] = prefix[i] + prices[i];
 
         // Compute idle power (cheapest way to stay available per interval)
         double p_idle = kInf;
@@ -410,27 +416,70 @@ namespace dp
         if (p_idle >= kInf || p_idle <= 0)
             return std::min(100, h); // fallback
 
-        // Compute restart power (shutdown then startup total power × duration)
-        double restart_power = 0;
-        // proc → off
-        if (config.t_trans[config.proc_idx][config.off_idx] > 0)
-            restart_power += config.p_trans[config.proc_idx][config.off_idx] *
-                             config.t_trans[config.proc_idx][config.off_idx];
-        // off → proc
-        if (config.t_trans[config.off_idx][config.proc_idx] > 0)
-            restart_power += config.p_trans[config.off_idx][config.proc_idx] *
-                             config.t_trans[config.off_idx][config.proc_idx];
+        auto max_direct_transition_cost = [&](int s_from, int s_to) -> double
+        {
+            int dur = config.t_trans[s_from][s_to];
+            double power = config.p_trans[s_from][s_to];
+            if (dur <= 0 || power >= kInf || dur > h)
+                return -1.0;
+            double best = 0.0;
+            for (int t = 0; t + dur <= h; ++t)
+            {
+                double window_sum = prefix[t + dur] - prefix[t];
+                best = std::max(best, power * window_sum);
+            }
+            return best;
+        };
 
-        // Price range
+        // Conservative upper bound on full shutdown+restart cost over all positions.
+        double max_shutdown = max_direct_transition_cost(config.proc_idx, config.off_idx);
+        double max_startup = max_direct_transition_cost(config.off_idx, config.proc_idx);
+        double max_restart_cost = -1.0;
+        if (max_shutdown >= 0.0 && max_startup >= 0.0)
+            max_restart_cost = max_shutdown + max_startup;
+
+        // Legacy coarse bound based on min/max prices.
         double max_price = *std::max_element(prices.begin(), prices.end());
         double min_price = *std::min_element(prices.begin(), prices.end());
         if (min_price <= 0)
             min_price = 0.01;
+        double restart_power = 0.0;
+        if (config.t_trans[config.proc_idx][config.off_idx] > 0)
+            restart_power += config.p_trans[config.proc_idx][config.off_idx] *
+                             config.t_trans[config.proc_idx][config.off_idx];
+        if (config.t_trans[config.off_idx][config.proc_idx] > 0)
+            restart_power += config.p_trans[config.off_idx][config.proc_idx] *
+                             config.t_trans[config.off_idx][config.proc_idx];
+        int coarse_gap = static_cast<int>(std::ceil(restart_power * max_price / (p_idle * min_price))) + 3;
 
-        // Break-even: p_idle × g × min_idle_price = restart_power × max_restart_price
-        // Worst case: idling is cheapest (min price), restarting is most expensive (max price)
-        // g = restart_power × max_price / (p_idle × min_price)
-        int gap = static_cast<int>(std::ceil(restart_power * max_price / (p_idle * min_price))) + 3;
+        // Sharper safe bound: use the minimum actual price-window sum of length g.
+        // For any gap of length g, idling/ready cost is at least p_idle * min_window_sum(g).
+        // Once that exceeds a conservative upper bound on full restart cost, any longer
+        // gap is safely handled by shutdown+startup.
+        auto min_window_sum = [&](int len) -> double
+        {
+            double best = kInf;
+            for (int t = 0; t + len <= h; ++t)
+                best = std::min(best, prefix[t + len] - prefix[t]);
+            return best;
+        };
+
+        int sharp_gap = h;
+        if (max_restart_cost >= 0.0)
+        {
+            int lo = 1, hi = h;
+            while (lo < hi)
+            {
+                int mid = lo + (hi - lo) / 2;
+                if (p_idle * min_window_sum(mid) >= max_restart_cost)
+                    hi = mid;
+                else
+                    lo = mid + 1;
+            }
+            sharp_gap = lo + 3;
+        }
+
+        int gap = std::min(coarse_gap, sharp_gap);
         return std::min(std::max(gap, 15), h);
     }
 
@@ -1262,16 +1311,37 @@ namespace dp
         RelaxationMode mode)
     {
         std::vector<int> allowed_lengths = relaxation_chunk_lengths(lengths, mode);
+        int rw_gcd = 0;
+        for (int L : allowed_lengths)
+            rw_gcd = std::gcd(rw_gcd, L);
+        if (rw_gcd <= 0 || (total_rw % rw_gcd) != 0)
+            rw_gcd = 1;
+        std::vector<int> scaled_lengths = allowed_lengths;
+        if (rw_gcd > 1)
+            for (int &L : scaled_lengths)
+                L /= rw_gcd;
         int K = static_cast<int>(allowed_lengths.size());
         int eff_max_gap = spaces.banded ? spaces.max_gap : T;
 
         // dp[rw] at time t_end = min cost with (total_rw - rw) work placed, last job ending at t_end
         // We sweep t_end from left to right, using two arrays per rw value.
         // Since we write to future t_end values, use a 2D table: dp[t][rw].
-        int RW = total_rw + 1;
+        int total_rw_scaled = total_rw / rw_gcd;
+        int RW = total_rw_scaled + 1;
         std::vector<double> dp((T + 2) * RW, kInf);
+        std::vector<std::vector<int>> active_rw(T + 2);
         auto idx = [&](int t, int rw) -> int
         { return t * RW + rw; };
+        auto relax_cell = [&](int t, int rw, double cost)
+        {
+            double &ref = dp[idx(t, rw)];
+            if (cost < ref)
+            {
+                if (ref >= kInf)
+                    active_rw[t].push_back(rw);
+                ref = cost;
+            }
+        };
 
         // Seed: first job from startup
         for (int t_s = spaces.early; t_s <= spaces.late; ++t_s)
@@ -1282,21 +1352,23 @@ namespace dp
             for (int j = 0; j < K; ++j)
             {
                 int L = allowed_lengths[j];
+                int Ls = scaled_lengths[j];
                 if (L > total_rw)
                     continue;
                 int t_e = t_s + L;
                 if (t_e > T || t_e > spaces.late + 1)
                     continue;
                 double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
-                int new_rw = total_rw - L;
-                double &ref = dp[idx(t_e, new_rw)];
-                ref = std::min(ref, cost);
+                int new_rw = total_rw_scaled - Ls;
+                relax_cell(t_e, new_rw, cost);
             }
         }
 
         // Shutdown bank: for each rw, best (cost + c_end) from past layers
         // Entries are deferred by eff_max_gap + 1 time steps.
         std::vector<double> bank(RW, kInf);
+        std::vector<int> bank_active;
+        std::vector<uint8_t> bank_seen(RW, 0);
         // deferred[t] = list of (rw, shutdown_cost) to absorb at time t
         std::vector<std::vector<std::pair<int, double>>> deferred(T + 2);
 
@@ -1308,7 +1380,17 @@ namespace dp
             if (spaces.banded && t_end < static_cast<int>(deferred.size()))
             {
                 for (auto &[rw, cost] : deferred[t_end])
-                    bank[rw] = std::min(bank[rw], cost);
+                {
+                    if (cost < bank[rw])
+                    {
+                        if (!bank_seen[rw])
+                        {
+                            bank_seen[rw] = 1;
+                            bank_active.push_back(rw);
+                        }
+                        bank[rw] = cost;
+                    }
+                }
                 deferred[t_end].clear();
             }
 
@@ -1316,7 +1398,7 @@ namespace dp
             if (spaces.banded && spaces.c_start[t_end] < kInf)
             {
                 double start_cost = spaces.c_start[t_end];
-                for (int rw = 1; rw < RW; ++rw)
+                for (int rw : bank_active)
                 {
                     if (bank[rw] >= kInf)
                         continue;
@@ -1324,14 +1406,14 @@ namespace dp
                     for (int j = 0; j < K; ++j)
                     {
                         int L = allowed_lengths[j];
-                        if (L > rw)
+                        int Ls = scaled_lengths[j];
+                        if (Ls > rw)
                             continue;
                         int t_e = t_end + L;
                         if (t_e > T || t_e > spaces.late + 1)
                             continue;
                         double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
-                        double &ref = dp[idx(t_e, rw - L)];
-                        ref = std::min(ref, cost);
+                        relax_cell(t_e, rw - Ls, cost);
                     }
                 }
             }
@@ -1342,7 +1424,7 @@ namespace dp
                 best = std::min(best, d0 + spaces.c_end[t_end]);
 
             // Phase C: within-max-gap transitions
-            for (int rw = 1; rw < RW; ++rw)
+            for (int rw : active_rw[t_end])
             {
                 double sv_cost = dp[idx(t_end, rw)];
                 if (sv_cost >= kInf)
@@ -1357,14 +1439,14 @@ namespace dp
                     for (int j = 0; j < K; ++j)
                     {
                         int L = allowed_lengths[j];
-                        if (L > rw)
+                        int Ls = scaled_lengths[j];
+                        if (Ls > rw)
                             continue;
                         int t_e = t_s + L;
                         if (t_e > T || t_e > spaces.late + 1)
                             continue;
                         double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]);
-                        double &ref = dp[idx(t_e, rw - L)];
-                        ref = std::min(ref, cost);
+                        relax_cell(t_e, rw - Ls, cost);
                     }
                 }
             }
@@ -1373,7 +1455,7 @@ namespace dp
             if (spaces.banded && spaces.c_end[t_end] < kInf)
             {
                 double c_end_here = spaces.c_end[t_end];
-                for (int rw = 1; rw < RW; ++rw)
+                for (int rw : active_rw[t_end])
                 {
                     double sv_cost = dp[idx(t_end, rw)];
                     if (sv_cost >= kInf)
@@ -1387,6 +1469,381 @@ namespace dp
         }
 
         return best;
+    }
+
+    struct RecoveredBlock
+    {
+        int start = 0;
+        int length = 0;
+    };
+
+    struct RecoveredBlockPackingResult
+    {
+        double bin_pack_ub = kInf;
+        int block_count = 0;
+        int merged_block_count = 0;
+        std::string pack_solver = "default";
+        std::string pack_external_status = "disabled";
+        std::string pack_method = "none";
+        std::string pack_outcome = "not_attempted";
+        double t_pack_external = 0.0;
+        double t_pack_heuristic = 0.0;
+        double t_pack_dfs = 0.0;
+        double t_pack_block_dp = 0.0;
+    };
+
+    RecoveredBlockPackingResult pack_recovered_blocks(
+        const std::vector<RecoveredBlock> &blocks,
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces)
+    {
+        RecoveredBlockPackingResult result;
+        result.pack_outcome = blocks.empty() ? "no_blocks" : "failed";
+        result.block_count = static_cast<int>(blocks.size());
+
+        if (blocks.empty())
+            return result;
+
+        const char *pack_mode = std::getenv("PAST_RELAXED_BINPACK_SOLVER");
+        result.pack_solver = pack_mode ? std::string(pack_mode) : "default";
+
+        auto note_pack_candidate = [&](const std::string &method, double cand)
+        {
+            if (cand < result.bin_pack_ub)
+            {
+                result.bin_pack_ub = cand;
+                result.pack_method = method;
+                result.pack_outcome = "feasible";
+            }
+        };
+
+        std::vector<RecoveredBlock> merged;
+        merged.push_back(blocks[0]);
+        for (std::size_t i = 1; i < blocks.size(); ++i)
+        {
+            RecoveredBlock &last = merged.back();
+            if (blocks[i].start <= last.start + last.length)
+            {
+                int new_end = std::max(last.start + last.length,
+                                       blocks[i].start + blocks[i].length);
+                last.length = new_end - last.start;
+            }
+            else
+            {
+                merged.push_back(blocks[i]);
+            }
+        }
+        result.merged_block_count = static_cast<int>(merged.size());
+
+        std::vector<int> all_jobs;
+        for (std::size_t i = 0; i < lengths.size(); ++i)
+        {
+            for (int j = 0; j < totals[i]; ++j)
+                all_jobs.push_back(lengths[i]);
+        }
+
+        std::size_t nB = merged.size();
+        std::vector<int> orig_cap(nB);
+        for (std::size_t i = 0; i < nB; ++i)
+            orig_cap[i] = merged[i].length;
+
+        bool exact_pack_decided = false;
+        // Legacy env vars removed: PAST_RELAXED_BINPACK_NATIVE_FIRST,
+        // PAST_RELAXED_BINPACK_ALLOW_SMALL_NC, PAST_RELAXED_BINPACK_DISABLE_DFS_EXACT
+        // are no longer needed. Block-DP is the sole packing method and runs unconditionally.
+
+
+        {
+            auto t0_pack = std::chrono::steady_clock::now();
+
+            auto try_pack = [&](const std::vector<int> &jobs, int mode) -> double
+            {
+                std::vector<int> cap = orig_cap;
+                std::vector<std::vector<int>> bj(nB);
+                for (int jl : jobs)
+                {
+                    int best_b = -1;
+                    if (mode == 0)
+                    {
+                        for (std::size_t b = 0; b < nB; ++b)
+                        {
+                            if (cap[b] >= jl)
+                            {
+                                best_b = static_cast<int>(b);
+                                break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        int best_rem = INT_MAX;
+                        for (std::size_t b = 0; b < nB; ++b)
+                        {
+                            if (cap[b] >= jl && cap[b] - jl < best_rem)
+                            {
+                                best_rem = cap[b] - jl;
+                                best_b = static_cast<int>(b);
+                            }
+                        }
+                    }
+                    if (best_b < 0)
+                        return kInf;
+                    cap[best_b] -= jl;
+                    bj[best_b].push_back(jl);
+                }
+                std::vector<int> seq;
+                for (std::size_t b = 0; b < nB; ++b)
+                    for (int j : bj[b])
+                        seq.push_back(j);
+                return solve_fixed_sequence(seq, prefix_proc, T, spaces);
+            };
+
+            {
+                std::vector<int> jobs = all_jobs;
+                std::sort(jobs.begin(), jobs.end(), std::greater<int>());
+                note_pack_candidate("ffd", try_pack(jobs, 0));
+            }
+            {
+                std::vector<int> jobs = all_jobs;
+                std::sort(jobs.begin(), jobs.end(), std::greater<int>());
+                note_pack_candidate("bfd", try_pack(jobs, 1));
+            }
+            {
+                std::vector<int> jobs = all_jobs;
+                std::sort(jobs.begin(), jobs.end());
+                note_pack_candidate("ffi", try_pack(jobs, 0));
+            }
+            {
+                std::vector<int> jobs = all_jobs;
+                std::sort(jobs.begin(), jobs.end());
+                note_pack_candidate("bfi", try_pack(jobs, 1));
+            }
+            {
+                std::mt19937_64 rng(12345);
+                std::vector<int> jobs = all_jobs;
+                for (int trial = 0; trial < 20; ++trial)
+                {
+                    std::shuffle(jobs.begin(), jobs.end(), rng);
+                    note_pack_candidate(trial & 1 ? "random_bf" : "random_ff",
+                                        try_pack(jobs, trial & 1));
+                }
+            }
+
+            result.t_pack_heuristic =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_pack).count();
+        }
+
+        // ---------------------------------------------------------------
+        // Block-based DP packing (the sole exact packing method).
+        //
+        // Given the recovered block capacities orig_cap[0..nB-1] and job
+        // type lengths/totals, determine whether there exists a multiset
+        // partition of all jobs into the blocks such that each block is
+        // exactly filled.  This is solved exactly via reachability in the
+        // mixed-radix count-space.
+        //
+        // DFS packing has been deprecated: block-DP is both faster and
+        // provably exact, rendering the ad-hoc capped DFS redundant.
+        // ---------------------------------------------------------------
+        auto run_block_dp_packing = [&]()
+        {
+            if (exact_pack_decided || result.bin_pack_ub < kInf * 0.5)
+                return;
+
+            int K = static_cast<int>(lengths.size());
+            int nBlk = static_cast<int>(nB);
+
+            // --- Enumerate valid compositions per block ---
+            struct BComp
+            {
+                int64_t delta;
+                int counts[8];
+            };
+
+            std::vector<int64_t> bp_strides(K);
+            int64_t bp_NC = 1;
+            for (int i = 0; i < K; ++i)
+            {
+                bp_strides[i] = bp_NC;
+                bp_NC *= (totals[i] + 1);
+            }
+
+            std::vector<std::vector<BComp>> bcomps(nBlk);
+            for (int b = 0; b < nBlk; ++b)
+            {
+                int cap = orig_cap[b];
+                std::vector<int> cc(K, 0);
+                std::function<void(int, int)> en = [&](int ti, int r)
+                {
+                    if (ti == K)
+                    {
+                        if (r == 0)
+                        {
+                            BComp bc;
+                            bc.delta = 0;
+                            for (int i = 0; i < K; ++i)
+                            {
+                                bc.counts[i] = cc[i];
+                                bc.delta += static_cast<int64_t>(cc[i]) * bp_strides[i];
+                            }
+                            bcomps[b].push_back(bc);
+                        }
+                        return;
+                    }
+                    int L = lengths[ti];
+                    int mx = std::min(totals[ti], r / L);
+                    for (int c = mx; c >= 0; --c)
+                    {
+                        cc[ti] = c;
+                        en(ti + 1, r - c * L);
+                    }
+                };
+                en(0, cap);
+            }
+
+            // --- Order blocks by fewest compositions first (prune early) ---
+            std::vector<int> border(nBlk);
+            std::iota(border.begin(), border.end(), 0);
+            std::sort(border.begin(), border.end(), [&](int a, int b)
+                      { return bcomps[a].size() < bcomps[b].size(); });
+
+            std::vector<int> suffix_cap(nBlk + 1, 0);
+            for (int i = nBlk - 1; i >= 0; --i)
+                suffix_cap[i] = suffix_cap[i + 1] + orig_cap[border[i]];
+
+            // --- Helper lambdas ---
+            int64_t initial_st = 0;
+            for (int i = 0; i < K; ++i)
+                initial_st += static_cast<int64_t>(totals[i]) * bp_strides[i];
+
+            auto compute_work = [&](int64_t s) -> int
+            {
+                int work = 0;
+                int64_t tmp = s;
+                for (int i = 0; i < K; ++i)
+                {
+                    int rv = static_cast<int>(tmp % (totals[i] + 1));
+                    tmp /= (totals[i] + 1);
+                    work += rv * lengths[i];
+                }
+                return work;
+            };
+
+            auto decode_state = [&](int64_t s, int r[8])
+            {
+                int64_t tmp = s;
+                for (int i = 0; i < K; ++i)
+                {
+                    r[i] = static_cast<int>(tmp % (totals[i] + 1));
+                    tmp /= (totals[i] + 1);
+                }
+            };
+
+            // --- Forward pass: build reachability sets ---
+            auto t0_block_dp = std::chrono::steady_clock::now();
+
+            std::vector<std::unordered_set<int64_t>> reach(nBlk + 1);
+            reach[0].insert(initial_st);
+
+            for (int bi = 0; bi < nBlk; ++bi)
+            {
+                int b = border[bi];
+                auto &comps_b = bcomps[b];
+                int required_work = suffix_cap[bi];
+                for (int64_t s : reach[bi])
+                {
+                    if (compute_work(s) != required_work)
+                        continue;
+                    int r[8];
+                    decode_state(s, r);
+                    for (auto &bc : comps_b)
+                    {
+                        bool ok = true;
+                        for (int i = 0; i < K; ++i)
+                        {
+                            if (bc.counts[i] > r[i])
+                            {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if (ok)
+                            reach[bi + 1].insert(s - bc.delta);
+                    }
+                }
+            }
+
+            // --- Result: reconstruct assignment if feasible ---
+            if (reach[nBlk].count(0))
+            {
+                std::vector<std::vector<int>> asgn(nBlk);
+                int64_t s = initial_st;
+                bool reconstruction_ok = true;
+                for (int bi = 0; bi < nBlk; ++bi)
+                {
+                    int b = border[bi];
+                    if (compute_work(s) != suffix_cap[bi])
+                    {
+                        reconstruction_ok = false;
+                        break;
+                    }
+                    int r[8];
+                    decode_state(s, r);
+                    bool found = false;
+                    for (auto &bc : bcomps[b])
+                    {
+                        bool ok = true;
+                        for (int i = 0; i < K; ++i)
+                        {
+                            if (bc.counts[i] > r[i])
+                            {
+                                ok = false;
+                                break;
+                            }
+                        }
+                        if (!ok)
+                            continue;
+                        int64_t ns = s - bc.delta;
+                        if (reach[bi + 1].count(ns))
+                        {
+                            asgn[b].assign(bc.counts, bc.counts + K);
+                            s = ns;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found)
+                    {
+                        reconstruction_ok = false;
+                        break;
+                    }
+                }
+                if (reconstruction_ok)
+                {
+                    std::vector<int> seq;
+                    for (int b = 0; b < nBlk; ++b)
+                        for (int i = 0; i < K; ++i)
+                            for (int j = 0; j < asgn[b][i]; ++j)
+                                seq.push_back(lengths[i]);
+                    note_pack_candidate("block_dp_exact",
+                                        solve_fixed_sequence(seq, prefix_proc, T, spaces));
+                }
+            }
+            else
+            {
+                result.pack_outcome = "infeasible";
+            }
+
+            result.t_pack_block_dp =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_block_dp).count();
+        };
+
+        run_block_dp_packing();
+
+        return result;
     }
 
     // =====================================================================
@@ -1407,7 +1864,17 @@ namespace dp
         int total_rw = 0;
         for (int i = 0; i < K; ++i)
             total_rw += lengths[i] * totals[i];
-        int RW = total_rw + 1;
+        int rw_gcd = 0;
+        for (int L : lengths)
+            rw_gcd = std::gcd(rw_gcd, L);
+        if (rw_gcd <= 0 || (total_rw % rw_gcd) != 0)
+            rw_gcd = 1;
+        std::vector<int> scaled_lengths = lengths;
+        if (rw_gcd > 1)
+            for (int &L : scaled_lengths)
+                L /= rw_gcd;
+        int total_rw_scaled = total_rw / rw_gcd;
+        int RW = total_rw_scaled + 1;
 
         // Relaxed DP with parent tracking (same as bin_packing_ub internal DP)
         struct RPar
@@ -1419,11 +1886,25 @@ namespace dp
         };
         std::vector<double> dp((T + 2) * RW, kInf);
         std::vector<RPar> par((T + 2) * RW, {-1, -1, 0, 0});
-        auto idx = [&](int t, int rw) -> int
-        { return t * RW + rw; };
-
+        std::vector<std::vector<int>> active_rw(T + 2);
         int64_t states_reached = 0;
         int64_t states_expanded = 0;
+        auto idx = [&](int t, int rw) -> int
+        { return t * RW + rw; };
+        auto relax_cell = [&](int t, int rw, double cost, RPar parent)
+        {
+            int i = idx(t, rw);
+            if (cost < dp[i])
+            {
+                if (dp[i] >= kInf)
+                {
+                    ++states_reached;
+                    active_rw[t].push_back(rw);
+                }
+                dp[i] = cost;
+                par[i] = parent;
+            }
+        };
 
         // Seed
         for (int t_s = spaces.early; t_s <= spaces.late; ++t_s)
@@ -1434,13 +1915,274 @@ namespace dp
             for (int j = 0; j < K; ++j)
             {
                 int L = lengths[j];
+                int Ls = scaled_lengths[j];
                 if (L > total_rw)
                     continue;
                 int t_e = t_s + L;
                 if (t_e > T || t_e > spaces.late + 1)
                     continue;
                 double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
+                int new_rw = total_rw_scaled - Ls;
+                relax_cell(t_e, new_rw, cost, {-1, total_rw_scaled, L, t_s});
+            }
+        }
+
+        std::vector<double> bank_cost(RW, kInf);
+        std::vector<int> bank_t(RW, -1);
+        std::vector<int> bank_active;
+        std::vector<uint8_t> bank_seen(RW, 0);
+        std::vector<std::vector<std::tuple<int, double, int>>> deferred(T + 2);
+
+        double best = kInf;
+        int best_t = -1;
+
+        for (int t_end = 1; t_end <= T; ++t_end)
+        {
+            if (spaces.banded && t_end < (int)deferred.size())
+            {
+                for (auto &[rw, cost, t_src] : deferred[t_end])
+                    if (cost < bank_cost[rw])
+                    {
+                        if (!bank_seen[rw])
+                        {
+                            bank_seen[rw] = 1;
+                            bank_active.push_back(rw);
+                        }
+                        bank_cost[rw] = cost;
+                        bank_t[rw] = t_src;
+                    }
+                deferred[t_end].clear();
+            }
+
+            if (spaces.banded && spaces.c_start[t_end] < kInf)
+            {
+                double start_cost = spaces.c_start[t_end];
+                for (int rw : bank_active)
+                {
+                    if (bank_cost[rw] >= kInf)
+                        continue;
+                    double base = bank_cost[rw] + start_cost;
+                    for (int j = 0; j < K; ++j)
+                    {
+                        int L = lengths[j];
+                        int Ls = scaled_lengths[j];
+                        if (Ls > rw)
+                            continue;
+                        int t_e = t_end + L;
+                        if (t_e > T || t_e > spaces.late + 1)
+                            continue;
+                        double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
+                        relax_cell(t_e, rw - Ls, cost, {bank_t[rw], rw, L, t_end});
+                    }
+                }
+            }
+
+            double d0 = dp[idx(t_end, 0)];
+            if (d0 < kInf && spaces.c_end[t_end] < kInf)
+            {
+                double total = d0 + spaces.c_end[t_end];
+                if (total < best)
+                {
+                    best = total;
+                    best_t = t_end;
+                }
+            }
+
+            for (int rw : active_rw[t_end])
+            {
+                double sv_cost = dp[idx(t_end, rw)];
+                if (sv_cost >= kInf)
+                    continue;
+                ++states_expanded;
+                int gap_limit = std::min(t_end + eff_max_gap + 1, spaces.late + 1);
+                for (int t_s = t_end; t_s < gap_limit; ++t_s)
+                {
+                    double gap = spaces.gap_cost(t_end, t_s);
+                    if (gap >= kInf)
+                        continue;
+                    double base = sv_cost + gap;
+                    for (int j = 0; j < K; ++j)
+                    {
+                        int L = lengths[j];
+                        int Ls = scaled_lengths[j];
+                        if (Ls > rw)
+                            continue;
+                        int t_e = t_s + L;
+                        if (t_e > T || t_e > spaces.late + 1)
+                            continue;
+                        double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]);
+                        relax_cell(t_e, rw - Ls, cost, {t_end, rw, L, t_s});
+                    }
+                }
+            }
+
+            if (spaces.banded && spaces.c_end[t_end] < kInf)
+            {
+                double c_end_here = spaces.c_end[t_end];
+                for (int rw : active_rw[t_end])
+                {
+                    double sv_cost = dp[idx(t_end, rw)];
+                    if (sv_cost >= kInf)
+                        continue;
+                    int eligible = t_end + eff_max_gap + 1;
+                    if (eligible <= T)
+                        deferred[eligible].push_back({rw, sv_cost + c_end_here, t_end});
+                }
+            }
+        }
+
+        double lb = best; // This IS the relaxed DP LB
+
+        // ---------------------------------------------------------------
+        //  CO-OPTIMAL PROFILE DIVERSITY
+        //
+        //  The relaxed DP table encodes a DAG of all optimal paths, not
+        //  just a single one. By collecting multiple co-optimal terminal
+        //  times and backtracking from each, we obtain structurally
+        //  diverse block profiles at zero additional DP cost. Each new
+        //  profile is an independent packing candidate.
+        //
+        //  Theorem justification: for any t such that
+        //      dp[t][0] + c_end[t] = OPT_relaxed,
+        //  the parent chain from (t, 0) yields an optimal block
+        //  decomposition. Different t values typically produce different
+        //  block structures (different starts, lengths, gaps).
+        // ---------------------------------------------------------------
+        constexpr int MAX_PROFILES = 32;
+        std::vector<int> co_optimal_terminals;
+        if (best_t >= 0)
+        {
+            for (int t = 1; t <= T; ++t)
+            {
+                double d0 = dp[idx(t, 0)];
+                if (d0 < kInf && spaces.c_end[t] < kInf)
+                {
+                    double total = d0 + spaces.c_end[t];
+                    if (std::abs(total - best) < 1e-6)
+                        co_optimal_terminals.push_back(t);
+                }
+            }
+            // Ensure best_t is first (highest priority)
+            auto it = std::find(co_optimal_terminals.begin(),
+                                co_optimal_terminals.end(), best_t);
+            if (it != co_optimal_terminals.end() &&
+                it != co_optimal_terminals.begin())
+            {
+                std::swap(*co_optimal_terminals.begin(), *it);
+            }
+            // Limit to avoid pathological cases
+            if ((int)co_optimal_terminals.size() > MAX_PROFILES)
+                co_optimal_terminals.resize(MAX_PROFILES);
+        }
+
+        // Try packing each co-optimal profile
+        RecoveredBlockPackingResult pack;
+        pack.pack_outcome = (best_t >= 0 ? "not_attempted" : "no_relaxed_path");
+        for (int term_t : co_optimal_terminals)
+        {
+            std::vector<RecoveredBlock> blocks;
+            {
+                int t = term_t;
+                int rw = 0;
+                while (true)
+                {
+                    int i = idx(t, rw);
+                    const RPar &p = par[i];
+                    if (p.L <= 0)
+                        break;
+                    blocks.push_back({p.t_s, p.L});
+                    t = p.prev_t;
+                    rw = p.prev_rw;
+                    if (t < 0)
+                        break;
+                }
+                std::reverse(blocks.begin(), blocks.end());
+            }
+            pack = pack_recovered_blocks(blocks, lengths, totals, prefix_proc, T, spaces);
+            if (pack.bin_pack_ub < kInf * 0.5)
+                break; // found a packable profile!
+        }
+
+        RelaxedDPResult result;
+        result.lb = lb;
+        result.bin_pack_ub = pack.bin_pack_ub;
+        result.states_reached = states_reached;
+        result.states_expanded = states_expanded;
+        result.rdp = std::move(dp);  // zero-copy transfer of the dp table
+        result.RW = RW;
+        result.block_count = pack.block_count;
+        result.merged_block_count = pack.merged_block_count;
+        result.pack_solver = pack.pack_solver;
+        result.pack_external_status = pack.pack_external_status;
+        result.pack_method = pack.pack_method;
+        result.pack_outcome = pack.pack_outcome;
+        result.t_pack_external = pack.t_pack_external;
+        result.t_pack_heuristic = pack.t_pack_heuristic;
+        result.t_pack_dfs = pack.t_pack_dfs;
+        result.t_pack_block_dp = pack.t_pack_block_dp;
+        return result;
+    }
+
+    RelaxedDPResult solve_relaxed_dp_lb_feas_with_binpack(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces)
+    {
+        int K = static_cast<int>(lengths.size());
+        int eff_max_gap = spaces.banded ? spaces.max_gap : T;
+        int total_rw = 0;
+        for (int i = 0; i < K; ++i)
+            total_rw += lengths[i] * totals[i];
+        int RW = total_rw + 1;
+
+        struct RPar
+        {
+            int prev_t;
+            int prev_rw;
+            int L;
+            int t_s;
+        };
+
+        auto bounded_work = compute_bounded_work_set(lengths, totals);
+        auto feas = compute_feas_sets(lengths, totals);
+
+        auto can_place = [&](int j, int rw, int next_rw) -> bool
+        {
+            int placed = total_rw - rw;
+            if (placed < 0 || placed > total_rw)
+                return false;
+            if (next_rw < 0 || next_rw > total_rw)
+                return false;
+            return bounded_work[placed] && feas[j][placed] && feas[j][next_rw];
+        };
+
+        std::vector<double> dp((T + 2) * RW, kInf);
+        std::vector<RPar> par((T + 2) * RW, {-1, -1, 0, 0});
+        auto idx = [&](int t, int rw) -> int
+        { return t * RW + rw; };
+
+        int64_t states_reached = 0;
+        int64_t states_expanded = 0;
+
+        for (int t_s = spaces.early; t_s <= spaces.late; ++t_s)
+        {
+            double startup = spaces.c_start[t_s];
+            if (startup >= kInf)
+                continue;
+            for (int j = 0; j < K; ++j)
+            {
+                int L = lengths[j];
+                if (L > total_rw)
+                    continue;
                 int new_rw = total_rw - L;
+                if (!can_place(j, total_rw, new_rw))
+                    continue;
+                int t_e = t_s + L;
+                if (t_e > T || t_e > spaces.late + 1)
+                    continue;
+                double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
                 int i = idx(t_e, new_rw);
                 if (cost < dp[i])
                 {
@@ -1461,14 +2203,16 @@ namespace dp
 
         for (int t_end = 1; t_end <= T; ++t_end)
         {
-            if (spaces.banded && t_end < (int)deferred.size())
+            if (spaces.banded && t_end < static_cast<int>(deferred.size()))
             {
                 for (auto &[rw, cost, t_src] : deferred[t_end])
+                {
                     if (cost < bank_cost[rw])
                     {
                         bank_cost[rw] = cost;
                         bank_t[rw] = t_src;
                     }
+                }
                 deferred[t_end].clear();
             }
 
@@ -1485,11 +2229,14 @@ namespace dp
                         int L = lengths[j];
                         if (L > rw)
                             continue;
+                        int next_rw = rw - L;
+                        if (!can_place(j, rw, next_rw))
+                            continue;
                         int t_e = t_end + L;
                         if (t_e > T || t_e > spaces.late + 1)
                             continue;
                         double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
-                        int i = idx(t_e, rw - L);
+                        int i = idx(t_e, next_rw);
                         if (cost < dp[i])
                         {
                             if (dp[i] >= kInf)
@@ -1530,11 +2277,14 @@ namespace dp
                         int L = lengths[j];
                         if (L > rw)
                             continue;
+                        int next_rw = rw - L;
+                        if (!can_place(j, rw, next_rw))
+                            continue;
                         int t_e = t_s + L;
                         if (t_e > T || t_e > spaces.late + 1)
                             continue;
                         double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]);
-                        int i = idx(t_e, rw - L);
+                        int i = idx(t_e, next_rw);
                         if (cost < dp[i])
                         {
                             if (dp[i] >= kInf)
@@ -1561,551 +2311,46 @@ namespace dp
             }
         }
 
-        double lb = best; // This IS the relaxed DP LB
-
-        // --- Bin-packing UB from the same DP pass ---
-        double bp_ub = kInf;
-        int block_count = 0;
-        int merged_block_count = 0;
-        const char *pack_mode = std::getenv("PAST_RELAXED_BINPACK_SOLVER");
-        std::string pack_solver = pack_mode ? std::string(pack_mode) : "default";
-        std::string pack_external_status = "disabled";
-        std::string pack_method = "none";
-        std::string pack_outcome = (best_t >= 0 ? "not_attempted" : "no_relaxed_path");
-        double t_pack_external = 0.0;
-        double t_pack_heuristic = 0.0;
-        double t_pack_dfs = 0.0;
-        double t_pack_block_dp = 0.0;
-        auto note_pack_candidate = [&](const std::string &method, double cand)
-        {
-            if (cand < bp_ub)
-            {
-                bp_ub = cand;
-                pack_method = method;
-                pack_outcome = "feasible";
-            }
-        };
+        RecoveredBlockPackingResult pack;
+        pack.pack_outcome = (best_t >= 0 ? "not_attempted" : "no_relaxed_path");
         if (best_t >= 0)
         {
-            struct Block
+            std::vector<RecoveredBlock> blocks;
+            int t = best_t;
+            int rw = 0;
+            while (true)
             {
-                int start;
-                int length;
-            };
-            std::vector<Block> blocks;
-            {
-                int t = best_t;
-                int rw = 0;
-                while (true)
-                {
-                    int i = idx(t, rw);
-                    const RPar &p = par[i];
-                    if (p.L <= 0)
-                        break;
-                    blocks.push_back({p.t_s, p.L});
-                    t = p.prev_t;
-                    rw = p.prev_rw;
-                    if (t < 0)
-                        break;
-                }
-                std::reverse(blocks.begin(), blocks.end());
+                int i = idx(t, rw);
+                const RPar &p = par[i];
+                if (p.L <= 0)
+                    break;
+                blocks.push_back({p.t_s, p.L});
+                t = p.prev_t;
+                rw = p.prev_rw;
+                if (t < 0)
+                    break;
             }
-
-            block_count = static_cast<int>(blocks.size());
-            if (!blocks.empty())
-            {
-                // Merge adjacent blocks
-                std::vector<Block> merged;
-                merged.push_back(blocks[0]);
-                for (size_t i = 1; i < blocks.size(); ++i)
-                {
-                    Block &last = merged.back();
-                    if (blocks[i].start <= last.start + last.length)
-                    {
-                        int new_end = std::max(last.start + last.length,
-                                               blocks[i].start + blocks[i].length);
-                        last.length = new_end - last.start;
-                    }
-                    else
-                        merged.push_back(blocks[i]);
-                }
-                merged_block_count = static_cast<int>(merged.size());
-                pack_outcome = "failed";
-
-                // Multi-strategy bin-packing: try many packing heuristics
-                std::vector<int> all_jobs;
-                for (int i = 0; i < K; ++i)
-                    for (int j = 0; j < totals[i]; ++j)
-                        all_jobs.push_back(lengths[i]);
-
-                size_t nB = merged.size();
-                std::vector<int> orig_cap(nB);
-                for (size_t i = 0; i < nB; ++i)
-                    orig_cap[i] = merged[i].length;
-
-                bool exact_pack_decided = false;
-                bool want_external_exact = (pack_solver != "default");
-                bool native_exact_first =
-                    (std::getenv("PAST_RELAXED_BINPACK_NATIVE_FIRST") != nullptr);
-                bool allow_small_nc =
-                    (std::getenv("PAST_RELAXED_BINPACK_ALLOW_SMALL_NC") != nullptr);
-                bool disable_dfs_exact =
-                    (std::getenv("PAST_RELAXED_BINPACK_DISABLE_DFS_EXACT") != nullptr);
-
-                // Start with the cheap in-process packers. For the ablation we still
-                // expose the external exact solver, but only after the fast packers
-                // fail to certify the recovered block structure.
-                {
-                    auto t0_pack = std::chrono::steady_clock::now();
-
-                    // Lambda: try packing jobs (in given order) into bins.
-                    // mode 0 = first-fit, mode 1 = best-fit (tightest bin)
-                    auto try_pack = [&](const std::vector<int> &jobs, int mode) -> double
-                    {
-                        std::vector<int> cap = orig_cap;
-                        std::vector<std::vector<int>> bj(nB);
-                        for (int jl : jobs)
-                        {
-                            int best_b = -1;
-                            if (mode == 0)
-                            {
-                                for (size_t b = 0; b < nB; ++b)
-                                    if (cap[b] >= jl)
-                                    {
-                                        best_b = (int)b;
-                                        break;
-                                    }
-                            }
-                            else
-                            {
-                                int best_rem = INT_MAX;
-                                for (size_t b = 0; b < nB; ++b)
-                                    if (cap[b] >= jl && cap[b] - jl < best_rem)
-                                    {
-                                        best_rem = cap[b] - jl;
-                                        best_b = (int)b;
-                                    }
-                            }
-                            if (best_b < 0)
-                                return kInf;
-                            cap[best_b] -= jl;
-                            bj[best_b].push_back(jl);
-                        }
-                        std::vector<int> seq;
-                        for (size_t b = 0; b < nB; ++b)
-                            for (int j : bj[b])
-                                seq.push_back(j);
-                        return solve_fixed_sequence(seq, prefix_proc, T, spaces);
-                    };
-
-                    {
-                        std::vector<int> jobs = all_jobs;
-                        std::sort(jobs.begin(), jobs.end(), std::greater<int>());
-                        note_pack_candidate("ffd", try_pack(jobs, 0));
-                    }
-                    {
-                        std::vector<int> jobs = all_jobs;
-                        std::sort(jobs.begin(), jobs.end(), std::greater<int>());
-                        note_pack_candidate("bfd", try_pack(jobs, 1));
-                    }
-                    {
-                        std::vector<int> jobs = all_jobs;
-                        std::sort(jobs.begin(), jobs.end());
-                        note_pack_candidate("ffi", try_pack(jobs, 0));
-                    }
-                    {
-                        std::vector<int> jobs = all_jobs;
-                        std::sort(jobs.begin(), jobs.end());
-                        note_pack_candidate("bfi", try_pack(jobs, 1));
-                    }
-                    {
-                        std::mt19937_64 rng(12345);
-                        std::vector<int> jobs = all_jobs;
-                        for (int trial = 0; trial < 20; ++trial)
-                        {
-                            std::shuffle(jobs.begin(), jobs.end(), rng);
-                            note_pack_candidate(trial & 1 ? "random_bf" : "random_ff",
-                                                try_pack(jobs, trial & 1));
-                        }
-                    }
-
-                    t_pack_heuristic =
-                        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_pack).count();
-                }
-
-                auto run_native_exact = [&]()
-                {
-                    if (exact_pack_decided || bp_ub < kInf * 0.5)
-                        return;
-
-                    int64_t NC_est = 1;
-                    for (int i = 0; i < K; ++i)
-                    {
-                        NC_est *= (totals[i] + 1);
-                        if (NC_est > 50'000)
-                            break;
-                    }
-
-                    if (allow_small_nc || NC_est >= 50'000)
-                    {
-                        std::vector<std::vector<std::vector<int>>> block_comps(nB);
-                        for (size_t b = 0; b < nB; ++b)
-                        {
-                            int cap = orig_cap[b];
-                            std::vector<int> comp(K, 0);
-                            std::function<void(int, int)> enumerate = [&](int ti, int rem)
-                            {
-                                if (ti == K)
-                                {
-                                    if (rem == 0)
-                                        block_comps[b].push_back(comp);
-                                    return;
-                                }
-                                int L = lengths[ti];
-                                int max_c = std::min(totals[ti], rem / L);
-                                for (int c = max_c; c >= 0; --c)
-                                {
-                                    comp[ti] = c;
-                                    enumerate(ti + 1, rem - c * L);
-                                }
-                            };
-                            enumerate(0, cap);
-                        }
-
-                        std::vector<int> border(nB);
-                        std::iota(border.begin(), border.end(), 0);
-                        std::sort(border.begin(), border.end(), [&](int a, int b)
-                                  { return block_comps[a].size() < block_comps[b].size(); });
-
-                        std::vector<int> rem(totals.begin(), totals.end());
-                        std::vector<std::vector<int>> assign(nB);
-                        int64_t nodes = 0;
-                        constexpr int64_t MAX_NODES = 2'000'000;
-                        bool dfs_capped = false;
-
-                        std::vector<int> suffix_cap(nB + 1, 0);
-                        for (int i = (int)nB - 1; i >= 0; --i)
-                            suffix_cap[i] = suffix_cap[i + 1] + orig_cap[border[i]];
-
-                        auto t0_dfs = std::chrono::steady_clock::now();
-                        std::function<bool(int)> dfs = [&](int idx) -> bool
-                        {
-                            if (idx == (int)nB)
-                            {
-                                for (int i = 0; i < K; ++i)
-                                    if (rem[i] != 0)
-                                        return false;
-                                return true;
-                            }
-                            if (++nodes > MAX_NODES)
-                            {
-                                dfs_capped = true;
-                                return false;
-                            }
-
-                            int b = border[idx];
-                            for (auto &comp : block_comps[b])
-                            {
-                                bool fits = true;
-                                for (int i = 0; i < K; ++i)
-                                {
-                                    if (comp[i] > rem[i])
-                                    {
-                                        fits = false;
-                                        break;
-                                    }
-                                }
-                                if (!fits)
-                                    continue;
-
-                                for (int i = 0; i < K; ++i)
-                                    rem[i] -= comp[i];
-
-                                int rem_work = 0;
-                                for (int i = 0; i < K; ++i)
-                                    rem_work += rem[i] * lengths[i];
-
-                                if (rem_work == suffix_cap[idx + 1])
-                                {
-                                    assign[b] = comp;
-                                    if (dfs(idx + 1))
-                                        return true;
-                                }
-
-                                for (int i = 0; i < K; ++i)
-                                    rem[i] += comp[i];
-                            }
-                            return false;
-                        };
-
-                        bool dfs_found = false;
-                        if (!disable_dfs_exact)
-                        {
-                            dfs_found = dfs(0);
-                            t_pack_dfs =
-                                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_dfs).count();
-                            if (dfs_found)
-                            {
-                                std::vector<int> seq;
-                                for (size_t b = 0; b < nB; ++b)
-                                {
-                                    for (int i = 0; i < K; ++i)
-                                        for (int j = 0; j < assign[b][i]; ++j)
-                                            seq.push_back(lengths[i]);
-                                }
-                                note_pack_candidate("dfs_exact",
-                                                    solve_fixed_sequence(seq, prefix_proc, T, spaces));
-                            }
-                        }
-
-                        // 7) Sparse block-level feasibility DP (systematic search)
-                        //    If DFS failed, use a sparse layered DP over blocks.
-                        //    State = remaining inventory (mixed-radix encoded).
-                        //    Only reachable states are tracked (unordered_set),
-                        //    so there is no NC cap — works for any number of types.
-                        //    Guaranteed to find a valid assignment if one exists.
-                        if (bp_ub >= kInf * 0.5)
-                        {
-                            std::vector<int64_t> bp_strides(K);
-                            int64_t bp_NC = 1;
-                            for (int i = 0; i < K; ++i)
-                            {
-                                bp_strides[i] = bp_NC;
-                                bp_NC *= (totals[i] + 1);
-                            }
-
-                            auto t0_block_dp = std::chrono::steady_clock::now();
-                            int64_t initial_st = 0;
-                            for (int i = 0; i < K; ++i)
-                                initial_st += static_cast<int64_t>(totals[i]) * bp_strides[i];
-
-                            // Compute total work for an encoded state on demand
-                            auto compute_work = [&](int64_t s) -> int
-                            {
-                                int work = 0;
-                                int64_t tmp = s;
-                                for (int i = 0; i < K; ++i)
-                                {
-                                    int rv = static_cast<int>(tmp % (totals[i] + 1));
-                                    tmp /= (totals[i] + 1);
-                                    work += rv * lengths[i];
-                                }
-                                return work;
-                            };
-
-                            // Decode per-type remaining counts from state
-                            auto decode_state = [&](int64_t s, int r[8])
-                            {
-                                int64_t tmp = s;
-                                for (int i = 0; i < K; ++i)
-                                {
-                                    r[i] = static_cast<int>(tmp % (totals[i] + 1));
-                                    tmp /= (totals[i] + 1);
-                                }
-                            };
-
-                            struct BComp
-                            {
-                                int64_t delta;
-                                int counts[8];
-                            };
-                            int nBlk = static_cast<int>(nB);
-                            std::vector<std::vector<BComp>> bcomps(nBlk);
-                            for (int b = 0; b < nBlk; ++b)
-                            {
-                                int cap = orig_cap[b];
-                                std::vector<int> cc(K, 0);
-                                std::function<void(int, int)> en = [&](int ti, int r)
-                                {
-                                    if (ti == K)
-                                    {
-                                        if (r == 0)
-                                        {
-                                            BComp bc;
-                                            bc.delta = 0;
-                                            for (int i = 0; i < K; ++i)
-                                            {
-                                                bc.counts[i] = cc[i];
-                                                bc.delta += static_cast<int64_t>(cc[i]) * bp_strides[i];
-                                            }
-                                            bcomps[b].push_back(bc);
-                                        }
-                                        return;
-                                    }
-                                    int L = lengths[ti];
-                                    int mx = std::min(totals[ti], r / L);
-                                    for (int c = mx; c >= 0; --c)
-                                    {
-                                        cc[ti] = c;
-                                        en(ti + 1, r - c * L);
-                                    }
-                                };
-                                en(0, cap);
-                            }
-
-                            // Sparse forward pass: only track reachable states
-                            std::vector<std::unordered_set<int64_t>> reach(nBlk + 1);
-                            reach[0].insert(initial_st);
-
-                            for (int bi = 0; bi < nBlk; ++bi)
-                            {
-                                int b = border[bi];
-                                auto &comps_b = bcomps[b];
-                                int required_work = suffix_cap[bi];
-                                for (int64_t s : reach[bi])
-                                {
-                                    if (compute_work(s) != required_work)
-                                        continue;
-                                    int r[8];
-                                    decode_state(s, r);
-                                    for (auto &bc : comps_b)
-                                    {
-                                        bool ok = true;
-                                        for (int i = 0; i < K; ++i)
-                                        {
-                                            if (bc.counts[i] > r[i])
-                                            {
-                                                ok = false;
-                                                break;
-                                            }
-                                        }
-                                        if (ok)
-                                            reach[bi + 1].insert(s - bc.delta);
-                                    }
-                                }
-                            }
-
-                            if (reach[nBlk].count(0))
-                            {
-                                // Backtrack to recover the assignment
-                                std::vector<std::vector<int>> asgn(nBlk);
-                                int64_t s = initial_st;
-                                bool reconstruction_ok = true;
-                                for (int bi = 0; bi < nBlk; ++bi)
-                                {
-                                    int b = border[bi];
-                                    if (compute_work(s) != suffix_cap[bi])
-                                    {
-                                        reconstruction_ok = false;
-                                        break;
-                                    }
-                                    int r[8];
-                                    decode_state(s, r);
-                                    bool found = false;
-                                    for (auto &bc : bcomps[b])
-                                    {
-                                        bool ok = true;
-                                        for (int i = 0; i < K; ++i)
-                                        {
-                                            if (bc.counts[i] > r[i])
-                                            {
-                                                ok = false;
-                                                break;
-                                            }
-                                        }
-                                        if (!ok)
-                                            continue;
-                                        int64_t ns = s - bc.delta;
-                                        if (reach[bi + 1].count(ns))
-                                        {
-                                            asgn[b].assign(bc.counts, bc.counts + K);
-                                            s = ns;
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found)
-                                    {
-                                        reconstruction_ok = false;
-                                        break;
-                                    }
-                                }
-                                if (reconstruction_ok)
-                                {
-                                    std::vector<int> seq;
-                                    for (int b = 0; b < nBlk; ++b)
-                                    {
-                                        for (int i = 0; i < K; ++i)
-                                            for (int j = 0; j < asgn[b][i]; ++j)
-                                                seq.push_back(lengths[i]);
-                                    }
-                                    note_pack_candidate("block_dp_exact",
-                                                        solve_fixed_sequence(seq, prefix_proc, T, spaces));
-                                }
-                            }
-                            else
-                            {
-                                pack_outcome = "infeasible";
-                            }
-                            t_pack_block_dp =
-                                std::chrono::duration<double>(std::chrono::steady_clock::now() - t0_block_dp).count();
-                        }
-                        else if (dfs_capped && pack_outcome != "feasible")
-                        {
-                            pack_outcome = "failed";
-                        }
-                    }
-                    else if (pack_outcome != "feasible")
-                    {
-                        pack_outcome = "skipped_small_nc";
-                    }
-                };
-
-                if (native_exact_first)
-                    run_native_exact();
-
-                if (want_external_exact && bp_ub >= kInf * 0.5)
-                {
-                    auto ext = exact_pack_via_ortools(orig_cap, lengths, totals);
-                    if (ext.solver != "disabled")
-                        pack_solver = ext.solver;
-                    t_pack_external = ext.runtime_sec;
-                    if (ext.status == ExternalPackStatus::Feasible)
-                    {
-                        pack_external_status = "feasible";
-                        note_pack_candidate("external_" + ext.solver,
-                                            solve_fixed_sequence(ext.sequence, prefix_proc, T, spaces));
-                        exact_pack_decided = true;
-                    }
-                    else if (ext.status == ExternalPackStatus::Infeasible)
-                    {
-                        pack_external_status = "infeasible";
-                        pack_method = "external_" + ext.solver;
-                        pack_outcome = "infeasible";
-                        exact_pack_decided = true;
-                    }
-                    else if (ext.status == ExternalPackStatus::Error)
-                    {
-                        pack_external_status = "error";
-                    }
-                }
-
-                if (!native_exact_first)
-                    run_native_exact();
-            }
-            else
-            {
-                pack_outcome = "no_blocks";
-            }
+            std::reverse(blocks.begin(), blocks.end());
+            pack = pack_recovered_blocks(blocks, lengths, totals, prefix_proc, T, spaces);
         }
 
         RelaxedDPResult result;
-        result.lb = lb;
-        result.bin_pack_ub = bp_ub;
+        result.lb = best;
+        result.bin_pack_ub = pack.bin_pack_ub;
         result.states_reached = states_reached;
         result.states_expanded = states_expanded;
-        result.rdp = std::move(dp);  // zero-copy transfer of the dp table
+        result.rdp = std::move(dp);
         result.RW = RW;
-        result.block_count = block_count;
-        result.merged_block_count = merged_block_count;
-        result.pack_solver = pack_solver;
-        result.pack_external_status = pack_external_status;
-        result.pack_method = pack_method;
-        result.pack_outcome = pack_outcome;
-        result.t_pack_external = t_pack_external;
-        result.t_pack_heuristic = t_pack_heuristic;
-        result.t_pack_dfs = t_pack_dfs;
-        result.t_pack_block_dp = t_pack_block_dp;
+        result.block_count = pack.block_count;
+        result.merged_block_count = pack.merged_block_count;
+        result.pack_solver = pack.pack_solver;
+        result.pack_external_status = pack.pack_external_status;
+        result.pack_method = pack.pack_method;
+        result.pack_outcome = pack.pack_outcome;
+        result.t_pack_external = pack.t_pack_external;
+        result.t_pack_heuristic = pack.t_pack_heuristic;
+        result.t_pack_dfs = pack.t_pack_dfs;
+        result.t_pack_block_dp = pack.t_pack_block_dp;
         return result;
     }
 
@@ -3693,15 +3938,52 @@ namespace dp
         return feas;
     }
 
+    std::vector<bool> compute_bounded_work_set(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals)
+    {
+        int K = static_cast<int>(lengths.size());
+        int W = 0;
+        for (int i = 0; i < K; ++i)
+            W += lengths[i] * totals[i];
+
+        std::vector<bool> reach(W + 1, false);
+        reach[0] = true;
+
+        for (int i = 0; i < K; ++i)
+        {
+            int L = lengths[i];
+            int remaining = totals[i];
+            int group = 1;
+            while (remaining > 0)
+            {
+                int take = std::min(group, remaining);
+                int weight = take * L;
+                for (int w = W; w >= weight; --w)
+                {
+                    if (reach[w - weight])
+                        reach[w] = true;
+                }
+                remaining -= take;
+                group *= 2;
+            }
+        }
+
+        return reach;
+    }
+
     // =====================================================================
-    //  solve_relaxed_dp_lb_feas: R_feas — relaxed DP with transition filter
+    //  solve_relaxed_dp_lb_feas: R_feas — relaxed DP with bounded-work and
+    //  two-sided transition filtering.
     //
-    //  Same as R_semi (solve_relaxed_dp_lb) but with an additional check:
-    //  at state (t, rw), placing type j is allowed only if the work already
-    //  placed (W - rw) can be decomposed into valid job counts with at
-    //  least one copy of type j still available.
+    //  A transition by type j from remaining work rw to rw-L_j is allowed only
+    //  if:
+    //    1) the already-placed work W-rw is globally bounded-reachable,
+    //    2) the prefix can still leave one type-j job unused, and
+    //    3) the suffix rw-L_j is achievable under the residual bounded counts.
     //
-    //  This is strictly tighter than R_semi.
+    //  This is stronger than the original one-sided R_feas but still not exact,
+    //  because multiple count vectors still project to the same rw value.
     // =====================================================================
 
     double solve_relaxed_dp_lb_feas(
@@ -3717,18 +3999,25 @@ namespace dp
         for (int i = 0; i < K; ++i)
             total_rw += lengths[i] * totals[i];
 
-        // Precompute feasibility sets
+        // Precompute bounded-work reachability and per-type reduced-capacity
+        // reachability sets.
+        auto bounded_work = compute_bounded_work_set(lengths, totals);
         auto feas = compute_feas_sets(lengths, totals);
 
-        // feas_check(j, rw) = true iff placing type j at remaining work rw is allowed
-        // Work placed so far = total_rw - rw. We need (total_rw - rw) ∈ A_j^-
-        // i.e., feas[j][total_rw - rw]
-        auto can_place = [&](int j, int rw) -> bool
+        auto can_place = [&](int j, int rw, int next_rw) -> bool
         {
             int placed = total_rw - rw;
             if (placed < 0 || placed > total_rw)
                 return false;
-            return feas[j][placed];
+            if (next_rw < 0 || next_rw > total_rw)
+                return false;
+            if (!bounded_work[placed])
+                return false;
+            if (!feas[j][placed])
+                return false;
+            if (!feas[j][next_rw])
+                return false;
+            return true;
         };
 
         int RW = total_rw + 1;
@@ -3747,14 +4036,13 @@ namespace dp
                 int L = lengths[j];
                 if (L > total_rw)
                     continue;
-                // At seed, placed = 0 → check feas[j][0]
-                if (!can_place(j, total_rw))
+                int new_rw = total_rw - L;
+                if (!can_place(j, total_rw, new_rw))
                     continue;
                 int t_e = t_s + L;
                 if (t_e > T || t_e > spaces.late + 1)
                     continue;
                 double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
-                int new_rw = total_rw - L;
                 double &ref = dp[idx(t_e, new_rw)];
                 ref = std::min(ref, cost);
             }
@@ -3790,13 +4078,14 @@ namespace dp
                         int L = lengths[j];
                         if (L > rw)
                             continue;
-                        if (!can_place(j, rw))
+                        int next_rw = rw - L;
+                        if (!can_place(j, rw, next_rw))
                             continue;
                         int t_e = t_end + L;
                         if (t_e > T || t_e > spaces.late + 1)
                             continue;
                         double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
-                        double &ref = dp[idx(t_e, rw - L)];
+                        double &ref = dp[idx(t_e, next_rw)];
                         ref = std::min(ref, cost);
                     }
                 }
@@ -3825,13 +4114,14 @@ namespace dp
                         int L = lengths[j];
                         if (L > rw)
                             continue;
-                        if (!can_place(j, rw))
+                        int next_rw = rw - L;
+                        if (!can_place(j, rw, next_rw))
                             continue;
                         int t_e = t_s + L;
                         if (t_e > T || t_e > spaces.late + 1)
                             continue;
                         double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]);
-                        double &ref = dp[idx(t_e, rw - L)];
+                        double &ref = dp[idx(t_e, next_rw)];
                         ref = std::min(ref, cost);
                     }
                 }
@@ -4155,11 +4445,14 @@ namespace dp
             total_rw += lengths[i] * totals[i];
         int RW = total_rw + 1;
 
-        // Precompute feasibility sets
+        // Precompute bounded-work reachability and reduced-capacity reachability.
+        auto bounded_work = compute_bounded_work_set(lengths, totals);
         auto feas = compute_feas_sets(lengths, totals);
-        auto can_place = [&](int j, int rw) -> bool {
+        auto can_place = [&](int j, int rw, int next_rw) -> bool {
             int placed = total_rw - rw;
-            return placed >= 0 && placed < (int)feas[j].size() && feas[j][placed];
+            return placed >= 0 && placed < (int)feas[j].size() &&
+                   next_rw >= 0 && next_rw < (int)feas[j].size() &&
+                   bounded_work[placed] && feas[j][placed] && feas[j][next_rw];
         };
 
         std::vector<double> lambda(K, 0.0);
@@ -4187,11 +4480,11 @@ namespace dp
                 {
                     int L = lengths[j];
                     if (L > total_rw) continue;
-                    if (!can_place(j, total_rw)) continue; // feas filter
+                    int new_rw = total_rw - L;
+                    if (!can_place(j, total_rw, new_rw)) continue; // feas filter
                     int t_e = t_s + L;
                     if (t_e > T || t_e > spaces.late + 1) continue;
                     double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]) + lambda[j];
-                    int new_rw = total_rw - L;
                     int i = idx(t_e, new_rw);
                     if (cost < dp[i]) { dp[i] = cost; par[i] = {-1, total_rw, j}; }
                 }
@@ -4226,11 +4519,12 @@ namespace dp
                         {
                             int L = lengths[j];
                             if (L > rw) continue;
-                            if (!can_place(j, rw)) continue; // feas filter
+                            int next_rw = rw - L;
+                            if (!can_place(j, rw, next_rw)) continue; // feas filter
                             int t_e = t_end + L;
                             if (t_e > T || t_e > spaces.late + 1) continue;
                             double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]) + lambda[j];
-                            int i = idx(t_e, rw - L);
+                            int i = idx(t_e, next_rw);
                             if (cost < dp[i]) { dp[i] = cost; par[i] = {bank_t[rw], rw, j}; }
                         }
                     }
@@ -4259,11 +4553,12 @@ namespace dp
                         {
                             int L = lengths[j];
                             if (L > rw) continue;
-                            if (!can_place(j, rw)) continue; // feas filter
+                            int next_rw = rw - L;
+                            if (!can_place(j, rw, next_rw)) continue; // feas filter
                             int t_e = t_s + L;
                             if (t_e > T || t_e > spaces.late + 1) continue;
                             double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]) + lambda[j];
-                            int i = idx(t_e, rw - L);
+                            int i = idx(t_e, next_rw);
                             if (cost < dp[i]) { dp[i] = cost; par[i] = {t_end, rw, j}; }
                         }
                     }
@@ -4339,6 +4634,1024 @@ namespace dp
         }
 
         return best_lb;
+    }
+
+    static std::vector<int> select_partial_tracked_types(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        int max_auto_tracked)
+    {
+        int K = static_cast<int>(lengths.size());
+        max_auto_tracked = std::max(0, std::min(max_auto_tracked, 2));
+        if (K == 0 || max_auto_tracked == 0)
+            return {};
+
+        int eff_max_gap = spaces.banded ? spaces.max_gap : T;
+        int total_rw = 0;
+        for (int i = 0; i < K; ++i)
+            total_rw += lengths[i] * totals[i];
+        int RW = total_rw + 1;
+
+        struct RPar
+        {
+            int prev_t;
+            int prev_rw;
+            int type_idx;
+        };
+
+        std::vector<double> dp(static_cast<size_t>(T + 2) * RW, kInf);
+        std::vector<RPar> par(static_cast<size_t>(T + 2) * RW, {-1, -1, -1});
+        auto idx = [&](int t, int rw) -> int
+        { return t * RW + rw; };
+
+        for (int t_s = spaces.early; t_s <= spaces.late; ++t_s)
+        {
+            double startup = spaces.c_start[t_s];
+            if (startup >= kInf)
+                continue;
+            for (int j = 0; j < K; ++j)
+            {
+                int L = lengths[j];
+                if (L > total_rw)
+                    continue;
+                int t_e = t_s + L;
+                if (t_e > T || t_e > spaces.late + 1)
+                    continue;
+                double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
+                int new_rw = total_rw - L;
+                int i = idx(t_e, new_rw);
+                if (cost < dp[i])
+                {
+                    dp[i] = cost;
+                    par[i] = {-1, total_rw, j};
+                }
+            }
+        }
+
+        std::vector<double> bank_cost(RW, kInf);
+        std::vector<int> bank_t(RW, -1);
+        std::vector<std::vector<std::tuple<int, double, int>>> deferred(T + 2);
+
+        double best = kInf;
+        int best_t = -1;
+        for (int t_end = 1; t_end <= T; ++t_end)
+        {
+            if (spaces.banded && t_end < static_cast<int>(deferred.size()))
+            {
+                for (auto &[rw, cost, t_src] : deferred[t_end])
+                {
+                    if (cost < bank_cost[rw])
+                    {
+                        bank_cost[rw] = cost;
+                        bank_t[rw] = t_src;
+                    }
+                }
+                deferred[t_end].clear();
+            }
+
+            if (spaces.banded && spaces.c_start[t_end] < kInf)
+            {
+                double start_cost = spaces.c_start[t_end];
+                for (int rw = 1; rw < RW; ++rw)
+                {
+                    if (bank_cost[rw] >= kInf)
+                        continue;
+                    double base = bank_cost[rw] + start_cost;
+                    for (int j = 0; j < K; ++j)
+                    {
+                        int L = lengths[j];
+                        if (L > rw)
+                            continue;
+                        int t_e = t_end + L;
+                        if (t_e > T || t_e > spaces.late + 1)
+                            continue;
+                        double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
+                        int i = idx(t_e, rw - L);
+                        if (cost < dp[i])
+                        {
+                            dp[i] = cost;
+                            par[i] = {bank_t[rw], rw, j};
+                        }
+                    }
+                }
+            }
+
+            double d0 = dp[idx(t_end, 0)];
+            if (d0 < kInf && spaces.c_end[t_end] < kInf)
+            {
+                double total = d0 + spaces.c_end[t_end];
+                if (total < best)
+                {
+                    best = total;
+                    best_t = t_end;
+                }
+            }
+
+            for (int rw = 1; rw < RW; ++rw)
+            {
+                double sv_cost = dp[idx(t_end, rw)];
+                if (sv_cost >= kInf)
+                    continue;
+                int gap_limit = std::min(t_end + eff_max_gap + 1, spaces.late + 1);
+                for (int t_s = t_end; t_s < gap_limit; ++t_s)
+                {
+                    double gap = spaces.gap_cost(t_end, t_s);
+                    if (gap >= kInf)
+                        continue;
+                    double base = sv_cost + gap;
+                    for (int j = 0; j < K; ++j)
+                    {
+                        int L = lengths[j];
+                        if (L > rw)
+                            continue;
+                        int t_e = t_s + L;
+                        if (t_e > T || t_e > spaces.late + 1)
+                            continue;
+                        double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]);
+                        int i = idx(t_e, rw - L);
+                        if (cost < dp[i])
+                        {
+                            dp[i] = cost;
+                            par[i] = {t_end, rw, j};
+                        }
+                    }
+                }
+            }
+
+            if (spaces.banded && spaces.c_end[t_end] < kInf)
+            {
+                double c_end_here = spaces.c_end[t_end];
+                for (int rw = 1; rw < RW; ++rw)
+                {
+                    double sv_cost = dp[idx(t_end, rw)];
+                    if (sv_cost >= kInf)
+                        continue;
+                    int eligible = t_end + eff_max_gap + 1;
+                    if (eligible <= T)
+                        deferred[eligible].push_back({rw, sv_cost + c_end_here, t_end});
+                }
+            }
+        }
+
+        std::vector<int> usage(K, 0);
+        if (best_t >= 0)
+        {
+            int t = best_t;
+            int rw = 0;
+            while (true)
+            {
+                int i = idx(t, rw);
+                const RPar &p = par[i];
+                if (p.type_idx < 0)
+                    break;
+                usage[p.type_idx]++;
+                t = p.prev_t;
+                rw = p.prev_rw;
+                if (t < 0)
+                    break;
+            }
+        }
+
+        std::vector<int> by_overuse(K);
+        std::iota(by_overuse.begin(), by_overuse.end(), 0);
+        std::sort(by_overuse.begin(), by_overuse.end(), [&](int a, int b)
+        {
+            int excess_a = usage[a] - totals[a];
+            int excess_b = usage[b] - totals[b];
+            bool pos_a = excess_a > 0;
+            bool pos_b = excess_b > 0;
+            if (pos_a != pos_b)
+                return pos_a > pos_b;
+            double rel_a = pos_a ? static_cast<double>(excess_a) / std::max(1, totals[a]) : 0.0;
+            double rel_b = pos_b ? static_cast<double>(excess_b) / std::max(1, totals[b]) : 0.0;
+            if (std::fabs(rel_a - rel_b) > 1e-12)
+                return rel_a > rel_b;
+            if (excess_a != excess_b)
+                return excess_a > excess_b;
+            if (totals[a] != totals[b])
+                return totals[a] < totals[b];
+            return lengths[a] < lengths[b];
+        });
+
+        std::vector<int> by_scarcity(K);
+        std::iota(by_scarcity.begin(), by_scarcity.end(), 0);
+        std::sort(by_scarcity.begin(), by_scarcity.end(), [&](int a, int b)
+        {
+            if (totals[a] != totals[b])
+                return totals[a] < totals[b];
+            return lengths[a] < lengths[b];
+        });
+
+        std::vector<int> chosen;
+        for (int j : by_overuse)
+        {
+            if (usage[j] <= totals[j])
+                continue;
+            chosen.push_back(j);
+            if (static_cast<int>(chosen.size()) >= max_auto_tracked)
+                break;
+        }
+        for (int j : by_scarcity)
+        {
+            if (static_cast<int>(chosen.size()) >= max_auto_tracked)
+                break;
+            if (std::find(chosen.begin(), chosen.end(), j) != chosen.end())
+                continue;
+            chosen.push_back(j);
+        }
+        return chosen;
+    }
+
+    // =====================================================================
+    //  solve_relaxed_dp_lb_partial: R_partial — partial count-vector
+    //  relaxation.
+    //
+    //  Tracks 1-2 critical type counts exactly; the rest are pooled into
+    //  a single remaining-work scalar. The relaxed remainder is further
+    //  filtered through bounded/two-sided feasibility checks.
+    //
+    //  State with 1 tracked type:
+    //    (t_end, c_tracked, rw_rest)
+    //    where c_tracked ∈ [0, n_tracked], rw_rest ∈ [0, W_rest]
+    //
+    //  State with 2 tracked types:
+    //    (t_end, c0, c1, rw_rest)
+    //    where c0 ∈ [0, n0], c1 ∈ [0, n1], rw_rest ∈ [0, W_rest]
+    //
+    //  Hierarchy target:  R_feas ≤ R_partial(1) ≤ R_partial(2) ≤ Exact
+    //
+    //  Single forward sweep after one optional diagnostic pass for automatic
+    //  tracked-type selection.
+    // =====================================================================
+
+    double solve_relaxed_dp_lb_partial(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        std::vector<int> tracked_types,
+        double time_limit_sec,
+        int max_auto_tracked,
+        bool use_remainder_feas)
+    {
+        using Clock = std::chrono::steady_clock;
+        auto t0 = Clock::now();
+
+        int K = static_cast<int>(lengths.size());
+        if (K == 0)
+            return 0.0;
+
+        int eff_max_gap = spaces.banded ? spaces.max_gap : T;
+
+        max_auto_tracked = std::max(0, std::min(max_auto_tracked, 2));
+
+        // ── Auto-select tracked types if not specified ──────────────
+        if (tracked_types.empty())
+        {
+            tracked_types = select_partial_tracked_types(
+                lengths, totals, prefix_proc, T, spaces, max_auto_tracked);
+        }
+
+        // Clamp to at most 2 tracked types
+        if (tracked_types.size() > static_cast<size_t>(max_auto_tracked))
+            tracked_types.resize(max_auto_tracked);
+        if (tracked_types.size() > 2)
+            tracked_types.resize(2);
+
+        // ── Set up tracked vs relaxed types ────────────────────────
+        int n_tracked = static_cast<int>(tracked_types.size());
+        // is_tracked[j] = true if type j is tracked exactly
+        std::vector<bool> is_tracked(K, false);
+        for (int j : tracked_types)
+            is_tracked[j] = true;
+
+        // Compute rest-work (from non-tracked types)
+        int rw_rest_total = 0;
+        for (int j = 0; j < K; ++j)
+            if (!is_tracked[j])
+                rw_rest_total += lengths[j] * totals[j];
+
+        // Feasibility structures for the relaxed remainder only.
+        std::vector<int> rest_lengths;
+        std::vector<int> rest_totals;
+        std::vector<int> rest_local_idx(K, -1);
+        rest_lengths.reserve(K);
+        rest_totals.reserve(K);
+        for (int j = 0; j < K; ++j)
+        {
+            if (is_tracked[j])
+                continue;
+            rest_local_idx[j] = static_cast<int>(rest_lengths.size());
+            rest_lengths.push_back(lengths[j]);
+            rest_totals.push_back(totals[j]);
+        }
+        std::vector<bool> rest_bounded;
+        std::vector<std::vector<bool>> rest_feas;
+        if (use_remainder_feas)
+        {
+            rest_bounded = compute_bounded_work_set(rest_lengths, rest_totals);
+            rest_feas = compute_feas_sets(rest_lengths, rest_totals);
+        }
+        auto can_place_rest = [&](int j, int rr, int next_rr) -> bool
+        {
+            int local = rest_local_idx[j];
+            if (local < 0)
+                return false;
+            int placed_rest = rw_rest_total - rr;
+            if (placed_rest < 0 || placed_rest > rw_rest_total)
+                return false;
+            if (next_rr < 0 || next_rr > rw_rest_total)
+                return false;
+            if (!use_remainder_feas)
+                return true;
+            if (!rest_bounded[placed_rest])
+                return false;
+            if (!rest_feas[local][placed_rest])
+                return false;
+            if (!rest_feas[local][next_rr])
+                return false;
+            return true;
+        };
+
+        // Dimensions for tracked counts
+        int nc0 = (n_tracked >= 1) ? (totals[tracked_types[0]] + 1) : 1;
+        int nc1 = (n_tracked >= 2) ? (totals[tracked_types[1]] + 1) : 1;
+        int RW = rw_rest_total + 1;
+
+        int64_t cells_per_t = static_cast<int64_t>(nc0) * nc1 * RW;
+        int64_t total_cells = static_cast<int64_t>(T + 2) * cells_per_t;
+
+        // Bail out if state space is too large
+        if (total_cells > 300'000'000LL)
+        {
+            std::cerr << "[R_partial] State space too large ("
+                      << total_cells << " cells), skipping.\n";
+            return kInf;
+        }
+
+        // ── Indexing ───────────────────────────────────────────────
+        // dp[(t * nc0 * nc1 + c0 * nc1 + c1) * RW + rr]
+        auto idx = [&](int t, int c0, int c1, int rr) -> int64_t
+        {
+            return (static_cast<int64_t>(t) * nc0 * nc1 +
+                    static_cast<int64_t>(c0) * nc1 + c1) *
+                       RW +
+                   rr;
+        };
+
+        std::vector<double> dp(total_cells, kInf);
+
+        // ── Proc-cost lower bound for pruning ─────────────────────
+        std::vector<double> proc_prices(T);
+        for (int i = 0; i < T; ++i)
+            proc_prices[i] = prefix_proc[i + 1] - prefix_proc[i];
+        std::vector<double> sorted_prices = proc_prices;
+        std::sort(sorted_prices.begin(), sorted_prices.end());
+        std::vector<double> sorted_prefix(T + 1, 0.0);
+        for (int i = 0; i < T; ++i)
+            sorted_prefix[i + 1] = sorted_prefix[i] + sorted_prices[i];
+        auto lb_proc_cost = [&](int work) -> double
+        {
+            if (work <= 0) return 0.0;
+            if (work > T) return kInf;
+            return sorted_prefix[work];
+        };
+
+        // Suffix-minimum of c_end for pruning
+        std::vector<double> min_c_end_from(T + 2, kInf);
+        for (int t = T; t >= 0; --t)
+        {
+            min_c_end_from[t] = min_c_end_from[t + 1];
+            if (spaces.c_end[t] < min_c_end_from[t])
+                min_c_end_from[t] = spaces.c_end[t];
+        }
+
+        double best = kInf;
+        bool exhausted = true;
+
+        // ── Helper to compute total remaining work from state ──────
+        auto state_total_rw = [&](int c0, int c1, int rr) -> int
+        {
+            int rw = rr; // remaining from non-tracked
+            if (n_tracked >= 1)
+                rw += (totals[tracked_types[0]] - c0) * lengths[tracked_types[0]];
+            if (n_tracked >= 2)
+                rw += (totals[tracked_types[1]] - c1) * lengths[tracked_types[1]];
+            return rw;
+        };
+
+        // ── Pruning helper ────────────────────────────────────────
+        auto prune = [&](double cost, int t_e, int c0, int c1, int rr) -> bool
+        {
+            int rw = state_total_rw(c0, c1, rr);
+            int earliest_end = std::min(t_e + rw, T + 1);
+            double lb = cost + lb_proc_cost(rw) + min_c_end_from[earliest_end];
+            return lb > best + kEps;
+        };
+
+        // ── Helper to try updating a DP cell ──────────────────────
+        auto try_update = [&](int t_e, int c0, int c1, int rr, double cost)
+        {
+            if (prune(cost, t_e, c0, c1, rr))
+                return;
+            int64_t i = idx(t_e, c0, c1, rr);
+            if (cost < dp[i])
+                dp[i] = cost;
+        };
+
+        // ── Seed: first job from startup ──────────────────────────
+        for (int t_s = spaces.early; t_s <= spaces.late; ++t_s)
+        {
+            double startup = spaces.c_start[t_s];
+            if (startup >= kInf)
+                continue;
+            for (int j = 0; j < K; ++j)
+            {
+                int L = lengths[j];
+                int t_e = t_s + L;
+                if (t_e > T || t_e > spaces.late + 1)
+                    continue;
+                double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
+
+                int c0 = 0, c1 = 0, rr = rw_rest_total;
+                if (n_tracked >= 1 && j == tracked_types[0])
+                {
+                    c0 = 1;
+                    if (c0 > totals[tracked_types[0]])
+                        continue;
+                }
+                else if (n_tracked >= 2 && j == tracked_types[1])
+                {
+                    c1 = 1;
+                    if (c1 > totals[tracked_types[1]])
+                        continue;
+                }
+                                else
+                                {
+                                    // Non-tracked type: reduce rw_rest
+                                    rr = rw_rest_total - L;
+                                    if (rr < 0)
+                                        continue;
+                                    if (!can_place_rest(j, rw_rest_total, rr))
+                                        continue;
+                                }
+                                try_update(t_e, c0, c1, rr, cost);
+                            }
+        }
+
+        // ── Bank for beyond-max-gap transitions ───────────────────
+        // Bank state: (c0, c1, rr) → min cost after shutdown
+        int64_t bank_cells = static_cast<int64_t>(nc0) * nc1 * RW;
+        std::vector<double> bank(bank_cells, kInf);
+        auto bank_idx = [&](int c0, int c1, int rr) -> int64_t
+        {
+            return (static_cast<int64_t>(c0) * nc1 + c1) * RW + rr;
+        };
+
+        // Deferred shutdown entries: eligible_time → list of (c0, c1, rr, cost)
+        struct DeferredEntry
+        {
+            int c0, c1, rr;
+            double cost;
+        };
+        std::vector<std::vector<DeferredEntry>> deferred(T + 2);
+
+        // ── Main forward sweep ────────────────────────────────────
+        for (int t_end = 1; t_end <= T; ++t_end)
+        {
+            // Time check
+            if ((t_end & 63) == 0)
+            {
+                double elapsed = std::chrono::duration<double>(
+                                     Clock::now() - t0)
+                                     .count();
+                if (elapsed > time_limit_sec)
+                {
+                    exhausted = false;
+                    break;
+                }
+            }
+
+            // Phase A: absorb deferred shutdown entries into bank
+            if (spaces.banded && t_end < static_cast<int>(deferred.size()))
+            {
+                for (auto &e : deferred[t_end])
+                {
+                    int64_t bi = bank_idx(e.c0, e.c1, e.rr);
+                    if (e.cost < bank[bi])
+                        bank[bi] = e.cost;
+                }
+                deferred[t_end].clear();
+            }
+
+            // Phase B: restart from bank at t_end
+            if (spaces.banded && spaces.c_start[t_end] < kInf)
+            {
+                double start_cost = spaces.c_start[t_end];
+                for (int c0 = 0; c0 < nc0; ++c0)
+                    for (int c1 = 0; c1 < nc1; ++c1)
+                        for (int rr = 0; rr < RW; ++rr)
+                        {
+                            int64_t bi = bank_idx(c0, c1, rr);
+                            if (bank[bi] >= kInf)
+                                continue;
+                            // Must have remaining work
+                            if (state_total_rw(c0, c1, rr) <= 0)
+                                continue;
+                            double base = bank[bi] + start_cost;
+
+                            for (int j = 0; j < K; ++j)
+                            {
+                                int L = lengths[j];
+                                int t_e = t_end + L;
+                                if (t_e > T || t_e > spaces.late + 1)
+                                    continue;
+                                double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
+
+                                int nc0_ = c0, nc1_ = c1, nrr = rr;
+                                if (n_tracked >= 1 && j == tracked_types[0])
+                                {
+                                    nc0_ = c0 + 1;
+                                    if (nc0_ > totals[tracked_types[0]])
+                                        continue;
+                                }
+                                else if (n_tracked >= 2 && j == tracked_types[1])
+                                {
+                                    nc1_ = c1 + 1;
+                                    if (nc1_ > totals[tracked_types[1]])
+                                        continue;
+                                }
+                                else
+                                {
+                                    nrr = rr - L;
+                                    if (nrr < 0)
+                                        continue;
+                                    if (!can_place_rest(j, rr, nrr))
+                                        continue;
+                                }
+                                try_update(t_e, nc0_, nc1_, nrr, cost);
+                            }
+                        }
+            }
+
+            // Check for complete solutions at t_end
+            {
+                int final_c0 = (n_tracked >= 1) ? totals[tracked_types[0]] : 0;
+                int final_c1 = (n_tracked >= 2) ? totals[tracked_types[1]] : 0;
+                int64_t i = idx(t_end, final_c0, final_c1, 0);
+                if (dp[i] < kInf && spaces.c_end[t_end] < kInf)
+                {
+                    double total = dp[i] + spaces.c_end[t_end];
+                    if (total < best)
+                        best = total;
+                }
+            }
+
+            // Phase C: within-max-gap transitions
+            for (int c0 = 0; c0 < nc0; ++c0)
+                for (int c1 = 0; c1 < nc1; ++c1)
+                    for (int rr = 0; rr < RW; ++rr)
+                    {
+                        int64_t si = idx(t_end, c0, c1, rr);
+                        double sv_cost = dp[si];
+                        if (sv_cost >= kInf)
+                            continue;
+                        if (state_total_rw(c0, c1, rr) <= 0)
+                            continue;
+
+                        int gap_limit = std::min(t_end + eff_max_gap + 1,
+                                                 spaces.late + 1);
+                        for (int t_s = t_end; t_s < gap_limit; ++t_s)
+                        {
+                            double gap = spaces.gap_cost(t_end, t_s);
+                            if (gap >= kInf)
+                                continue;
+                            double base = sv_cost + gap;
+
+                            for (int j = 0; j < K; ++j)
+                            {
+                                int L = lengths[j];
+                                int t_e = t_s + L;
+                                if (t_e > T || t_e > spaces.late + 1)
+                                    continue;
+                                double cost = base +
+                                              (prefix_proc[t_e] - prefix_proc[t_s]);
+
+                                int nc0_ = c0, nc1_ = c1, nrr = rr;
+                                if (n_tracked >= 1 && j == tracked_types[0])
+                                {
+                                    nc0_ = c0 + 1;
+                                    if (nc0_ > totals[tracked_types[0]])
+                                        continue;
+                                }
+                                else if (n_tracked >= 2 && j == tracked_types[1])
+                                {
+                                    nc1_ = c1 + 1;
+                                    if (nc1_ > totals[tracked_types[1]])
+                                        continue;
+                                }
+                                else
+                                {
+                                    nrr = rr - L;
+                                    if (nrr < 0)
+                                        continue;
+                                    if (!can_place_rest(j, rr, nrr))
+                                        continue;
+                                }
+                                try_update(t_e, nc0_, nc1_, nrr, cost);
+                            }
+                        }
+                    }
+
+            // Phase D: defer shutdown entries for beyond-max-gap restart
+            if (spaces.banded && spaces.c_end[t_end] < kInf)
+            {
+                double c_end_here = spaces.c_end[t_end];
+                for (int c0 = 0; c0 < nc0; ++c0)
+                    for (int c1 = 0; c1 < nc1; ++c1)
+                        for (int rr = 0; rr < RW; ++rr)
+                        {
+                            int64_t si = idx(t_end, c0, c1, rr);
+                            if (dp[si] >= kInf)
+                                continue;
+                            if (state_total_rw(c0, c1, rr) <= 0)
+                                continue;
+                            double sc = dp[si] + c_end_here;
+                            int eligible = t_end + eff_max_gap + 1;
+                            if (eligible <= T)
+                                deferred[eligible].push_back(
+                                    {c0, c1, rr, sc});
+                        }
+            }
+        }
+
+        return exhausted ? best : kInf;
+    }
+
+    RelaxedDPResult solve_relaxed_dp_lb_partial_with_binpack(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        std::vector<int> tracked_types,
+        int max_auto_tracked,
+        bool use_remainder_feas)
+    {
+        int K = static_cast<int>(lengths.size());
+        if (K == 0)
+        {
+            RelaxedDPResult out;
+            out.lb = 0.0;
+            out.bin_pack_ub = 0.0;
+            out.pack_outcome = "no_blocks";
+            return out;
+        }
+
+        max_auto_tracked = std::max(0, std::min(max_auto_tracked, 1));
+        if (tracked_types.empty())
+            tracked_types = select_partial_tracked_types(
+                lengths, totals, prefix_proc, T, spaces, max_auto_tracked);
+        if (tracked_types.empty())
+        {
+            int scarce = 0;
+            for (int j = 1; j < K; ++j)
+                if (totals[j] < totals[scarce] ||
+                    (totals[j] == totals[scarce] && lengths[j] < lengths[scarce]))
+                    scarce = j;
+            tracked_types.push_back(scarce);
+        }
+        if (tracked_types.size() > 1)
+            tracked_types.resize(1);
+
+        int tracked = tracked_types[0];
+        int n_tracked = totals[tracked];
+        int nc0 = n_tracked + 1;
+
+        int rw_rest_total = 0;
+        std::vector<int> rest_lengths;
+        std::vector<int> rest_totals;
+        std::vector<int> rest_local_idx(K, -1);
+        for (int j = 0; j < K; ++j)
+        {
+            if (j == tracked)
+                continue;
+            rest_local_idx[j] = static_cast<int>(rest_lengths.size());
+            rest_lengths.push_back(lengths[j]);
+            rest_totals.push_back(totals[j]);
+            rw_rest_total += lengths[j] * totals[j];
+        }
+        int RW = rw_rest_total + 1;
+
+        std::vector<bool> rest_bounded;
+        std::vector<std::vector<bool>> rest_feas;
+        if (use_remainder_feas)
+        {
+            rest_bounded = compute_bounded_work_set(rest_lengths, rest_totals);
+            rest_feas = compute_feas_sets(rest_lengths, rest_totals);
+        }
+        auto can_place_rest = [&](int j, int rr, int next_rr) -> bool
+        {
+            int local = rest_local_idx[j];
+            if (local < 0)
+                return false;
+            if (!use_remainder_feas)
+                return next_rr >= 0 && next_rr <= rw_rest_total;
+            int placed_rest = rw_rest_total - rr;
+            if (placed_rest < 0 || placed_rest > rw_rest_total)
+                return false;
+            if (next_rr < 0 || next_rr > rw_rest_total)
+                return false;
+            return rest_bounded[placed_rest] &&
+                   rest_feas[local][placed_rest] &&
+                   rest_feas[local][next_rr];
+        };
+
+        int eff_max_gap = spaces.banded ? spaces.max_gap : T;
+        int64_t cells_per_t = static_cast<int64_t>(nc0) * RW;
+        int64_t total_cells = static_cast<int64_t>(T + 2) * cells_per_t;
+        if (total_cells > 300'000'000LL)
+        {
+            RelaxedDPResult out;
+            out.lb = kInf;
+            out.bin_pack_ub = kInf;
+            out.pack_outcome = "no_relaxed_path";
+            return out;
+        }
+
+        struct PPar
+        {
+            int prev_t;
+            int prev_c0;
+            int prev_rr;
+            int L;
+            int t_s;
+        };
+
+        auto idx = [&](int t, int c0, int rr) -> int64_t
+        {
+            return (static_cast<int64_t>(t) * nc0 + c0) * RW + rr;
+        };
+        auto total_rw = [&](int c0, int rr) -> int
+        {
+            return rr + (n_tracked - c0) * lengths[tracked];
+        };
+
+        std::vector<double> dp(total_cells, kInf);
+        std::vector<PPar> par(total_cells, {-1, -1, -1, 0, 0});
+        int64_t states_reached = 0;
+        int64_t states_expanded = 0;
+
+        std::vector<double> proc_prices(T);
+        for (int i = 0; i < T; ++i)
+            proc_prices[i] = prefix_proc[i + 1] - prefix_proc[i];
+        std::vector<double> sorted_prices = proc_prices;
+        std::sort(sorted_prices.begin(), sorted_prices.end());
+        std::vector<double> sorted_prefix(T + 1, 0.0);
+        for (int i = 0; i < T; ++i)
+            sorted_prefix[i + 1] = sorted_prefix[i] + sorted_prices[i];
+        auto lb_proc_cost = [&](int work) -> double
+        {
+            if (work <= 0)
+                return 0.0;
+            if (work > T)
+                return kInf;
+            return sorted_prefix[work];
+        };
+
+        std::vector<double> min_c_end_from(T + 2, kInf);
+        for (int t = T; t >= 0; --t)
+        {
+            min_c_end_from[t] = min_c_end_from[t + 1];
+            if (spaces.c_end[t] < min_c_end_from[t])
+                min_c_end_from[t] = spaces.c_end[t];
+        }
+
+        double best = kInf;
+        int best_t = -1;
+
+        auto prune = [&](double cost, int t_e, int c0, int rr) -> bool
+        {
+            int rw = total_rw(c0, rr);
+            int earliest_end = std::min(t_e + rw, T + 1);
+            double lb = cost + lb_proc_cost(rw) + min_c_end_from[earliest_end];
+            return lb > best + kEps;
+        };
+
+        auto try_update = [&](int t_e, int c0, int rr, double cost, int prev_t, int prev_c0, int prev_rr, int L, int t_s)
+        {
+            if (prune(cost, t_e, c0, rr))
+                return;
+            int64_t i = idx(t_e, c0, rr);
+            if (cost < dp[i])
+            {
+                if (dp[i] >= kInf)
+                    ++states_reached;
+                dp[i] = cost;
+                par[i] = {prev_t, prev_c0, prev_rr, L, t_s};
+            }
+        };
+
+        for (int t_s = spaces.early; t_s <= spaces.late; ++t_s)
+        {
+            double startup = spaces.c_start[t_s];
+            if (startup >= kInf)
+                continue;
+            for (int j = 0; j < K; ++j)
+            {
+                int L = lengths[j];
+                int t_e = t_s + L;
+                if (t_e > T || t_e > spaces.late + 1)
+                    continue;
+                double cost = startup + (prefix_proc[t_e] - prefix_proc[t_s]);
+                if (j == tracked)
+                {
+                    if (n_tracked <= 0)
+                        continue;
+                    try_update(t_e, 1, rw_rest_total, cost, -1, n_tracked, rw_rest_total, L, t_s);
+                }
+                else
+                {
+                    int rr = rw_rest_total - L;
+                    if (rr < 0 || !can_place_rest(j, rw_rest_total, rr))
+                        continue;
+                    try_update(t_e, 0, rr, cost, -1, n_tracked, rw_rest_total, L, t_s);
+                }
+            }
+        }
+
+        int64_t bank_cells = static_cast<int64_t>(nc0) * RW;
+        std::vector<double> bank(bank_cells, kInf);
+        std::vector<int> bank_t(bank_cells, -1);
+        auto bank_idx = [&](int c0, int rr) -> int64_t
+        {
+            return static_cast<int64_t>(c0) * RW + rr;
+        };
+        std::vector<std::vector<std::tuple<int, int, double, int>>> deferred(T + 2);
+
+        for (int t_end = 1; t_end <= T; ++t_end)
+        {
+            if (spaces.banded && t_end < static_cast<int>(deferred.size()))
+            {
+                for (auto &[c0, rr, cost, src_t] : deferred[t_end])
+                {
+                    int64_t bi = bank_idx(c0, rr);
+                    if (cost < bank[bi])
+                    {
+                        bank[bi] = cost;
+                        bank_t[bi] = src_t;
+                    }
+                }
+                deferred[t_end].clear();
+            }
+
+            if (spaces.banded && spaces.c_start[t_end] < kInf)
+            {
+                double start_cost = spaces.c_start[t_end];
+                for (int c0 = 0; c0 < nc0; ++c0)
+                    for (int rr = 0; rr < RW; ++rr)
+                    {
+                        int64_t bi = bank_idx(c0, rr);
+                        if (bank[bi] >= kInf || total_rw(c0, rr) <= 0)
+                            continue;
+                        double base = bank[bi] + start_cost;
+                        for (int j = 0; j < K; ++j)
+                        {
+                            int L = lengths[j];
+                            int t_e = t_end + L;
+                            if (t_e > T || t_e > spaces.late + 1)
+                                continue;
+                            double cost = base + (prefix_proc[t_e] - prefix_proc[t_end]);
+                            if (j == tracked)
+                            {
+                                if (c0 + 1 > n_tracked)
+                                    continue;
+                                try_update(t_e, c0 + 1, rr, cost, bank_t[bi], c0, rr, L, t_end);
+                            }
+                            else
+                            {
+                                int nrr = rr - L;
+                                if (nrr < 0 || !can_place_rest(j, rr, nrr))
+                                    continue;
+                                try_update(t_e, c0, nrr, cost, bank_t[bi], c0, rr, L, t_end);
+                            }
+                        }
+                    }
+            }
+
+            int64_t fi = idx(t_end, n_tracked, 0);
+            if (dp[fi] < kInf && spaces.c_end[t_end] < kInf)
+            {
+                double total = dp[fi] + spaces.c_end[t_end];
+                if (total < best)
+                {
+                    best = total;
+                    best_t = t_end;
+                }
+            }
+
+            for (int c0 = 0; c0 < nc0; ++c0)
+                for (int rr = 0; rr < RW; ++rr)
+                {
+                    int64_t si = idx(t_end, c0, rr);
+                    double sv_cost = dp[si];
+                    if (sv_cost >= kInf || total_rw(c0, rr) <= 0)
+                        continue;
+                    ++states_expanded;
+                    int gap_limit = std::min(t_end + eff_max_gap + 1, spaces.late + 1);
+                    for (int t_s = t_end; t_s < gap_limit; ++t_s)
+                    {
+                        double gap = spaces.gap_cost(t_end, t_s);
+                        if (gap >= kInf)
+                            continue;
+                        double base = sv_cost + gap;
+                        for (int j = 0; j < K; ++j)
+                        {
+                            int L = lengths[j];
+                            int t_e = t_s + L;
+                            if (t_e > T || t_e > spaces.late + 1)
+                                continue;
+                            double cost = base + (prefix_proc[t_e] - prefix_proc[t_s]);
+                            if (j == tracked)
+                            {
+                                if (c0 + 1 > n_tracked)
+                                    continue;
+                                try_update(t_e, c0 + 1, rr, cost, t_end, c0, rr, L, t_s);
+                            }
+                            else
+                            {
+                                int nrr = rr - L;
+                                if (nrr < 0 || !can_place_rest(j, rr, nrr))
+                                    continue;
+                                try_update(t_e, c0, nrr, cost, t_end, c0, rr, L, t_s);
+                            }
+                        }
+                    }
+                }
+
+            if (spaces.banded && spaces.c_end[t_end] < kInf)
+            {
+                double c_end_here = spaces.c_end[t_end];
+                for (int c0 = 0; c0 < nc0; ++c0)
+                    for (int rr = 0; rr < RW; ++rr)
+                    {
+                        int64_t si = idx(t_end, c0, rr);
+                        if (dp[si] >= kInf || total_rw(c0, rr) <= 0)
+                            continue;
+                        int eligible = t_end + eff_max_gap + 1;
+                        if (eligible <= T)
+                            deferred[eligible].push_back({c0, rr, dp[si] + c_end_here, t_end});
+                    }
+            }
+        }
+
+        RecoveredBlockPackingResult pack;
+        pack.pack_outcome = (best_t >= 0 ? "not_attempted" : "no_relaxed_path");
+        if (best_t >= 0)
+        {
+            std::vector<RecoveredBlock> blocks;
+            int t = best_t;
+            int c0 = n_tracked;
+            int rr = 0;
+            while (true)
+            {
+                int64_t i = idx(t, c0, rr);
+                const PPar &p = par[i];
+                if (p.L <= 0)
+                    break;
+                blocks.push_back({p.t_s, p.L});
+                t = p.prev_t;
+                c0 = p.prev_c0;
+                rr = p.prev_rr;
+                if (t < 0)
+                    break;
+            }
+            std::reverse(blocks.begin(), blocks.end());
+            pack = pack_recovered_blocks(blocks, lengths, totals, prefix_proc, T, spaces);
+        }
+
+        RelaxedDPResult result;
+        result.lb = best;
+        result.bin_pack_ub = pack.bin_pack_ub;
+        result.states_reached = states_reached;
+        result.states_expanded = states_expanded;
+        result.rdp = std::move(dp);
+        result.RW = RW;
+        result.block_count = pack.block_count;
+        result.merged_block_count = pack.merged_block_count;
+        result.pack_solver = pack.pack_solver;
+        result.pack_external_status = pack.pack_external_status;
+        result.pack_method = pack.pack_method;
+        result.pack_outcome = pack.pack_outcome;
+        result.t_pack_external = pack.t_pack_external;
+        result.t_pack_heuristic = pack.t_pack_heuristic;
+        result.t_pack_dfs = pack.t_pack_dfs;
+        result.t_pack_block_dp = pack.t_pack_block_dp;
+        return result;
     }
 
 } // namespace dp

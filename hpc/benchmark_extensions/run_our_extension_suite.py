@@ -134,7 +134,7 @@ def suite_payload(data_dir: Path) -> tuple[list[Path], list[str], dict[str, dict
 
 def run_scalability(data_dir: Path, out: Path, time_limit: float, timeout: int, batch_size: int) -> None:
     json_files, payload, manifest = suite_payload(data_dir)
-    rows = call_solver_batched("ablation-stdin", payload, timeout, batch_size, extra_arg="full")
+    rows = call_solver_batched("solve-stdin", payload, timeout, batch_size, extra_arg=str(time_limit))
     by_id = {r["instance_id"]: r for r in rows}
 
     merged = []
@@ -155,8 +155,8 @@ def run_scalability(data_dir: Path, out: Path, time_limit: float, timeout: int, 
                 "feasible": row.get("feasible", ""),
                 "is_optimal": row.get("is_optimal", ""),
                 "timed_out": row.get("timed_out", ""),
-                "step_reached": row.get("step_reached", ""),
-                "winner_detail": row.get("winner_detail", ""),
+                "step_reached": row.get("step_reached", "solve-stdin"),
+                "winner_detail": row.get("winner_detail", "default_production"),
                 "max_gap": row.get("max_gap", ""),
                 "processing_group": "-".join(str(x) for x in md.get("processing_group", [])),
                 "ec_repeat": md.get("ec_repeat", ""),
@@ -225,9 +225,9 @@ def run_backup(data_dir: Path, out: Path, timeout: int, exact_time_limit: float,
         writer.writerows(merged)
 
 
-def run_k_boundary(data_dir: Path, out: Path, timeout: int, exact_time_limit: float, batch_size: int) -> None:
+def run_k_boundary(data_dir: Path, out: Path, time_limit: float, timeout: int, exact_time_limit: float, batch_size: int) -> None:
     json_files, payload, manifest = suite_payload(data_dir)
-    ab_rows = call_solver_batched("ablation-stdin", payload, timeout, batch_size, extra_arg="full")
+    ab_rows = call_solver_batched("solve-stdin", payload, timeout, batch_size, extra_arg=str(time_limit))
     hier_rows = call_solver_batched("relax-hierarchy-stdin", payload, timeout, batch_size, extra_arg=str(exact_time_limit))
     ab_by = {r["instance_id"]: r for r in ab_rows}
     hier_by = {r["instance_id"]: r for r in hier_rows}
@@ -249,8 +249,8 @@ def run_k_boundary(data_dir: Path, out: Path, timeout: int, exact_time_limit: fl
                 "n_jobs": a.get("n_jobs", ""),
                 "horizon": a.get("horizon", ""),
                 "runtime_sec": a.get("runtime_sec", ""),
-                "step_reached": a.get("step_reached", ""),
-                "winner_detail": a.get("winner_detail", ""),
+                "step_reached": a.get("step_reached", "solve-stdin"),
+                "winner_detail": a.get("winner_detail", "default_production"),
                 "lb_semi": h.get("lb_semi", ""),
                 "lb_feas": h.get("lb_feas", ""),
                 "opt": h.get("opt", ""),
@@ -278,14 +278,14 @@ def main() -> None:
 
     data_dir = SUITE_DIRS[args.suite]
     if args.suite == "scalability_large_n":
-        ensure_solver_modes(["ablation-stdin"])
+        ensure_solver_modes(["solve-stdin"])
         run_scalability(data_dir, args.out, args.time_limit, args.solver_timeout, args.batch_size)
     elif args.suite == "backup_realistic":
         ensure_solver_modes(["relax-pack-stdin", "relax-hierarchy-stdin"])
         run_backup(data_dir, args.out, args.solver_timeout, args.exact_time_limit, args.batch_size)
     elif args.suite == "k_boundary":
-        ensure_solver_modes(["ablation-stdin", "relax-hierarchy-stdin"])
-        run_k_boundary(data_dir, args.out, args.solver_timeout, args.exact_time_limit, args.batch_size)
+        ensure_solver_modes(["solve-stdin", "relax-hierarchy-stdin"])
+        run_k_boundary(data_dir, args.out, args.time_limit, args.solver_timeout, args.exact_time_limit, args.batch_size)
 
     print(f"CSV: {args.out}")
 
