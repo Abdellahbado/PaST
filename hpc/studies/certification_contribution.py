@@ -96,6 +96,18 @@ def main():
         instances = instances[: args.max_instances]
     log(f"Instances: {len(instances)}", logfile)
 
+    if not instances:
+        report = (
+            "# Certification Contribution Report\n\n"
+            f"Suite: `{args.suite}`\n\n"
+            "## Config Summary\n\n"
+            "No instances were loaded. The extension dataset is missing or empty.\n"
+        )
+        (out_dir / "report.md").write_text(report)
+        print(report)
+        print(f"Saved results to {out_dir}")
+        return
+
     all_rows = []
     for name, cfg in CONFIGS.items():
         rows = []

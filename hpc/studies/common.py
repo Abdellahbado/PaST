@@ -88,6 +88,7 @@ def load_dataset_dir(dataset_name: str, label: str | None = None, logfile=None):
     ds_dir = PAPER_DATASETS / dataset_name
     if not ds_dir.exists():
         log(f"  WARNING: dataset not found: {ds_dir}", logfile)
+        log("           Run: bash hpc/benchmark_extensions/00_setup_extension_benchmarks.sh", logfile)
         return []
     json_files = sorted(
         [jf for jf in ds_dir.glob("*.json") if jf.name != "manifest.json"],

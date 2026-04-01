@@ -119,6 +119,18 @@ def main():
     json_files, payload, manifest = load_instances(args.dataset)
     log(f"Instances: {len(json_files)}", logfile)
 
+    if not json_files:
+        report = (
+            "# Backup Necessity Report\n\n"
+            "## Overall\n"
+            "- instances: 0\n"
+            "- dataset missing or empty; no study was run.\n"
+        )
+        (out_dir / "report.md").write_text(report)
+        print(report)
+        print(f"Saved results to {out_dir}")
+        return
+
     pack_env = os.environ.copy()
     pack_env["PAST_RELAXED_BINPACK_ALLOW_SMALL_NC"] = "1"
     pack_env["PAST_RELAXED_BINPACK_NATIVE_FIRST"] = "1"
@@ -157,10 +169,11 @@ def main():
             }
         )
 
-    with open(out_dir / "combined.csv", "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(merged[0].keys()))
-        writer.writeheader()
-        writer.writerows(merged)
+    if merged:
+        with open(out_dir / "combined.csv", "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(merged[0].keys()))
+            writer.writeheader()
+            writer.writerows(merged)
 
     report = build_report(merged)
     (out_dir / "report.md").write_text(report)
