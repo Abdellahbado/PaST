@@ -41,18 +41,44 @@ def load_instance(jf: Path) -> dict:
     }
 
 
+def solver_usage_text() -> str:
+    proc = subprocess.run(
+        [str(SOLVER), "__invalid_mode__"],
+        capture_output=True,
+        text=True,
+    )
+    return (proc.stdout or "") + (proc.stderr or "")
+
+
+def ensure_solver_modes(required_modes: list[str]) -> None:
+    usage = solver_usage_text()
+    missing = [mode for mode in required_modes if mode not in usage]
+    if missing:
+        missing_s = ", ".join(missing)
+        raise RuntimeError(
+            "The built solver does not support the required mode(s): "
+            f"{missing_s}. Rebuild `solvers/cpp/build/stateful_compare` on the HPC after pulling the latest branch."
+        )
+
+
 def call_solver(mode: str, payload_lines: list[str], timeout: int, extra_arg: str | None = None, env: dict[str, str] | None = None) -> list[dict]:
     cmd = [str(SOLVER), mode]
     if extra_arg is not None:
         cmd.append(extra_arg)
-    proc = subprocess.run(
-        cmd,
-        input="\n".join(payload_lines) + "\n",
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            input="\n".join(payload_lines) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"Solver timed out after {timeout}s in mode `{mode}` on a batch of {len(payload_lines)} instance(s). "
+            "Reduce batch size or increase `--solver-timeout`."
+        ) from exc
     if proc.returncode != 0:
         raise RuntimeError(proc.stderr[:1000])
     rows = []
@@ -145,14 +171,20 @@ def run_scalability(data_dir: Path, out: Path, time_limit: float, timeout: int, 
         writer.writerows(merged)
 
 
-def run_backup(data_dir: Path, out: Path, timeout: int, exact_time_limit: float) -> None:
+def run_backup(data_dir: Path, out: Path, timeout: int, exact_time_limit: float, batch_size: int) -> None:
     json_files, payload, manifest = suite_payload(data_dir)
     pack_env = os.environ.copy()
     pack_env["PAST_RELAXED_BINPACK_ALLOW_SMALL_NC"] = "1"
     pack_env["PAST_RELAXED_BINPACK_NATIVE_FIRST"] = "1"
 
-    pack_rows = call_solver("relax-pack-stdin", payload, timeout=timeout, env=pack_env)
-    hier_rows = call_solver("relax-hierarchy-stdin", payload, timeout=timeout, extra_arg=str(exact_time_limit))
+    pack_rows = call_solver_batched("relax-pack-stdin", payload, timeout=timeout, batch_size=batch_size, env=pack_env)
+    hier_rows = call_solver_batched(
+        "relax-hierarchy-stdin",
+        payload,
+        timeout=timeout,
+        batch_size=batch_size,
+        extra_arg=str(exact_time_limit),
+    )
     pack_by = {r["instance_id"]: r for r in pack_rows}
     hier_by = {r["instance_id"]: r for r in hier_rows}
 
@@ -246,10 +278,13 @@ def main() -> None:
 
     data_dir = SUITE_DIRS[args.suite]
     if args.suite == "scalability_large_n":
+        ensure_solver_modes(["ablation-stdin"])
         run_scalability(data_dir, args.out, args.time_limit, args.solver_timeout, args.batch_size)
     elif args.suite == "backup_realistic":
-        run_backup(data_dir, args.out, args.solver_timeout, args.exact_time_limit)
+        ensure_solver_modes(["relax-pack-stdin", "relax-hierarchy-stdin"])
+        run_backup(data_dir, args.out, args.solver_timeout, args.exact_time_limit, args.batch_size)
     elif args.suite == "k_boundary":
+        ensure_solver_modes(["ablation-stdin", "relax-hierarchy-stdin"])
         run_k_boundary(data_dir, args.out, args.solver_timeout, args.exact_time_limit, args.batch_size)
 
     print(f"CSV: {args.out}")

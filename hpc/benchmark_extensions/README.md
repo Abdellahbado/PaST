@@ -69,6 +69,17 @@ with names:
 
 ## Run Our Solver
 
+After pulling new code on the HPC, rebuild `stateful_compare` before running the
+extension suites:
+
+```bash
+bash hpc/01_build_our_solver.sh
+```
+
+If the runner reports that modes such as `relax-pack-stdin` or
+`relax-hierarchy-stdin` are missing, the built solver is older than the Python
+wrapper and needs to be rebuilt.
+
 ```bash
 bash hpc/benchmark_extensions/01_run_ours_scalability.sh
 bash hpc/benchmark_extensions/02_run_ours_backup.sh
@@ -105,3 +116,6 @@ which uses the paper's `Experiments` runner on the formal dataset directory.
   the formal benchmark package described here.
 - The backup suite is intentionally small and explanatory; it is not meant to
   replace the larger exploratory stress benchmark.
+- The default wrappers use conservative batch sizes because the scalability and
+  `K`-boundary suites run the full ablation path for reporting fields such as
+  `step_reached` and `winner_detail`.

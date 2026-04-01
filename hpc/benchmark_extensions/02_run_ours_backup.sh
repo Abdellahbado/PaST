@@ -8,5 +8,6 @@ mkdir -p "$OUT_DIR"
 python3 "$ROOT/hpc/benchmark_extensions/run_our_extension_suite.py" \
   --suite backup_realistic \
   --out "$OUT_DIR/ours_backup_realistic.csv" \
-  --solver-timeout 600 \
-  --exact-time-limit 60
+  --solver-timeout 900 \
+  --exact-time-limit 60 \
+  --batch-size 5
