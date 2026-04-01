@@ -14,6 +14,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 import subprocess
 from pathlib import Path
 
@@ -38,6 +39,17 @@ def load_instance(jf: Path) -> dict:
         "machine": "twosby" if len(d.get("OffOnTime", [])) == 3 else "nosby",
         "n_jobs": len(d["Jobs"]),
         "horizon": len(d["EnergyCosts"]),
+    }
+
+
+def payload_meta(payload_line: str) -> dict:
+    d = json.loads(payload_line)
+    jobs = d.get("jobs", [])
+    prices = d.get("prices", [])
+    return {
+        "instance_id": d.get("instance_id", ""),
+        "n_jobs": str(len(jobs)),
+        "horizon": str(len(prices)),
     }
 
 
@@ -95,11 +107,93 @@ def call_solver(mode: str, payload_lines: list[str], timeout: int, extra_arg: st
     return rows
 
 
+def timeout_rows(mode: str, payload_lines: list[str], timeout: int) -> list[dict]:
+    rows: list[dict] = []
+    for payload_line in payload_lines:
+        meta = payload_meta(payload_line)
+        row = {
+            "instance_id": meta["instance_id"],
+            "n_jobs": meta["n_jobs"],
+            "horizon": meta["horizon"],
+        }
+        if mode == "solve-stdin":
+            row.update(
+                {
+                    "ub": "",
+                    "lb": "",
+                    "gap_pct": "",
+                    "feasible": "0",
+                    "is_optimal": "0",
+                    "timed_out": "1",
+                    "runtime_sec": f"{timeout:.1f}",
+                    "states_fwd_reached": "",
+                    "states_fwd_expanded": "",
+                    "step_reached": "external_timeout",
+                    "winner_detail": "external_timeout",
+                }
+            )
+        elif mode == "relax-hierarchy-stdin":
+            row.update(
+                {
+                    "lb_semi": "",
+                    "lb_feas": "",
+                    "lb_lagr": "",
+                    "lb_fl": "",
+                    "opt": "",
+                    "is_optimal": "0",
+                    "t_semi": "",
+                    "t_feas": "",
+                    "t_lagr": "",
+                    "t_fl": "",
+                    "t_opt": f"{timeout:.1f}",
+                }
+            )
+        elif mode == "relax-pack-stdin":
+            row.update(
+                {
+                    "lb_semi": "",
+                    "semi_packable": "0",
+                    "semi_pack_outcome": "external_timeout",
+                    "semi_pack_method": "none",
+                    "lb_feas": "",
+                    "feas_packable": "0",
+                    "feas_pack_outcome": "external_timeout",
+                    "feas_pack_method": "none",
+                }
+            )
+        elif mode == "ablation-stdin":
+            row.update(
+                {
+                    "ub": "",
+                    "lb": "",
+                    "gap_pct": "",
+                    "feasible": "0",
+                    "is_optimal": "0",
+                    "timed_out": "1",
+                    "runtime_sec": f"{timeout:.1f}",
+                    "step_reached": "external_timeout",
+                    "winner_detail": "external_timeout",
+                }
+            )
+        rows.append(row)
+    return rows
+
+
 def call_solver_batched(mode: str, payload_lines: list[str], timeout: int, batch_size: int, extra_arg: str | None = None, env: dict[str, str] | None = None) -> list[dict]:
     rows: list[dict] = []
     for start in range(0, len(payload_lines), batch_size):
         batch = payload_lines[start : start + batch_size]
-        rows.extend(call_solver(mode, batch, timeout=timeout, extra_arg=extra_arg, env=env))
+        try:
+            rows.extend(call_solver(mode, batch, timeout=timeout, extra_arg=extra_arg, env=env))
+        except RuntimeError as exc:
+            if "timed out after" not in str(exc):
+                raise
+            print(
+                f"[warn] {exc} Recording external-timeout row(s) and continuing.",
+                file=sys.stderr,
+                flush=True,
+            )
+            rows.extend(timeout_rows(mode, batch, timeout))
         print(f"Progress {min(start + batch_size, len(payload_lines))}/{len(payload_lines)}", flush=True)
     return rows
 

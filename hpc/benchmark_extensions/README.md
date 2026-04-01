@@ -116,6 +116,7 @@ which uses the paper's `Experiments` runner on the formal dataset directory.
   the formal benchmark package described here.
 - The backup suite is intentionally small and explanatory; it is not meant to
   replace the larger exploratory stress benchmark.
-- The default wrappers use conservative batch sizes because the scalability and
-  `K`-boundary suites run the full ablation path for reporting fields such as
-  `step_reached` and `winner_detail`.
+- The default wrappers use single-instance batches for the scalability and
+  `K`-boundary suites so one hard row does not block an entire subprocess.
+- If an instance exceeds the external subprocess cap, the runner records an
+  `external_timeout` row and continues instead of aborting the whole suite.
