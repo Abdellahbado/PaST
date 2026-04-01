@@ -2,44 +2,42 @@
 """
 Build the formal benchmark-extension suites used in the paper-facing study.
 
-This script creates three explicit suites:
-
-1. scalability_large_n
-   The paper-hard {8,10} family with larger n.
-2. backup_realistic
-   Small realistic bounded-count rescue/control suite for semigroup vs R_feas.
-3. k_boundary
-   Increasing-K family to probe where certification/exact fallback starts
-   becoming the bottleneck.
+This script is intentionally self-contained so it can run on HPC without
+depending on exploratory generators that may not be present in the branch.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import shutil
-import subprocess
-import sys
+import math
+import random
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT / "data" / "green-scheduling-bab" / "Iirc.EnergyStatesAndCostsScheduling" / "data" / "datasets"
+DATA_ROOT = ROOT / "data" / "green-scheduling-bab" / "Iirc.EnergyStatesAndCostsScheduling" / "data"
+DATASETS = DATA_ROOT / "datasets"
 
 FORMAL_SUITES = {
-    "scalability_large_n": DATA / "paperext_scalability_large_n_202604",
-    "backup_realistic": DATA / "paperext_backup_realistic_202604",
-    "k_boundary": DATA / "paperext_k_boundary_202604",
+    "scalability_large_n": DATASETS / "paperext_scalability_large_n_202604",
+    "backup_realistic": DATASETS / "paperext_backup_realistic_202604",
+    "k_boundary": DATASETS / "paperext_k_boundary_202604",
 }
 
-STRESS_V3 = DATA / "stress_extended_202603_v3"
-BACKUP_SHOWCASE = DATA / "backup_feas_showcase_202604"
-K_BOUNDARY = DATA / "k_boundary_202604"
+EC_CONFIGS = [
+    {"from_date": "2019-01-21T00:00:00", "repeat_count": 1},
+    {"from_date": "2019-04-08T00:00:00", "repeat_count": 1},
+    {"from_date": "2019-01-21T00:00:00", "repeat_count": 4},
+]
 
-
-def run_py(script: str, *args: str) -> None:
-    cmd = [sys.executable, str(ROOT / script), *args]
-    subprocess.run(cmd, check=True)
+OFF_ON_TIME = [4, 3, 2]
+ON_OFF_TIME = [1, 1, 1]
+OFF_ON_POWER = [15, 13, 12]
+ON_OFF_POWER = [2, 2, 2]
+ON_POWER = 10
+IDLE_POWER = 8
+OFF_POWER = [0, 2, 4]
 
 
 def reset_out_dir(out_dir: Path) -> None:
@@ -49,83 +47,222 @@ def reset_out_dir(out_dir: Path) -> None:
     (out_dir / "manifest.json").unlink(missing_ok=True)
 
 
-def copy_suite(src_dir: Path, out_dir: Path, filter_fn, suite_name: str, description: str) -> None:
-    manifest_src = {}
-    manifest_path = src_dir / "manifest.json"
-    if manifest_path.exists():
-        with open(manifest_path) as f:
-            rows = json.load(f)
-        manifest_src = {row["file"]: row for row in rows}
+def load_energy_costs():
+    ec_path = DATA_ROOT / "dataset-generators-prescriptions" / "energy-costs" / "ote2019.json"
+    with open(ec_path) as f:
+        d = json.load(f)
+    return d["dates"], d["costs"]
 
+
+def generate_file_costs(dates, costs, from_date: str, intervals_count: int, repeat_count: int):
+    from_idx = None
+    for i, dt in enumerate(dates):
+        if dt == from_date:
+            from_idx = i
+            break
+    if from_idx is None:
+        raise ValueError(f"Date {from_date} not found in ote2019.json")
+
+    result = []
+    curr_idx = from_idx
+    while len(result) < intervals_count:
+        for _ in range(repeat_count):
+            if len(result) == intervals_count:
+                break
+            if curr_idx >= len(costs):
+                curr_idx = from_idx
+            result.append(costs[curr_idx])
+        curr_idx += 1
+    return result
+
+
+def write_instance_json(inst: dict, out_path: Path):
+    jobs = [
+        {
+            "Index": j_idx,
+            "OriginalIndex": j_idx,
+            "ReleaseDate": 0,
+            "ProcessingTime": pt,
+        }
+        for j_idx, pt in enumerate(inst["jobs"])
+    ]
+    data = {
+        "MachinesCount": 1,
+        "Jobs": jobs,
+        "Intervals": [
+            {"Index": i, "StartTime": i, "EndTime": i + 1, "EnergyCost": cost}
+            for i, cost in enumerate(inst["prices"])
+        ],
+        "LengthInterval": 1,
+        "EnergyCosts": inst["prices"],
+        "OffOnTime": inst["off_on_time"],
+        "OnOffTime": inst["on_off_time"],
+        "OffOnPowerConsumption": inst["off_on_power"],
+        "OnOffPowerConsumption": inst["on_off_power"],
+        "OffIdleTime": [None, None, None],
+        "IdleOffTime": [None, None, None],
+        "OffIdlePowerConsumption": [None, None, None],
+        "IdleOffPowerConsumption": [None, None, None],
+        "OnPowerConsumption": inst["on_power"],
+        "IdlePowerConsumption": inst["idle_power"],
+        "OffPowerConsumption": inst["off_power"],
+    }
+    with open(out_path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def build_instance(*, name: str, family: str, jobs_list: list[int], horizon_multiplier: float, ec_config: dict, metadata: dict):
+    dates, costs = load_energy_costs()
+    time_mul = int(ec_config["repeat_count"])
+    scaled_jobs = [p * time_mul for p in jobs_list]
+    norm_min_nonproc = 1 + OFF_ON_TIME[0] * time_mul + ON_OFF_TIME[0] * time_mul + 1
+    intervals_count = math.ceil(sum(scaled_jobs) * horizon_multiplier) + norm_min_nonproc
+    prices = generate_file_costs(dates, costs, str(ec_config["from_date"]), intervals_count, time_mul)
+    prices = [max(1, c) for c in prices]
+    return {
+        "name": name,
+        "family": family,
+        "n_jobs": len(jobs_list),
+        "horizon": len(prices),
+        "jobs": scaled_jobs,
+        "prices": prices,
+        "off_on_time": [v * time_mul for v in OFF_ON_TIME],
+        "on_off_time": [v * time_mul for v in ON_OFF_TIME],
+        "off_on_power": OFF_ON_POWER,
+        "on_off_power": ON_OFF_POWER,
+        "on_power": ON_POWER,
+        "idle_power": IDLE_POWER,
+        "off_power": OFF_POWER,
+        "metadata": {
+            **metadata,
+            "family": family,
+            "jobsCount": len(jobs_list),
+            "horizonMultiplier": horizon_multiplier,
+            "ec_from": ec_config["from_date"],
+            "ec_repeat": ec_config["repeat_count"],
+            "machine": "twosby",
+        },
+    }
+
+
+def write_suite(out_dir: Path, instances: list[dict], suite_name: str, description: str):
     reset_out_dir(out_dir)
-    manifest_rows = []
-    for src in sorted(src_dir.glob("*.json")):
-        if src.name == "manifest.json":
-            continue
-        meta = manifest_src.get(src.name, {})
-        if not filter_fn(src, meta):
-            continue
-        shutil.copy2(src, out_dir / src.name)
-        manifest_rows.append(
+    manifest = []
+    for idx, inst in enumerate(instances):
+        fname = f"{idx:04d}_{inst['name']}.json"
+        write_instance_json(inst, out_dir / fname)
+        manifest.append(
             {
-                "file": src.name,
-                "source_dataset": src_dir.name,
+                "file": fname,
                 "suite": suite_name,
                 "description": description,
-                "source_family": meta.get("family", ""),
-                "metadata": meta.get("metadata", meta),
+                "family": inst["family"],
+                "metadata": inst["metadata"],
             }
         )
-
     with open(out_dir / "manifest.json", "w") as f:
-        json.dump(manifest_rows, f, indent=2)
-
-    print(f"{suite_name}: wrote {len(manifest_rows)} instances to {out_dir}")
-
-
-def ensure_sources() -> None:
-    reset_out_dir(STRESS_V3)
-    run_py(
-        "scripts/generate_extended_stress_benchmark.py",
-        "--out-dir",
-        str(STRESS_V3),
-        "--seeds-per-case",
-        "3",
-    )
-    if not (DATA / "backup_packability_202603").exists():
-        run_py("scripts/build_backup_packability_suite.py")
-    run_py("scripts/build_backup_feas_showcase_suite.py")
-    run_py("scripts/generate_k_boundary_benchmark.py")
+        json.dump(manifest, f, indent=2)
+    print(f"{suite_name}: wrote {len(instances)} instances to {out_dir}")
 
 
-def build_scalability_suite() -> None:
-    copy_suite(
-        STRESS_V3,
-        FORMAL_SUITES["scalability_large_n"],
-        lambda src, meta: meta.get("family") == "A_nscale_8_10" or "_famA_nscale_" in src.stem,
-        "scalability_large_n",
-        "Large-n extension of the paper-hard {8,10} family; only n is scaled.",
-    )
+def gen_scalability_suite() -> list[dict]:
+    instances = []
+    for n in [300, 400, 500, 600, 750, 1000]:
+        for sidx in range(3):
+            ec = EC_CONFIGS[sidx % len(EC_CONFIGS)]
+            seed = 1000 + 37 * sidx + n
+            rng = random.Random(seed)
+            jobs = [rng.choice([8, 10]) for _ in range(n)]
+            instances.append(
+                build_instance(
+                    name=f"famA_nscale_p8_10_n{n}_s{sidx}",
+                    family="A_nscale_8_10",
+                    jobs_list=jobs,
+                    horizon_multiplier=1.3,
+                    ec_config=ec,
+                    metadata={"processing_group": [8, 10], "seed": seed},
+                )
+            )
+    return instances
 
 
-def build_backup_suite() -> None:
-    copy_suite(
-        BACKUP_SHOWCASE,
-        FORMAL_SUITES["backup_realistic"],
-        lambda src, meta: True,
-        "backup_realistic",
-        "Small realistic bounded-count showcase where semigroup is sometimes enough and sometimes repaired by R_feas.",
-    )
+def gen_backup_suite() -> list[dict]:
+    instances = []
+    configs = [
+        ("rescue_focus", [5, 7, 11], 60, {0: 2, 2: 3}, list(range(10))),
+        ("control_4610", [4, 6, 10], 60, {0: 1, 2: 3}, list(range(5))),
+        ("control_8_10_14", [8, 10, 14], 50, {0: 1, 2: 2}, list(range(5))),
+    ]
+    for family_tag, group, n_total, scarce, seeds in configs:
+        for sidx in seeds:
+            ec = EC_CONFIGS[sidx % len(EC_CONFIGS)]
+            seed = 4000 + 89 * sidx + 17 * n_total + sum(group)
+            rng = random.Random(seed)
+            jobs_by_type = [0] * len(group)
+            remaining = n_total
+            for pos, cnt in scarce.items():
+                jobs_by_type[pos] = cnt
+                remaining -= cnt
+            non_scarce = [i for i in range(len(group)) if i not in scarce]
+            if non_scarce:
+                per_type = remaining // len(non_scarce)
+                extra = remaining % len(non_scarce)
+                for i, pos in enumerate(non_scarce):
+                    jobs_by_type[pos] = per_type + (1 if i < extra else 0)
+            jobs = []
+            for i, p in enumerate(group):
+                jobs.extend([p] * jobs_by_type[i])
+            rng.shuffle(jobs)
+            scarce_tag = "_".join(f"{k}c{v}" for k, v in sorted(scarce.items()))
+            instances.append(
+                build_instance(
+                    name=f"famB_backup_p{'_'.join(map(str,group))}_n{n_total}_l1.8_sc{scarce_tag}_s{sidx}",
+                    family=f"backup_{family_tag}",
+                    jobs_list=jobs,
+                    horizon_multiplier=1.8,
+                    ec_config=ec,
+                    metadata={
+                        "processing_group": group,
+                        "seed": seed,
+                        "scarce_counts": scarce,
+                        "category": family_tag,
+                    },
+                )
+            )
+    return instances
 
 
-def build_k_boundary_suite() -> None:
-    copy_suite(
-        K_BOUNDARY,
-        FORMAL_SUITES["k_boundary"],
-        lambda src, meta: True,
-        "k_boundary",
-        "Increasing-K realistic families used to probe the structural boundary of the method.",
-    )
+def gen_k_boundary_suite() -> list[dict]:
+    instances = []
+    families = [
+        ("K_contig", [7, 8, 9], [100, 200, 300]),
+        ("K_contig", [7, 8, 9, 10], [100, 200, 300]),
+        ("K_contig", [7, 8, 9, 10, 11], [100, 200, 300]),
+        ("K_contig", [7, 8, 9, 10, 11, 12], [100, 200]),
+        ("K_contig", [7, 8, 9, 10, 11, 12, 13], [100, 200]),
+        ("K_contig", [7, 8, 9, 10, 11, 12, 13, 14], [100, 200]),
+        ("K_moderate_spread", [3, 5, 6, 7], [100, 200, 300]),
+        ("K_moderate_spread", [5, 7, 9, 11, 13], [100, 200]),
+        ("K_moderate_spread", [4, 5, 6, 8, 9, 11, 12], [100, 200]),
+    ]
+    for family, group, n_values in families:
+        for n in n_values:
+            for sidx in range(3):
+                ec = EC_CONFIGS[sidx % len(EC_CONFIGS)]
+                seed = 8000 + 97 * sidx + 31 * n + sum(group) + 17 * len(group)
+                rng = random.Random(seed)
+                jobs = [rng.choice(group) for _ in range(n)]
+                instances.append(
+                    build_instance(
+                        name=f"{family}_p{'_'.join(map(str,group))}_n{n}_s{sidx}",
+                        family=family,
+                        jobs_list=jobs,
+                        horizon_multiplier=1.3,
+                        ec_config=ec,
+                        metadata={"processing_group": group, "seed": seed, "K": len(group)},
+                    )
+                )
+    return instances
 
 
 def main() -> None:
@@ -137,14 +274,27 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    ensure_sources()
-
     if args.suite in ("all", "scalability_large_n"):
-        build_scalability_suite()
+        write_suite(
+            FORMAL_SUITES["scalability_large_n"],
+            gen_scalability_suite(),
+            "scalability_large_n",
+            "Large-n extension of the paper-hard {8,10} family; only n is scaled.",
+        )
     if args.suite in ("all", "backup_realistic"):
-        build_backup_suite()
+        write_suite(
+            FORMAL_SUITES["backup_realistic"],
+            gen_backup_suite(),
+            "backup_realistic",
+            "Realistic bounded-count 3-type suite used to compare semigroup and R_feas.",
+        )
     if args.suite in ("all", "k_boundary"):
-        build_k_boundary_suite()
+        write_suite(
+            FORMAL_SUITES["k_boundary"],
+            gen_k_boundary_suite(),
+            "k_boundary",
+            "Increasing-K realistic families used to probe the structural boundary of the method.",
+        )
 
 
 if __name__ == "__main__":
