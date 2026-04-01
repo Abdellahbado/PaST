@@ -42,6 +42,12 @@ bash hpc/run_spaces_ablation.sh --section 2
 
 # Study 5: Pipeline Cascade - uses existing data
 cat hpc/studies/full_blockdp_only.csv
+
+# Revised journal-facing studies
+bash hpc/run_max_gap_study.sh
+bash hpc/run_certification_study.sh
+bash hpc/run_backup_necessity_study.sh
+bash hpc/run_structure_hardness_study.sh
 ```
 
 ---
@@ -147,6 +153,10 @@ hpc/results_studies/
 | 3. G Sweep | How sensitive is performance to G parameter? | Runtime vs G, mismatches vs full |
 | 4. SPACES Storage | Does banded storage lose anything? | Speedup, same optimal values |
 | 5. Pipeline Cascade | Are intermediate phases needed? | Step reached counts (all fwd_relax with block DP) |
+| Max-gap robustness | Is the sharpened auto-gap safe and faster? | Speedup vs full, mismatch count |
+| Certification contribution | Which certification path closes the scalable hard cases? | Phase and submethod counts |
+| Backup necessity | When does `R_feas` matter beyond semigroup? | Packability rescue and LB improvements |
+| Structure hardness | Which processing-time structures are hardest? | Runtime and stage by signature |
 
 ---
 

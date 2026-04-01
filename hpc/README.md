@@ -68,10 +68,18 @@ Run `bash hpc/setup_hpc_env.sh` for the recommended setup path.
 | `run_spaces_ablation.sh` | Banded SPACES vs full SPACES |
 | `run_g_sweep.sh` | `G` parameter sweep around the automatic value |
 | `run_relaxation_quality.sh` | Unit vs GCD vs semigroup relaxation-quality study |
+| `run_max_gap_study.sh` | Revised max-gap robustness study |
+| `run_certification_study.sh` | Revised certification-contribution study |
+| `run_backup_necessity_study.sh` | Revised semigroup-vs-`R_feas` necessity study |
+| `run_structure_hardness_study.sh` | Revised structure-hardness study |
 | `studies/component_ablation.py` | Study implementation |
 | `studies/spaces_ablation.py` | Study implementation |
 | `studies/g_sweep.py` | Study implementation |
 | `studies/relaxation_quality.py` | Study implementation |
+| `studies/max_gap_robustness.py` | Study implementation |
+| `studies/certification_contribution.py` | Study implementation |
+| `studies/backup_necessity.py` | Study implementation |
+| `studies/structure_hardness.py` | Study implementation |
 | `studies/common.py` | Shared study utilities |
 
 ### Deprecated study scripts

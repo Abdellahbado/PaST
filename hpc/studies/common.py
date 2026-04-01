@@ -31,6 +31,11 @@ TABLE1_DATASETS = [
 ]
 TABLE2_DATASETS = ["benedikt2025b_groups"]
 FIG9_DATASETS = ["benedikt2025_groups"]
+EXTENSION_DATASETS = {
+    "scalability_large_n": "paperext_scalability_large_n_202604",
+    "backup_realistic": "paperext_backup_realistic_202604",
+    "k_boundary": "paperext_k_boundary_202604",
+}
 
 
 def log(msg: str, logfile=None):
@@ -77,6 +82,31 @@ def load_instances(section: str, dataset_substr: str = "", logfile=None):
             out.append((sec, ds_name, inst_id, inst))
         log(f"  Loaded {len(json_files)} instances from {ds_name}", logfile)
     return out
+
+
+def load_dataset_dir(dataset_name: str, label: str | None = None, logfile=None):
+    ds_dir = PAPER_DATASETS / dataset_name
+    if not ds_dir.exists():
+        log(f"  WARNING: dataset not found: {ds_dir}", logfile)
+        return []
+    json_files = sorted(
+        [jf for jf in ds_dir.glob("*.json") if jf.name != "manifest.json"],
+        key=lambda p: p.stem,
+    )
+    out = []
+    sec = label or dataset_name
+    for jf in json_files:
+        inst = load_paper_instance(jf)
+        inst_id = f"{dataset_name}/{jf.stem}"
+        out.append((sec, dataset_name, inst_id, inst))
+    log(f"  Loaded {len(json_files)} instances from {dataset_name}", logfile)
+    return out
+
+
+def load_extension_suite(suite_name: str, logfile=None):
+    if suite_name not in EXTENSION_DATASETS:
+        raise ValueError(f"Unknown extension suite: {suite_name}")
+    return load_dataset_dir(EXTENSION_DATASETS[suite_name], label=suite_name, logfile=logfile)
 
 
 def as_float(row: dict, key: str) -> float:
