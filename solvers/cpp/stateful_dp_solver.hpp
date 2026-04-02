@@ -233,7 +233,10 @@ namespace dp
         int T,
         const SPACESResult &spaces,
         double known_ub = kInf,
-        double time_limit_sec = 300.0);
+        double time_limit_sec = 300.0,
+        const std::vector<double> *relaxed_dp = nullptr,
+        int relaxed_RW = 0,
+        double relaxed_lb = kInf);
 
     // ── New LB hierarchy bounds ──────────────────────────────────────────
 

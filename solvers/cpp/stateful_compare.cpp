@@ -386,7 +386,8 @@ namespace
             }
             if (!gap_closed())
             {
-                exact = dp::solve_sparse_exact_multiset_dp(lens, tots, prefix, T, spaces, ub, 300.0);
+                exact = dp::solve_sparse_exact_multiset_dp(
+                    lens, tots, prefix, T, spaces, ub, 300.0, &fwd.rdp, fwd.RW, fwd.lb);
                 if (exact < dp::kInf)
                 {
                     if (exact < ub)
@@ -504,6 +505,15 @@ namespace
             }
             return false;
         };
+        auto tiny_gap_for_exact = [&]()
+        {
+            if (!(ub < dp::kInf * 0.5) || lb <= 0.0)
+                return false;
+            double rel_gap = (ub - lb) / lb;
+            // If the current gap is already tiny, extra heuristic / backup work
+            // is unlikely to beat simply giving the remaining budget to exact DP.
+            return rel_gap <= 5e-4;
+        };
 
         // Compute NC to decide whether to skip expensive heuristics
         int64_t NC_est = 1;
@@ -544,6 +554,8 @@ namespace
                 ub = heur_ub;
             if (gap_closed())
                 goto done;
+            if (!use_exact_shortcut && tiny_gap_for_exact())
+                goto exact_dp;
             if (out_of_time())
                 goto done;
         }
@@ -571,6 +583,8 @@ namespace
                 ub = ls_cost;
             if (gap_closed())
                 goto done;
+            if (!use_exact_shortcut && tiny_gap_for_exact())
+                goto exact_dp;
             if (out_of_time())
                 goto done;
         }
@@ -582,6 +596,8 @@ namespace
                 lb = lb_feas;
             if (gap_closed())
                 goto done;
+            if (!use_exact_shortcut && tiny_gap_for_exact())
+                goto exact_dp;
             if (out_of_time())
                 goto done;
         }
@@ -682,7 +698,7 @@ namespace
                 goto done;
             }
             double exact = dp::solve_sparse_exact_multiset_dp(
-                lens, tots, prefix, T, spaces, ub, budget);
+                lens, tots, prefix, T, spaces, ub, budget, &fwd.rdp, fwd.RW, fwd.lb);
             if (exact < dp::kInf)
             {
                 if (exact < ub)

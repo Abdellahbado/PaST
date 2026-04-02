@@ -1860,6 +1860,14 @@ namespace dp
         const SPACESResult &spaces)
     {
         int K = static_cast<int>(lengths.size());
+        std::vector<int> job_order(K);
+        std::iota(job_order.begin(), job_order.end(), 0);
+        std::sort(job_order.begin(), job_order.end(), [&](int a, int b)
+                  {
+                      if (lengths[a] != lengths[b])
+                          return lengths[a] > lengths[b];
+                      return a < b;
+                  });
         int eff_max_gap = spaces.banded ? spaces.max_gap : T;
         int total_rw = 0;
         for (int i = 0; i < K; ++i)
@@ -1912,7 +1920,7 @@ namespace dp
             double startup = spaces.c_start[t_s];
             if (startup >= kInf)
                 continue;
-            for (int j = 0; j < K; ++j)
+            for (int j : job_order)
             {
                 int L = lengths[j];
                 int Ls = scaled_lengths[j];
@@ -1962,7 +1970,7 @@ namespace dp
                     if (bank_cost[rw] >= kInf)
                         continue;
                     double base = bank_cost[rw] + start_cost;
-                    for (int j = 0; j < K; ++j)
+                    for (int j : job_order)
                     {
                         int L = lengths[j];
                         int Ls = scaled_lengths[j];
@@ -2001,7 +2009,7 @@ namespace dp
                     if (gap >= kInf)
                         continue;
                     double base = sv_cost + gap;
-                    for (int j = 0; j < K; ++j)
+                    for (int j : job_order)
                     {
                         int L = lengths[j];
                         int Ls = scaled_lengths[j];
@@ -2048,7 +2056,7 @@ namespace dp
         //  decomposition. Different t values typically produce different
         //  block structures (different starts, lengths, gaps).
         // ---------------------------------------------------------------
-        constexpr int MAX_PROFILES = 32;
+        int max_profiles = (K <= 2) ? std::min(T, 2048) : 256;
         std::vector<int> co_optimal_terminals;
         if (best_t >= 0)
         {
@@ -2071,8 +2079,8 @@ namespace dp
                 std::swap(*co_optimal_terminals.begin(), *it);
             }
             // Limit to avoid pathological cases
-            if ((int)co_optimal_terminals.size() > MAX_PROFILES)
-                co_optimal_terminals.resize(MAX_PROFILES);
+            if ((int)co_optimal_terminals.size() > max_profiles)
+                co_optimal_terminals.resize(max_profiles);
         }
 
         // Try packing each co-optimal profile
@@ -2131,6 +2139,14 @@ namespace dp
         const SPACESResult &spaces)
     {
         int K = static_cast<int>(lengths.size());
+        std::vector<int> job_order(K);
+        std::iota(job_order.begin(), job_order.end(), 0);
+        std::sort(job_order.begin(), job_order.end(), [&](int a, int b)
+                  {
+                      if (lengths[a] != lengths[b])
+                          return lengths[a] > lengths[b];
+                      return a < b;
+                  });
         int eff_max_gap = spaces.banded ? spaces.max_gap : T;
         int total_rw = 0;
         for (int i = 0; i < K; ++i)
@@ -2171,7 +2187,7 @@ namespace dp
             double startup = spaces.c_start[t_s];
             if (startup >= kInf)
                 continue;
-            for (int j = 0; j < K; ++j)
+            for (int j : job_order)
             {
                 int L = lengths[j];
                 if (L > total_rw)
@@ -2224,7 +2240,7 @@ namespace dp
                     if (bank_cost[rw] >= kInf)
                         continue;
                     double base = bank_cost[rw] + start_cost;
-                    for (int j = 0; j < K; ++j)
+                    for (int j : job_order)
                     {
                         int L = lengths[j];
                         if (L > rw)
@@ -2272,7 +2288,7 @@ namespace dp
                     if (gap >= kInf)
                         continue;
                     double base = sv_cost + gap;
-                    for (int j = 0; j < K; ++j)
+                    for (int j : job_order)
                     {
                         int L = lengths[j];
                         if (L > rw)
@@ -2311,12 +2327,37 @@ namespace dp
             }
         }
 
-        RecoveredBlockPackingResult pack;
-        pack.pack_outcome = (best_t >= 0 ? "not_attempted" : "no_relaxed_path");
+        int max_profiles = (K <= 2) ? std::min(T, 2048) : 256;
+        std::vector<int> co_optimal_terminals;
         if (best_t >= 0)
         {
+            for (int t = 1; t <= T; ++t)
+            {
+                double d0 = dp[idx(t, 0)];
+                if (d0 < kInf && spaces.c_end[t] < kInf)
+                {
+                    double total = d0 + spaces.c_end[t];
+                    if (std::abs(total - best) < 1e-6)
+                        co_optimal_terminals.push_back(t);
+                }
+            }
+            auto it = std::find(co_optimal_terminals.begin(),
+                                co_optimal_terminals.end(), best_t);
+            if (it != co_optimal_terminals.end() &&
+                it != co_optimal_terminals.begin())
+            {
+                std::swap(*co_optimal_terminals.begin(), *it);
+            }
+            if ((int)co_optimal_terminals.size() > max_profiles)
+                co_optimal_terminals.resize(max_profiles);
+        }
+
+        RecoveredBlockPackingResult pack;
+        pack.pack_outcome = (best_t >= 0 ? "not_attempted" : "no_relaxed_path");
+        for (int term_t : co_optimal_terminals)
+        {
             std::vector<RecoveredBlock> blocks;
-            int t = best_t;
+            int t = term_t;
             int rw = 0;
             while (true)
             {
@@ -2332,6 +2373,8 @@ namespace dp
             }
             std::reverse(blocks.begin(), blocks.end());
             pack = pack_recovered_blocks(blocks, lengths, totals, prefix_proc, T, spaces);
+            if (pack.bin_pack_ub < kInf * 0.5)
+                break;
         }
 
         RelaxedDPResult result;
@@ -3593,7 +3636,10 @@ namespace dp
         int T,
         const SPACESResult &spaces,
         double known_ub,
-        double time_limit_sec)
+        double time_limit_sec,
+        const std::vector<double> *relaxed_dp,
+        int relaxed_RW,
+        double relaxed_lb)
     {
         auto t0 = std::chrono::steady_clock::now();
         int K = static_cast<int>(lengths.size());
@@ -3641,6 +3687,14 @@ namespace dp
             for (int j = 0; j < i; ++j)
                 tmp /= (totals[j] + 1);
             return static_cast<int>(tmp % (totals[i] + 1));
+        };
+        auto relaxed_cost = [&](int t, int rw) -> double
+        {
+            if (!relaxed_dp)
+                return 0.0;
+            if (t < 0 || t > T + 1 || rw < 0 || rw >= relaxed_RW)
+                return kInf;
+            return (*relaxed_dp)[static_cast<size_t>(t) * relaxed_RW + rw];
         };
 
         // Proc-cost LB for pruning (sorted cheapest slots)
@@ -3710,6 +3764,14 @@ namespace dp
                 double lb = cost + lb_proc_cost(new_rw) + min_c_end_from[earliest_end];
                 if (lb > best + kEps)
                     continue;
+                if (relaxed_dp)
+                {
+                    double rdp_val = relaxed_cost(t_e, new_rw);
+                    if (rdp_val >= kInf)
+                        continue;
+                    if (relaxed_lb < kInf && cost - rdp_val > best - relaxed_lb + kEps)
+                        continue;
+                }
                 auto &m = dp_maps[t_e];
                 auto it = m.find(new_s);
                 if (it == m.end())
@@ -3777,6 +3839,14 @@ namespace dp
                         double lb = cost + lb_proc_cost(new_rw) + min_c_end_from[earliest_end];
                         if (lb > best + kEps)
                             continue;
+                        if (relaxed_dp)
+                        {
+                            double rdp_val = relaxed_cost(t_e, new_rw);
+                            if (rdp_val >= kInf)
+                                continue;
+                            if (relaxed_lb < kInf && cost - rdp_val > best - relaxed_lb + kEps)
+                                continue;
+                        }
                         auto &m = dp_maps[t_e];
                         auto it = m.find(new_s);
                         if (it == m.end())
@@ -3836,6 +3906,14 @@ namespace dp
                         double lb = cost + lb_proc_cost(new_rw) + min_c_end_from[earliest_end];
                         if (lb > best + kEps)
                             continue;
+                        if (relaxed_dp)
+                        {
+                            double rdp_val = relaxed_cost(t_e, new_rw);
+                            if (rdp_val >= kInf)
+                                continue;
+                            if (relaxed_lb < kInf && cost - rdp_val > best - relaxed_lb + kEps)
+                                continue;
+                        }
                         auto &m = dp_maps[t_e];
                         auto it2 = m.find(new_s);
                         if (it2 == m.end())
