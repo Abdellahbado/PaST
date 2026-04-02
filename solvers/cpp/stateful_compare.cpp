@@ -149,6 +149,11 @@ namespace
     using Clock = std::chrono::steady_clock;
     using Dur = std::chrono::duration<double>;
 
+    bool is_valid_relax_lb(double v)
+    {
+        return std::isfinite(v) && v < dp::kInf * 0.5;
+    }
+
     // ---------------------------------------------------------------------------
     // Ablation-aware solver. Returns a structured CSV row with per-step timing.
     // ---------------------------------------------------------------------------
@@ -298,7 +303,7 @@ namespace
             auto t0 = Clock::now();
             double lb_feas = dp::solve_relaxed_dp_lb_feas(lens, tots, prefix, T, spaces);
             t_bwd_relax = Dur(Clock::now() - t0).count(); // reuse column for R_feas
-            if (lb_feas > lb)
+            if (is_valid_relax_lb(lb_feas) && lb_feas > lb)
                 lb = lb_feas;
             lb_after_feas = lb;
             step_reached = "r_feas";
@@ -317,7 +322,7 @@ namespace
                 lens, tots, prefix, T, spaces, {}, 20.0);
             double t_partial = Dur(Clock::now() - t0).count();
             (void)t_partial; // timing captured in overall elapsed
-            if (lb_par > lb)
+            if (is_valid_relax_lb(lb_par) && lb_par > lb)
                 lb = lb_par;
             step_reached = "r_partial";
             if (should_stop())
@@ -334,7 +339,7 @@ namespace
             double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(
                 lens, tots, prefix, T, spaces, 50, 10.0);
             t_two_class = Dur(Clock::now() - t0).count(); // reuse column for R_feas+Lagr
-            if (lb_fl > lb)
+            if (is_valid_relax_lb(lb_fl) && lb_fl > lb)
                 lb = lb_fl;
             lb_after_fl = lb;
             step_reached = "r_feas_lagr";
@@ -573,7 +578,7 @@ namespace
         // --- Step 4: R_feas LB (transition-feasibility filter) ---
         {
             double lb_feas = dp::solve_relaxed_dp_lb_feas(lens, tots, prefix, T, spaces);
-            if (lb_feas > lb)
+            if (is_valid_relax_lb(lb_feas) && lb_feas > lb)
                 lb = lb_feas;
             if (gap_closed())
                 goto done;
@@ -593,7 +598,7 @@ namespace
             }
             double lb_par = dp::solve_relaxed_dp_lb_partial(
                 lens, tots, prefix, T, spaces, {}, budget);
-            if (lb_par > lb)
+            if (is_valid_relax_lb(lb_par) && lb_par > lb)
                 lb = lb_par;
             if (gap_closed())
                 goto done;
@@ -607,7 +612,7 @@ namespace
             if (budget > 0.0)
             {
                 double lb_fl = dp::solve_relaxed_dp_lb_feas_lagrangian(lens, tots, prefix, T, spaces, 50, budget);
-                if (lb_fl > lb)
+                if (is_valid_relax_lb(lb_fl) && lb_fl > lb)
                     lb = lb_fl;
                 if (gap_closed())
                     goto done;
