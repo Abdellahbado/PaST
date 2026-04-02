@@ -39,8 +39,8 @@ Policy for our solver:
 
 Purpose:
 
-- increasing-`K` benchmark to probe whether many distinct job sizes create a
-  real practical boundary.
+- increasing-`K` benchmark at fixed `n` to probe whether many distinct job
+  sizes create a real practical boundary.
 
 Policy for our solver:
 

@@ -37,6 +37,8 @@ FORMAL_EC_CONFIGS = [
     {"from_date": "2019-01-21T00:00:00", "repeat_count": 1},
 ]
 
+FORMAL_K_FIXED_N = 100
+
 OFF_ON_TIME = [4, 3, 2]
 ON_OFF_TIME = [1, 1, 1]
 OFF_ON_POWER = [15, 13, 12]
@@ -241,33 +243,33 @@ def gen_backup_suite() -> list[dict]:
 def gen_k_boundary_suite() -> list[dict]:
     instances = []
     families = [
-        ("K_contig", [7, 8, 9], [100, 200, 300]),
-        ("K_contig", [7, 8, 9, 10], [100, 200, 300]),
-        ("K_contig", [7, 8, 9, 10, 11], [100, 200]),
-        ("K_contig", [7, 8, 9, 10, 11, 12], [100, 150]),
-        ("K_contig", [7, 8, 9, 10, 11, 12, 13], [100]),
-        ("K_contig", [7, 8, 9, 10, 11, 12, 13, 14], [100]),
-        ("K_moderate_spread", [3, 5, 6, 7], [100, 200, 300]),
-        ("K_moderate_spread", [5, 7, 9, 11, 13], [100, 200]),
-        ("K_moderate_spread", [4, 5, 6, 8, 9, 11, 12], [100]),
+        ("K_contig", [7, 8, 9]),
+        ("K_contig", [7, 8, 9, 10]),
+        ("K_contig", [7, 8, 9, 10, 11]),
+        ("K_contig", [7, 8, 9, 10, 11, 12]),
+        ("K_contig", [7, 8, 9, 10, 11, 12, 13]),
+        ("K_contig", [7, 8, 9, 10, 11, 12, 13, 14]),
+        ("K_moderate_spread", [3, 5, 6, 7]),
+        ("K_moderate_spread", [5, 7, 9, 11, 13]),
+        ("K_moderate_spread", [4, 5, 6, 8, 9, 11, 12]),
     ]
-    for family, group, n_values in families:
-        for n in n_values:
-            for sidx in range(3):
-                ec = FORMAL_EC_CONFIGS[sidx % len(FORMAL_EC_CONFIGS)]
-                seed = 8000 + 97 * sidx + 31 * n + sum(group) + 17 * len(group)
-                rng = random.Random(seed)
-                jobs = [rng.choice(group) for _ in range(n)]
-                instances.append(
-                    build_instance(
-                        name=f"{family}_p{'_'.join(map(str,group))}_n{n}_s{sidx}",
-                        family=family,
-                        jobs_list=jobs,
-                        horizon_multiplier=1.3,
-                        ec_config=ec,
-                        metadata={"processing_group": group, "seed": seed, "K": len(group)},
-                    )
+    n = FORMAL_K_FIXED_N
+    for family, group in families:
+        for sidx in range(3):
+            ec = FORMAL_EC_CONFIGS[sidx % len(FORMAL_EC_CONFIGS)]
+            seed = 8000 + 97 * sidx + 31 * n + sum(group) + 17 * len(group)
+            rng = random.Random(seed)
+            jobs = [rng.choice(group) for _ in range(n)]
+            instances.append(
+                build_instance(
+                    name=f"{family}_p{'_'.join(map(str,group))}_n{n}_s{sidx}",
+                    family=family,
+                    jobs_list=jobs,
+                    horizon_multiplier=1.3,
+                    ec_config=ec,
+                    metadata={"processing_group": group, "seed": seed, "K": len(group), "fixed_n": n},
                 )
+            )
     return instances
 
 
@@ -299,7 +301,7 @@ def main() -> None:
             FORMAL_SUITES["k_boundary"],
             gen_k_boundary_suite(),
             "k_boundary",
-            "Increasing-K realistic families used to probe the structural boundary of the method.",
+            "Increasing-K realistic families at fixed n used to probe the structural boundary of the method.",
         )
 
 
