@@ -142,6 +142,7 @@ namespace
         bool use_exact_shortcut = true;
         bool use_exact_dp = true;
         bool profile_bounds = false; // true → compute all LB stages even if gap closes
+        bool use_exact_guidance = false; // run semigroup DP only to guide sparse exact DP
         // When both use_heuristics=false and use_relaxation_lb=false,
         // we get exact-DP-only (baseline).
     };
@@ -223,21 +224,23 @@ namespace
         dp::RelaxedDPResult fwd;
 
         // --- Step 1: Forward relaxed DP with bin-packing (LB + UB) ---
-        if (ab.use_relaxation_lb || ab.use_heuristics)
+        if (ab.use_relaxation_lb || ab.use_heuristics || ab.use_exact_guidance)
         {
             auto t0 = Clock::now();
             fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
             t_fwd_relax = Dur(Clock::now() - t0).count();
             if (ab.use_relaxation_lb)
                 lb = fwd.lb;
-            if (fwd.bin_pack_ub < ub)
+            if ((ab.use_relaxation_lb || ab.use_heuristics) && fwd.bin_pack_ub < ub)
                 ub = fwd.bin_pack_ub;
             states_fwd_reached = fwd.states_reached;
             states_fwd_expanded = fwd.states_expanded;
-            step_reached = "fwd_relax";
+            step_reached = ab.use_exact_guidance && !ab.use_relaxation_lb && !ab.use_heuristics
+                               ? "exact_guidance"
+                               : "fwd_relax";
             lb_after_fwd = lb;
             ub_after_fwd = ub;
-            if (should_stop())
+            if (!ab.use_exact_guidance && should_stop())
             {
                 winner_detail = (fwd.pack_method != "none")
                                     ? ("fwd_relax:" + fwd.pack_method)
@@ -386,8 +389,14 @@ namespace
             }
             if (!gap_closed())
             {
+                const std::vector<double> *guided_rdp =
+                    (!fwd.rdp.empty() && (ab.use_relaxation_lb || ab.use_heuristics || ab.use_exact_guidance))
+                        ? &fwd.rdp
+                        : nullptr;
+                int guided_RW = guided_rdp ? fwd.RW : 0;
+                double guided_lb = guided_rdp ? fwd.lb : dp::kInf;
                 exact = dp::solve_sparse_exact_multiset_dp(
-                    lens, tots, prefix, T, spaces, ub, 300.0, &fwd.rdp, fwd.RW, fwd.lb);
+                    lens, tots, prefix, T, spaces, ub, 300.0, guided_rdp, guided_RW, guided_lb);
                 if (exact < dp::kInf)
                 {
                     if (exact < ub)
@@ -1322,6 +1331,7 @@ int main(int argc, char **argv)
     //   "bounds_profile" — same as bounds_only, but computes all LB stages
     //                      even when the forward stage already closes the gap
     //   "exact_only"   — banded SPACES + exact DP only (no heuristics/relaxations)
+    //   "exact_guided_only" — semigroup DP only for sparse exact guidance, then exact DP
     //   "baseline"     — full O(h²) SPACES + exact DP only
     //
     // Output CSV has extra columns for per-step timing.
@@ -1383,6 +1393,14 @@ int main(int argc, char **argv)
             ab.use_banded_spaces = true;
             ab.use_heuristics = false;
             ab.use_relaxation_lb = false;
+        }
+        else if (ab_mode == "exact_guided_only")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = false;
+            ab.use_smart_recon = false;
+            ab.use_exact_guidance = true;
         }
         else if (ab_mode == "baseline")
         {
@@ -1727,7 +1745,7 @@ int main(int argc, char **argv)
               << "  stateful_compare relax-pack-stdin\n"
               << "      reads JSONL from stdin, outputs semigroup vs R_feas packability\n"
               << "  stateful_compare ablation-stdin <config>\n"
-              << "      config: full | full_spaces | bounds_only | bounds_profile | exact_only | baseline\n"
+              << "      config: full | full_spaces | bounds_only | bounds_profile | exact_only | exact_guided_only | baseline\n"
               << "      reads JSONL from stdin, outputs CSV with per-step timing\n"
               << "  stateful_compare benchmark [n_csv] [lambda_csv] [seeds_csv] [time_limit_sec]\n"
               << "      single-process sweep (parallel: use Python launcher instead)\n"

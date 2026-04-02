@@ -48,6 +48,9 @@ bash hpc/run_max_gap_study.sh
 bash hpc/run_certification_study.sh
 bash hpc/run_backup_necessity_study.sh
 bash hpc/run_structure_hardness_study.sh
+
+# Focused appendix study: exact DP with vs without semigroup guidance
+bash hpc/run_exact_guidance_study.sh
 ```
 
 ---
@@ -157,6 +160,7 @@ hpc/results_studies/
 | Certification contribution | Which certification path closes the scalable hard cases? | Phase and submethod counts |
 | Backup necessity | When does `R_feas` matter beyond semigroup? | Packability rescue and LB improvements |
 | Structure hardness | Which processing-time structures are hardest? | Runtime and stage by signature |
+| Exact guidance | Does semigroup-guided pruning accelerate exact DP without changing solutions? | Speedup and mismatch count vs exact-only |
 
 ---
 
