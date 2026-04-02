@@ -27,6 +27,7 @@ SUITE_DIRS = {
     "scalability_large_n": DATA / "paperext_scalability_large_n_202604",
     "backup_realistic": DATA / "paperext_backup_realistic_202604",
     "k_boundary": DATA / "paperext_k_boundary_202604",
+    "k_structure_boundary": DATA / "paperext_k_structure_boundary_202604",
 }
 
 
@@ -319,7 +320,15 @@ def run_backup(data_dir: Path, out: Path, timeout: int, exact_time_limit: float,
         writer.writerows(merged)
 
 
-def run_k_boundary(data_dir: Path, out: Path, time_limit: float, timeout: int, exact_time_limit: float, batch_size: int) -> None:
+def run_k_boundary_like(
+    suite_name: str,
+    data_dir: Path,
+    out: Path,
+    time_limit: float,
+    timeout: int,
+    exact_time_limit: float,
+    batch_size: int,
+) -> None:
     json_files, payload, manifest = suite_payload(data_dir)
     ab_rows = call_solver_batched("solve-stdin", payload, timeout, batch_size, extra_arg=str(time_limit))
     hier_rows = call_solver_batched("relax-feas-stdin", payload, timeout, batch_size)
@@ -335,7 +344,7 @@ def run_k_boundary(data_dir: Path, out: Path, time_limit: float, timeout: int, e
         h = hier_by.get(iid, {})
         merged.append(
             {
-                "suite": "k_boundary",
+                "suite": suite_name,
                 "instance_id": iid,
                 "family": meta.get("source_family", meta.get("family", "")),
                 "K": md.get("K", ""),
@@ -378,9 +387,9 @@ def main() -> None:
     elif args.suite == "backup_realistic":
         ensure_solver_modes(["relax-pack-stdin", "relax-hierarchy-stdin"])
         run_backup(data_dir, args.out, args.solver_timeout, args.exact_time_limit, args.batch_size)
-    elif args.suite == "k_boundary":
+    elif args.suite in ("k_boundary", "k_structure_boundary"):
         ensure_solver_modes(["solve-stdin", "relax-feas-stdin"])
-        run_k_boundary(data_dir, args.out, args.time_limit, args.solver_timeout, args.exact_time_limit, args.batch_size)
+        run_k_boundary_like(args.suite, data_dir, args.out, args.time_limit, args.solver_timeout, args.exact_time_limit, args.batch_size)
 
     print(f"CSV: {args.out}")
 

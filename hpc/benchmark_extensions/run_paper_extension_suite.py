@@ -28,6 +28,7 @@ SUITE_DATASETS = {
     "scalability_large_n": "paperext_scalability_large_n_202604",
     "backup_realistic": "paperext_backup_realistic_202604",
     "k_boundary": "paperext_k_boundary_202604",
+    "k_structure_boundary": "paperext_k_structure_boundary_202604",
 }
 
 

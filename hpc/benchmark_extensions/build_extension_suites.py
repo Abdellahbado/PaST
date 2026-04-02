@@ -23,6 +23,7 @@ FORMAL_SUITES = {
     "scalability_large_n": DATASETS / "paperext_scalability_large_n_202604",
     "backup_realistic": DATASETS / "paperext_backup_realistic_202604",
     "k_boundary": DATASETS / "paperext_k_boundary_202604",
+    "k_structure_boundary": DATASETS / "paperext_k_structure_boundary_202604",
 }
 
 EC_CONFIGS = [
@@ -273,11 +274,46 @@ def gen_k_boundary_suite() -> list[dict]:
     return instances
 
 
+def gen_k_structure_boundary_suite() -> list[dict]:
+    instances = []
+    n = FORMAL_K_FIXED_N
+    families = [
+        ("K7_contiguous", [7, 8, 9, 10, 11, 12, 13]),
+        ("K7_shifted_contiguous", [8, 9, 10, 11, 12, 13, 14]),
+        ("K7_even_spread", [4, 6, 8, 10, 12, 14, 16]),
+        ("K7_odd_spread", [5, 7, 9, 11, 13, 15, 17]),
+        ("K7_irregular", [4, 5, 7, 9, 10, 12, 13]),
+    ]
+    for family, group in families:
+        for sidx in range(5):
+            ec = FORMAL_EC_CONFIGS[sidx % len(FORMAL_EC_CONFIGS)]
+            seed = 12000 + 131 * sidx + 31 * n + sum(group) + 19 * len(group)
+            rng = random.Random(seed)
+            jobs = [rng.choice(group) for _ in range(n)]
+            instances.append(
+                build_instance(
+                    name=f"{family}_p{'_'.join(map(str,group))}_n{n}_s{sidx}",
+                    family=family,
+                    jobs_list=jobs,
+                    horizon_multiplier=1.3,
+                    ec_config=ec,
+                    metadata={
+                        "processing_group": group,
+                        "seed": seed,
+                        "K": len(group),
+                        "fixed_n": n,
+                        "structure_family": family,
+                    },
+                )
+            )
+    return instances
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build formal benchmark-extension suites")
     ap.add_argument(
         "--suite",
-        choices=["all", "scalability_large_n", "backup_realistic", "k_boundary"],
+        choices=["all", "scalability_large_n", "backup_realistic", "k_boundary", "k_structure_boundary"],
         default="all",
     )
     args = ap.parse_args()
@@ -302,6 +338,13 @@ def main() -> None:
             gen_k_boundary_suite(),
             "k_boundary",
             "Increasing-K realistic families at fixed n used to probe the structural boundary of the method.",
+        )
+    if args.suite in ("all", "k_structure_boundary"):
+        write_suite(
+            FORMAL_SUITES["k_structure_boundary"],
+            gen_k_structure_boundary_suite(),
+            "k_structure_boundary",
+            "Fixed-K=7, fixed-n structure study that varies only the processing-time family.",
         )
 
 

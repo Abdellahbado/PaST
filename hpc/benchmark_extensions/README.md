@@ -47,6 +47,19 @@ Policy for our solver:
 - run the default production path,
 - and record only semigroup and `R_feas` from the hierarchy side.
 
+### `k_structure_boundary`
+
+Purpose:
+
+- fixed-`K=7`, fixed-`n=100` companion study,
+- used to test whether the observed runtime spike is caused by processing-time
+  structure rather than by `K` alone.
+
+Policy for our solver:
+
+- run the default production path,
+- and record only semigroup and `R_feas` from the hierarchy side.
+
 ## Setup
 
 Build the formal suites:
@@ -84,6 +97,7 @@ wrapper and needs to be rebuilt.
 bash hpc/benchmark_extensions/01_run_ours_scalability.sh
 bash hpc/benchmark_extensions/02_run_ours_backup.sh
 bash hpc/benchmark_extensions/03_run_ours_k_boundary.sh
+bash hpc/benchmark_extensions/07_run_ours_k_structure_boundary.sh
 ```
 
 Outputs go by default to:
@@ -100,6 +114,7 @@ Later, the same suites can be run on the paper solver:
 bash hpc/benchmark_extensions/04_run_paper_scalability.sh
 bash hpc/benchmark_extensions/05_run_paper_backup.sh
 bash hpc/benchmark_extensions/06_run_paper_k_boundary.sh
+bash hpc/benchmark_extensions/08_run_paper_k_structure_boundary.sh
 ```
 
 These wrappers call:
