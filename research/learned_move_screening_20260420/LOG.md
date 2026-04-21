@@ -246,3 +246,44 @@ Clean the learning-thread markdown surface so re-entry is fast and old phase not
 ### Conclusion
 
 The thread can now be resumed from a new conversation with a short read path: `START_HERE.md` -> `ACTIVE.md` -> current iteration `SUMMARY.md`, with older phase notes separated from the main working surface.
+
+## 2026-04-21
+
+### Attempt
+Run Phase Q synthetic-only offline move-ranking training/evaluation on the frozen Phase P train/val dataset.
+
+### Result
+
+- created Phase Q iteration memory for synthetic-only offline ranking evaluation
+- trained `XGBoost`, `LightGBM`, and `CatBoost` on frozen synthetic train only
+- evaluated against random, `screen_score_s1`, `screen_score_s2`, and oracle baselines on frozen synthetic val only
+- learned models produced only modest gains over the strongest handcrafted baseline, with the clearest lift on top-k improvement magnitude and only small recall/precision gains at larger budget
+- selected `xgboost` as the default learned candidate from this bounded run
+
+### Evidence
+
+- `research/learned_move_screening_20260420/iterations/20260421_phaseQ_synthetic_offline_training/RESULTS.md`
+- `research/learned_move_screening_20260420/iterations/20260421_phaseQ_synthetic_offline_training/SUMMARY.md`
+
+### Conclusion
+
+Phase Q did not justify continuing fine-grained learned move ranking as the main paper direction; the next branch should test an algorithmic mechanism instead.
+
+### Attempt
+Create Phase R as a bounded diagnostic for epsilon warm-start continuity on benchmark instance `61`.
+
+### Result
+
+- created and activated iteration `20260421_phaseR_epsilon_warmstart_diagnostic`
+- documented the warm-start hypothesis, grounded evidence from Phases I/J/K/Q, and a strict paired warm-start vs fresh-start design
+- prepared a detailed coder prompt that can run from the pushed GitHub branch alone
+
+### Evidence
+
+- `research/learned_move_screening_20260420/iterations/20260421_phaseR_epsilon_warmstart_diagnostic/SUMMARY.md`
+- `research/learned_move_screening_20260420/phaseR_epsilon_warmstart_diagnostic_design.md`
+- `research/learned_move_screening_20260420/phaseR_epsilon_warmstart_diagnostic_coder_prompt.md`
+
+### Conclusion
+
+Phase R is now the active branch. The next step is a single-instance epsilon warm-start diagnostic that can validate or falsify the continuity hypothesis cheaply before any full sweep implementation.
