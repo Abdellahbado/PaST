@@ -1,0 +1,21 @@
+# Phase Q: synthetic-only offline move-ranking training
+#
+# Scope:
+# - read frozen synthetic train/val CSV files
+# - train/evaluate tabular ranking models
+# - compare against random / handcrafted / oracle baselines
+#
+# Intentionally minimal:
+# - no repo-wide RL / torch / plotting stack
+# - no benchmark-generation dependencies
+
+numpy>=1.24
+pandas>=2.0
+scipy>=1.11
+scikit-learn>=1.3
+tqdm>=4.66
+
+# Required model families for Phase Q
+xgboost>=2.0
+lightgbm>=4.0
+catboost>=1.2
