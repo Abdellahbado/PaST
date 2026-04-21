@@ -1,0 +1,63 @@
+{
+  "phase": "phaseP_full_synthetic_freeze",
+  "timestamp_utc": "2026-04-20T23:40:26.614187+00:00",
+  "manifests_used": {
+    "train": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/split_manifest_train.csv",
+    "val": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/split_manifest_val.csv"
+  },
+  "explicitly_not_used": [
+    "temp/phaseM_vls_synthetic_protocol/split_manifest_test_primary_vls.csv",
+    "temp/phaseM_vls_synthetic_protocol/split_manifest_test_secondary_legacy.csv"
+  ],
+  "execution": {
+    "manifest_instances_train": 150,
+    "manifest_instances_val": 30,
+    "instances_total": 180,
+    "instances_success": 180,
+    "instances_failed": 0,
+    "total_retries_used": 0,
+    "total_wall_runtime_sec": 547.466584,
+    "max_rss_bytes": 256868352
+  },
+  "dataset": {
+    "rows_total": 317113,
+    "positives_total": 251721,
+    "negatives_total": 65392,
+    "positive_rate": 0.7937895955069644,
+    "negative_rate": 0.2062104044930356,
+    "train_rows": 263356,
+    "val_rows": 53757,
+    "train_positive_rate": 0.7903180485730342,
+    "val_positive_rate": 0.8107967334486671,
+    "train_val_positive_rate_gap": 0.02047868487563287
+  },
+  "skew_diagnosis": {
+    "bucket_composition": {
+      "row_weight_composition_effect_on_positive_rate_gap": -0.000988037528532448,
+      "within_bucket_rate_effect_on_positive_rate_gap": 0.02146672240416546,
+      "val_positive_rate_with_train_bucket_weights": 0.8114356724133224,
+      "train_positive_rate_with_val_bucket_weights": 0.7889809124806242
+    },
+    "epsilon_policy": {
+      "epsilon_slack": 8,
+      "epsilon_stress_vs_instance_positive_rate_corr_overall": -0.15260458598521098,
+      "epsilon_stress_vs_instance_positive_rate_corr_by_split": {
+        "train": -0.15242123795909127,
+        "val": -0.15331965671424017
+      },
+      "train_mean_epsilon_stress": 0.2075352382,
+      "val_mean_epsilon_stress": 0.206552381
+    },
+    "instance_seed_variance": {
+      "comparable_buckets": 30,
+      "val_outside_train_2std_bucket_count": 3,
+      "val_outside_train_2std_bucket_fraction": 0.1
+    }
+  },
+  "freeze_readiness": {
+    "manifest_gated_full_labeling_complete": true,
+    "schema_stable": true,
+    "class_balance_documented": true,
+    "skew_explained_enough": true
+  }
+}

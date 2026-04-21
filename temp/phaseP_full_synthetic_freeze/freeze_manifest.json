@@ -1,0 +1,30 @@
+{
+  "phase": "phaseP_full_synthetic_freeze",
+  "timestamp_utc": "2026-04-20T23:40:26.614187+00:00",
+  "inputs": {
+    "train_manifest": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/split_manifest_train.csv",
+    "val_manifest": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/split_manifest_val.csv",
+    "train_manifest_rows": 150,
+    "val_manifest_rows": 30
+  },
+  "labeling_policy": {
+    "solver_variant": "stageO_synthetic_dense_logging",
+    "epsilon_policy": "epsilon=min(K, max(ceil(sum(p)/M), max(p)) + epsilon_slack)",
+    "epsilon_slack": 8,
+    "per_machine_dp_limit_sec": 1.0,
+    "ls_time_cap_sec": 2.0,
+    "ls_max_rounds": 2,
+    "ls_max_moves_per_round": 8000
+  },
+  "outputs": {
+    "batch_progress_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/batch_progress.csv",
+    "batch_summary_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/batch_summary.csv",
+    "dataset_summary_global_json": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/dataset_summary_global.json",
+    "dataset_summary_by_split_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/dataset_summary_by_split.csv",
+    "dataset_summary_by_bucket_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/dataset_summary_by_bucket.csv",
+    "train_frozen_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/synthetic_moves_exact_labeled_train_frozen.csv",
+    "val_frozen_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/synthetic_moves_exact_labeled_val_frozen.csv",
+    "merged_frozen_csv": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/synthetic_moves_exact_labeled_frozen_merged.csv",
+    "schema_json": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze/feature_schema_frozen.json"
+  }
+}

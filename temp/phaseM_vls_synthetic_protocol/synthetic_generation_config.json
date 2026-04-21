@@ -1,0 +1,46 @@
+{
+  "phase": "phaseM_vls_synthetic_protocol",
+  "description": "Synthetic VLS-only corpus for clean train/val, with benchmark-only test manifests.",
+  "training_data_policy": "generated_only",
+  "validation_data_policy": "generated_only",
+  "primary_test_policy": "benchmark_61_90_only",
+  "secondary_test_policy": "benchmark_1_60_only_ood_legacy",
+  "generator_family": {
+    "M_values": [
+      25,
+      30,
+      40
+    ],
+    "N_values": [
+      250,
+      300,
+      350,
+      400,
+      500
+    ],
+    "K_values": [
+      350,
+      500
+    ],
+    "p_distribution": "discrete_uniform[1,12]",
+    "e_distribution": "discrete_uniform[1,6]",
+    "c_distribution": "discrete_uniform[1,8]"
+  },
+  "seeding_scheme": {
+    "root_seed": 20260420,
+    "split_seed": 20260421,
+    "instance_seed_formula": "root_seed + combo_index*1000 + local_seed",
+    "seeds_per_combo": 6
+  },
+  "pilot_corpus": {
+    "n_combinations": 30,
+    "instances_total": 180,
+    "instances_train": 150,
+    "instances_val": 30
+  },
+  "benchmark_manifests": {
+    "primary_vls_count": 30,
+    "secondary_legacy_count": 60,
+    "benchmark_source_dir": "/Users/mac/Documents/Study/PFE/PaST/temp/paper_exact_repo/instances"
+  }
+}

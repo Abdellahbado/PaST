@@ -1,0 +1,16 @@
+{
+  "train_manifest": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/split_manifest_train.csv",
+  "val_manifest": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/split_manifest_val.csv",
+  "output_dir": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseP_full_synthetic_freeze",
+  "solver_bin": "/Users/mac/Documents/Study/PFE/PaST/solvers/cpp/build/parallel_heuristic_compare",
+  "synthetic_data_dir": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseM_vls_synthetic_protocol/synthetic_instances",
+  "stageo_raw_dir": "/Users/mac/Documents/Study/PFE/PaST/temp/phaseO_synthetic_dense_labeling",
+  "epsilon_slack": 8,
+  "per_machine_dp_limit_sec": 1.0,
+  "ls_time_cap_sec": 2.0,
+  "ls_max_rounds": 2,
+  "ls_max_moves_per_round": 8000,
+  "max_retries": 1,
+  "resume_enabled": true,
+  "batching_policy": "by_(M,N,K)_bucket_within_split_tracking"
+}
