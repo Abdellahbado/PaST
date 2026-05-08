@@ -473,6 +473,13 @@ struct VariantResult
     int phaseV_score_escape_normal_rounds = 0;
     int phaseV_score_escape_distinct_pairs = 0;
     double phaseV_score_escape_max_cheap_lb = 0.0;
+    int phaseX_candidates_considered = 0;
+    int phaseX_candidates_evaluated = 0;
+    int phaseX_improvement_count = 0;
+    double phaseX_best_delta = 0.0;
+    int phaseX_normal_rounds = 0;
+    int phaseX_escape_rounds = 0;
+    std::string phaseX_policy_name;
 };
 
 struct RepairMoveItem
@@ -619,6 +626,13 @@ struct VndStats
     int phaseV_score_escape_normal_rounds = 0;
     int phaseV_score_escape_distinct_pairs = 0;
     double phaseV_score_escape_max_cheap_lb = 0.0;
+    int phaseX_candidates_considered = 0;
+    int phaseX_candidates_evaluated = 0;
+    int phaseX_improvement_count = 0;
+    double phaseX_best_delta = 0.0;
+    int phaseX_normal_rounds = 0;
+    int phaseX_escape_rounds = 0;
+    std::string phaseX_policy_name;
 };
 
 struct NoScreenDiagStats
@@ -867,11 +881,99 @@ enum class InsertScreenMode
     ExceptionLaneRefined1,
     ExceptionLaneRefined2,
     ExceptionLaneRefined3,
-    ScoreEscapeSampler
+    ScoreEscapeSampler,
+    PhaseXPolicyJson
 };
 
 static int g_random_exception_seed = 42;
 static int g_audit_instance_id = -1;
+static std::string g_phaseX_policy_path;
+
+struct PhaseXPolicy
+{
+    std::string policy_name;
+    std::string normal_mode = "llm_score";
+    std::string escape_mode = "none";
+    int switch_after_no_hit = 2;
+    bool switch_back_on_hit = true;
+    int initial_budget = 4;
+    int max_budget = 12;
+    int grow_on_hit = 2;
+    int shrink_on_miss = 1;
+    int max_per_source = 3;
+    int max_per_target = 3;
+    bool require_positive_cheap_lb = false;
+    double coverage_bonus = 0.0;
+    double random_mix = 0.0;
+    double cheap_lb_weight = 0.0;
+    double s2_weight = 1.0;
+    double slack_weight = 0.5;
+    int guard_max_budget = 0;
+};
+
+static std::string phaseX_trim(const std::string& s)
+{
+    std::size_t start = 0;
+    while (start < s.size() && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r')) ++start;
+    if (start >= s.size()) return "";
+    std::size_t end = s.size() - 1;
+    while (end > start && (s[end] == ' ' || s[end] == '\t' || s[end] == '\n' || s[end] == '\r')) --end;
+    return s.substr(start, end - start + 1);
+}
+
+static std::string phaseX_unquote(const std::string& s)
+{
+    std::string t = phaseX_trim(s);
+    if (t.size() >= 2 && t.front() == '"' && t.back() == '"') return t.substr(1, t.size() - 2);
+    return t;
+}
+
+static PhaseXPolicy phaseX_read_policy(const std::string& path)
+{
+    PhaseXPolicy p;
+    std::ifstream f(path);
+    if (!f.is_open()) { std::cerr << "PhaseX: cannot open policy " << path << "\n"; return p; }
+    std::stringstream buf; buf << f.rdbuf();
+    std::string raw = buf.str();
+    std::size_t bo = raw.find('{');
+    std::size_t bc = raw.rfind('}');
+    if (bo == std::string::npos || bc == std::string::npos || bc <= bo) return p;
+    std::string body = raw.substr(bo + 1, bc - bo - 1);
+    std::map<std::string, std::string> kv;
+    std::size_t pos = 0;
+    while (pos < body.size()) {
+        std::size_t ks = body.find('"', pos); if (ks == std::string::npos) break;
+        std::size_t ke = body.find('"', ks + 1); if (ke == std::string::npos) break;
+        std::string key = body.substr(ks + 1, ke - ks - 1);
+        std::size_t col = body.find(':', ke + 1); if (col == std::string::npos) break;
+        std::size_t vs = col + 1;
+        while (vs < body.size() && (body[vs] == ' ' || body[vs] == '\t' || body[vs] == '\n' || body[vs] == '\r')) ++vs;
+        if (vs >= body.size()) break;
+        std::string val;
+        if (body[vs] == '"') { std::size_t ve = vs + 1; while (ve < body.size() && !(body[ve] == '"' && body[ve-1] != '\\')) ++ve; val = body.substr(vs, ve - vs + 1); pos = ve + 1; }
+        else { std::size_t ve = vs; while (ve < body.size() && body[ve] != ',' && body[ve] != '}' && body[ve] != '\n') ++ve; val = body.substr(vs, ve - vs); pos = ve; }
+        kv[key] = phaseX_trim(val);
+    }
+    if (kv.count("policy_name")) p.policy_name = phaseX_unquote(kv["policy_name"]);
+    if (kv.count("normal_mode")) p.normal_mode = phaseX_unquote(kv["normal_mode"]);
+    if (kv.count("escape_mode")) p.escape_mode = phaseX_unquote(kv["escape_mode"]);
+    if (kv.count("switch_after_no_hit")) p.switch_after_no_hit = std::stoi(kv["switch_after_no_hit"]);
+    if (kv.count("switch_back_on_hit")) { std::string v = kv["switch_back_on_hit"]; p.switch_back_on_hit = (v == "true" || v == "1"); }
+    if (kv.count("initial_budget")) p.initial_budget = std::stoi(kv["initial_budget"]);
+    if (kv.count("max_budget")) p.max_budget = std::stoi(kv["max_budget"]);
+    if (kv.count("grow_on_hit")) p.grow_on_hit = std::stoi(kv["grow_on_hit"]);
+    if (kv.count("shrink_on_miss")) p.shrink_on_miss = std::stoi(kv["shrink_on_miss"]);
+    if (kv.count("max_per_source")) p.max_per_source = std::stoi(kv["max_per_source"]);
+    if (kv.count("max_per_target")) p.max_per_target = std::stoi(kv["max_per_target"]);
+    if (kv.count("require_positive_cheap_lb")) { std::string v = kv["require_positive_cheap_lb"]; p.require_positive_cheap_lb = (v == "true" || v == "1"); }
+    if (kv.count("coverage_bonus")) p.coverage_bonus = std::stod(kv["coverage_bonus"]);
+    if (kv.count("random_mix")) p.random_mix = std::stod(kv["random_mix"]);
+    if (kv.count("cheap_lb_weight")) p.cheap_lb_weight = std::stod(kv["cheap_lb_weight"]);
+    if (kv.count("s2_weight")) p.s2_weight = std::stod(kv["s2_weight"]);
+    if (kv.count("slack_weight")) p.slack_weight = std::stod(kv["slack_weight"]);
+    if (kv.count("guard_max_budget")) p.guard_max_budget = std::stoi(kv["guard_max_budget"]);
+    return p;
+}
 
 struct LocalSearchConfig
 {
@@ -1755,14 +1857,16 @@ void run_insert_inter_screened_redesign(
          mode == InsertScreenMode::ExceptionLaneRefined1 ||
          mode == InsertScreenMode::ExceptionLaneRefined2 ||
          mode == InsertScreenMode::ExceptionLaneRefined3 ||
-         mode == InsertScreenMode::ScoreEscapeSampler);
-    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler);
-    const bool is_exception_mode = (mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler);
+         mode == InsertScreenMode::ScoreEscapeSampler ||
+         mode == InsertScreenMode::PhaseXPolicyJson);
+    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler || mode == InsertScreenMode::PhaseXPolicyJson);
+    const bool is_exception_mode = (mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler || mode == InsertScreenMode::PhaseXPolicyJson);
     const bool is_exception_random = (mode == InsertScreenMode::ExceptionLaneRandom);
     const bool is_refined1 = (mode == InsertScreenMode::ExceptionLaneRefined1);
     const bool is_refined2 = (mode == InsertScreenMode::ExceptionLaneRefined2);
     const bool is_refined3 = (mode == InsertScreenMode::ExceptionLaneRefined3);
     const bool is_score_escape_sampler = (mode == InsertScreenMode::ScoreEscapeSampler);
+    const bool is_phaseX_policy_json = (mode == InsertScreenMode::PhaseXPolicyJson);
     const bool is_budgeted_mode = (mode == InsertScreenMode::DiverseBudgeted);
     const bool is_dense_mode = (mode == InsertScreenMode::DenseLabeling);
 
@@ -2568,6 +2672,112 @@ void run_insert_inter_screened_redesign(
                 continue;
             }
 
+            if (is_phaseX_policy_json)
+            {
+                static PhaseXPolicy phaseX_policy;
+                static bool phaseX_loaded = false;
+                static int phaseX_budget = 4;
+                static int phaseX_no_hit = 0;
+                static int phaseX_improved_last = 0;
+                static int phaseX_inst_guard = -1;
+
+                if (!phaseX_loaded)
+                {
+                    phaseX_policy = phaseX_read_policy(g_phaseX_policy_path);
+                    phaseX_loaded = true;
+                    stats.phaseX_policy_name = phaseX_policy.policy_name;
+                }
+                if (phaseX_inst_guard != g_audit_instance_id)
+                {
+                    phaseX_budget = phaseX_policy.initial_budget;
+                    phaseX_no_hit = 0;
+                    phaseX_improved_last = 0;
+                    phaseX_inst_guard = g_audit_instance_id;
+                    stats.phaseX_policy_name = phaseX_policy.policy_name;
+                }
+
+                const int total_jobs = static_cast<int>(std::accumulate(machine_jobs.begin(), machine_jobs.end(), std::size_t{0}, [](std::size_t s, const auto& v) { return s + v.size(); }));
+                const double job_dens = m > 0 ? static_cast<double>(total_jobs) / static_cast<double>(m) : 0.0;
+                const double eps_per_job = job_dens > 0.0 ? static_cast<double>(epsilon) / job_dens : 0.0;
+                const bool is_guard = (eps_per_job <= 3.0);
+
+                const int sl_improved = had_shortlist_improvement ? 1 : 0;
+                if (phaseX_improved_last > 0) { phaseX_budget = std::min(phaseX_policy.max_budget, phaseX_budget + phaseX_policy.grow_on_hit); phaseX_no_hit = 0; }
+                else { ++phaseX_no_hit; if (phaseX_no_hit >= 2 && sl_improved > 0) phaseX_budget = std::max(1, phaseX_budget - phaseX_policy.shrink_on_miss); }
+                int exc_cap = phaseX_budget;
+                if (is_guard && phaseX_policy.guard_max_budget > 0) exc_cap = std::min(exc_cap, phaseX_policy.guard_max_budget);
+                else if (is_guard && phaseX_policy.guard_max_budget == 0) exc_cap = 0;
+
+                bool in_escape = false;
+                if (phaseX_policy.escape_mode != "none" && phaseX_policy.switch_after_no_hit > 0 && phaseX_no_hit >= phaseX_policy.switch_after_no_hit)
+                {
+                    in_escape = true;
+                    if (phaseX_policy.switch_back_on_hit && phaseX_improved_last > 0) in_escape = false;
+                }
+                stats.phaseX_normal_rounds += (in_escape ? 0 : 1);
+                stats.phaseX_escape_rounds += (in_escape ? 1 : 0);
+                stats.exception_budget_used = exc_cap;
+
+                struct PXCand { const InsertCand* cand; double score; };
+                std::vector<PXCand> px_scored;
+                px_scored.reserve(outside_pool.size());
+
+                auto px_slack = [epsilon](const InsertCand& c) { double s = std::max(0.0, static_cast<double>(epsilon - c.tgt_load)); return (s / std::max(1.0, static_cast<double>(epsilon))) * 0.5; };
+                auto px_llm = [epsilon,&px_slack](const InsertCand& c) { double s2 = c.s2; if (s2 < -1e9) { s2 = 0.60 * c.s1 + 0.40 * std::max(0.0, c.cheap_lb_delta); } double st = 0.0; if (epsilon>0) st = std::max(0.0, 1.0 - static_cast<double>(c.src_load) / static_cast<double>(epsilon)); return s2 + px_slack(c) + st * 0.2; };
+                auto px_rnd = [](std::uint64_t sd) { std::mt19937_64 r(sd); return static_cast<double>(r()) / static_cast<double>(r.max()); };
+
+                for (auto& c : outside_pool)
+                {
+                    if (!c.epsilon_feasible) continue;
+                    if (phaseX_policy.require_positive_cheap_lb && c.cheap_lb_delta <= 0.0) continue;
+                    double sc;
+                    if (!in_escape) {
+                        if (phaseX_policy.normal_mode == "llm_score") sc = px_llm(c);
+                        else if (phaseX_policy.normal_mode == "s2") sc = c.s2;
+                        else if (phaseX_policy.normal_mode == "random") { std::uint64_t sd = static_cast<std::uint64_t>(g_audit_instance_id)*1000003ULL + static_cast<std::uint64_t>(round)*11003ULL + static_cast<std::uint64_t>(&c-outside_pool.data()); sc = px_rnd(sd); }
+                        else if (phaseX_policy.normal_mode == "cheap_lb") sc = c.cheap_lb_delta;
+                        else { std::uint64_t sd = static_cast<std::uint64_t>(g_audit_instance_id)*1000003ULL + static_cast<std::uint64_t>(round)*11003ULL + static_cast<std::uint64_t>(&c-outside_pool.data()); double r = px_rnd(sd); sc = phaseX_policy.cheap_lb_weight*c.cheap_lb_delta + phaseX_policy.s2_weight*c.s2 + phaseX_policy.slack_weight*px_slack(c) + phaseX_policy.random_mix*r; }
+                    } else {
+                        if (phaseX_policy.escape_mode == "cheap_lb_pair") sc = c.cheap_lb_delta;
+                        else if (phaseX_policy.escape_mode == "random_pair") { std::uint64_t sd = static_cast<std::uint64_t>(g_audit_instance_id)*1000003ULL + static_cast<std::uint64_t>(round)*11003ULL + static_cast<std::uint64_t>(c.a)*77003ULL + static_cast<std::uint64_t>(c.b); sc = px_rnd(sd); }
+                        else if (phaseX_policy.escape_mode == "coverage") { sc = c.s2; std::set<int> us,ut; for (auto& x:px_scored) { us.insert(x.cand->a); ut.insert(x.cand->b); } if (!us.count(c.a)) sc+=phaseX_policy.coverage_bonus; if (!ut.count(c.b)) sc+=phaseX_policy.coverage_bonus; }
+                        else sc = std::max(0.0, c.cheap_lb_delta) - c.s2;
+                    }
+                    px_scored.push_back({&c, sc});
+                }
+                stats.phaseX_candidates_considered = static_cast<int>(px_scored.size());
+                stats.exception_candidates_considered = static_cast<int>(px_scored.size());
+                std::sort(px_scored.begin(), px_scored.end(), [](const PXCand& x, const PXCand& y) { if (std::fabs(x.score-y.score)>1e-12) return x.score>y.score; return x.cand<y.cand; });
+                const int eff_cap = std::min(exc_cap, static_cast<int>(px_scored.size()));
+                std::vector<const InsertCand*> px_sel; px_sel.reserve(static_cast<std::size_t>(eff_cap));
+                std::map<int,int> px_sc, px_tc;
+                for (auto& sc : px_scored) { if (static_cast<int>(px_sel.size())>=eff_cap) break; if (px_sc[sc.cand->a]>=phaseX_policy.max_per_source) continue; if (px_tc[sc.cand->b]>=phaseX_policy.max_per_target) continue; px_sel.push_back(sc.cand); ++px_sc[sc.cand->a]; ++px_tc[sc.cand->b]; }
+                stats.exception_candidates_evaluated = static_cast<int>(px_sel.size());
+                stats.phaseX_candidates_evaluated = static_cast<int>(px_sel.size());
+                { std::set<int> os,ot; for (auto& sc:px_scored) { os.insert(sc.cand->a); ot.insert(sc.cand->b); } stats.outside_pool_distinct_src = static_cast<int>(os.size()); stats.outside_pool_distinct_tgt = static_cast<int>(ot.size()); }
+                { std::map<int,int> ss,st; for (auto* c:px_sel) { ++ss[c->a]; ++st[c->b]; } stats.selected_distinct_src = static_cast<int>(ss.size()); stats.selected_distinct_tgt = static_cast<int>(st.size()); }
+                int px_imp = 0; double px_best = 0.0;
+                for (auto* c : px_sel) {
+                    if (elapsed_sec() > time_cap_sec) break;
+                    if (static_cast<std::size_t>(c->a)>=machine_jobs.size() || static_cast<std::size_t>(c->b)>=machine_jobs.size()) continue;
+                    if (static_cast<std::size_t>(c->ia)>=machine_jobs[static_cast<std::size_t>(c->a)].size()) continue;
+                    if (machine_jobs[static_cast<std::size_t>(c->a)][static_cast<std::size_t>(c->ia)]!=c->p) continue;
+                    if (machine_loads[static_cast<std::size_t>(c->b)]+c->p>epsilon) continue;
+                    auto ta = machine_jobs[static_cast<std::size_t>(c->a)]; auto tb = machine_jobs[static_cast<std::size_t>(c->b)];
+                    ta.erase(ta.begin()+c->ia); tb.push_back(c->p);
+                    double na = exact_machine_cost_cached(ta,prices,epsilon,rates[static_cast<std::size_t>(c->a)],per_machine_dp_limit_sec,cache);
+                    double nb = exact_machine_cost_cached(tb,prices,epsilon,rates[static_cast<std::size_t>(c->b)],per_machine_dp_limit_sec,cache);
+                    if (!(na<kInf*0.5)||!(nb<kInf*0.5)) continue;
+                    double oab = machine_exact_cost[static_cast<std::size_t>(c->a)]+machine_exact_cost[static_cast<std::size_t>(c->b)];
+                    if (na+nb+1e-9<oab) { double d=oab-(na+nb); if (d>px_best) px_best=d; ++px_imp; machine_jobs[static_cast<std::size_t>(c->a)]=std::move(ta); machine_jobs[static_cast<std::size_t>(c->b)]=std::move(tb); machine_loads[static_cast<std::size_t>(c->a)]-=c->p; machine_loads[static_cast<std::size_t>(c->b)]+=c->p; machine_exact_cost[static_cast<std::size_t>(c->a)]=na; machine_exact_cost[static_cast<std::size_t>(c->b)]=nb; ++stats.accepted_insert_inter; improved=true; }
+                }
+                stats.exception_improvement_count = px_imp; stats.exception_best_delta = px_best;
+                stats.exception_hit_rate = (px_sel.size()>0) ? static_cast<double>(px_imp)/static_cast<double>(px_sel.size()) : 0.0;
+                stats.phaseX_improvement_count = px_imp; stats.phaseX_best_delta = px_best;
+                phaseX_improved_last = px_imp;
+                continue;
+            }
+
             {
                 std::set<int> distinct_src_set;
                 std::set<int> distinct_tgt_set;
@@ -3250,6 +3460,7 @@ VariantResult evaluate_variant(
          variant == "phaseS_refined2_anticore" ||
          variant == "phaseS_refined3_coverage" ||
          variant == "phaseV_score_escape_sampler" ||
+         variant == "phaseX_policy_json" ||
          variant == "phaseI_noscreen_diagnostic")
     {
         LocalSearchConfig cfg;
@@ -3344,7 +3555,9 @@ VariantResult evaluate_variant(
                  variant == "phaseS_refined1_stratified" ||
                  variant == "phaseS_refined2_anticore" ||
                  variant == "phaseS_refined3_coverage" ||
-                 variant == "phaseV_score_escape_sampler")
+                 variant == "phaseV_score_escape_sampler" ||
+                 variant == "phaseX_policy_json" ||
+                 variant == "phaseI_noscreen_diagnostic")
         {
              VndStats insert_stats;
             run_insert_inter_screened_redesign(
@@ -3368,6 +3581,7 @@ VariantResult evaluate_variant(
                 (variant == "phaseS_refined2_anticore") ? InsertScreenMode::ExceptionLaneRefined2 :
                 (variant == "phaseS_refined3_coverage") ? InsertScreenMode::ExceptionLaneRefined3 :
                 (variant == "phaseV_score_escape_sampler") ? InsertScreenMode::ScoreEscapeSampler :
+                (variant == "phaseX_policy_json") ? InsertScreenMode::PhaseXPolicyJson :
                 InsertScreenMode::DenseLabeling,
                 ls_cache,
                 insert_stats,
@@ -3410,6 +3624,13 @@ VariantResult evaluate_variant(
             out.phaseV_score_escape_normal_rounds = insert_stats.phaseV_score_escape_normal_rounds;
             out.phaseV_score_escape_distinct_pairs = insert_stats.phaseV_score_escape_distinct_pairs;
             out.phaseV_score_escape_max_cheap_lb = insert_stats.phaseV_score_escape_max_cheap_lb;
+            out.phaseX_candidates_considered = insert_stats.phaseX_candidates_considered;
+            out.phaseX_candidates_evaluated = insert_stats.phaseX_candidates_evaluated;
+            out.phaseX_improvement_count = insert_stats.phaseX_improvement_count;
+            out.phaseX_best_delta = insert_stats.phaseX_best_delta;
+            out.phaseX_normal_rounds = insert_stats.phaseX_normal_rounds;
+            out.phaseX_escape_rounds = insert_stats.phaseX_escape_rounds;
+            out.phaseX_policy_name = insert_stats.phaseX_policy_name;
         }
         else if (variant == "phaseI_noscreen_diagnostic")
         {
@@ -3517,6 +3738,8 @@ VariantResult evaluate_variant(
                  variant == "phaseS_refined1_stratified" ||
                  variant == "phaseS_refined2_anticore" ||
                  variant == "phaseS_refined3_coverage" ||
+                 variant == "phaseV_score_escape_sampler" ||
+                 variant == "phaseX_policy_json" ||
                  variant == "phaseI_noscreen_diagnostic")
         {
             machine_cost = out.machine_exact_cost[static_cast<std::size_t>(h)];
@@ -3573,7 +3796,8 @@ void print_csv_header()
                  "selected_distinct_src,selected_distinct_tgt,selected_max_src_share,selected_max_tgt_share,"
                  "exception_hit_rate,final_machine_load_pressure,avg_machine_load_pressure,"
                  "phaseV_score_escape_candidates_considered,phaseV_score_escape_candidates_evaluated,phaseV_score_escape_improvement_count,phaseV_score_escape_best_delta,"
-                 "phaseV_score_escape_escape_rounds,phaseV_score_escape_normal_rounds,phaseV_score_escape_distinct_pairs,phaseV_score_escape_max_cheap_lb\n";
+                 "phaseV_score_escape_escape_rounds,phaseV_score_escape_normal_rounds,phaseV_score_escape_distinct_pairs,phaseV_score_escape_max_cheap_lb,"
+                 "phaseX_policy_name,phaseX_candidates_considered,phaseX_candidates_evaluated,phaseX_improvement_count,phaseX_best_delta,phaseX_normal_rounds,phaseX_escape_rounds\n";
 }
 
 void print_csv_row(
@@ -3644,7 +3868,14 @@ void print_csv_row(
               << res.phaseV_score_escape_escape_rounds << ","
               << res.phaseV_score_escape_normal_rounds << ","
               << res.phaseV_score_escape_distinct_pairs << ","
-              << res.phaseV_score_escape_max_cheap_lb << "\n";
+              << res.phaseV_score_escape_max_cheap_lb << ","
+              << res.phaseX_policy_name << ","
+              << res.phaseX_candidates_considered << ","
+              << res.phaseX_candidates_evaluated << ","
+              << res.phaseX_improvement_count << ","
+              << res.phaseX_best_delta << ","
+              << res.phaseX_normal_rounds << ","
+              << res.phaseX_escape_rounds << "\n";
 }
 
 } // namespace
@@ -3656,7 +3887,7 @@ int main(int argc, char **argv)
         std::cerr << "Usage:\n"
                   << "  parallel_heuristic_compare paper-instance <instance_id> <epsilon> <variant> [data_dir] [per_machine_dp_limit_sec] [ls_time_cap_sec] [ls_max_rounds] [ls_max_moves_per_round]\n"
                   << "  parallel_heuristic_compare paper-history-chain <instance_id> <epsilon_start> <epsilon_end> <variant> [data_dir] [per_machine_dp_limit_sec] [ls_time_cap_sec] [ls_max_rounds] [ls_max_moves_per_round]\n"
-                   << "Variants: greedy_esr | greedy_dp | dp_guided_assignment_dp | greedy_dp_local_search | greedy_dp_local_search_relocate_only | greedy_dp_local_search_relocate_multistart | greedy_dp_local_search_screened_swap | greedy_dp_local_search_priority_machines | vnd_exact_dp | vnd_exact_dp_insert_rank_v1 | vnd_exact_dp_insert_rank_diverse | vnd_exact_dp_insert_rank_diverse_trimmed | vnd_exact_dp_insert_rank_diverse_budgeted | vnd_exact_dp_insert_rank_dense_labeling | phaseS_llm_exception_lane | phaseS_random_exception_lane | phaseS_refined1_stratified | phaseS_refined2_anticore | phaseS_refined3_coverage | phaseI_noscreen_diagnostic | stageL1_dataset_logging | stageL15_dense_labeling | stageO_synthetic_dense_logging | history_repair_dp_ranked | history_repair_dp_ranked_relocate | history_repair_priority_displaced | history_repair_priority_displaced_relocate | all\n";
+                   << "Variants: greedy_esr | greedy_dp | dp_guided_assignment_dp | greedy_dp_local_search | greedy_dp_local_search_relocate_only | greedy_dp_local_search_relocate_multistart | greedy_dp_local_search_screened_swap | greedy_dp_local_search_priority_machines | vnd_exact_dp | vnd_exact_dp_insert_rank_v1 | vnd_exact_dp_insert_rank_diverse | vnd_exact_dp_insert_rank_diverse_trimmed | vnd_exact_dp_insert_rank_diverse_budgeted | vnd_exact_dp_insert_rank_dense_labeling | phaseS_llm_exception_lane | phaseS_random_exception_lane | phaseS_refined1_stratified | phaseS_refined2_anticore | phaseS_refined3_coverage | phaseV_score_escape_sampler | phaseX_policy_json | phaseI_noscreen_diagnostic | stageL1_dataset_logging | stageL15_dense_labeling | stageO_synthetic_dense_logging | history_repair_dp_ranked | history_repair_dp_ranked_relocate | history_repair_priority_displaced | history_repair_priority_displaced_relocate | all\n";
         return 1;
     }
 
@@ -3671,6 +3902,9 @@ int main(int argc, char **argv)
 
     if (const char* env_seed = std::getenv("PHASES_RANDOM_SEED"))
         g_random_exception_seed = std::stoi(env_seed);
+
+    if (const char* env_phaseX = std::getenv("PHASEX_POLICY_PATH"))
+        g_phaseX_policy_path = env_phaseX;
 
     int epsilon = -1;
     int epsilon_end = -1;
@@ -4179,7 +4413,8 @@ int main(int argc, char **argv)
             name == "phaseS_refined1_stratified" ||
             name == "phaseS_refined2_anticore" ||
             name == "phaseS_refined3_coverage" ||
-            name == "phaseV_score_escape_sampler")
+            name == "phaseV_score_escape_sampler" ||
+            name == "phaseX_policy_json")
         {
             const auto t0 = std::chrono::steady_clock::now();
             const int starts = 4;
@@ -4432,6 +4667,8 @@ int main(int argc, char **argv)
         run_variant("phaseS_refined1_stratified");
         run_variant("phaseS_refined2_anticore");
         run_variant("phaseS_refined3_coverage");
+        run_variant("phaseV_score_escape_sampler");
+        run_variant("phaseX_policy_json");
         run_variant("stageL1_dataset_logging");
         run_variant("stageL15_dense_labeling");
         run_variant("stageO_synthetic_dense_logging");
@@ -4458,6 +4695,7 @@ int main(int argc, char **argv)
         variant != "phaseS_refined2_anticore" &&
         variant != "phaseS_refined3_coverage" &&
         variant != "phaseV_score_escape_sampler" &&
+        variant != "phaseX_policy_json" &&
         variant != "phaseI_noscreen_diagnostic" &&
         variant != "stageL1_dataset_logging" &&
         variant != "stageL15_dense_labeling" &&
