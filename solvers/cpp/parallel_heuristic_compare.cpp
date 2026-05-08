@@ -465,6 +465,14 @@ struct VariantResult
     double exception_hit_rate = 0.0;
     double final_machine_load_pressure = 0.0;
     double avg_machine_load_pressure = 0.0;
+    int phaseV_score_escape_candidates_considered = 0;
+    int phaseV_score_escape_candidates_evaluated = 0;
+    int phaseV_score_escape_improvement_count = 0;
+    double phaseV_score_escape_best_delta = 0.0;
+    int phaseV_score_escape_escape_rounds = 0;
+    int phaseV_score_escape_normal_rounds = 0;
+    int phaseV_score_escape_distinct_pairs = 0;
+    double phaseV_score_escape_max_cheap_lb = 0.0;
 };
 
 struct RepairMoveItem
@@ -603,6 +611,14 @@ struct VndStats
     double exception_hit_rate = 0.0;
     double final_machine_load_pressure = 0.0;
     double avg_machine_load_pressure = 0.0;
+    int phaseV_score_escape_candidates_considered = 0;
+    int phaseV_score_escape_candidates_evaluated = 0;
+    int phaseV_score_escape_improvement_count = 0;
+    double phaseV_score_escape_best_delta = 0.0;
+    int phaseV_score_escape_escape_rounds = 0;
+    int phaseV_score_escape_normal_rounds = 0;
+    int phaseV_score_escape_distinct_pairs = 0;
+    double phaseV_score_escape_max_cheap_lb = 0.0;
 };
 
 struct NoScreenDiagStats
@@ -850,10 +866,12 @@ enum class InsertScreenMode
     ExceptionLaneRandom,
     ExceptionLaneRefined1,
     ExceptionLaneRefined2,
-    ExceptionLaneRefined3
+    ExceptionLaneRefined3,
+    ScoreEscapeSampler
 };
 
 static int g_random_exception_seed = 42;
+static int g_audit_instance_id = -1;
 
 struct LocalSearchConfig
 {
@@ -1736,15 +1754,17 @@ void run_insert_inter_screened_redesign(
          mode == InsertScreenMode::ExceptionLaneRandom ||
          mode == InsertScreenMode::ExceptionLaneRefined1 ||
          mode == InsertScreenMode::ExceptionLaneRefined2 ||
-         mode == InsertScreenMode::ExceptionLaneRefined3);
-    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3);
-    const bool is_budgeted_mode = (mode == InsertScreenMode::DiverseBudgeted);
-    const bool is_dense_mode = (mode == InsertScreenMode::DenseLabeling);
-    const bool is_exception_mode = (mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3);
+         mode == InsertScreenMode::ExceptionLaneRefined3 ||
+         mode == InsertScreenMode::ScoreEscapeSampler);
+    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler);
+    const bool is_exception_mode = (mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler);
     const bool is_exception_random = (mode == InsertScreenMode::ExceptionLaneRandom);
     const bool is_refined1 = (mode == InsertScreenMode::ExceptionLaneRefined1);
     const bool is_refined2 = (mode == InsertScreenMode::ExceptionLaneRefined2);
     const bool is_refined3 = (mode == InsertScreenMode::ExceptionLaneRefined3);
+    const bool is_score_escape_sampler = (mode == InsertScreenMode::ScoreEscapeSampler);
+    const bool is_budgeted_mode = (mode == InsertScreenMode::DiverseBudgeted);
+    const bool is_dense_mode = (mode == InsertScreenMode::DenseLabeling);
 
     const int source_top_k = [&]() -> int
     {
@@ -2358,6 +2378,196 @@ void run_insert_inter_screened_redesign(
         bool had_shortlist_improvement = improved;
         if (is_exception_mode)
         {
+            if (is_score_escape_sampler)
+            {
+                static int score_escape_budget = 4;
+                static int score_escape_no_hit = 0;
+                static int score_escape_improved_last = 0;
+                static int score_escape_instance_guard = -1;
+                static bool score_escape_mode = false;
+                static int score_escape_k = 3;
+
+                if (score_escape_instance_guard != g_audit_instance_id)
+                {
+                    score_escape_budget = 4;
+                    score_escape_no_hit = 0;
+                    score_escape_improved_last = 0;
+                    score_escape_mode = false;
+                    score_escape_k = 3;
+                    score_escape_instance_guard = g_audit_instance_id;
+                }
+
+                stats.phaseV_score_escape_normal_rounds += (score_escape_mode ? 0 : 1);
+                stats.phaseV_score_escape_escape_rounds += (score_escape_mode ? 1 : 0);
+
+                const int shortlist_improved = had_shortlist_improvement ? 1 : 0;
+                if (score_escape_improved_last > 0) { score_escape_budget = std::min(12, score_escape_budget + 2); score_escape_no_hit = 0; }
+                else { ++score_escape_no_hit; if (score_escape_no_hit >= 2 && shortlist_improved > 0) score_escape_budget = std::max(1, score_escape_budget - 1); }
+                stats.exception_budget_used = score_escape_budget;
+
+                std::vector<const InsertCand*> exc_cands;
+                exc_cands.reserve(static_cast<std::size_t>(score_escape_budget));
+
+                if (!score_escape_mode)
+                {
+                    struct ScoredCand { const InsertCand* cand; double score; };
+                    std::vector<ScoredCand> scored;
+                    scored.reserve(outside_pool.size());
+                    for (auto& c : outside_pool)
+                    {
+                        if (!c.epsilon_feasible) continue;
+                        double s2 = c.s2;
+                        if (s2 < -1e9)
+                        {
+                            double lb_gain = std::max(0.0, c.cheap_lb_delta);
+                            double a_gap = source_gap[static_cast<std::size_t>(c.a)] / static_cast<double>(std::max(1, machine_loads[static_cast<std::size_t>(c.a)]));
+                            s2 = 0.60 * c.s1 + 0.40 * lb_gain + 0.30 * a_gap;
+                        }
+                        double tgt_slack = std::max(0.0, static_cast<double>(epsilon - c.tgt_load));
+                        double slack_bonus = (tgt_slack / std::max(1.0, static_cast<double>(epsilon))) * 0.5;
+                        double src_tightness = 0.0;
+                        if (epsilon > 0) src_tightness = std::max(0.0, 1.0 - (static_cast<double>(c.src_load) / static_cast<double>(epsilon)));
+                        double tightness_bonus = src_tightness * 0.2;
+                        double sc = s2 + slack_bonus + tightness_bonus;
+                        scored.push_back({&c, sc});
+                    }
+                    std::sort(scored.begin(), scored.end(), [](const ScoredCand& x, const ScoredCand& y) {
+                        if (std::fabs(x.score - y.score) > 1e-12) return x.score > y.score;
+                        return x.cand < y.cand;
+                    });
+                    const int exc_cap = std::min(score_escape_budget, static_cast<int>(scored.size()));
+                    std::map<int, int> src_cnt, tgt_cnt;
+                    for (const auto& sc : scored)
+                    {
+                        if (static_cast<int>(exc_cands.size()) >= exc_cap) break;
+                        if (src_cnt[sc.cand->a] >= 3) continue;
+                        if (tgt_cnt[sc.cand->b] >= 3) continue;
+                        exc_cands.push_back(sc.cand);
+                        ++src_cnt[sc.cand->a];
+                        ++tgt_cnt[sc.cand->b];
+                    }
+                    stats.exception_candidates_considered = static_cast<int>(scored.size());
+                }
+                else
+                {
+                    std::map<std::pair<int, int>, double> pair_max_delta;
+                    std::map<std::pair<int, int>, const InsertCand*> pair_best;
+                    std::vector<const InsertCand*> eligible;
+                    for (auto& c : outside_pool)
+                    {
+                        if (!c.epsilon_feasible) continue;
+                        if (c.cheap_lb_delta <= 0.0) continue;
+                        eligible.push_back(&c);
+                        auto key = std::make_pair(c.a, c.b);
+                        if (c.cheap_lb_delta > pair_max_delta[key])
+                        {
+                            pair_max_delta[key] = c.cheap_lb_delta;
+                            pair_best[key] = &c;
+                        }
+                    }
+                    if (!pair_best.empty())
+                    {
+                        std::vector<std::pair<std::pair<int,int>, double>> pairs(pair_max_delta.begin(), pair_max_delta.end());
+                        std::sort(pairs.begin(), pairs.end(), [](const auto& x, const auto& y) { return x.second > y.second; });
+                        stats.phaseV_score_escape_distinct_pairs = static_cast<int>(pairs.size());
+                        stats.phaseV_score_escape_max_cheap_lb = pairs.empty() ? 0.0 : pairs[0].second;
+                        const int K = 3;
+                        std::map<int, int> src_cnt, tgt_cnt;
+                        for (const auto& pr : pairs)
+                        {
+                            if (static_cast<int>(exc_cands.size()) >= K) break;
+                            const auto* cand = pair_best.at(pr.first);
+                            if (src_cnt[cand->a] >= 2) continue;
+                            if (tgt_cnt[cand->b] >= 2) continue;
+                            exc_cands.push_back(cand);
+                            ++src_cnt[cand->a];
+                            ++tgt_cnt[cand->b];
+                        }
+                    }
+                    stats.exception_candidates_considered = static_cast<int>(eligible.size());
+                }
+
+                stats.phaseV_score_escape_candidates_considered = stats.exception_candidates_considered;
+
+                {
+                    std::set<int> op_src, op_tgt;
+                    for (const auto& c : outside_pool)
+                    {
+                        if (!c.epsilon_feasible) continue;
+                        op_src.insert(c.a); op_tgt.insert(c.b);
+                    }
+                    stats.outside_pool_distinct_src = static_cast<int>(op_src.size());
+                    stats.outside_pool_distinct_tgt = static_cast<int>(op_tgt.size());
+                }
+
+                stats.exception_candidates_evaluated = static_cast<int>(exc_cands.size());
+                stats.phaseV_score_escape_candidates_evaluated = static_cast<int>(exc_cands.size());
+
+                {
+                    std::map<int, int> sel_src_cnt, sel_tgt_cnt;
+                    for (const auto* c : exc_cands) { ++sel_src_cnt[c->a]; ++sel_tgt_cnt[c->b]; }
+                    stats.selected_distinct_src = static_cast<int>(sel_src_cnt.size());
+                    stats.selected_distinct_tgt = static_cast<int>(sel_tgt_cnt.size());
+                }
+
+                int exc_improved_count = 0;
+                double exc_best_delta = 0.0;
+                for (const auto* c : exc_cands)
+                {
+                    if (elapsed_sec() > time_cap_sec) break;
+                    if (static_cast<std::size_t>(c->a) >= machine_jobs.size()) continue;
+                    if (static_cast<std::size_t>(c->b) >= machine_jobs.size()) continue;
+                    if (static_cast<std::size_t>(c->ia) >= machine_jobs[static_cast<std::size_t>(c->a)].size()) continue;
+                    const int p_actual = machine_jobs[static_cast<std::size_t>(c->a)][static_cast<std::size_t>(c->ia)];
+                    if (p_actual != c->p) continue;
+                    if (machine_loads[static_cast<std::size_t>(c->b)] + c->p > epsilon) continue;
+                    auto trial_a = machine_jobs[static_cast<std::size_t>(c->a)];
+                    auto trial_b = machine_jobs[static_cast<std::size_t>(c->b)];
+                    trial_a.erase(trial_a.begin() + c->ia);
+                    trial_b.push_back(c->p);
+                    const double new_a = exact_machine_cost_cached(trial_a, prices, epsilon, rates[static_cast<std::size_t>(c->a)], per_machine_dp_limit_sec, cache);
+                    const double new_b = exact_machine_cost_cached(trial_b, prices, epsilon, rates[static_cast<std::size_t>(c->b)], per_machine_dp_limit_sec, cache);
+                    if (!(new_a < kInf * 0.5) || !(new_b < kInf * 0.5)) continue;
+                    const double old_ab = machine_exact_cost[static_cast<std::size_t>(c->a)] + machine_exact_cost[static_cast<std::size_t>(c->b)];
+                    if (new_a + new_b + 1e-9 < old_ab) {
+                        double delta = old_ab - (new_a + new_b);
+                        if (delta > exc_best_delta) exc_best_delta = delta;
+                        ++exc_improved_count;
+                        machine_jobs[static_cast<std::size_t>(c->a)] = std::move(trial_a);
+                        machine_jobs[static_cast<std::size_t>(c->b)] = std::move(trial_b);
+                        machine_loads[static_cast<std::size_t>(c->a)] -= c->p;
+                        machine_loads[static_cast<std::size_t>(c->b)] += c->p;
+                        machine_exact_cost[static_cast<std::size_t>(c->a)] = new_a;
+                        machine_exact_cost[static_cast<std::size_t>(c->b)] = new_b;
+                        ++stats.accepted_insert_inter;
+                        improved = true;
+                    }
+                }
+
+                stats.exception_improvement_count = exc_improved_count;
+                stats.exception_best_delta = exc_best_delta;
+                stats.exception_hit_rate = (exc_cands.size() > 0) ? static_cast<double>(exc_improved_count) / static_cast<double>(exc_cands.size()) : 0.0;
+                stats.phaseV_score_escape_improvement_count = exc_improved_count;
+                stats.phaseV_score_escape_best_delta = exc_best_delta;
+
+                score_escape_improved_last = exc_improved_count;
+
+                if (exc_improved_count > 0)
+                {
+                    score_escape_mode = false;
+                    score_escape_k = 3;
+                }
+                else if (!score_escape_mode)
+                {
+                    if (score_escape_no_hit >= 2)
+                    {
+                        score_escape_mode = true;
+                        score_escape_k = 3;
+                    }
+                }
+                continue;
+            }
+
             {
                 std::set<int> distinct_src_set;
                 std::set<int> distinct_tgt_set;
@@ -2536,7 +2746,7 @@ void run_insert_inter_screened_redesign(
                 stats.exception_budget_used = exception_budget;
                 stats.exception_best_delta = (best_delta > 1e-9) ? best_delta : 0.0;
                 stats.exception_improvement_count = (best_delta > 1e-9) ? 1 : 0;
-                stats.exception_hit_rate = (exception_budget > 0) ? static_cast<double>(evaluated) / static_cast<double>(exception_budget) : 0.0;
+                stats.exception_hit_rate = (evaluated > 0) ? static_cast<double>(stats.exception_improvement_count) / static_cast<double>(evaluated) : 0.0;
 
                 if (best_delta > 1e-9 && best_cand_idx >= 0)
                 {
@@ -3039,6 +3249,7 @@ VariantResult evaluate_variant(
          variant == "phaseS_refined1_stratified" ||
          variant == "phaseS_refined2_anticore" ||
          variant == "phaseS_refined3_coverage" ||
+         variant == "phaseV_score_escape_sampler" ||
          variant == "phaseI_noscreen_diagnostic")
     {
         LocalSearchConfig cfg;
@@ -3132,9 +3343,10 @@ VariantResult evaluate_variant(
                  variant == "phaseS_random_exception_lane" ||
                  variant == "phaseS_refined1_stratified" ||
                  variant == "phaseS_refined2_anticore" ||
-                 variant == "phaseS_refined3_coverage")
+                 variant == "phaseS_refined3_coverage" ||
+                 variant == "phaseV_score_escape_sampler")
         {
-            VndStats insert_stats;
+             VndStats insert_stats;
             run_insert_inter_screened_redesign(
                 jobs_by_machine,
                 loads,
@@ -3155,6 +3367,7 @@ VariantResult evaluate_variant(
                 (variant == "phaseS_refined1_stratified") ? InsertScreenMode::ExceptionLaneRefined1 :
                 (variant == "phaseS_refined2_anticore") ? InsertScreenMode::ExceptionLaneRefined2 :
                 (variant == "phaseS_refined3_coverage") ? InsertScreenMode::ExceptionLaneRefined3 :
+                (variant == "phaseV_score_escape_sampler") ? InsertScreenMode::ScoreEscapeSampler :
                 InsertScreenMode::DenseLabeling,
                 ls_cache,
                 insert_stats,
@@ -3189,6 +3402,14 @@ VariantResult evaluate_variant(
             out.exception_hit_rate = insert_stats.exception_hit_rate;
             out.final_machine_load_pressure = insert_stats.final_machine_load_pressure;
             out.avg_machine_load_pressure = insert_stats.avg_machine_load_pressure;
+            out.phaseV_score_escape_candidates_considered = insert_stats.phaseV_score_escape_candidates_considered;
+            out.phaseV_score_escape_candidates_evaluated = insert_stats.phaseV_score_escape_candidates_evaluated;
+            out.phaseV_score_escape_improvement_count = insert_stats.phaseV_score_escape_improvement_count;
+            out.phaseV_score_escape_best_delta = insert_stats.phaseV_score_escape_best_delta;
+            out.phaseV_score_escape_escape_rounds = insert_stats.phaseV_score_escape_escape_rounds;
+            out.phaseV_score_escape_normal_rounds = insert_stats.phaseV_score_escape_normal_rounds;
+            out.phaseV_score_escape_distinct_pairs = insert_stats.phaseV_score_escape_distinct_pairs;
+            out.phaseV_score_escape_max_cheap_lb = insert_stats.phaseV_score_escape_max_cheap_lb;
         }
         else if (variant == "phaseI_noscreen_diagnostic")
         {
@@ -3350,7 +3571,9 @@ void print_csv_header()
                  "exception_candidates_considered,exception_candidates_evaluated,exception_budget_used,exception_improvement_count,exception_best_delta,"
                  "outside_pool_distinct_src,outside_pool_distinct_tgt,outside_pool_max_src_share,outside_pool_max_tgt_share,"
                  "selected_distinct_src,selected_distinct_tgt,selected_max_src_share,selected_max_tgt_share,"
-                 "exception_hit_rate,final_machine_load_pressure,avg_machine_load_pressure\n";
+                 "exception_hit_rate,final_machine_load_pressure,avg_machine_load_pressure,"
+                 "phaseV_score_escape_candidates_considered,phaseV_score_escape_candidates_evaluated,phaseV_score_escape_improvement_count,phaseV_score_escape_best_delta,"
+                 "phaseV_score_escape_escape_rounds,phaseV_score_escape_normal_rounds,phaseV_score_escape_distinct_pairs,phaseV_score_escape_max_cheap_lb\n";
 }
 
 void print_csv_row(
@@ -3413,7 +3636,15 @@ void print_csv_row(
               << res.selected_max_tgt_share << ","
               << res.exception_hit_rate << ","
               << res.final_machine_load_pressure << ","
-              << res.avg_machine_load_pressure << "\n";
+              << res.avg_machine_load_pressure << ","
+              << res.phaseV_score_escape_candidates_considered << ","
+              << res.phaseV_score_escape_candidates_evaluated << ","
+              << res.phaseV_score_escape_improvement_count << ","
+              << res.phaseV_score_escape_best_delta << ","
+              << res.phaseV_score_escape_escape_rounds << ","
+              << res.phaseV_score_escape_normal_rounds << ","
+              << res.phaseV_score_escape_distinct_pairs << ","
+              << res.phaseV_score_escape_max_cheap_lb << "\n";
 }
 
 } // namespace
@@ -3947,7 +4178,8 @@ int main(int argc, char **argv)
             name == "phaseS_random_exception_lane" ||
             name == "phaseS_refined1_stratified" ||
             name == "phaseS_refined2_anticore" ||
-            name == "phaseS_refined3_coverage")
+            name == "phaseS_refined3_coverage" ||
+            name == "phaseV_score_escape_sampler")
         {
             const auto t0 = std::chrono::steady_clock::now();
             const int starts = 4;
@@ -4225,6 +4457,7 @@ int main(int argc, char **argv)
         variant != "phaseS_refined1_stratified" &&
         variant != "phaseS_refined2_anticore" &&
         variant != "phaseS_refined3_coverage" &&
+        variant != "phaseV_score_escape_sampler" &&
         variant != "phaseI_noscreen_diagnostic" &&
         variant != "stageL1_dataset_logging" &&
         variant != "stageL15_dense_labeling" &&
