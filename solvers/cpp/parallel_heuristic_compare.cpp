@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <fstream>
 #include <filesystem>
 #include <iomanip>
@@ -448,6 +449,22 @@ struct VariantResult
     double diagnostic_best_tec = -1.0;
     int diagnostic_improving_move_found = 0;
     std::int64_t diagnostic_exact_evaluated_moves = 0;
+    int exception_candidates_considered = 0;
+    int exception_candidates_evaluated = 0;
+    int exception_budget_used = 0;
+    int exception_improvement_count = 0;
+    double exception_best_delta = 0.0;
+    int outside_pool_distinct_src = 0;
+    int outside_pool_distinct_tgt = 0;
+    int outside_pool_max_src_share = 0;
+    int outside_pool_max_tgt_share = 0;
+    int selected_distinct_src = 0;
+    int selected_distinct_tgt = 0;
+    int selected_max_src_share = 0;
+    int selected_max_tgt_share = 0;
+    double exception_hit_rate = 0.0;
+    double final_machine_load_pressure = 0.0;
+    double avg_machine_load_pressure = 0.0;
 };
 
 struct RepairMoveItem
@@ -570,6 +587,22 @@ struct VndStats
     std::int64_t evaluated_swap_inter = 0;
     std::int64_t evaluated_insert_inter = 0;
     std::string stop_reason = "max_rounds";
+    int exception_candidates_considered = 0;
+    int exception_candidates_evaluated = 0;
+    int exception_budget_used = 0;
+    int exception_improvement_count = 0;
+    double exception_best_delta = 0.0;
+    int outside_pool_distinct_src = 0;
+    int outside_pool_distinct_tgt = 0;
+    int outside_pool_max_src_share = 0;
+    int outside_pool_max_tgt_share = 0;
+    int selected_distinct_src = 0;
+    int selected_distinct_tgt = 0;
+    int selected_max_src_share = 0;
+    int selected_max_tgt_share = 0;
+    double exception_hit_rate = 0.0;
+    double final_machine_load_pressure = 0.0;
+    double avg_machine_load_pressure = 0.0;
 };
 
 struct NoScreenDiagStats
@@ -811,8 +844,16 @@ enum class InsertScreenMode
     DiverseTwoStage,
     DiverseTrimmed,
     DiverseBudgeted,
-    DenseLabeling
+    DenseLabeling,
+    MissetAudit,
+    ExceptionLaneLLM,
+    ExceptionLaneRandom,
+    ExceptionLaneRefined1,
+    ExceptionLaneRefined2,
+    ExceptionLaneRefined3
 };
+
+static int g_random_exception_seed = 42;
 
 struct LocalSearchConfig
 {
@@ -1690,10 +1731,20 @@ void run_insert_inter_screened_redesign(
         (mode == InsertScreenMode::DiverseTwoStage ||
          mode == InsertScreenMode::DiverseTrimmed ||
          mode == InsertScreenMode::DiverseBudgeted ||
-         mode == InsertScreenMode::DenseLabeling);
-    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed);
+         mode == InsertScreenMode::DenseLabeling ||
+         mode == InsertScreenMode::ExceptionLaneLLM ||
+         mode == InsertScreenMode::ExceptionLaneRandom ||
+         mode == InsertScreenMode::ExceptionLaneRefined1 ||
+         mode == InsertScreenMode::ExceptionLaneRefined2 ||
+         mode == InsertScreenMode::ExceptionLaneRefined3);
+    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3);
     const bool is_budgeted_mode = (mode == InsertScreenMode::DiverseBudgeted);
     const bool is_dense_mode = (mode == InsertScreenMode::DenseLabeling);
+    const bool is_exception_mode = (mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3);
+    const bool is_exception_random = (mode == InsertScreenMode::ExceptionLaneRandom);
+    const bool is_refined1 = (mode == InsertScreenMode::ExceptionLaneRefined1);
+    const bool is_refined2 = (mode == InsertScreenMode::ExceptionLaneRefined2);
+    const bool is_refined3 = (mode == InsertScreenMode::ExceptionLaneRefined3);
 
     const int source_top_k = [&]() -> int
     {
@@ -1851,6 +1902,7 @@ void run_insert_inter_screened_redesign(
         }
 
         std::vector<InsertCand> pool;
+        std::vector<InsertCand> outside_pool;
         pool.reserve(1024);
         std::int64_t screened_in_round = 0;
 
@@ -2035,15 +2087,23 @@ void run_insert_inter_screened_redesign(
             const int keep = std::min<int>(per_source_keep, static_cast<int>(source_pool.size()));
             if (is_trimmed_mode || is_budgeted_mode)
             {
-                const int per_target_quota = is_trimmed_mode ? 1 : 2;
+                const int per_target_quota = (is_trimmed_mode && !is_exception_mode) ? 1 : (is_budgeted_mode ? 2 : 1);
                 std::vector<int> target_count(static_cast<std::size_t>(m), 0);
                 int selected = 0;
                 for (const auto &cand : source_pool)
                 {
                     if (selected >= keep)
-                        break;
-                    if (target_count[static_cast<std::size_t>(cand.b)] >= per_target_quota)
+                    {
+                        if (is_exception_mode)
+                            outside_pool.push_back(cand);
                         continue;
+                    }
+                    if (target_count[static_cast<std::size_t>(cand.b)] >= per_target_quota)
+                    {
+                        if (is_exception_mode)
+                            outside_pool.push_back(cand);
+                        continue;
+                    }
                     ++target_count[static_cast<std::size_t>(cand.b)];
                     pool.push_back(cand);
                     ++selected;
@@ -2053,6 +2113,11 @@ void run_insert_inter_screened_redesign(
             {
                 for (int i = 0; i < keep; ++i)
                     pool.push_back(source_pool[static_cast<std::size_t>(i)]);
+                if (is_exception_mode)
+                {
+                    for (int i = keep; i < static_cast<int>(source_pool.size()); ++i)
+                        outside_pool.push_back(source_pool[static_cast<std::size_t>(i)]);
+                }
             }
         }
 
@@ -2288,6 +2353,239 @@ void run_insert_inter_screened_redesign(
                     improved = true;
                 }
             }
+        }
+
+        bool had_shortlist_improvement = improved;
+        if (is_exception_mode)
+        {
+            {
+                std::set<int> distinct_src_set;
+                std::set<int> distinct_tgt_set;
+                std::map<int, int> src_share;
+                std::map<int, int> tgt_share;
+                for (const auto &cand : outside_pool)
+                {
+                    distinct_src_set.insert(cand.a);
+                    distinct_tgt_set.insert(cand.b);
+                    ++src_share[cand.a];
+                    ++tgt_share[cand.b];
+                }
+                stats.outside_pool_distinct_src = static_cast<int>(distinct_src_set.size());
+                stats.outside_pool_distinct_tgt = static_cast<int>(distinct_tgt_set.size());
+                stats.outside_pool_max_src_share = 0;
+                stats.outside_pool_max_tgt_share = 0;
+                for (const auto &kv : src_share)
+                    if (kv.second > stats.outside_pool_max_src_share)
+                        stats.outside_pool_max_src_share = kv.second;
+                for (const auto &kv : tgt_share)
+                    if (kv.second > stats.outside_pool_max_tgt_share)
+                        stats.outside_pool_max_tgt_share = kv.second;
+            }
+            stats.exception_candidates_considered = static_cast<int>(outside_pool.size());
+
+            if (!had_shortlist_improvement && !outside_pool.empty())
+            {
+                int exception_budget = 10;
+                std::vector<int> selected_indices;
+
+                if (is_exception_random)
+                {
+                    std::vector<int> idx(outside_pool.size());
+                    std::iota(idx.begin(), idx.end(), 0);
+                    std::mt19937 rng(static_cast<unsigned int>(g_random_exception_seed + round));
+                    std::shuffle(idx.begin(), idx.end(), rng);
+                    exception_budget = std::min(10, static_cast<int>(idx.size()));
+                    selected_indices.assign(idx.begin(), idx.begin() + exception_budget);
+                }
+                else if (is_refined1)
+                {
+                    std::map<std::pair<int, int>, std::vector<int>> strata;
+                    for (int i = 0; i < static_cast<int>(outside_pool.size()); ++i)
+                        strata[{outside_pool[static_cast<std::size_t>(i)].a, outside_pool[static_cast<std::size_t>(i)].b}].push_back(i);
+                    std::vector<std::pair<int, int>> stratum_keys;
+                    for (const auto &kv : strata)
+                        stratum_keys.push_back(kv.first);
+                    std::mt19937 rng_s(static_cast<unsigned int>(g_random_exception_seed + round * 1007));
+                    std::shuffle(stratum_keys.begin(), stratum_keys.end(), rng_s);
+                    exception_budget = std::min(10, static_cast<int>(stratum_keys.size()));
+                    for (int k = 0; k < exception_budget; ++k)
+                    {
+                        const auto &cand_idx = strata[stratum_keys[static_cast<std::size_t>(k)]];
+                        auto best_it = std::max_element(cand_idx.begin(), cand_idx.end(),
+                            [&](int i1, int i2) { return outside_pool[static_cast<std::size_t>(i1)].s1 < outside_pool[static_cast<std::size_t>(i2)].s1; });
+                        selected_indices.push_back(*best_it);
+                    }
+                }
+                else if (is_refined2)
+                {
+                    std::map<std::pair<int, int>, std::vector<int>> strata;
+                    for (int i = 0; i < static_cast<int>(outside_pool.size()); ++i)
+                        strata[{outside_pool[static_cast<std::size_t>(i)].a, outside_pool[static_cast<std::size_t>(i)].b}].push_back(i);
+                    std::vector<std::pair<std::pair<int, int>, std::vector<int>>> sorted_strata(strata.begin(), strata.end());
+                    std::sort(sorted_strata.begin(), sorted_strata.end(),
+                        [](const auto &x, const auto &y) { return x.second.size() < y.second.size(); });
+                    exception_budget = std::min(5, static_cast<int>(sorted_strata.size()));
+                    for (int k = 0; k < exception_budget; ++k)
+                    {
+                        const auto &cand_idx = sorted_strata[static_cast<std::size_t>(k)].second;
+                        auto best_it = std::max_element(cand_idx.begin(), cand_idx.end(),
+                            [&](int i1, int i2) { return outside_pool[static_cast<std::size_t>(i1)].s1 < outside_pool[static_cast<std::size_t>(i2)].s1; });
+                        selected_indices.push_back(*best_it);
+                    }
+                }
+                else if (is_refined3)
+                {
+                    std::vector<int> sorted_idx(outside_pool.size());
+                    std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+                    std::sort(sorted_idx.begin(), sorted_idx.end(),
+                        [&](int i1, int i2) { return outside_pool[static_cast<std::size_t>(i1)].s1 > outside_pool[static_cast<std::size_t>(i2)].s1; });
+                    std::set<int> covered_src;
+                    std::set<int> covered_tgt;
+                    exception_budget = 8;
+                    for (int i = 0; i < static_cast<int>(sorted_idx.size()) && static_cast<int>(selected_indices.size()) < exception_budget; ++i)
+                    {
+                        int idx = sorted_idx[static_cast<std::size_t>(i)];
+                        int ca = outside_pool[static_cast<std::size_t>(idx)].a;
+                        int cb = outside_pool[static_cast<std::size_t>(idx)].b;
+                        if (covered_src.count(ca) == 0 || covered_tgt.count(cb) == 0)
+                        {
+                            selected_indices.push_back(idx);
+                            covered_src.insert(ca);
+                            covered_tgt.insert(cb);
+                        }
+                    }
+                    for (int i = 0; i < static_cast<int>(sorted_idx.size()) && static_cast<int>(selected_indices.size()) < exception_budget; ++i)
+                    {
+                        int idx = sorted_idx[static_cast<std::size_t>(i)];
+                        if (std::find(selected_indices.begin(), selected_indices.end(), idx) == selected_indices.end())
+                            selected_indices.push_back(idx);
+                    }
+                }
+                else
+                {
+                    std::vector<int> sorted_idx(outside_pool.size());
+                    std::iota(sorted_idx.begin(), sorted_idx.end(), 0);
+                    std::sort(sorted_idx.begin(), sorted_idx.end(),
+                        [&](int i1, int i2) { return outside_pool[static_cast<std::size_t>(i1)].s1 > outside_pool[static_cast<std::size_t>(i2)].s1; });
+                    exception_budget = std::min(10, static_cast<int>(sorted_idx.size()));
+                    selected_indices.assign(sorted_idx.begin(), sorted_idx.begin() + exception_budget);
+                }
+
+                {
+                    std::set<int> sel_src_set;
+                    std::set<int> sel_tgt_set;
+                    std::map<int, int> sel_src_share;
+                    std::map<int, int> sel_tgt_share;
+                    for (int si : selected_indices)
+                    {
+                        const auto &cand = outside_pool[static_cast<std::size_t>(si)];
+                        sel_src_set.insert(cand.a);
+                        sel_tgt_set.insert(cand.b);
+                        ++sel_src_share[cand.a];
+                        ++sel_tgt_share[cand.b];
+                    }
+                    stats.selected_distinct_src = static_cast<int>(sel_src_set.size());
+                    stats.selected_distinct_tgt = static_cast<int>(sel_tgt_set.size());
+                    stats.selected_max_src_share = 0;
+                    stats.selected_max_tgt_share = 0;
+                    for (const auto &kv : sel_src_share)
+                        if (kv.second > stats.selected_max_src_share)
+                            stats.selected_max_src_share = kv.second;
+                    for (const auto &kv : sel_tgt_share)
+                        if (kv.second > stats.selected_max_tgt_share)
+                            stats.selected_max_tgt_share = kv.second;
+                }
+
+                int evaluated = 0;
+                double best_delta = 0.0;
+                int best_cand_idx = -1;
+
+                for (int si : selected_indices)
+                {
+                    if (elapsed_sec() > time_cap_sec)
+                        break;
+                    if (evaluated >= exception_budget)
+                        break;
+
+                    const auto &c = outside_pool[static_cast<std::size_t>(si)];
+                    auto trial_a = machine_jobs[static_cast<std::size_t>(c.a)];
+                    auto trial_b = machine_jobs[static_cast<std::size_t>(c.b)];
+                    const int job_p = trial_a[static_cast<std::size_t>(c.ia)];
+                    trial_a.erase(trial_a.begin() + c.ia);
+                    trial_b.push_back(job_p);
+
+                    ++evaluated;
+
+                    const double new_a = exact_machine_cost_cached(trial_a, prices, epsilon, rates[static_cast<std::size_t>(c.a)], per_machine_dp_limit_sec, cache);
+                    const double new_b = exact_machine_cost_cached(trial_b, prices, epsilon, rates[static_cast<std::size_t>(c.b)], per_machine_dp_limit_sec, cache);
+                    if (!(new_a < kInf * 0.5) || !(new_b < kInf * 0.5))
+                        continue;
+
+                    const double old_ab = machine_exact_cost[static_cast<std::size_t>(c.a)] + machine_exact_cost[static_cast<std::size_t>(c.b)];
+                    const double new_ab = new_a + new_b;
+                    const double delta = old_ab - new_ab;
+
+                    if (delta > best_delta + 1e-9)
+                    {
+                        best_delta = delta;
+                        best_cand_idx = si;
+                    }
+                }
+
+                stats.exception_candidates_evaluated = evaluated;
+                stats.exception_budget_used = exception_budget;
+                stats.exception_best_delta = (best_delta > 1e-9) ? best_delta : 0.0;
+                stats.exception_improvement_count = (best_delta > 1e-9) ? 1 : 0;
+                stats.exception_hit_rate = (exception_budget > 0) ? static_cast<double>(evaluated) / static_cast<double>(exception_budget) : 0.0;
+
+                if (best_delta > 1e-9 && best_cand_idx >= 0)
+                {
+                    const auto &c = outside_pool[static_cast<std::size_t>(best_cand_idx)];
+                    auto trial_a_final = machine_jobs[static_cast<std::size_t>(c.a)];
+                    auto trial_b_final = machine_jobs[static_cast<std::size_t>(c.b)];
+                    const int p_final = trial_a_final[static_cast<std::size_t>(c.ia)];
+                    trial_a_final.erase(trial_a_final.begin() + c.ia);
+                    trial_b_final.push_back(p_final);
+                    const double na = exact_machine_cost_cached(trial_a_final, prices, epsilon, rates[static_cast<std::size_t>(c.a)], per_machine_dp_limit_sec, cache);
+                    const double nb = exact_machine_cost_cached(trial_b_final, prices, epsilon, rates[static_cast<std::size_t>(c.b)], per_machine_dp_limit_sec, cache);
+                    machine_jobs[static_cast<std::size_t>(c.a)] = std::move(trial_a_final);
+                    machine_jobs[static_cast<std::size_t>(c.b)] = std::move(trial_b_final);
+                    machine_loads[static_cast<std::size_t>(c.a)] -= p_final;
+                    machine_loads[static_cast<std::size_t>(c.b)] += p_final;
+                    machine_exact_cost[static_cast<std::size_t>(c.a)] = na;
+                    machine_exact_cost[static_cast<std::size_t>(c.b)] = nb;
+                    ++stats.accepted_insert_inter;
+                    improved = true;
+                }
+            }
+            else
+            {
+                stats.exception_candidates_evaluated = 0;
+                stats.exception_budget_used = 0;
+                stats.exception_improvement_count = 0;
+                stats.exception_best_delta = 0.0;
+                stats.exception_hit_rate = 0.0;
+                stats.selected_distinct_src = 0;
+                stats.selected_distinct_tgt = 0;
+                stats.selected_max_src_share = 0;
+                stats.selected_max_tgt_share = 0;
+            }
+
+            {
+                double max_pressure = 0.0;
+                double sum_pressure = 0.0;
+                for (int h = 0; h < m; ++h)
+                {
+                    double pressure = static_cast<double>(machine_loads[static_cast<std::size_t>(h)]) / static_cast<double>(std::max(1, epsilon));
+                    if (pressure > max_pressure)
+                        max_pressure = pressure;
+                    sum_pressure += pressure;
+                }
+                stats.final_machine_load_pressure = max_pressure;
+                stats.avg_machine_load_pressure = sum_pressure / static_cast<double>(m);
+            }
+
+            continue;
         }
 
         if (is_dense_mode && dense_has_improving)
@@ -2735,8 +3033,13 @@ VariantResult evaluate_variant(
         variant == "vnd_exact_dp_insert_rank_diverse" ||
         variant == "vnd_exact_dp_insert_rank_diverse_trimmed" ||
         variant == "vnd_exact_dp_insert_rank_diverse_budgeted" ||
-        variant == "vnd_exact_dp_insert_rank_dense_labeling" ||
-        variant == "phaseI_noscreen_diagnostic")
+         variant == "vnd_exact_dp_insert_rank_dense_labeling" ||
+         variant == "phaseS_llm_exception_lane" ||
+         variant == "phaseS_random_exception_lane" ||
+         variant == "phaseS_refined1_stratified" ||
+         variant == "phaseS_refined2_anticore" ||
+         variant == "phaseS_refined3_coverage" ||
+         variant == "phaseI_noscreen_diagnostic")
     {
         LocalSearchConfig cfg;
         if (variant == "greedy_dp_local_search_relocate_only")
@@ -2824,7 +3127,12 @@ VariantResult evaluate_variant(
                  variant == "vnd_exact_dp_insert_rank_diverse" ||
                  variant == "vnd_exact_dp_insert_rank_diverse_trimmed" ||
                  variant == "vnd_exact_dp_insert_rank_diverse_budgeted" ||
-                 variant == "vnd_exact_dp_insert_rank_dense_labeling")
+                 variant == "vnd_exact_dp_insert_rank_dense_labeling" ||
+                 variant == "phaseS_llm_exception_lane" ||
+                 variant == "phaseS_random_exception_lane" ||
+                 variant == "phaseS_refined1_stratified" ||
+                 variant == "phaseS_refined2_anticore" ||
+                 variant == "phaseS_refined3_coverage")
         {
             VndStats insert_stats;
             run_insert_inter_screened_redesign(
@@ -2841,7 +3149,13 @@ VariantResult evaluate_variant(
                 (variant == "vnd_exact_dp_insert_rank_v1") ? InsertScreenMode::DualPressureGlobal :
                 (variant == "vnd_exact_dp_insert_rank_diverse") ? InsertScreenMode::DiverseTwoStage :
                 (variant == "vnd_exact_dp_insert_rank_diverse_trimmed") ? InsertScreenMode::DiverseTrimmed :
-                (variant == "vnd_exact_dp_insert_rank_diverse_budgeted") ? InsertScreenMode::DiverseBudgeted : InsertScreenMode::DenseLabeling,
+                (variant == "vnd_exact_dp_insert_rank_diverse_budgeted") ? InsertScreenMode::DiverseBudgeted :
+                (variant == "phaseS_llm_exception_lane") ? InsertScreenMode::ExceptionLaneLLM :
+                (variant == "phaseS_random_exception_lane") ? InsertScreenMode::ExceptionLaneRandom :
+                (variant == "phaseS_refined1_stratified") ? InsertScreenMode::ExceptionLaneRefined1 :
+                (variant == "phaseS_refined2_anticore") ? InsertScreenMode::ExceptionLaneRefined2 :
+                (variant == "phaseS_refined3_coverage") ? InsertScreenMode::ExceptionLaneRefined3 :
+                InsertScreenMode::DenseLabeling,
                 ls_cache,
                 insert_stats,
                 log_ctx);
@@ -2859,6 +3173,22 @@ VariantResult evaluate_variant(
             out.evaluated_relocate_moves = insert_stats.evaluated_insert_inter;
             out.stop_reason = insert_stats.stop_reason;
             out.dominant_improvement_move = (out.accepted_insert_inter_moves > 0 ? "insert_inter" : "none");
+            out.exception_candidates_considered = insert_stats.exception_candidates_considered;
+            out.exception_candidates_evaluated = insert_stats.exception_candidates_evaluated;
+            out.exception_budget_used = insert_stats.exception_budget_used;
+            out.exception_improvement_count = insert_stats.exception_improvement_count;
+            out.exception_best_delta = insert_stats.exception_best_delta;
+            out.outside_pool_distinct_src = insert_stats.outside_pool_distinct_src;
+            out.outside_pool_distinct_tgt = insert_stats.outside_pool_distinct_tgt;
+            out.outside_pool_max_src_share = insert_stats.outside_pool_max_src_share;
+            out.outside_pool_max_tgt_share = insert_stats.outside_pool_max_tgt_share;
+            out.selected_distinct_src = insert_stats.selected_distinct_src;
+            out.selected_distinct_tgt = insert_stats.selected_distinct_tgt;
+            out.selected_max_src_share = insert_stats.selected_max_src_share;
+            out.selected_max_tgt_share = insert_stats.selected_max_tgt_share;
+            out.exception_hit_rate = insert_stats.exception_hit_rate;
+            out.final_machine_load_pressure = insert_stats.final_machine_load_pressure;
+            out.avg_machine_load_pressure = insert_stats.avg_machine_load_pressure;
         }
         else if (variant == "phaseI_noscreen_diagnostic")
         {
@@ -2961,6 +3291,11 @@ VariantResult evaluate_variant(
                  variant == "vnd_exact_dp_insert_rank_diverse_trimmed" ||
                  variant == "vnd_exact_dp_insert_rank_diverse_budgeted" ||
                  variant == "vnd_exact_dp_insert_rank_dense_labeling" ||
+                 variant == "phaseS_llm_exception_lane" ||
+                 variant == "phaseS_random_exception_lane" ||
+                 variant == "phaseS_refined1_stratified" ||
+                 variant == "phaseS_refined2_anticore" ||
+                 variant == "phaseS_refined3_coverage" ||
                  variant == "phaseI_noscreen_diagnostic")
         {
             machine_cost = out.machine_exact_cost[static_cast<std::size_t>(h)];
@@ -3011,7 +3346,11 @@ void print_csv_header()
                  "accepted_moves,accepted_relocate_moves,accepted_swap_moves,evaluated_relocate_moves,evaluated_swap_moves,displaced_jobs,reinsertion_candidates_scored,"
                  "exact_dp_evals_repair,exact_dp_evals_post_repair_local_search,relocate_cleanup_used,dominant_improvement_move,exact_dp_calls_initial,exact_dp_calls_local_search_only,"
                  "accepted_swap_intra_moves,accepted_swap_inter_moves,accepted_insert_inter_moves,evaluated_swap_intra_moves,evaluated_swap_inter_moves,evaluated_insert_inter_moves,"
-                 "exact_dp_cache_hits,exact_dp_cache_misses,stop_reason,diagnostic_start_tec,diagnostic_best_tec,diagnostic_improving_move_found,diagnostic_exact_evaluated_moves\n";
+                 "exact_dp_cache_hits,exact_dp_cache_misses,stop_reason,diagnostic_start_tec,diagnostic_best_tec,diagnostic_improving_move_found,diagnostic_exact_evaluated_moves,"
+                 "exception_candidates_considered,exception_candidates_evaluated,exception_budget_used,exception_improvement_count,exception_best_delta,"
+                 "outside_pool_distinct_src,outside_pool_distinct_tgt,outside_pool_max_src_share,outside_pool_max_tgt_share,"
+                 "selected_distinct_src,selected_distinct_tgt,selected_max_src_share,selected_max_tgt_share,"
+                 "exception_hit_rate,final_machine_load_pressure,avg_machine_load_pressure\n";
 }
 
 void print_csv_row(
@@ -3058,7 +3397,23 @@ void print_csv_row(
               << res.diagnostic_start_tec << ","
               << res.diagnostic_best_tec << ","
               << res.diagnostic_improving_move_found << ","
-              << res.diagnostic_exact_evaluated_moves << "\n";
+              << res.diagnostic_exact_evaluated_moves << ","
+              << res.exception_candidates_considered << ","
+              << res.exception_candidates_evaluated << ","
+              << res.exception_budget_used << ","
+              << res.exception_improvement_count << ","
+              << res.exception_best_delta << ","
+              << res.outside_pool_distinct_src << ","
+              << res.outside_pool_distinct_tgt << ","
+              << res.outside_pool_max_src_share << ","
+              << res.outside_pool_max_tgt_share << ","
+              << res.selected_distinct_src << ","
+              << res.selected_distinct_tgt << ","
+              << res.selected_max_src_share << ","
+              << res.selected_max_tgt_share << ","
+              << res.exception_hit_rate << ","
+              << res.final_machine_load_pressure << ","
+              << res.avg_machine_load_pressure << "\n";
 }
 
 } // namespace
@@ -3070,7 +3425,7 @@ int main(int argc, char **argv)
         std::cerr << "Usage:\n"
                   << "  parallel_heuristic_compare paper-instance <instance_id> <epsilon> <variant> [data_dir] [per_machine_dp_limit_sec] [ls_time_cap_sec] [ls_max_rounds] [ls_max_moves_per_round]\n"
                   << "  parallel_heuristic_compare paper-history-chain <instance_id> <epsilon_start> <epsilon_end> <variant> [data_dir] [per_machine_dp_limit_sec] [ls_time_cap_sec] [ls_max_rounds] [ls_max_moves_per_round]\n"
-                  << "Variants: greedy_esr | greedy_dp | dp_guided_assignment_dp | greedy_dp_local_search | greedy_dp_local_search_relocate_only | greedy_dp_local_search_relocate_multistart | greedy_dp_local_search_screened_swap | greedy_dp_local_search_priority_machines | vnd_exact_dp | vnd_exact_dp_insert_rank_v1 | vnd_exact_dp_insert_rank_diverse | vnd_exact_dp_insert_rank_diverse_trimmed | vnd_exact_dp_insert_rank_diverse_budgeted | vnd_exact_dp_insert_rank_dense_labeling | phaseI_noscreen_diagnostic | stageL1_dataset_logging | stageL15_dense_labeling | stageO_synthetic_dense_logging | history_repair_dp_ranked | history_repair_dp_ranked_relocate | history_repair_priority_displaced | history_repair_priority_displaced_relocate | all\n";
+                   << "Variants: greedy_esr | greedy_dp | dp_guided_assignment_dp | greedy_dp_local_search | greedy_dp_local_search_relocate_only | greedy_dp_local_search_relocate_multistart | greedy_dp_local_search_screened_swap | greedy_dp_local_search_priority_machines | vnd_exact_dp | vnd_exact_dp_insert_rank_v1 | vnd_exact_dp_insert_rank_diverse | vnd_exact_dp_insert_rank_diverse_trimmed | vnd_exact_dp_insert_rank_diverse_budgeted | vnd_exact_dp_insert_rank_dense_labeling | phaseS_llm_exception_lane | phaseS_random_exception_lane | phaseS_refined1_stratified | phaseS_refined2_anticore | phaseS_refined3_coverage | phaseI_noscreen_diagnostic | stageL1_dataset_logging | stageL15_dense_labeling | stageO_synthetic_dense_logging | history_repair_dp_ranked | history_repair_dp_ranked_relocate | history_repair_priority_displaced | history_repair_priority_displaced_relocate | all\n";
         return 1;
     }
 
@@ -3082,6 +3437,9 @@ int main(int argc, char **argv)
     }
 
     const int instance_id = std::stoi(argv[2]);
+
+    if (const char* env_seed = std::getenv("PHASES_RANDOM_SEED"))
+        g_random_exception_seed = std::stoi(env_seed);
 
     int epsilon = -1;
     int epsilon_end = -1;
@@ -3584,7 +3942,12 @@ int main(int argc, char **argv)
         if (name == "vnd_exact_dp_insert_rank_v1" ||
             name == "vnd_exact_dp_insert_rank_diverse" ||
             name == "vnd_exact_dp_insert_rank_diverse_trimmed" ||
-            name == "vnd_exact_dp_insert_rank_diverse_budgeted")
+            name == "vnd_exact_dp_insert_rank_diverse_budgeted" ||
+            name == "phaseS_llm_exception_lane" ||
+            name == "phaseS_random_exception_lane" ||
+            name == "phaseS_refined1_stratified" ||
+            name == "phaseS_refined2_anticore" ||
+            name == "phaseS_refined3_coverage")
         {
             const auto t0 = std::chrono::steady_clock::now();
             const int starts = 4;
@@ -3832,6 +4195,11 @@ int main(int argc, char **argv)
         run_variant("vnd_exact_dp_insert_rank_diverse_trimmed");
         run_variant("vnd_exact_dp_insert_rank_diverse_budgeted");
         run_variant("vnd_exact_dp_insert_rank_dense_labeling");
+        run_variant("phaseS_llm_exception_lane");
+        run_variant("phaseS_random_exception_lane");
+        run_variant("phaseS_refined1_stratified");
+        run_variant("phaseS_refined2_anticore");
+        run_variant("phaseS_refined3_coverage");
         run_variant("stageL1_dataset_logging");
         run_variant("stageL15_dense_labeling");
         run_variant("stageO_synthetic_dense_logging");
@@ -3852,6 +4220,11 @@ int main(int argc, char **argv)
         variant != "vnd_exact_dp_insert_rank_diverse_trimmed" &&
         variant != "vnd_exact_dp_insert_rank_diverse_budgeted" &&
         variant != "vnd_exact_dp_insert_rank_dense_labeling" &&
+        variant != "phaseS_llm_exception_lane" &&
+        variant != "phaseS_random_exception_lane" &&
+        variant != "phaseS_refined1_stratified" &&
+        variant != "phaseS_refined2_anticore" &&
+        variant != "phaseS_refined3_coverage" &&
         variant != "phaseI_noscreen_diagnostic" &&
         variant != "stageL1_dataset_logging" &&
         variant != "stageL15_dense_labeling" &&
