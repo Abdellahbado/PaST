@@ -212,3 +212,42 @@ Files:
 - `eval/x3_random_campaign_summary.csv` — per-cell metrics
 - `eval/x3_random_campaign_aggregate.csv` — per-policy aggregate
 - `policies/random_campaign/x3_campaign_000.json` … `019.json`
+
+## Phase X Closure (2026-05-10)
+
+### Verdict
+
+**Phase X stopped as main LLM-critical direction.** X5 WEAK signal shows
+interactive LLM policy repair does NOT outperform random best-of-5 under the
+same 5-attempt budget. X6 validation on held-out cells is NOT justified.
+
+### Why
+
+| Stage | Result | Implications |
+|-------|--------|-------------|
+| X3 | Case B — DSL contains useful policies but search is noisy | DSL is learnable, not trivial |
+| X4 | MINIMUM SUCCESS — LLM found beating policy in 2 rounds | Interactive repair works against individual random |
+| X5 | WEAK — LLM at 20th percentile vs random best-of-5 | Random brute-force beats LLM under same 5-attempt budget |
+
+The DSL is flat enough that brute-force random search with 5 attempts per batch
+finds better policies 75% of the time. The X4 efficiency claim (2/5 interactive
+rounds vs 2/20 individual random) holds, but the aggregate budget comparison
+reverses it decisively. Running X6 on held-out cells would test whether the same
+null result generalizes — but there is no evidence warranting another DeepSeek
+call or further DSL expansion.
+
+### Remaining value
+
+- DSL-based policy optimization is a valid concept but needs a richer DSL or
+  per-cell adaptation to beat brute-force random.
+- Guard cell breakthrough (Round 4 hybrid, 61/347: 6884→6873) shows that cell-
+  adaptive scoring has potential, but this is orthogonal to interactive LLM.
+
+### Phase Y motivation
+
+The core negative result (LLM cannot beat random best-of-5 under equal budget
+when the policy space is flat) motivates Phase Y: instead of tuning a static
+policy DSL, use the LLM to propose **concrete bounded neighborhoods** from the
+**current schedule state**. The LLM's diagnostic ability (demonstrated in
+Phases S, U, V, X) is tested in a setting where the comparison is against
+random neighborhood proposals rather than random policy settings.

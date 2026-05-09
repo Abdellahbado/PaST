@@ -2,9 +2,38 @@
 
 ## Status
 
-X5 COMPLETED. Random best-of-5 distribution estimator shows **WEAK** signal:
-LLM (14285.7) is at 20th percentile vs random best-of-5 (median 14265.0).
-Interactive LLM does NOT outperform random with same 5-attempt budget.
+**PHASE X STOPPED as main LLM-critical direction (2026-05-10).**
+
+X5 WEAK signal closes the branch: interactive LLM DSL tuning does NOT
+outperform random best-of-5 under the same 5-attempt budget. X6 validation
+on held-out cells is NOT justified. The branch is now archived.
+
+## Why Stopped
+
+- X4 MINIMUM SUCCESS proved interactive feedback works (LLM found beating
+  policy in 2 rounds vs random needing 2/20 individual attempts).
+- X5 WEAK reversed the comparison: when random gets the same 5-attempt
+  budget and picks best-of-5, it beats LLM 75% of the time (15/20 batches).
+  LLM at 20th percentile (14285.7) vs random best-of-5 median (14265.0).
+- The DSL is flat enough that brute-force random dominates interactive repair.
+- Further DSL complexity or more interaction rounds do not address the core
+  weakness — the LLM is not generating insight beyond what random search finds.
+
+## What Survives
+
+- DSL-based policy optimization is a valid concept (Case B).
+- Interactive LLM feedback is more efficient than single-shot generation (X4
+  finding beating policies in fewer total attempts than random).
+- Guard-cell breakthrough (hybrid mode: 61/347 6884→6873) shows cell-adaptive
+  scoring has potential, but this is a DSL-mechanism observation, not an
+  LLM-interaction one.
+
+## What Does Not Survive
+
+- Claim that interactive LLM beats brute-force random under equal budget.
+- Validation on held-out cells (proposed in notes/x5_validation_cells.md
+  but not executed — not justified given X5 WEAK signal).
+- Phase X as the main paper narrative.
 
 ## Pipeline
 
@@ -16,7 +45,7 @@ Interactive LLM does NOT outperform random with same 5-attempt budget.
 | X3 — Random DSL baseline campaign | COMPLETED (Case B) |
 | X4 — Interactive LLM loop | COMPLETED (MINIMUM SUCCESS) |
 | X5 — Random best-of-5 distribution | COMPLETED (WEAK) |
-| X6 — Validation | Not started (cells proposed) |
+| X6 — Validation | SKIPPED (not justified) |
 
 ## X5 Random Best-of-5 Distribution
 
@@ -58,10 +87,12 @@ The DSL is flat enough that brute force beats interactive feedback.
 - Matches score_escape on 61/347 and 65/195, beats it on 62/290
 - Random policy shows intermediate results (no catastrophic regressions)
 
-## Hypothesis
+## Hypothesis (falsified)
 
 Interactive LLM repair (proposal → eval → feedback → revise) will outperform
 one-shot LLM generation and random policy search on a constrained policy DSL.
+
+Falsified at X5: LLM at 20th percentile vs random best-of-5 budget parity.
 
 ## Key Design Decisions
 

@@ -2,7 +2,16 @@
 
 ## Active
 
-(none — X2 completed successfully)
+(none — Phase X stopped by evidence, not by blocker)
+
+## Closure Reason
+
+Branch stopped 2026-05-10 because X5 WEAK signal does not justify continuation:
+interactive LLM DSL repair at 20th percentile vs random best-of-5 under same
+5-attempt budget. No engineering blocker — the pipeline works from X0 through
+X5 including checkpointing, policy JSON evaluation, interactive DeepSeek calls,
+and batch distribution estimation. The evidence simply does not support more
+LLM spend.
 
 ## Resolved
 

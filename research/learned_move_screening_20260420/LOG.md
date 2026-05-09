@@ -1317,6 +1317,39 @@ Complete X2: create Python orchestration script and run full smoke on 3 dev cell
 X2 complete. Phase X generic policy runner is functional. Ready for X3 (fast dev
 evaluation with more policies) and X4 (5-round interactive LLM loop).
 
+## 2026-05-10 — Phase X closed as main LLM-critical direction
+
+### Attempt
+
+Close Phase X after X5 WEAK signal. No X6 validation.
+
+### Result
+
+Phase X stopped by evidence. Interactive LLM DSL policy repair does NOT
+outperform random best-of-5 under equal 5-attempt budget. The DSL is flat
+enough that brute-force random dominates interactive repair 75% of the time.
+
+Phase Y initialized as the new active branch: online/state-conditioned LLM
+neighborhood proposal from current schedule state, with exact DP as verifier.
+
+### Evidence
+
+- `iterations/20260508_phaseX_interactive_llm_policy_repair/RESULTS.md` —
+  X5 closure section added
+- `iterations/20260508_phaseX_interactive_llm_policy_repair/SUMMARY.md` —
+  marked stopped
+- `iterations/20260508_phaseX_interactive_llm_policy_repair/BLOCKERS.md` —
+  closure reason documented
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/` —
+  Phase Y initialized
+
+### Conclusion
+
+Phase X is archived. Survivor evidence: DSL-based policy optimization is
+valid (Case B), interactive LLM feedback is more efficient than single-shot
+generation (X4), cell-adaptive scoring has potential (guard breakthrough).
+The core claim — LLM DSL repair beats random search — is falsified by X5.
+
 ## 2026-05-10 — X5 Random Best-of-5 Distribution complete (WEAK signal)
 
 ### Attempt
