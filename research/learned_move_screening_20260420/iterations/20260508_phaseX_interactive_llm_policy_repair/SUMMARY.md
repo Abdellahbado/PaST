@@ -2,9 +2,9 @@
 
 ## Status
 
-X4 COMPLETED. 5-round interactive DeepSeek policy repair. Verdict: MINIMUM SUCCESS.
-Best LLM policy (Round 2) beats example_policy (-6.3) and random median (-76.3),
-does NOT beat random best c000 (+31.4).
+X5 COMPLETED. Random best-of-5 distribution estimator shows **WEAK** signal:
+LLM (14285.7) is at 20th percentile vs random best-of-5 (median 14265.0).
+Interactive LLM does NOT outperform random with same 5-attempt budget.
 
 ## Pipeline
 
@@ -15,40 +15,36 @@ does NOT beat random best c000 (+31.4).
 | X2 — Generic policy runner | COMPLETED |
 | X3 — Random DSL baseline campaign | COMPLETED (Case B) |
 | X4 — Interactive LLM loop | COMPLETED (MINIMUM SUCCESS) |
-| X5 — Compare against controls | Not started |
-| X6 — Validation | Not started |
+| X5 — Random best-of-5 distribution | COMPLETED (WEAK) |
+| X6 — Validation | Not started (cells proposed) |
 
-## X4 Outcome
+## X5 Random Best-of-5 Distribution
 
 | Metric | Value |
 |--------|------:|
-| Best LLM round | Round 2 (14285.7) |
-| Δ vs example_policy (14292.0) | -6.3 |
-| Δ vs random median (14362.0) | -76.3 |
-| Δ vs random best c000 (14254.3) | +31.4 |
-| Rounds beating example | 2/5 |
-| Rounds beating random best | 0/5 |
-| Verdict | MINIMUM SUCCESS |
+| LLM best-of-5 mean TEC | 14285.7 |
+| Random median best-of-5 | 14265.0 |
+| Random Q1 best-of-5 | 14252.3 |
+| Random Q3 best-of-5 | 14293.3 |
+| Random IQR | 41.0 |
+| Random beating LLM | 15/20 (75%) |
+| LLM percentile rank | 20% |
+| Signal | **WEAK** |
 
-### Key Findings
+### Key Finding
 
-1. **Interactive feedback works**: LLM improved from +8.7 (R0) to -6.3 (R2)
-   by diagnosing per-cell bottlenecks and making targeted changes.
-2. **LLM efficiency**: Found a beating policy in 3 attempts (Round 2). Random
-   needed 20 attempts, only 2/20 hit.
-3. **DSL constraints are binding**: The `max_per_target ≤ 4` cap prevented
-   further improvement (Round 3 proposal was capped).
-4. **Guard cell breakthrough**: Round 4's hybrid mode achieved the first
-   improvement on 61/347 (6873 vs 6884 baseline), suggesting cheap_lb_delta
-   signal is informative on tight cells.
-5. **Cell trade-off**: Hybrid mode improved tight cells but regressed the
-   primary cell — a single fixed-weight scoring cannot optimally serve all
-   epsilon regimes.
+Interactive LLM does NOT beat random best-of-5. When random is given the same
+5-attempt budget and picks the best, it finds better policies 75% of the time.
+The DSL is flat enough that brute force beats interactive feedback.
 
-### Best Policy (Round 2)
+### Implications
 
-llm_score normal mode + cheap_lb_pair escape, max_per_source=4, max_per_target=4,
-require_positive_cheap_lb=false, budget 3→11, grow_on_hit=3.
+- The earlier X4 efficiency claim (LLM found beating policy in 2 rounds vs
+  random needing 2/20 individual attempts) holds against INDIVIDUAL random
+  policies, but not against aggregate best-of-5 random search.
+- The DSL is learnable but not sufficiently structured for interactive LLM
+  to dominate brute-force random within the same attempt budget.
+- Validation is proposed but may not be justified given WEAK signal.
 
 ## X2 Smoke Results
 

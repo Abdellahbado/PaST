@@ -79,12 +79,85 @@ max_budget 11→12 (slightly lower cap).
 
 ### Files
 
-- `prompts/x4_round_0.md` … `x4_round_4.md` — full prompts
-- `responses/x4_round_0_raw.md` … `x4_round_4_raw.md` — raw DeepSeek responses
-- `responses/x4_round_*_meta.json` — API metadata
-- `policies/llm_interactive/x4_round_0.json` … `x4_round_4.json` — policies
-- `eval/x4_interactive_rounds.csv` — per-round aggregate
+- `prompts/x4_round_0.md` … `x4_round_4.md` — 5 prompts
+- `responses/x4_round_*_raw.md` + `_meta.json` — 5 responses + metadata
+- `policies/llm_interactive/x4_round_*.json` — 5 policies
+- `eval/x4_interactive_rounds.csv` — aggregate per-round
 - `eval/x4_interactive_summary.csv` — per-cell per-round
+
+## X5 Random Best-of-5 Distribution (2026-05-09)
+
+20 independent batches × 5 random policies = 100 random DSL policies on 3 dev cells.
+Fair comparison: LLM best-of-5 (14285.7) vs random best-of-5 per batch.
+
+### Distribution
+
+| Metric | Value |
+|--------|------:|
+| N batches | 20 |
+| LLM best-of-5 mean TEC | 14285.7 |
+| Random Q1 best-of-5 | 14252.3 |
+| Random median best-of-5 | 14265.0 |
+| Random Q3 best-of-5 | 14293.3 |
+| Random IQR | 41.0 |
+| Random worst | 14410.0 |
+
+### LLM vs Random (Best-of-5 Comparison)
+
+| Metric | Value |
+|--------|------|
+| Random batches beating LLM | 15/20 (75%) |
+| LLM beating random batches | 5/20 (25%) |
+| LLM percentile rank | 20% |
+| LLM beats random median | NO |
+| Signal strength | **WEAK** |
+
+### Oracle Reference (global best-of-100, NOT equal budget)
+
+| Metric | Value |
+|--------|------:|
+| Global best-of-100 random | 14207.0 |
+| Δ LLM vs global best | +78.7 |
+
+### Interpretation
+
+Interactive LLM does NOT outperform random best-of-5. Random with 5 shots per
+batch finds better policies 75% of the time. The DSL is flat enough that
+brute-force random with a 5-policy budget beats the interactive LLM. The
+prior X4 efficiency claim against individual random policies (2/20) still
+holds, but random aggregate budget (best-of-5) reverses the comparison.
+
+### Best Random Best-of-5 Policy (b014, seed 5074)
+
+```json
+{
+  "normal_mode": "hybrid",
+  "escape_mode": "anti_s2",
+  "switch_after_no_hit": 3,
+  "switch_back_on_hit": true,
+  "initial_budget": 7,
+  "max_budget": 14,
+  "grow_on_hit": 4,
+  "shrink_on_miss": 2,
+  "max_per_source": 3,
+  "max_per_target": 4,
+  "require_positive_cheap_lb": true,
+  "guard_max_budget": 0
+}
+```
+Mean TEC = 14207.0. Per-cell: 61/347=6884, 62/290=9474, 65/195=26263.
+Uses `hybrid` normal mode + `anti_s2` escape (inverts s2 when s2 mis-ranks),
+high budget (7→14) with aggressive growth, and require_positive_cheap_lb=true.
+
+### Files
+
+- `eval/x5_batch_checkpoint.csv` — 20-batch checkpoint
+- `eval/x5_random_bestof5_batches.csv` — copy
+- `eval/x5_random_bestof5_summary.csv` — distribution metrics
+- `policies/random_bestof5_batches/` — 100 random policy JSONs
+- `notes/x5_validation_cells.md` — 14 proposed held-out validation cells
+
+## X3 Random Campaign (2026-05-09)
 
 20 random DSL policies on 3 cells. Baselines recomputed.
 

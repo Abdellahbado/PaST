@@ -1,0 +1,13 @@
+metric,value
+llm_best_of_5_mean_tec,14285.7
+n_batches,20
+random_best_bestof5_oracle,14207.0
+random_q1_bestof5,14252.3
+random_median_bestof5,14265.0
+random_q3_bestof5,14293.3
+random_iqr_bestof5,41.0
+random_worst_bestof5,14410.0
+n_random_beats_llm,15
+n_llm_beats_random,5
+llm_percentile_rank,25.0
+signal_strength,WEAK

@@ -1,0 +1,20 @@
+{
+  "policy_name": "x5_b006_p2_5032",
+  "normal_mode": "cheap_lb",
+  "escape_mode": "random_pair",
+  "switch_after_no_hit": 0,
+  "switch_back_on_hit": true,
+  "initial_budget": 4,
+  "max_budget": 16,
+  "grow_on_hit": 3,
+  "shrink_on_miss": 4,
+  "max_per_source": 3,
+  "max_per_target": 1,
+  "require_positive_cheap_lb": true,
+  "coverage_bonus": 0.26,
+  "random_mix": 0.44,
+  "cheap_lb_weight": 0.33,
+  "s2_weight": 0.06,
+  "slack_weight": 0.05,
+  "guard_max_budget": 4
+}

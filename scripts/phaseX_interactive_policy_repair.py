@@ -1375,6 +1375,245 @@ def run_x4_interactive():
     }
 
 
+# ── X5 equal-budget random comparison ─────────────────────────────────────────
+
+X5_N_BATCHES = 20
+X5_N_PER_BATCH = 5
+X5_LLM_BEST = 14285.7  # LLM best-of-5 mean TEC from X4 Round 2
+X5_SEED_BASE = 5000
+X5_CELLS = [(61, 347, "guard"), (62, 290, "secondary"), (65, 195, "primary")]
+
+
+def run_x5_equal_budget():
+    """X5: 50 batches × 5 random policies on 3 dev cells.
+
+    Checkpointed to eval/x5_batch_checkpoint.csv. Safe to resume.
+    """
+    _ensure_dirs()
+    checkpoint_path = EVAL_DIR / "x5_batch_checkpoint.csv"
+    campaign_dir = POLICIES_DIR / "random_bestof5_batches"
+    campaign_dir.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 60)
+    print("Phase X5 — Random Best-of-5 Distribution Estimator")
+    print(f"  {X5_N_BATCHES} independent batches × {X5_N_PER_BATCH} policies = "
+          f"{X5_N_BATCHES * X5_N_PER_BATCH} random policies total")
+    print(f"  Unit of comparison: best-of-5 (LLM) vs best-of-5 (random batch)")
+    print(f"  LLM best-of-5 target: mean TEC = {X5_LLM_BEST:.1f}")
+    print("=" * 60)
+
+    # Load or init checkpoint
+    completed = set()
+    if checkpoint_path.exists():
+        with open(checkpoint_path) as f:
+            for row in csv.DictReader(f):
+                completed.add(row["batch_id"])
+        print(f"  Resuming from checkpoint: {len(completed)} batches done")
+
+    # Main loop
+    for batch_idx in range(X5_N_BATCHES):
+        batch_id = f"b{batch_idx:03d}"
+        if batch_id in completed:
+            continue
+
+        print(f"\n  Batch {batch_idx+1}/{X5_N_BATCHES} ({batch_id})...", flush=True)
+        t0_batch = time.time()
+
+        batch_tecs = {}
+        batch_feasible = True
+
+        for p in range(X5_N_PER_BATCH):
+            policy_seed = X5_SEED_BASE + batch_idx * X5_N_PER_BATCH + p
+            policy_name = f"x5_b{batch_idx:03d}_p{p}_{policy_seed}"
+
+            # Generate
+            _, pol_path = generate_random_policy(
+                output_path=campaign_dir / f"{policy_name}.json",
+                seed=policy_seed,
+            )
+            with open(pol_path) as f:
+                pol = json.load(f)
+            pol["policy_name"] = policy_name
+            with open(pol_path, "w") as f:
+                json.dump(pol, f, indent=2)
+                f.write("\n")
+
+            # Evaluate
+            pol_tecs = {}
+            for inst, eps, _ in X5_CELLS:
+                rc, stdout, stderr = _run_variant(
+                    "phaseX_policy_json", inst, eps,
+                    extra_env={"PHASEX_POLICY_PATH": str(pol_path.resolve())},
+                )
+                if rc != 0:
+                    print(f"    p{p}: {policy_name} on {inst}/{eps} FAILED rc={rc}", file=sys.stderr)
+                    pol_tecs[inst] = None
+                    continue
+                row = _parse_csv(stdout)
+                if row is None or not _is_feasible(row):
+                    print(f"    p{p}: {policy_name} on {inst}/{eps} INFEASIBLE", file=sys.stderr)
+                    pol_tecs[inst] = None
+                    continue
+                tec = float(row.get("tec_total", 0))
+                pol_tecs[inst] = tec
+
+            valid = [v for v in pol_tecs.values() if v is not None]
+            if len(valid) == 3:
+                mean_tec = sum(valid) / 3
+                batch_tecs[policy_name] = {
+                    "tecs": pol_tecs,
+                    "mean_tec": mean_tec,
+                }
+            else:
+                print(f"    p{p}: {policy_name} not fully feasible ({len(valid)}/3 cells)")
+
+        elapsed = time.time() - t0_batch
+
+        # Find best in batch
+        if batch_tecs:
+            best_name = min(batch_tecs, key=lambda k: batch_tecs[k]["mean_tec"])
+            best_mean = batch_tecs[best_name]["mean_tec"]
+            best_tecs = batch_tecs[best_name]["tecs"]
+            beats_llm = best_mean < X5_LLM_BEST
+            delta_llm = best_mean - X5_LLM_BEST
+
+            print(f"    Best: {best_name} mean={best_mean:.1f} (ΔLLM={delta_llm:+.1f}) "
+                  f"{'BEATS LLM' if beats_llm else ''}  ({elapsed:.0f}s)")
+
+            # Save checkpoint line
+            ck_row = {
+                "batch_id": batch_id,
+                "batch_idx": batch_idx,
+                "n_feasible": len(batch_tecs),
+                "best_policy": best_name,
+                "tec_61_347": f"{best_tecs.get(61, 0):.0f}",
+                "tec_62_290": f"{best_tecs.get(62, 0):.0f}",
+                "tec_65_195": f"{best_tecs.get(65, 0):.0f}",
+                "mean_tec": f"{best_mean:.1f}",
+                "delta_vs_llm": f"{delta_llm:+.1f}",
+                "beats_llm": str(beats_llm),
+                "wall_sec": f"{elapsed:.0f}",
+            }
+        else:
+            print(f"    ALL FAILED ({elapsed:.0f}s)")
+            ck_row = {
+                "batch_id": batch_id, "batch_idx": batch_idx,
+                "n_feasible": 0, "best_policy": "", "tec_61_347": "", "tec_62_290": "",
+                "tec_65_195": "", "mean_tec": "", "delta_vs_llm": "", "beats_llm": "",
+                "wall_sec": f"{elapsed:.0f}",
+            }
+
+        # Append checkpoint
+        fieldnames = list(ck_row.keys())
+        write_header = not checkpoint_path.exists()
+        with open(checkpoint_path, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames)
+            if write_header:
+                w.writeheader()
+            w.writerow(ck_row)
+
+    # ── Analysis ──────────────────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print("X5 ANALYSIS — Random Best-of-5 Distribution")
+    print(f"{'='*60}")
+
+    # Read complete checkpoint
+    all_batches = []
+    with open(checkpoint_path) as f:
+        for row in csv.DictReader(f):
+            all_batches.append(row)
+
+    ml = [float(r["mean_tec"]) for r in all_batches if r["mean_tec"]]
+    if not ml:
+        print("ERROR: No valid batches")
+        return
+
+    ml_sorted = sorted(ml)
+    n = len(ml_sorted)
+    median_ml = ml_sorted[n // 2]
+    best_ml = ml_sorted[0]
+    worst_ml = ml_sorted[-1]
+
+    # IQR (p25, p75)
+    q1_idx = max(0, n // 4)
+    q3_idx = min(n - 1, 3 * n // 4)
+    q1 = ml_sorted[q1_idx]
+    q3 = ml_sorted[q3_idx]
+    iqr = q3 - q1
+
+    n_beats_llm = sum(1 for m in ml if m < X5_LLM_BEST)  # random batches BETTER than LLM
+    n_llm_beats_random = n - n_beats_llm  # random batches WORSE than LLM
+    rank = n_beats_llm + 1
+    pct_rank = (n - rank) / n * 100  # fraction of random batches WORSE than LLM
+
+    print(f"\n  LLM best-of-5 mean TEC: {X5_LLM_BEST:.1f}")
+    print(f"\n  Random best-of-5 distribution (N={n} batches):")
+    print(f"    Best (global best-of-{X5_N_BATCHES * X5_N_PER_BATCH} oracle):  {best_ml:.1f}")
+    print(f"    Q1:  {q1:.1f}")
+    print(f"    Median: {median_ml:.1f}")
+    print(f"    Q3:  {q3:.1f}")
+    print(f"    IQR: {iqr:.1f}")
+    print(f"    Worst: {worst_ml:.1f}")
+    print(f"\n  LLM vs random best-of-5 distribution:")
+    print(f"    Random batches beating LLM: {n_beats_llm}/{n} ({n_beats_llm/n*100:.0f}%)")
+    print(f"    LLM beats {n_llm_beats_random}/{n} ({n_llm_beats_random/n*100:.0f}%) random batches")
+    print(f"    LLM percentile rank: {pct_rank:.0f}% (rank {rank} of {n})")
+    print(f"    LLM beats median best-of-5: {'YES' if X5_LLM_BEST < median_ml else 'NO'}")
+    print(f"    LLM in top quartile (≥p75): {'YES' if pct_rank >= 75 else 'NO'}")
+
+    # Oracle reference (not equal budget)
+    print(f"\n  Oracle reference (global best-of-{X5_N_BATCHES * X5_N_PER_BATCH}, NOT equal budget):")
+    print(f"    Global best random: {best_ml:.1f}")
+    print(f"    Δ LLM vs global best: {X5_LLM_BEST - best_ml:+.1f}")
+
+    if pct_rank >= 75:
+        strength = "STRONG"
+    elif pct_rank >= 50:
+        strength = "MODERATE"
+    else:
+        strength = "WEAK"
+
+    print(f"\n  Signal strength: {strength}")
+    if pct_rank < 50:
+        print(f"  WARNING: LLM is worse than random median best-of-5.")
+
+    # ── Save summary CSVs ────────────────────────────────────────────────────
+    batches_path = EVAL_DIR / "x5_random_bestof5_batches.csv"
+    with open(checkpoint_path) as f:
+        content = f.read()
+    with open(batches_path, "w") as f:
+        f.write(content)
+    print(f"\nBatches CSV → {batches_path}")
+
+    # Summary CSV
+    summary_path = EVAL_DIR / "x5_random_bestof5_summary.csv"
+    with open(summary_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["metric", "value"])
+        w.writeheader()
+        w.writerow({"metric": "llm_best_of_5_mean_tec", "value": f"{X5_LLM_BEST:.1f}"})
+        w.writerow({"metric": "n_batches", "value": str(n)})
+        w.writerow({"metric": "random_best_bestof5_oracle", "value": f"{best_ml:.1f}"})
+        w.writerow({"metric": "random_q1_bestof5", "value": f"{q1:.1f}"})
+        w.writerow({"metric": "random_median_bestof5", "value": f"{median_ml:.1f}"})
+        w.writerow({"metric": "random_q3_bestof5", "value": f"{q3:.1f}"})
+        w.writerow({"metric": "random_iqr_bestof5", "value": f"{iqr:.1f}"})
+        w.writerow({"metric": "random_worst_bestof5", "value": f"{worst_ml:.1f}"})
+        w.writerow({"metric": "n_random_beats_llm", "value": str(n_beats_llm)})
+        w.writerow({"metric": "n_llm_beats_random", "value": str(n_llm_beats_random)})
+        w.writerow({"metric": "llm_percentile_rank", "value": f"{pct_rank:.1f}"})
+        w.writerow({"metric": "signal_strength", "value": strength})
+    print(f"Summary CSV → {summary_path}")
+
+    return {
+        "llm_best": X5_LLM_BEST,
+        "random_best": best_ml,
+        "random_median": median_ml,
+        "n_beats_llm": n_beats_llm,
+        "pct_rank": pct_rank,
+        "strength": strength,
+    }
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1412,6 +1651,11 @@ def main():
         "--x4-interactive",
         action="store_true",
         help="X4: 5-round interactive DeepSeek policy repair.",
+    )
+    parser.add_argument(
+        "--x5-equal-budget",
+        action="store_true",
+        help="X5: 20 batches × 5 random policies — best-of-5 distribution estimator.",
     )
     parser.add_argument(
         "--policy-output",
@@ -1455,6 +1699,9 @@ def main():
 
     elif args.x4_interactive:
         run_x4_interactive()
+
+    elif args.x5_equal_budget:
+        run_x5_equal_budget()
 
     else:
         parser.print_help()

@@ -2,7 +2,7 @@
 
 Current active iteration:
 
-- `iterations/20260508_phaseX_interactive_llm_policy_repair/` — **PHASE X ACTIVE** (X4 complete).
+- `iterations/20260508_phaseX_interactive_llm_policy_repair/` — **PHASE X ACTIVE** (X5 complete).
 
 Previous iterations (archived):
 
@@ -13,13 +13,17 @@ Current state:
 
 - Phase S source rebuilt from oracle binary (committed `a61c79c`).
 - Phase V `score_escape_sampler` rebuilt and fixed (commits `24ca7a7`, `47d7fd3`).
-- Phase X1-X2 complete. C++ `PhaseXPolicyJson` and Python orchestration working.
-- Phase X3 complete. 20 random DSL policies → Case B (median worse than example, best beats example).
-- Phase X4 complete. 5-round interactive DeepSeek loop → MINIMUM SUCCESS.
-  Best LLM policy beats example (-6.3) and random median (-76.3), trails random best c000 (+31.4).
+- Phase X1-X2 complete. C++ runner and Python orchestration working.
+- Phase X3 complete. 20 random DSL policies → Case B.
+- Phase X4 complete. 5-round interactive DeepSeek → MINIMUM SUCCESS.
+- Phase X5 complete. Random best-of-5 distribution estimator:
+  LLM at 20th percentile. **WEAK signal** — interactive LLM does NOT outperform
+  random best-of-5 under same 5-attempt budget.
+
+Validation cells (14) proposed in `notes/x5_validation_cells.md` but NOT run.
 
 Next:
 
-- Phase X5: Compare PhaseX against controls on full paper instances.
-- Phase X6: Validation on held-out instances.
-- **Next action**: Begin X5 (comparison against controls) or analyze X4 results further.
+- Decide whether to run X6 validation despite WEAK X5 signal.
+- If yes: evaluate all baselines + LLM policy + random best-of-5 on 14 cells.
+- If no: write X5 summary as final result; Phase X stops here.

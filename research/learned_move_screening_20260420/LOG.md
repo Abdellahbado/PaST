@@ -1317,6 +1317,44 @@ Complete X2: create Python orchestration script and run full smoke on 3 dev cell
 X2 complete. Phase X generic policy runner is functional. Ready for X3 (fast dev
 evaluation with more policies) and X4 (5-round interactive LLM loop).
 
+## 2026-05-10 — X5 Random Best-of-5 Distribution complete (WEAK signal)
+
+### Attempt
+
+20 independent batches × 5 random DSL policies = 100 random policies on 3 dev
+cells (61/347, 62/290, 65/195). Unit of comparison: LLM best-of-5 (14285.7)
+vs random best-of-5 per batch.
+
+### Result
+
+Random best-of-5 distribution:
+| Metric | Value |
+|--------|------:|
+| Q1 | 14252.3 |
+| Median | 14265.0 |
+| Q3 | 14293.3 |
+| IQR | 41.0 |
+| Global best-of-100 | 14207.0 |
+
+LLM at 14285.7: rank 16/20, 20th percentile. 15/20 random batches beat LLM.
+Interactive LLM does NOT outperform random best-of-5 under the same 5-attempt
+budget. Signal: WEAK.
+
+### Evidence
+
+- `eval/x5_batch_checkpoint.csv` — 20 batch checkpoints
+- `eval/x5_random_bestof5_summary.csv` — distribution metrics
+- `policies/random_bestof5_batches/` — 100 random policy JSONs
+- `notes/x5_validation_cells.md` — 14 proposed held-out validation cells
+- `scripts/phaseX_interactive_policy_repair.py` — updated with --x5-equal-budget
+
+### Conclusion
+
+WEAK signal. DSL is flat enough that brute-force random with 5 shots outperforms
+interactive LLM 75% of the time. The X4 efficiency claim against INDIVIDUAL
+random policies still holds, but the aggregate budget comparison reverses it.
+Validation cells proposed but may not be justified.
+
 ## 2026-05-09 — X4 Interactive LLM Policy Repair complete (MINIMUM SUCCESS)
 
 ### Attempt

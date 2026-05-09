@@ -1,0 +1,20 @@
+{
+  "policy_name": "x5_b013_p3_5068",
+  "normal_mode": "hybrid",
+  "escape_mode": "none",
+  "switch_after_no_hit": 0,
+  "switch_back_on_hit": false,
+  "initial_budget": 7,
+  "max_budget": 11,
+  "grow_on_hit": 2,
+  "shrink_on_miss": 2,
+  "max_per_source": 3,
+  "max_per_target": 1,
+  "require_positive_cheap_lb": true,
+  "coverage_bonus": 0.95,
+  "random_mix": 0.2,
+  "cheap_lb_weight": 0.41,
+  "s2_weight": 0.92,
+  "slack_weight": 0.24,
+  "guard_max_budget": 3
+}
