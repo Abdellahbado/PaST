@@ -2,9 +2,9 @@
 
 ## Status
 
-X2 COMPLETED. Generic C++ PhaseXPolicyJson runner works. Python orchestration
-script functional. Full 3-cell × 6-arm smoke passed. PhaseX example_policy equals
-or beats both trimmed and LLM exception on all cells.
+X3 COMPLETED. 20 random DSL policies evaluated on 3 cells. Case B:
+example_policy is a strong baseline (median random worse), but good policies
+exist (best random beats example by -37.7 on mean TEC).
 
 ## Pipeline
 
@@ -13,10 +13,16 @@ or beats both trimmed and LLM exception on all cells.
 | X0 — Initialize | COMPLETED |
 | X1 — Define DSL | COMPLETED |
 | X2 — Generic policy runner | COMPLETED |
-| X3 — Fast dev evaluation | Not started |
+| X3 — Random DSL baseline campaign | COMPLETED (Case B) |
 | X4 — Interactive LLM loop | Not started |
 | X5 — Compare against controls | Not started |
 | X6 — Validation | Not started |
+
+## X3 Classification: CASE B
+
+- Random median mean TEC: 14362.0 > example_policy 14292.0 → not random-searchable
+- Random best mean TEC: 14254.3 < example_policy 14292.0 → good policies exist
+- Implications: X4 compares LLM vs both median and best random
 
 ## X2 Smoke Results
 
