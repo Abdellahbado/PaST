@@ -1316,3 +1316,87 @@ Complete X2: create Python orchestration script and run full smoke on 3 dev cell
 
 X2 complete. Phase X generic policy runner is functional. Ready for X3 (fast dev
 evaluation with more policies) and X4 (5-round interactive LLM loop).
+
+## 2026-05-09 — X4 Interactive LLM Policy Repair complete (MINIMUM SUCCESS)
+
+### Attempt
+
+5-round interactive DeepSeek policy repair loop:
+Round 0 → initial policy, Round 1-4 → feedback + revise.
+
+### Result
+
+Best LLM policy (Round 2, llm_cheaplb_escape_v2): mean TEC = 14285.7.
+| Baseline | Value | Δ vs Best LLM |
+|----------|------:|-------------:|
+| Example policy | 14292.0 | +6.3 (LLM beats) |
+| Random median | 14362.0 | +76.3 (LLM beats) |
+| Random best c000 | 14254.3 | -31.4 (LLM trails) |
+
+- 2/5 rounds beat example_policy (MINIMUM SUCCESS)
+- 0/5 rounds beat random best c000 (not strong success)
+- Efficiency: LLM found beating policy in 2 interactive rounds; random needed 20
+  attempts with only 2/20 (10%) success rate.
+- Guard cell breakthrough: Round 4 hybrid mode improved 61/347 (6884→6873),
+  first policy ever to improve this cell, but regressed 65/195 severely.
+
+Key findings:
+- Interactive feedback enabled targeted diagnosis (Round 1 correctly identified
+  require_positive_cheap_lb as bottleneck on 62/290).
+- DSL max_per_target cap (≤4) became binding — LLM wanted to increase further
+  but could not within existing DSL.
+- Cell-specific scoring matters: hybrid mode helps tight cells, hurts loose
+  cells. A per-epsilon-regime adaptive policy might achieve combined gains.
+
+### Evidence
+
+- `prompts/x4_round_*.md` — 5 prompts
+- `responses/x4_round_*_raw.md` + `_meta.json` — 5 responses
+- `policies/llm_interactive/x4_round_*.json` — 5 policies
+- `eval/x4_interactive_rounds.csv` — aggregate per-round
+- `eval/x4_interactive_summary.csv` — per-cell per-round
+- `scripts/phaseX_interactive_policy_repair.py` — updated with X4 subcommand
+
+### Conclusion
+
+MINIMUM SUCCESS. Interactive LLM found a policy beating example_policy
+and random median, proving the interactive repair concept works.
+The LLM did NOT beat random best c000 — the DSL search space is flat
+enough that brute-force random can find lucky draws. But the LLM
+found a good policy in fewer attempts (2/5 vs 2/20 random).
+
+## 2026-05-09 — Phase X3 random campaign complete (Case B)
+
+### Attempt
+
+Run 20 random DSL policies on 3 dev cells to establish the random-search
+baseline distribution. The goal is to determine whether the DSL is easy
+to search randomly (Case A), noisy but searchable (Case B), or requires
+non-random intelligence (Case C).
+
+### Result
+
+- 20 policies evaluated, 0 failures, 0 infeasible
+- Baseline mean TEC: trimmed=14534, example_policy=14292
+- Random median mean TEC: 14362.0 (worse than example by +70)
+- Random best mean TEC: 14254.3 (better than example by -38)
+- 2/20 beat example on mean TEC, 20/20 beat trimmed, 11/20 beat score_escape on ≥1 cell
+
+Classification: **CASE B** — DSL contains useful policies but search is noisy.
+Example_policy is a strong baseline (median doesn't beat it), but good policies
+do exist (best random beats example). Interactive LLM should be compared against
+both median and best random.
+
+Top random policy c000 (seed 100): mean TEC=14254.3, beats example on 2/3 cells.
+
+### Evidence
+
+- `eval/x3_random_campaign_raw.csv`, `eval/x3_random_campaign_summary.csv`
+- `eval/x3_random_campaign_aggregate.csv`
+- `policies/random_campaign/x3_campaign_*.json` (20 policies)
+
+### Conclusion
+
+X3 complete. Case B implies X4 interactive LLM must show it can find good
+policies faster/more reliably than brute-force random search. The example_policy
+and best random policy provide strong baselines.

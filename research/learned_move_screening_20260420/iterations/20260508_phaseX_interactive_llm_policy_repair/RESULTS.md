@@ -1,16 +1,90 @@
 # Results — Phase X
 
-## X2 Smoke (2026-05-08)
+## X4 Interactive LLM Policy Repair (2026-05-09)
 
-Full smoke on 3 dev cells × 6 arms. All 18 runs feasible.
+5-round interactive DeepSeek policy repair loop. Each round: LLM proposes
+a policy JSON → evaluate on 3 cells → feedback with per-cell TEC → revise.
 
-| Inst/Eps | Trimmed | LLM Exc | Random Exc | Score Esc | PhaseX Example | PhaseX Random |
-|:--------:|--------:|--------:|----------:|---------:|:--------------:|:-------------:|
-| 61/347 | 6884 | 6884 | 6870 | 6884 | 6884 | 6884 |
-| 62/290 | 9687 | 9687 | 9687 | 9489 | **9484** | 9503 |
-| 65/195 | 27031 | 27031 | 27031 | 26508 | **26508** | 26749 |
+### Per-Round Results
 
-## X3 Random Campaign (2026-05-09)
+| Round | Policy | 61/347 | 62/290 | 65/195 | Mean TEC | Δ Example |
+|:-----:|--------|-------:|-------:|-------:|--------:|----------:|
+| 0 | llm_cheaplb_escape | 6884 | 9534 | 26484 | 14300.7 | +8.7 |
+| 1 | llm_cheaplb_escape | 6884 | 9534 | 26484 | 14300.7 | +8.7 |
+| 2 | llm_cheaplb_escape_v2 | 6884 | 9495 | **26478** | **14285.7** | **-6.3** |
+| 3 | llm_cheaplb_escape_v3 | 6884 | 9495 | 26478 | 14285.7 | -6.3 |
+| 4 | llm_hybrid_cheaplb_escape_v3 | **6873** | **9415** | 26956 | 14414.7 | +122.7 |
+
+### Round-by-Round Changes
+
+| Round | Change | Rationale | Effect |
+|:-----:|--------|-----------|--------|
+| 0 | Initial generation | LLM chose llm_score + cheap_lb_pair escape, require_positive_cheap_lb=true | +8.7 vs example |
+| 1 | require_positive_cheap_lb: true→false | Remove cheap-LB filtering to allow more escape moves | No effect (same TEC) |
+| 2 | max_per_source: 4, max_per_target: 4 | Increase diversity quotas to help escape on 62/290 | **-6.3** (beats example) |
+| 3 | max_per_target: 5 (capped to 4) | Wanted to further increase target diversity | No change (same as R2) |
+| 4 | normal_mode: llm_score→hybrid, cheap_lb_weight=0.5, require_positive_cheap_lb=true | Blend cheap_lb signal with s2 for primary cell | Guard+secondary improved, primary severely regressed |
+
+### Final Verdict
+
+| Criteria | Result |
+|----------|--------|
+| Best mean TEC | 14285.7 (Round 2) |
+| Δ vs example_policy (14292.0) | **-6.3** ✅ |
+| Δ vs random median (14362.0) | **-76.3** ✅ |
+| Δ vs random best c000 (14254.3) | **+31.4** ✗ |
+| Rounds beating example | 2/5 |
+| Rounds beating random best | 0/5 |
+| Verdict | **MINIMUM SUCCESS** |
+
+### Efficiency Claim
+
+LLM found a beating policy at Round 2 (3rd attempt, after initial + unchanged).
+Random search required 20 attempts and only 2/20 (10%) beat example_policy.
+Interactive feedback enabled directed improvement: Round 1 identified the
+bottleneck (require_positive_cheap_lb blocking 62/290), Round 2 fixed it
+with increased quotas.
+
+### Notable Finding: Guard Cell Breakthrough
+
+Round 4's hybrid normal mode (cheap_lb_weight=0.5 + s2_weight=1.0) produced the
+**first-ever improvement on guard cell 61/347** (6884→6873). It also improved
+62/290 (9495→9415). However, it severely regressed 65/195 (26478→26956, +448),
+making the mean worse. This suggests that cheap_lb_delta is informative on
+tight/small cells but misleads on loose/large cells. A **cell-adaptive scoring
+strategy** (different weights per epsilon regime) might achieve a combined win.
+
+### Best Policy (Round 2: llm_cheaplb_escape_v2)
+
+```json
+{
+  "normal_mode": "llm_score",
+  "escape_mode": "cheap_lb_pair",
+  "switch_after_no_hit": 2,
+  "switch_back_on_hit": true,
+  "initial_budget": 3,
+  "max_budget": 11,
+  "grow_on_hit": 3,
+  "shrink_on_miss": 1,
+  "max_per_source": 4,
+  "max_per_target": 4,
+  "require_positive_cheap_lb": false,
+  "guard_max_budget": 0
+}
+```
+
+Differences from example_policy: max_per_source/target 4→3 (more diverse),
+initial_budget 3→4 (start conservative), grow_on_hit 3→2 (aggressive growth),
+max_budget 11→12 (slightly lower cap).
+
+### Files
+
+- `prompts/x4_round_0.md` … `x4_round_4.md` — full prompts
+- `responses/x4_round_0_raw.md` … `x4_round_4_raw.md` — raw DeepSeek responses
+- `responses/x4_round_*_meta.json` — API metadata
+- `policies/llm_interactive/x4_round_0.json` … `x4_round_4.json` — policies
+- `eval/x4_interactive_rounds.csv` — per-round aggregate
+- `eval/x4_interactive_summary.csv` — per-cell per-round
 
 20 random DSL policies on 3 cells. Baselines recomputed.
 

@@ -6,6 +6,8 @@ Subcommands:
   --eval-policy               Run phaseX_policy_json and return parsed CSV.
   --eval-baselines            Run trimmed, LLM exc, random exc, score escape.
   --smoke                     Full X2 smoke on 3 dev cells × 6 arms.
+  --x3-random-campaign        X3: 20 random policies × 3 cells + baselines.
+  --x4-interactive            X4: 5-round interactive DeepSeek policy repair.
 """
 
 import argparse
@@ -13,9 +15,11 @@ import csv
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import time
+import urllib.request
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +34,9 @@ PHASEX_DIR = (
 POLICIES_DIR = PHASEX_DIR / "policies"
 EVAL_DIR = PHASEX_DIR / "eval"
 NOTES_DIR = PHASEX_DIR / "notes"
+PROMPTS_DIR = PHASEX_DIR / "prompts"
+RESPONSES_DIR = PHASEX_DIR / "responses"
+LLM_INTERACTIVE_DIR = POLICIES_DIR / "llm_interactive"
 
 SCHEMA_PATH = POLICIES_DIR / "schema.json"
 EXAMPLE_POLICY_PATH = POLICIES_DIR / "example_policy.json"
@@ -63,6 +70,9 @@ def _load_schema():
 def _ensure_dirs():
     POLICIES_DIR.mkdir(parents=True, exist_ok=True)
     EVAL_DIR.mkdir(parents=True, exist_ok=True)
+    PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
+    RESPONSES_DIR.mkdir(parents=True, exist_ok=True)
+    LLM_INTERACTIVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _run_variant(variant, inst, eps, *, extra_env=None, timeout=1800):
@@ -119,6 +129,118 @@ def _is_feasible(row):
     except (ValueError, TypeError):
         return False
     return val > 0.0  # positive energy cost = feasible
+
+
+# ── DeepSeek client ───────────────────────────────────────────────────────────
+
+def _load_env_deepseek():
+    """Source .env.deepseek.sh into os.environ if not already set."""
+    if os.environ.get("DEEPSEEK_API_KEY", "").startswith("sk-"):
+        return
+    env_file = PROJECT_ROOT / ".env.deepseek.sh"
+    if not env_file.exists():
+        raise RuntimeError(".env.deepseek.sh not found")
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):]
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() not in os.environ:
+                os.environ[k.strip()] = v.strip().strip('"').strip("'")
+
+DS_MODEL = "deepseek-v4-pro"
+DS_MAX_TOKENS = 16000
+DS_TEMPERATURE = 0.5
+
+
+def _call_deepseek(messages):
+    _load_env_deepseek()
+    url = f"{os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')}/chat/completions"
+    api_key = os.environ["DEEPSEEK_API_KEY"]
+    body = json.dumps({
+        "model": DS_MODEL,
+        "messages": messages,
+        "temperature": DS_TEMPERATURE,
+        "max_tokens": DS_MAX_TOKENS,
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    })
+    t0 = time.time()
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"\nDeepSeek API error: {e}", file=sys.stderr)
+        raise
+    elapsed = time.time() - t0
+    content = data["choices"][0]["message"]["content"]
+    usage = data.get("usage", {})
+    meta = {
+        "model": data.get("model", DS_MODEL),
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+        "elapsed_sec": round(elapsed, 1),
+    }
+    return content, meta
+
+
+def _extract_json_from_response(content):
+    """Extract JSON object from LLM response. Handles code fences and inline JSON."""
+    json_str = None
+    m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+    if m:
+        json_str = m.group(1)
+    else:
+        m = re.search(r"(\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})", content, re.DOTALL)
+        if m:
+            json_str = m.group(1)
+    if json_str is None:
+        return None
+    try:
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        return None
+
+
+def _validate_policy(policy):
+    """Validate policy dict against schema. Returns (ok, errors_list)."""
+    schema = _load_schema()
+    errors = []
+    required = schema.get("required", [])
+    props = schema.get("properties", {})
+    for key in required:
+        if key not in policy:
+            errors.append(f"missing required field: {key}")
+    for key, val in policy.items():
+        if key not in props:
+            continue
+        spec = props[key]
+        if "enum" in spec and val not in spec["enum"]:
+            errors.append(f"{key}: {val} not in enum {spec['enum']}")
+        if "type" in spec:
+            t = spec["type"]
+            if t == "integer" and not isinstance(val, int):
+                errors.append(f"{key}: expected int, got {type(val).__name__}")
+            elif t == "number" and not isinstance(val, (int, float)):
+                errors.append(f"{key}: expected number, got {type(val).__name__}")
+            elif t == "string" and not isinstance(val, str):
+                errors.append(f"{key}: expected string, got {type(val).__name__}")
+            elif t == "boolean" and not isinstance(val, bool):
+                errors.append(f"{key}: expected bool, got {type(val).__name__}")
+        if "minimum" in spec and isinstance(val, (int, float)):
+            if val < spec["minimum"]:
+                errors.append(f"{key}: {val} < minimum {spec['minimum']}")
+        if "maximum" in spec and isinstance(val, (int, float)):
+            if val > spec["maximum"]:
+                errors.append(f"{key}: {val} > maximum {spec['maximum']}")
+    return len(errors) == 0, errors
 
 
 # ── random policy generator ──────────────────────────────────────────────────
@@ -787,6 +909,472 @@ def run_x3_campaign():
         }
 
 
+# ── X4 interactive LLM loop ────────────────────────────────────────────────────
+
+# Fixed reference values from X3 campaign (2026-05-09)
+X3_REF = {
+    "example_mean_tec": 14292.0,
+    "trimmed_mean_tec": 14534.0,
+    "random_median_mean": 14362.0,
+    "random_best_mean": 14254.3,
+    "example_per_cell": {61: 6884, 62: 9484, 65: 26508},
+    "score_esc_per_cell": {61: 6884, 62: 9484, 65: 26508},
+    "trimmed_per_cell": {61: 6884, 62: 9687, 65: 27031},
+}
+
+X4_CELLS = [
+    (61, 347, "guard"),
+    (62, 290, "secondary"),
+    (65, 195, "primary"),
+]
+
+
+def _build_round0_prompt():
+    schema_text = json.dumps(_load_schema(), indent=2)
+    example_text = json.dumps(json.load(open(EXAMPLE_POLICY_PATH)), indent=2)
+    best_random = json.dumps(json.load(
+        open(POLICIES_DIR / "random_campaign/x3_campaign_000.json")
+    ), indent=2)
+
+    prompt = f"""# Phase X — Interactive LLM Policy Repair — Round 0
+
+You are a scheduling optimization expert designing exception-lane policies for a
+parallel machine scheduling solver with exact DP per-machine cost evaluation.
+
+## Problem
+
+We have a VND local search solver for parallel machine scheduling with:
+- DiverseTrimmed core shortlist (per-source top-K with per-target quota=1)
+- Exception lane: evaluates candidates rejected by the shortlist
+- Exact DP verification per proposed move
+
+Your job: design a JSON policy that controls the exception lane to minimize total
+energy cost (TEC). Lower TEC is better.
+
+## Policy DSL
+
+The policy is a JSON object with 17 fields controlling the exception lane.
+You generate exactly ONE policy JSON. The C++ solver reads it and applies it.
+
+```json
+{schema_text}
+```
+
+### Field Summary
+
+| Field | Range | Meaning |
+|-------|-------|---------|
+| normal_mode | llm_score, s2, random, cheap_lb, hybrid | Scoring in normal rounds |
+| escape_mode | none, cheap_lb_pair, random_pair, coverage, anti_s2 | Scoring after consecutive misses |
+| switch_after_no_hit | 0-4 | Rounds before escape (0=never) |
+| switch_back_on_hit | true/false | Return to normal after escape hit |
+| initial_budget | 1-8 | Starting exception evals per round |
+| max_budget | 4-16 | Upper bound on budget |
+| grow_on_hit | 0-4 | Add candidates on improvement |
+| shrink_on_miss | 0-4 | Remove after 2+ misses |
+| max_per_source | 1-4 | Diversity quota per source |
+| max_per_target | 1-4 | Diversity quota per target |
+| require_positive_cheap_lb | true/false | Drop candidates with cheap_lb_delta ≤ 0 |
+| coverage_bonus | 0.0-3.0 | Bonus for novel machines (coverage mode) |
+| random_mix | 0.0-1.0 | Random fraction in hybrid mode |
+| cheap_lb_weight | 0.0-1.0 | cheap_lb_delta weight in hybrid |
+| s2_weight | 0.0-1.0 | s2 weight in hybrid |
+| slack_weight | 0.0-1.0 | slack_bonus weight in hybrid |
+| guard_max_budget | 0-4 | Budget cap on tight-epsilon rounds (eps_per_job≤3.0). 0 = skip on guard |
+
+### Scoring Mode Details
+
+- llm_score: s2 + slack_bonus + tightness_bonus (current example behavior)
+- s2: Raw s2 score only
+- random: Uniform random via seeded RNG
+- cheap_lb: cheap_lb_delta (lower-bound improvement estimate)
+- hybrid: Weighted mix of cheap_lb_delta + s2 + slack_bonus + random
+
+### Escape Mode Details
+
+- none: No escape — stay in normal mode
+- cheap_lb_pair: Best cheap_lb_delta per (source, target) pair
+- random_pair: Random pairs
+- coverage: Reward uncovered machines (needs coverage_bonus)
+- anti_s2: score = max(0, cheap_lb_delta) - s2 (inverts s2 for when s2 mis-ranks)
+
+### Budget Adaptation
+
+1. Start: budget = initial_budget
+2. On improvement: budget = min(max_budget, budget + grow_on_hit)
+3. On 2+ consecutive misses: budget = max(1, budget - shrink_on_miss)
+4. Guard rounds: capped at guard_max_budget (0 = skip exception lane entirely)
+
+## Constraints
+
+- Output EXACTLY ONE valid JSON object matching the schema above.
+- NO C++ code, NO Python, NO pseudocode.
+- NO instance IDs (61/347, 62/290, 65/195) in policy values.
+- NO arbitrary thresholds outside the DSL.
+- Policy fields are in the JSON; NO external if/then logic.
+- Include a short rationale BEFORE the JSON, but evaluation uses ONLY the JSON.
+
+## Baseline Reference (3 development cells)
+
+### Example Policy (current baseline)
+```json
+{example_text}
+```
+
+### X3 Random Campaign — 20 random DSL policies
+
+| Metric | Value |
+|--------|------|
+| Example mean TEC | 14292.0 |
+| Random median mean TEC | 14362.0 (worse than example by +70) |
+| Random best mean TEC | 14254.3 (better than example by -37.7) |
+| Random worst mean TEC | 14471.0 |
+| Policies beating example on mean | 2/20 (10%) |
+| Policies beating trimmed on mean | 20/20 (100%) |
+
+### Best Random Policy (c000, mean TEC = 14254.3)
+```json
+{best_random}
+```
+
+This random policy achieved:
+- 61/347: 6877 (vs example 6884, Δ = -7)
+- 62/290: 9561 (vs example 9484, Δ = +77)
+- 65/195: 26325 (vs example 26508, Δ = -183)
+
+### Per-Cell Context
+
+The three cells have different characteristics:
+- 61/347: guard cell, tight epsilon. Exception lane finds no improvements (TEC same as trimmed).
+- 62/290: secondary cell, medium epsilon. Exception lane can find ~200 improvement.
+- 65/195: primary cell, loose epsilon. Exception lane can find ~500 improvement.
+
+## Your Task
+
+Design ONE policy JSON that should beat the example_policy (mean TEC < 14292.0)
+and ideally approach or beat the random best (mean TEC < 14254.3).
+
+Key insights from X3:
+1. Most random policies beat trimmed (all 20/20) — exception lane always helps.
+2. Only 2/20 beat the example policy — the DSL is NOT trivially random-searchable.
+3. The best random policy uses random normal mode + cheap_lb_pair escape
+   with require_positive_cheap_lb=true and diverse quotas (4,3). It keeps
+   guard_max_budget=0 (skip on tight guard cell).
+4. The guard cell (61/347) is hard to improve — most policies tie the baseline there.
+
+Think strategically:
+- Scoring mode matters for the primary cell (65/195) where most improvement comes from.
+- The hybrid mode lets you blend multiple signals — use it if a pure mode underperforms.
+- Budget adaptation (grow/shrink) controls exploration depth.
+- Escape mode matters when normal mode gets stuck.
+- guard_max_budget=0 protects the guard cell from bad exception moves.
+
+Output format: short rationale first, then:
+```json
+{{...}}
+```"""
+
+    return prompt
+
+
+def _build_round_n_prompt(round_num, rounds_history):
+    """Build feedback prompt for rounds 1-4."""
+    prev = rounds_history[-1]
+    policy_json = json.dumps(prev["policy"], indent=2)
+    tecs = prev["tecs"]
+    example_tecs = X3_REF["example_per_cell"]
+    score_tecs = X3_REF["score_esc_per_cell"]
+
+    prev_rows = []
+    for r in rounds_history:
+        prev_rows.append(f"| Round {r['round']} | {r['tecs'].get(61, '?')} | {r['tecs'].get(62, '?')} | {r['tecs'].get(65, '?')} | {r['mean_tec']:.1f} |")
+
+    prev_table = "\n".join(prev_rows)
+
+    prompt = f"""# Phase X — Interactive LLM Policy Repair — Round {round_num}
+
+## Previous Policy (Round {round_num - 1})
+```json
+{policy_json}
+```
+
+### Per-Cell TEC Results
+
+| Cell | Your TEC | Example TEC | Δ vs Example | ScoreEsc TEC | Δ vs ScoreEsc |
+|------|---------|------------|-------------|-------------|--------------|
+"""
+
+    eps_map = {61: 347, 62: 290, 65: 195}
+    for inst in [61, 62, 65]:
+        t = tecs.get(inst, 0)
+        te = example_tecs[inst]
+        ts = score_tecs[inst]
+        eps = eps_map[inst]
+        prompt += f"| {inst}/{eps} | {t:.0f} | {te} | {t-te:+.0f} | {ts} | {t-ts:+.0f} |\n"
+
+    prompt += f"""
+| **Mean** | **{prev['mean_tec']:.1f}** | **{X3_REF['example_mean_tec']:.1f}** | **{prev['mean_tec']-X3_REF['example_mean_tec']:+.1f}** | — | — |
+
+### Comparison to Baselines
+
+| Baseline | Mean TEC | Δ vs Your Policy |
+|----------|---------:|-----------------:|
+| Example policy | {X3_REF['example_mean_tec']:.1f} | {X3_REF['example_mean_tec'] - prev['mean_tec']:+.1f} |
+| Random median | {X3_REF['random_median_mean']:.1f} | {X3_REF['random_median_mean'] - prev['mean_tec']:+.1f} |
+| Random best c000 | {X3_REF['random_best_mean']:.1f} | {X3_REF['random_best_mean'] - prev['mean_tec']:+.1f} |
+| Trimmed baseline | {X3_REF['trimmed_mean_tec']:.1f} | {X3_REF['trimmed_mean_tec'] - prev['mean_tec']:+.1f} |
+
+### All Rounds History
+
+| Round | 61/347 | 62/290 | 65/195 | Mean TEC |
+|-------|--------|--------|--------|----------|
+{prev_table}
+
+## Your Task
+
+Analyze the results above and propose ONE REVISED policy JSON.
+
+1. Which cells improved vs regressed? Why?
+2. What specific field change should fix the regression while preserving gains?
+3. State explicitly what you changed in this round and WHY.
+
+Output format: analysis first, then:
+```json
+{{...}}
+```"""
+
+    return prompt
+
+
+def run_x4_interactive():
+    """X4: 5-round interactive DeepSeek policy repair."""
+    _ensure_dirs()
+
+    print("=" * 60)
+    print("Phase X4 — 5-Round Interactive DeepSeek Policy Repair")
+    print("=" * 60)
+
+    rounds_history = []
+
+    for round_num in range(5):
+        print(f"\n{'─'*60}")
+        print(f"ROUND {round_num}/4")
+        print(f"{'─'*60}")
+
+        # ── Build prompt ───────────────────────────────────────────────────
+        if round_num == 0:
+            prompt = _build_round0_prompt()
+        else:
+            prompt = _build_round_n_prompt(round_num, rounds_history)
+
+        prompt_path = PROMPTS_DIR / f"x4_round_{round_num}.md"
+        with open(prompt_path, "w") as f:
+            f.write(prompt)
+        print(f"  Prompt → {prompt_path} ({len(prompt)} chars)")
+
+        # ── Call DeepSeek ──────────────────────────────────────────────────
+        print(f"  Calling DeepSeek...", end=" ", flush=True)
+        messages = []
+        if round_num >= 2:
+            prev_prompt = open(PROMPTS_DIR / f"x4_round_{round_num - 1}.md").read()
+            prev_resp = open(RESPONSES_DIR / f"x4_round_{round_num - 1}_raw.md").read()
+            messages.append({"role": "user", "content": prev_prompt[:4000]})
+            messages.append({"role": "assistant", "content": prev_resp[:4000]})
+        messages.append({"role": "user", "content": prompt})
+        content, meta = _call_deepseek(messages)
+
+        resp_path = RESPONSES_DIR / f"x4_round_{round_num}_raw.md"
+        with open(resp_path, "w") as f:
+            f.write(content)
+        meta_path = RESPONSES_DIR / f"x4_round_{round_num}_meta.json"
+        with open(meta_path, "w") as f:
+            json.dump(meta, f, indent=2)
+        print(f"{len(content)} chars, {meta['elapsed_sec']:.0f}s")
+        print(f"  Response → {resp_path}")
+
+        # ── Extract & validate JSON ────────────────────────────────────────
+        policy = _extract_json_from_response(content)
+        if policy is None:
+            print("  ERROR: No JSON found in response. Saving full response for manual extraction.")
+            continue
+
+        ok, errors = _validate_policy(policy)
+        if not ok:
+            print(f"  JSON validation errors: {errors}")
+            if round_num > 0:
+                print("  Attempting JSON repair via DeepSeek...")
+                repair_prompt = (
+                    f"The JSON you generated failed validation:\n"
+                    + "\n".join(f"  - {e}" for e in errors)
+                    + f"\n\nOriginal JSON:\n```json\n{json.dumps(policy, indent=2)}\n```\n\n"
+                    + "Please output the FIXED JSON (same policy, just fix validation errors):\n```json\n{...}\n```"
+                )
+                repair_content, _ = _call_deepseek([{"role": "user", "content": repair_prompt}])
+                repair_path = RESPONSES_DIR / f"x4_round_{round_num}_repair_raw.md"
+                with open(repair_path, "w") as f:
+                    f.write(repair_content)
+                fixed = _extract_json_from_response(repair_content)
+                if fixed is not None:
+                    ok2, err2 = _validate_policy(fixed)
+                    if ok2:
+                        policy = fixed
+                        print(f"  JSON repaired successfully.")
+                    else:
+                        print(f"  Repair also failed: {err2}")
+                        continue
+                else:
+                    print("  Could not extract JSON from repair response.")
+                    continue
+            else:
+                continue
+
+        print(f"  Policy: {policy.get('policy_name', '?')}")
+
+        # ── Save policy JSON ───────────────────────────────────────────────
+        policy_path = LLM_INTERACTIVE_DIR / f"x4_round_{round_num}.json"
+        with open(policy_path, "w") as f:
+            json.dump(policy, f, indent=2)
+            f.write("\n")
+        print(f"  Policy JSON → {policy_path}")
+
+        # ── Evaluate on 3 cells ────────────────────────────────────────────
+        tecs = {}
+        print(f"  Evaluating on 3 cells...")
+        for inst, eps, role in X4_CELLS:
+            print(f"    {inst}/{eps}...", end=" ", flush=True)
+            rc, stdout, stderr = _run_variant(
+                "phaseX_policy_json", inst, eps,
+                extra_env={"PHASEX_POLICY_PATH": str(policy_path.resolve())},
+            )
+            if rc != 0:
+                print(f"FAILED rc={rc}")
+                tecs[inst] = None
+                continue
+            row = _parse_csv(stdout)
+            if row is None or not _is_feasible(row):
+                print("INFEASIBLE")
+                tecs[inst] = None
+                continue
+            tec = float(row.get("tec_total", 0))
+            tecs[inst] = tec
+            example_tec = X3_REF["example_per_cell"].get(inst, 0)
+            delta = tec - example_tec
+            best_rand_tec = 0
+            if inst == 61:
+                best_rand_tec = 6877
+            elif inst == 62:
+                best_rand_tec = 9561
+            elif inst == 65:
+                best_rand_tec = 26325
+            print(f"TEC={tec:.0f} (Δex={delta:+.0f}, Δbest={tec-best_rand_tec:+.0f})")
+
+        valid_tecs = [v for v in tecs.values() if v is not None]
+        mean_tec = sum(valid_tecs) / len(valid_tecs) if valid_tecs else float("inf")
+
+        print(f"  Mean TEC = {mean_tec:.1f}" + (
+            f" (Δ example = {mean_tec - X3_REF['example_mean_tec']:+.1f})"
+            if valid_tecs else ""
+        ))
+
+        rounds_history.append({
+            "round": round_num,
+            "policy": policy,
+            "tecs": tecs,
+            "mean_tec": mean_tec,
+            "n_valid": len(valid_tecs),
+        })
+
+    # ── Final Report ────────────────────────────────────────────────────────
+    print(f"\n{'='*60}")
+    print("X4 FINAL REPORT")
+    print(f"{'='*60}")
+
+    all_valid = [r for r in rounds_history if r["n_valid"] == 3]
+    if not all_valid:
+        print("ERROR: No round had all 3 cells feasible.")
+        return
+
+    best_round = min(all_valid, key=lambda r: r["mean_tec"])
+
+    print(f"\nPer-Round Summary:")
+    print(f"  {'Round':<8s} {'61/347':>8s} {'62/290':>8s} {'65/195':>8s} {'Mean':>10s} {'ΔEx':>10s} {'ΔMed':>10s} {'ΔBest':>10s}")
+    for r in rounds_history:
+        if r["n_valid"] < 3:
+            continue
+        dm_ex = r["mean_tec"] - X3_REF["example_mean_tec"]
+        dm_med = r["mean_tec"] - X3_REF["random_median_mean"]
+        dm_best = r["mean_tec"] - X3_REF["random_best_mean"]
+        marker = "← BEST" if r is best_round else ""
+        print(f"  Round {r['round']:<3d} "
+              f"{r['tecs'].get(61, 0):>8.0f} "
+              f"{r['tecs'].get(62, 0):>8.0f} "
+              f"{r['tecs'].get(65, 0):>8.0f} "
+              f"{r['mean_tec']:>10.1f} "
+              f"{dm_ex:>+10.1f} "
+              f"{dm_med:>+10.1f} "
+              f"{dm_best:>+10.1f} "
+              f"{marker}")
+
+    beats_example = sum(1 for r in all_valid if r["mean_tec"] < X3_REF["example_mean_tec"])
+    beats_median = sum(1 for r in all_valid if r["mean_tec"] < X3_REF["random_median_mean"])
+    beats_best = sum(1 for r in all_valid if r["mean_tec"] < X3_REF["random_best_mean"])
+    improved = sum(1 for i in range(1, len(rounds_history))
+                   if rounds_history[i]["n_valid"] == 3 and rounds_history[i-1]["n_valid"] == 3
+                   and rounds_history[i]["mean_tec"] < rounds_history[i-1]["mean_tec"])
+
+    print(f"\nAggregate:")
+    print(f"  Best round: Round {best_round['round']} (mean TEC = {best_round['mean_tec']:.1f})")
+    print(f"  Δ vs example_policy: {best_round['mean_tec'] - X3_REF['example_mean_tec']:+.1f}")
+    print(f"  Δ vs random median: {best_round['mean_tec'] - X3_REF['random_median_mean']:+.1f}")
+    print(f"  Δ vs random best c000: {best_round['mean_tec'] - X3_REF['random_best_mean']:+.1f}")
+    print(f"  Rounds beating example: {beats_example}/5")
+    print(f"  Rounds beating random median: {beats_median}/5")
+    print(f"  Rounds beating random best: {beats_best}/5")
+    print(f"  Rounds improved over previous round: {improved}/4")
+
+    success_level = "FAILURE"
+    if beats_example > 0:
+        success_level = "MINIMUM SUCCESS"
+    if beats_best > 0:
+        success_level = "STRONG SUCCESS"
+
+    print(f"\n  Verdict: {success_level}")
+
+    # ── Save eval CSVs ─────────────────────────────────────────────────────
+    # Per-round CSV
+    rounds_csv_path = EVAL_DIR / "x4_interactive_rounds.csv"
+    with open(rounds_csv_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=[
+            "round", "policy_name",
+            "tec_61_347", "tec_62_290", "tec_65_195",
+            "mean_tec", "delta_vs_example", "delta_vs_random_median",
+            "delta_vs_random_best", "n_valid",
+        ])
+        w.writeheader()
+        for r in rounds_history:
+            w.writerow({
+                "round": r["round"],
+                "policy_name": r["policy"].get("policy_name", ""),
+                "tec_61_347": r["tecs"].get(61, ""),
+                "tec_62_290": r["tecs"].get(62, ""),
+                "tec_65_195": r["tecs"].get(65, ""),
+                "mean_tec": f"{r['mean_tec']:.1f}" if r["n_valid"] == 3 else "",
+                "delta_vs_example": f"{r['mean_tec'] - X3_REF['example_mean_tec']:+.1f}" if r["n_valid"] == 3 else "",
+                "delta_vs_random_median": f"{r['mean_tec'] - X3_REF['random_median_mean']:+.1f}" if r["n_valid"] == 3 else "",
+                "delta_vs_random_best": f"{r['mean_tec'] - X3_REF['random_best_mean']:+.1f}" if r["n_valid"] == 3 else "",
+                "n_valid": r["n_valid"],
+            })
+    print(f"\nRounds CSV → {rounds_csv_path}")
+
+    return {
+        "best_round": best_round,
+        "rounds_history": rounds_history,
+        "beats_example": beats_example,
+        "beats_best": beats_best,
+        "success_level": success_level,
+    }
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -818,7 +1406,12 @@ def main():
     parser.add_argument(
         "--x3-random-campaign",
         action="store_true",
-        help="X3: 30 random policies × 3 cells + baselines.",
+        help="X3: 20 random policies × 3 cells + baselines.",
+    )
+    parser.add_argument(
+        "--x4-interactive",
+        action="store_true",
+        help="X4: 5-round interactive DeepSeek policy repair.",
     )
     parser.add_argument(
         "--policy-output",
@@ -859,6 +1452,9 @@ def main():
 
     elif args.x3_random_campaign:
         run_x3_campaign()
+
+    elif args.x4_interactive:
+        run_x4_interactive()
 
     else:
         parser.print_help()

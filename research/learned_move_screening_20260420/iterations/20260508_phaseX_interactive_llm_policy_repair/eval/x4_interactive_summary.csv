@@ -1,0 +1,16 @@
+round,policy_name,inst,eps,role,tec_total,delta_vs_example,delta_vs_random_best
+0,llm_cheaplb_escape,61,347,guard,6884,+0,+7
+0,llm_cheaplb_escape,62,290,secondary,9534,+50,-27
+0,llm_cheaplb_escape,65,195,primary,26484,-24,+159
+1,llm_cheaplb_escape,61,347,guard,6884,+0,+7
+1,llm_cheaplb_escape,62,290,secondary,9534,+50,-27
+1,llm_cheaplb_escape,65,195,primary,26484,-24,+159
+2,llm_cheaplb_escape_v2,61,347,guard,6884,+0,+7
+2,llm_cheaplb_escape_v2,62,290,secondary,9495,+11,-66
+2,llm_cheaplb_escape_v2,65,195,primary,26478,-30,+153
+3,llm_cheaplb_escape_v3,61,347,guard,6884,+0,+7
+3,llm_cheaplb_escape_v3,62,290,secondary,9495,+11,-66
+3,llm_cheaplb_escape_v3,65,195,primary,26478,-30,+153
+4,llm_hybrid_cheaplb_escape_v3,61,347,guard,6873,-11,-4
+4,llm_hybrid_cheaplb_escape_v3,62,290,secondary,9415,-69,-146
+4,llm_hybrid_cheaplb_escape_v3,65,195,primary,26956,+448,+631
