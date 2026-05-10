@@ -2,6 +2,13 @@
 
 ## Active
 
+### B-Y3.1 — Phase Y fails primary hypothesis (LLM ≤ random under equal budget)
+
+Y3 single-call LLM neighborhood proposals lost to random best on 2/2 evaluable
+cells. The constrained format (5 sources, 5 targets, single call) does not give
+the LLM enough leverage. The LLM tied manual on Cell_A (0 improvements) and found
+only 1 improvement on Cell_C (Δ=-18 vs random best Δ=-242).
+
 ### B-Y2.1 RESIDUAL — SIGBUS on macOS Apple Silicon for some instance+seed combos
 
 Intermittent crash (exit 138) on macOS Apple Silicon release builds for:

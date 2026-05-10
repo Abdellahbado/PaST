@@ -1,0 +1,12 @@
+{
+  "proposal_name": "y3_attack_underexplored_highgap_small_medium",
+  "move_family": "insert_inter",
+  "source_machines": ["M15", "M14", "M4", "M5", "M21"],
+  "target_machines": ["M23", "M6", "M16", "M19", "M8"],
+  "job_size_classes": ["small", "medium"],
+  "max_candidates": 20,
+  "ranking_hint": "cost_gap",
+  "diversity_rule": "per_source",
+  "fallback_if_empty": "top_s2_same_budget",
+  "rationale": "M15(gap=178,CS=0) and M14(gap=124,CS=0) are underexplored high-gap sources with 21-35 small/medium jobs. M4(gap=182) and M5(gap=132) worked as sources before but only with large jobs→M1(saturated). M21(EC=1319,rate=1,CS=0) is an underexplored high-cost source—removing large jobs may free re-packing. Previous moves all used large jobs on M1(CT=5). Switch to small/medium and target empty rate=3-4 machines M23/M6/M16/M19/M8 instead. cost_gap ranking tackles biggest hidden savings first."
+}

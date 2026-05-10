@@ -2,7 +2,7 @@
 
 Current active iteration:
 
-- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/` — **PHASE Y ACTIVE** (Y1.1 complete).
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/` — **PHASE Y CONCLUDED (FAIL)**.
 
 Previous iterations (archived):
 
@@ -15,11 +15,10 @@ Current state:
 - Phase S: exception-lane architecture + exact-DP verification validated.
 - Phase V: runtime-LLM operators stopped — LLM C++ code too fragile.
 - Phase X: interactive LLM policy DSL repair stopped — LLM at 20th percentile.
-- Phase Y: Y1 trace instrumentation complete; Y1.1 search-behavior fields populated
-  (core_source_hits, core_target_hits, starved, underexplored_sources,
-  underexplored_targets, last_accepted_moves, failed_summary). Smoke passed
-  on 3 dev cells (~3800 tokens each, all machines present).
+- **Phase Y: CONCLUDED — FAIL.** LLM neighborhood proposals from state traces
+  do NOT beat random under equal DP budget. The hypothesis that an LLM can
+  diagnose stagnation from machine-level trace data and propose better
+  neighborhoods is rejected. All 3 prior LLM approaches (S/V/X/Y) have now
+  failed to beat random search.
 
-Next: Phase Y2 (random neighborhood baseline) or Y3 (first DeepSeek call).
-
-Do NOT call DeepSeek until instructed.
+Next: Open-ended. No active LLM-critical path remains.

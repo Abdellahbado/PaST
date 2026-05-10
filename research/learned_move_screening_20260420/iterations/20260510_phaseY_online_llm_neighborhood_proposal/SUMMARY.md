@@ -2,10 +2,20 @@
 
 ## Status
 
-**Y2.1 COMPLETED (2026-05-10).** Proposal execution and random-neighborhood baseline
-validated on all 3 dev cells. Two root causes fixed: DP time limit (0.125s→30.0s)
-and random weighted-sampling SIGBUS (replaced discrete_distribution). Residual
-macOS-specific intermittent SIGBUS documented (does not block Y3).
+**Y3 COMPLETED (2026-05-10) — FAIL.** Phase Y fails the primary hypothesis: an LLM
+reading concrete solver state and proposing bounded neighborhoods does NOT outperform
+random search under equal DP budget. The LLM lost to random best on 0/2 evaluable
+cells (1 cell crashed). Phase Y is concluded as negative result.
+
+### Y3 Summary
+
+| Cell | Baseline TEC | LLM TEC | LLM Δ | Random Best Δ | Outcome |
+|------|-------------|---------|-------|--------------|---------|
+| Cell_A | 6946 | 6946 | 0 | -53 | LLM loses |
+| Cell_B | 9435 | CRASH | — | -69 | Infrastructure bug |
+| Cell_C | 27031 | 27013 | -18 | -242 | LLM loses |
+
+Gate: FAIL (0/2 strong, 0/2 moderate, 0/2 weak).
 
 ### Y2.1 Smoke Results Summary
 
@@ -90,9 +100,9 @@ All previously null trace fields now populated:
 | Y1.1 — Search-behavior fields in trace | COMPLETED |
 | Y2 — Random neighborhood baseline | COMPLETED |
 | Y2.1 — Full 3-cell proposal-execution smoke | COMPLETED |
-| Y3 — First DeepSeek call on dev cells | Not started |
-| Y4 — Held-out validation (if Y3 positive) | Not started |
-| Y5 — Compare vs best prior results (if Y4 positive) | Not started |
+| Y3 — First DeepSeek call on dev cells | COMPLETED — FAIL |
+| Y4 — Held-out validation (if Y3 positive) | SKIPPED (Y3 negative) |
+| Y5 — Compare vs best prior results | SKIPPED |
 
 ## Key Design Decisions
 

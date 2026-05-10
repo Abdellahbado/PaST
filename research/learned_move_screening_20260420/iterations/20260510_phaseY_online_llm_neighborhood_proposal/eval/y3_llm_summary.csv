@@ -1,0 +1,4 @@
+cell,baseline_tec,llm_tec,llm_delta,manual_tec,manual_delta,random_best_tec,random_best_delta,random_median_tec,random_median_delta,llm_vs_random_best,llm_vs_random_median,llm_vs_manual,random_seeds_passed,llm_gen,llm_ev,llm_imp,pass
+Cell_A,6946,6946,0,6946,0,6893,-53,6924,-22,WORSE,WORSE,TIE,5/5,645,20,0,PASS
+Cell_B,9435,N/A,N/A,N/A,N/A,9366,-69,9395,-40,N/A,N/A,N/A,4/5,N/A,N/A,N/A,FAIL
+Cell_C,27031,27013,-18,26715,-316,26789,-242,26814,-217,WORSE,WORSE,WORSE,4/7,590,20,1,PASS

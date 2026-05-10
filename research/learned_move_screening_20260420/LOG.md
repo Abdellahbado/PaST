@@ -1653,3 +1653,57 @@ block Y3.
 Phase Y2.1 smoke passes 17/21 runs with 4 macOS-specific SIGBUS documented as
 known issue. Infrastructure validated: all 3 cells produce valid trace probes,
 manual and random proposals parse and execute. Ready for Y3 (first DeepSeek call).
+
+## 2026-05-10 — Phase Y3 first DeepSeek call — FAIL
+
+### Attempt
+
+Test whether DeepSeek can read concrete solver state traces and propose better
+bounded neighborhoods than random under equal DP budget (K=20). One call per dev
+cell. DeepSeek V4 Pro acts as the LLM.
+
+### Result
+
+| Cell | Baseline | LLM TEC | LLM Δ | Random Best Δ | Outcome |
+|------|----------|---------|-------|--------------|---------|
+| Cell_A | 6946 | 6946 | 0 | -53 | LLM loses |
+| Cell_B | 9435 | CRASH | — | -69 | Infrastructure bug |
+| Cell_C | 27031 | 27013 | -18 | -242 | LLM loses |
+
+Gate: FAIL on all levels (0/2 strong, 0/2 moderate, 0/2 weak).
+
+### Analysis
+
+1. **Cell_A**: LLM proposed attacking high-gap rate-2 sources with small/medium
+   jobs. 645 candidates generated but 0 improvements (same as manual). Cell
+   appears near-optimal (Δ=-94 to prior Phase S best).
+
+2. **Cell_B**: SIGBUS crash on macOS (same heap-buffer-overflow bug from Y2.1).
+   ASAN debug build confirms real memory error in Phase Y execution path on
+   instance 62. LLM proposal saved but not executed.
+
+3. **Cell_C**: LLM continued the proven large-job pattern from rate-3→high-gap
+   targets. Only 1 improvement (Δ=-18) vs manual's 12 (Δ=-316) and random's
+   best Δ=-242. The LLM was too conservative — 1 source-target pair produced
+   improvements vs manual's broader success.
+
+### Root Causes
+
+- Single-call protocol with constrained format gives LLM insufficient leverage
+- State trace lacks job-level detail — LLM can only make machine-level suggestions
+- No feedback loop — LLM cannot refine after seeing results (unlike Phase X)
+- Proposal format (5 sources × 5 targets) may be too restrictive
+
+### Evidence
+
+- `prompts/y3_Cell_{A,B,C}_prompt.md`
+- `responses/y3_Cell_{A,B,C}_raw.md`
+- `proposals/llm/y3_Cell_{A,B,C}.json`
+- `eval/y3_llm_raw.csv`, `eval/y3_llm_summary.csv`
+- `notes/phaseY3_llm_results.md`
+
+### Conclusion
+
+**Phase Y FAILS.** An LLM reading concrete solver state and proposing bounded
+neighborhoods does not outperform random search. The primary hypothesis is
+rejected. Phase Y is concluded. Y4/Y5 skipped.

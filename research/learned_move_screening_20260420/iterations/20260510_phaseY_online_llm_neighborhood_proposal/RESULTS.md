@@ -142,3 +142,44 @@ TEC values unchanged from Y1 — instrumentation only.
 | Cell_C | 3874 | ~1500 | ~5374 |
 
 All under 5000 token budget per JSON trace.
+
+
+## Y3 — First DeepSeek Online Neighborhood Proposal (2026-05-10) — FAIL
+
+### Protocol
+
+One DeepSeek call per dev cell. LLM receives: state trace JSON + proposal schema + task + reference results. Outputs one bounded-neighborhood proposal (max K=20). Random baselines use same K=20, same release binary.
+
+### LLM Proposal Results
+
+| Cell | Baseline TEC | LLM TEC | LLM Δ | Manual Δ | Random Best Δ | Random Med Δ |
+|------|-------------|---------|-------|----------|--------------|-------------|
+| Cell_A | 6946 | 6946 | 0 | 0 | -53 | -22 |
+| Cell_B | 9435 | CRASH | — | — | -69 | -40 |
+| Cell_C | 27031 | 27013 | -18 | -316 | -242 | -217 |
+
+### Gate Assessment
+
+| Gate | Condition | Outcome |
+|------|-----------|---------|
+| Strong | LLM beats random best on ≥2/3 cells | FAIL |
+| Moderate | LLM beats random median + manual on ≥2/3 | FAIL |
+| Weak | LLM beats baseline only | FAIL |
+| Fail | LLM loses on most cells | **CONFIRMED** |
+
+### Analysis
+
+- **Cell_A**: LLM tied manual (both 0 improvements). 645 candidates generated but none improved TEC. Cell near-optimal (Δ=-94 to prior best).
+- **Cell_B**: SIGBUS crash (exit 138) on macOS — same heap-buffer-overflow bug as Y2.1 (ASAN confirmed). LLM proposal saved but not executed.
+- **Cell_C**: LLM found 1 improvement (Δ=-18) vs manual's 12 (Δ=-316) and random best's Δ=-242. LLM strategy was directionally correct (large jobs from rate-3→high-gap targets) but too conservative and under-explored.
+
+### Root Causes
+
+1. Single-call protocol with constrained proposal format (5 sources × 5 targets) limits expressiveness
+2. State trace lacks job-level visibility — LLM can only make broad machine-level suggestions
+3. LLM cannot learn from execution feedback (unlike Phase X interactive protocol)
+4. Cell_B infrastructure bug blocks evaluation on 1/3 cells
+
+### Conclusion
+
+**Phase Y fails the primary hypothesis**: an LLM reading concrete solver state and proposing bounded neighborhoods does NOT outperform random search under equal DP budget. The constrained neighborhood format (max 5 sources, 5 targets) does not give the LLM enough leverage over random search, and the single-call protocol provides no opportunity to learn from results.

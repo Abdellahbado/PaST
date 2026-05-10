@@ -1,0 +1,12 @@
+{
+  "proposal_name": "y3_large_jobs_rate3_to_highgap_targets",
+  "move_family": "insert_inter",
+  "source_machines": ["M7", "M19", "M0", "M2", "M13"],
+  "target_machines": ["M1", "M6", "M12", "M8", "M5"],
+  "job_size_classes": ["small", "medium", "large"],
+  "max_candidates": 20,
+  "ranking_hint": "cost_gap",
+  "diversity_rule": "per_source",
+  "fallback_if_empty": "top_s2_same_budget",
+  "rationale": "Recent accepted moves pattern: large job(11) from rate-3 EC~2450 sources→rate-6 high-gap M1/M6/M12 gives Δ=-33 to -60. Continue this proven direction but expand to underexplored source M7(CS=0,EC=2457,6 large jobs) and M19(EC=2721,highest cost,12 large jobs). Add M8/M5(gap=105 each) as new targets since M1/M6 are saturated(CT=5). All job sizes for DP flexibility—mixing sizes on high-gap targets may unlock better repacking than pure large. Prior best 26262 suggests -769 room."
+}

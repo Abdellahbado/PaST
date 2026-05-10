@@ -1,0 +1,12 @@
+{
+  "proposal_name": "y3_attack_highgap_rate2_sources_small_medium",
+  "move_family": "insert_inter",
+  "source_machines": ["M24", "M19", "M22", "M6", "M17"],
+  "target_machines": ["M12", "M0", "M20", "M15", "M21"],
+  "job_size_classes": ["small", "medium"],
+  "max_candidates": 20,
+  "ranking_hint": "cost_gap",
+  "diversity_rule": "per_source",
+  "fallback_if_empty": "top_s2_same_budget",
+  "rationale": "M24(gap=124,underexplored)/M19(gap=112)/M22(gap=96)/M6(gap=108)/M17(gap=92) are the top-5 gap machines—highest hidden repacking room where cheap LB is most inaccurate. All are rate=2 with many small/medium jobs. Current targets M19/M22 are saturated(CT=5). Switch to underexplored near-empty targets M12/M0/M20/M15/M21 with rate=3-4 and slack=346—lower energy cost than the empty rate=5-6 machines. cost_gap ranking prioritizes biggest-gap sources first."
+}
