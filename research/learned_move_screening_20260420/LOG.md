@@ -1317,6 +1317,53 @@ Complete X2: create Python orchestration script and run full smoke on 3 dev cell
 X2 complete. Phase X generic policy runner is functional. Ready for X3 (fast dev
 evaluation with more policies) and X4 (5-round interactive LLM loop).
 
+## 2026-05-10 — Phase Y0 trace and proposal schema designed
+
+### Attempt
+
+Design the state trace format (what the LLM sees at a stagnation point) and
+the neighborhood proposal schema (what the LLM returns to the solver). No
+DeepSeek calls, no C++ implementation, no experiments.
+
+### Result
+
+- `traces/schema_state_trace.md`: 6-section trace format with metadata,
+  cell regime, current snapshot, 17-column per-machine state table (all
+  25-40 machines), recent search behavior, candidate pool summaries, and
+  prior arm results.
+- `proposals/schema_neighborhood_proposal.json`: bounded JSON proposal
+  (source/target max 5 each, job size classes, max_candidates ≤ 30,
+  ranking hint, diversity rule, fallback, rationale). Constraint-to-
+  candidate mapping: 9-step pipeline from machine lists to exact-DP-
+  evaluated triples.
+- `notes/phaseY0_trace_and_proposal_design.md`: design rationale explaining
+  why each field is included/excluded, fairness guarantees, overfitting
+  risks, Y1 implementation plan with new C++ instrumentation.
+- `prompts/call0_trace_schema_review.md`: DeepSeek review prompt with 17
+  questions across trace sufficiency, proposal executability, fairness,
+  overfitting risk, and implementation feasibility.
+
+Key design decisions:
+- LLM proposes constraints (source/target lists, job size classes), not
+  individual (source, job, target) triples — prevents token bloat.
+- All machines shown in state table (25-40 rows × 17 columns) — LLM can
+  process tabular data at scale.
+- Fields excluded: raw instance ID, S1 score, price curves, per-candidate
+  s2, DP cache stats, CPU/runtime — prevents overfitting and context bloat.
+- Random baseline: same format, same K, same DP, same initial state.
+
+### Evidence
+
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/traces/schema_state_trace.md`
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/proposals/schema_neighborhood_proposal.json`
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/notes/phaseY0_trace_and_proposal_design.md`
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/prompts/call0_trace_schema_review.md`
+
+### Conclusion
+
+Phase Y0 schema design is complete. Ready for Y1 C++ implementation when
+instructed. Do NOT send the Call 0 review prompt without explicit direction.
+
 ## 2026-05-10 — Phase X closed as main LLM-critical direction
 
 ### Attempt

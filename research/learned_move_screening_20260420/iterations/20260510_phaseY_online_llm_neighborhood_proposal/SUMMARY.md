@@ -2,8 +2,8 @@
 
 ## Status
 
-**INITIALIZED (2026-05-10).** No implementation yet. Phase Y is the active
-branch following Phase X closure.
+**Y0 COMPLETED (2026-05-10).** Trace and proposal schema designed. No
+DeepSeek calls, no C++ implementation, no experiments.
 
 ## Hypothesis
 
@@ -12,11 +12,26 @@ and proposes bounded neighborhoods to evaluate, rather than tuning a
 static policy DSL (Phase X) or designing C++ operators offline from
 aggregate traces (Phase V).
 
+## Y0 Deliverables
+
+- `traces/schema_state_trace.md` — 6-section state trace format:
+  metadata, cell regime, current snapshot, per-machine table (17 columns),
+  recent search behavior, candidate pool summaries, prior arm results
+- `proposals/schema_neighborhood_proposal.json` — bounded JSON proposal:
+  source/target lists (max 5 each), job size classes, max_candidates 
+  (≤ 30), ranking hint, diversity rule, fallback, rationale
+- `notes/phaseY0_trace_and_proposal_design.md` — design rationale:
+  why each field is included/excluded, constraint-to-candidate mapping,
+  fairness guarantees, Y1 implementation plan
+- `prompts/call0_trace_schema_review.md` — DeepSeek review prompt
+  (17 questions across trace sufficiency, proposal executability,
+  fairness, overfitting risk, implementation feasibility)
+
 ## Pipeline
 
 | Step | Status |
 |------|--------|
-| Y0 — Trace format + state conditioning | Not started |
+| Y0 — Trace format + state conditioning | COMPLETED |
 | Y1 — C++ variant for neighborhood evaluation | Not started |
 | Y2 — Random neighborhood baseline | Not started |
 | Y3 — First DeepSeek call on dev cells | Not started |

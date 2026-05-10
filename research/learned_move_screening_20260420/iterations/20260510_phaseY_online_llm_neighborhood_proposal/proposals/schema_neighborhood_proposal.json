@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Phase Y Neighborhood Proposal",
+  "description": "Bounded JSON proposal from LLM specifying which concrete neighborhood of moves to evaluate with exact DP. The LLM receives a concrete solver state trace and returns this proposal. The solver executes the proposal by mapping source/target lists + constraints to concrete candidate (source, job, target) triples, evaluates them with exact DP, and accepts only verified improvements.",
+  "type": "object",
+  "required": [
+    "proposal_name",
+    "source_machines",
+    "target_machines",
+    "job_size_classes",
+    "max_candidates",
+    "ranking_hint",
+    "diversity_rule",
+    "fallback_if_empty",
+    "rationale"
+  ],
+  "properties": {
+    "proposal_name": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Human-readable identifier for this proposal."
+    },
+    "move_family": {
+      "type": "string",
+      "enum": ["insert_inter"],
+      "description": "Move family to evaluate. Y0/Y1: only insert_inter is supported."
+    },
+    "source_machines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "pattern": "^M[0-9]+$"
+      },
+      "description": "List of source machine IDs (M0..M{n-1}) from which to remove jobs. Max 5. These are the primary attack surface — the LLM selects which machines to try moving jobs OUT of."
+    },
+    "target_machines": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "pattern": "^M[0-9]+$"
+      },
+      "description": "List of target machine IDs (M0..M{n-1}) to which to insert jobs. Max 5. These are receivers — the LLM selects which machines can absorb jobs."
+    },
+    "job_size_classes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["small", "medium", "large"]
+      },
+      "description": "Job size classes to consider: small (p ∈ [1,4]), medium (p ∈ [5,8]), large (p ∈ [9,12]). 'any' is represented as ['small', 'medium', 'large']. Filters which jobs from the source machines are candidates."
+    },
+    "max_candidates": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 30,
+      "default": 20,
+      "description": "Maximum number of (source, job, target) triples to evaluate with exact DP. Hard cap at 30 to bound DP cost. The solver generates all candidates matching the source/target/job constraints, ranks them by ranking_hint, applies diversity_rule, and evaluates up to this many with exact DP."
+    },
+    "ranking_hint": {
+      "type": "string",
+      "enum": ["cheap_lb", "s2", "random", "cost_gap", "slack", "hybrid"],
+      "description": "How to rank the generated (source, job, target) candidates before selecting the top max_candidates. Determines which candidates get evaluated first.",
+      "detail": {
+        "cheap_lb": "Rank by cheap_lb_delta (estimated lower-bound improvement). Higher delta = earlier evaluation.",
+        "s2": "Rank by s2 score (handcrafted: 0.60*s1 + 0.40*lb_gain + 0.30*src_gap_density). Higher = earlier.",
+        "random": "Shuffle candidates uniformly. Each call gets a different order.",
+        "cost_gap": "Rank by source machine exact-minus-LB gap (EC - RLB). Higher gap = earlier evaluation. Rationale: machines where cheap LB is most wrong have most hidden re-packing room.",
+        "slack": "Rank by target machine slack (epsilon - load). Higher slack = earlier. Rationale: targets with room to absorb jobs are safer bets.",
+        "hybrid": "Weighted combination of multiple hints (weights TBD in Y1 implementation)."
+      }
+    },
+    "diversity_rule": {
+      "type": "string",
+      "enum": ["per_source", "per_target", "source_target_pair", "none"],
+      "description": "Diversity constraint applied during candidate selection to ensure exploration across machines.",
+      "detail": {
+        "per_source": "At most ceil(max_candidates / |source_machines|) candidates from each source. Forces exploration across all requested sources.",
+        "per_target": "At most ceil(max_candidates / |target_machines|) candidates per target. Forces exploration across all requested targets.",
+        "source_target_pair": "At most 1 candidate per (source, target) pair. Maximum diversity — explores each permitted pair exactly once before repeating.",
+        "none": "No diversity constraint — purely by ranking_hint order. Best candidates win regardless of source/target concentration."
+      }
+    },
+    "fallback_if_empty": {
+      "type": "string",
+      "enum": ["random_same_budget", "top_s2_same_budget"],
+      "description": "What to do if the proposal generates zero valid candidates (e.g., no jobs matching the size class on the requested sources). Ensures DP budget is not wasted.",
+      "detail": {
+        "random_same_budget": "Fall back to random neighborhood with same max_candidates budget. Selects random (source, target) pairs from the full machine universe (not just the LLM's request), evaluates with exact DP. Uses same move family (insert_inter).",
+        "top_s2_same_budget": "Fall back to s2-ranked candidates from the full outside pool with same max_candidates budget. Uses the existing DiverseTrimmed outside pool."
+      }
+    },
+    "rationale": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "LLM's explanation of why this neighborhood should find improvements. NOT used by the solver. Included for traceability — lets us verify whether the LLM's reasoning was sound after seeing execution results."
+    }
+  },
+  "additionalProperties": false,
+
+  "safety_constraints": {
+    "no_arbitrary_code": "The proposal contains only machine IDs, size classes, and enum values. No code execution.",
+    "no_acceptance_bypass": "All evaluated moves still go through exact single-machine DP. Only verified improvements are accepted.",
+    "no_unbounded_cost": "Hard cap at max_candidates=30 exact-DP evaluations per proposal. Upper bound on worst-case DP cost.",
+    "invalid_proposal_handling": "If source_machines or target_machines contains IDs not in [M0..M{n-1}], the invalid IDs are silently dropped. If all IDs are invalid → fallback_if_empty is triggered.",
+    "empty_proposal_handling": "If no candidates match source/target/job constraints → fallback_if_empty is triggered.",
+    "duplicate_ID_handling": "Duplicate machine IDs in source_machines or target_machines are deduplicated before candidate generation."
+  },
+
+  "execution_mapping": {
+    "description": "How this proposal maps to concrete (source, job, target) triples that the solver evaluates.",
+    "steps": [
+      {
+        "step": 1,
+        "action": "Filter sources",
+        "detail": "Start with all machines in source_machines. For each source, enumerate all jobs on that machine (by position index)."
+      },
+      {
+        "step": 2,
+        "action": "Filter jobs by size",
+        "detail": "Keep only jobs whose processing time p matches job_size_classes: small ∈ [1,4], medium ∈ [5,8], large ∈ [9,12]."
+      },
+      {
+        "step": 3,
+        "action": "Expand targets",
+        "detail": "For each (source, job) pair, enumerate all feasible targets in target_machines. Feasible = the target has slack ≥ job processing time p (i.e., the job can physically fit)."
+      },
+      {
+        "step": 4,
+        "action": "Generate (source, job, target) triples",
+        "detail": "Cartesian product of (filtered sources × filtered jobs × feasible targets). This is the candidate set."
+      },
+      {
+        "step": 5,
+        "action": "Rank candidates",
+        "detail": "Rank by ranking_hint. Compute the hint score for each candidate and sort descending ('higher is better') for cheap_lb, s2, cost_gap, slack. For 'random', shuffle."
+      },
+      {
+        "step": 6,
+        "action": "Apply diversity rule",
+        "detail": "Traverse ranked list. Accept candidates that satisfy diversity_rule quota. Skip candidates from sources/targets that have reached their quota."
+      },
+      {
+        "step": 7,
+        "action": "Select top-K",
+        "detail": "Keep the first max_candidates candidates that pass diversity. If fewer than max_candidates, evaluate all that pass."
+      },
+      {
+        "step": 8,
+        "action": "Evaluate with exact DP",
+        "detail": "For each selected candidate, run exact single-machine DP on the source and target machines. If the resulting schedule has total exact cost < current TEC, accept the move. Otherwise, discard."
+      },
+      {
+        "step": 9,
+        "action": "Fallback on empty",
+        "detail": "If steps 1-7 produce zero candidates, execute fallback_if_empty with the same max_candidates budget."
+      }
+    ]
+  },
+
+  "random_baseline_spec": {
+    "description": "The random baseline generates proposals of the same structure but with random machine IDs instead of LLM-selected ones.",
+    "generation": {
+      "source_machines": "Random sample of [1, 5] distinct machine IDs from the full machine universe, weighted by exact cost (higher cost machines more likely to be selected).",
+      "target_machines": "Random sample of [1, 5] distinct machine IDs from the full machine universe, weighted by slack (higher slack machines more likely to be selected).",
+      "job_size_classes": "Random subset of {small, medium, large}, each included with p=0.5 independently. If empty (p=0.125), retry.",
+      "max_candidates": "Same value as the LLM proposal it is being compared against.",
+      "ranking_hint": "Fixed to 'random'.",
+      "diversity_rule": "Randomly chosen from {per_source, per_target, source_target_pair, none}, uniform.",
+      "fallback_if_empty": "Fixed to 'top_s2_same_budget' (silent fallback when unlucky random picks produce zero candidates).",
+      "rationale": "Random baseline proposal — seed {seed}"
+    },
+    "comparison_unit": "Single proposal vs single proposal at the SAME solver state (same initial schedule, same no_hit_streak, same round).",
+    "fairness_guarantee": "Random baseline draws from the same universe of (source, job, target) triples as the LLM proposal. Same move_family. Same exact-DP verifier. Same max_candidates budget. Same fallback behavior. Only difference: which machines and jobs the LLM selects vs which machines and jobs random selects."
+  },
+
+  "example_proposal": {
+    "proposal_name": "attack_expensive_imbalanced_sources",
+    "move_family": "insert_inter",
+    "source_machines": ["M0", "M1", "M8"],
+    "target_machines": ["M24", "M23", "M22", "M21"],
+    "job_size_classes": ["small", "medium"],
+    "max_candidates": 20,
+    "ranking_hint": "cost_gap",
+    "diversity_rule": "per_source",
+    "fallback_if_empty": "random_same_budget",
+    "rationale": "M0 and M1 have highest exact cost (1498, 1204) and large exact-minus-LB gaps (158, 84). M8 has highest cost density (6.2). Moving small-medium jobs to slack machines M24/M23/M22 should improve TEC via re-packing. Attack the most expensive machines first."
+  }
+}
