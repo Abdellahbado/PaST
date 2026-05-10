@@ -2,10 +2,10 @@
 
 ## Status
 
-**Y1.1 COMPLETED (2026-05-10).** Search-behavior trace fields populated:
-core_source_hits, core_target_hits, starved, underexplored_sources,
-underexplored_targets, last_accepted_moves, failed_summary.
-No DeepSeek calls, no proposal execution, no LLM vs random comparisons.
+**Y2 COMPLETED (2026-05-10).** Proposal execution and random-neighborhood baseline
+implemented. Cell A smoke confirms: manual proposal generates 425 candidates,
+random baseline finds 3 improvements (TEC -6 vs baseline).
+Cells B/C blocked by uncommitted dp_solver changes.
 
 ## Hypothesis
 
@@ -61,6 +61,16 @@ All previously null trace fields now populated:
 - Token budget: ~3800 JSON tokens per trace (under 5000 limit)
 - TEC unchanged from Y1
 
+## Y2 Deliverables
+
+- C++: `PhaseYProposal` struct, JSON parser (`parse_phaseY_proposal`),
+  candidate generation/ranking/diversity, random proposal generator,
+  `phaseY_execute_proposal` and `phaseY_random_proposal` variants
+- 11 new CSV fields: phaseY_proposal_name through phaseY_targets_used
+- Manual proposals: `proposals/manual/y2_Cell_{A,B,C}_manual.json`
+- Python: CSV saved to `eval/y2_execution_raw.csv`
+- Cell A smoke: execute 425 gen/20 eval/0 imp, random 76 gen/20 eval/3 imp
+
 ## Pipeline
 
 | Step | Status |
@@ -68,7 +78,7 @@ All previously null trace fields now populated:
 | Y0 — Trace format + state conditioning | COMPLETED |
 | Y1 — C++ variant for trace generation | COMPLETED |
 | Y1.1 — Search-behavior fields in trace | COMPLETED |
-| Y2 — Random neighborhood baseline | Not started |
+| Y2 — Random neighborhood baseline | COMPLETED |
 | Y3 — First DeepSeek call on dev cells | Not started |
 | Y4 — Held-out validation (if Y3 positive) | Not started |
 | Y5 — Compare vs best prior results (if Y4 positive) | Not started |

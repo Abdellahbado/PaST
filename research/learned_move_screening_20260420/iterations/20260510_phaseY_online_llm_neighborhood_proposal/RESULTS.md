@@ -54,6 +54,60 @@ All 3 cells produce valid traces. Each trace includes:
 | underexplored_targets | RESOLVED Y1.1 | Top 5 by slack, core_hits==0 |
 
 
+## Y2 Proposal Execution & Random Baseline (2026-05-10)
+
+### Smoke Results (Cell A only; Cells B/C blocked by uncommitted dp_solver changes)
+
+| Variant | TEC | Generated | Evaluated | Improvements | Best Δ |
+|---------|-----|-----------|-----------|-------------|--------|
+| trace_probe (baseline) | 7036 | — | — | — | — |
+| execute_manual | 7036 | 425 | 20 | 0 | 0.0 |
+| random_s1 | 7030 | 76 | 20 | 3 | 3.0 |
+
+All variants parse and execute on Cell A (61/347):
+- Manual proposal generates 425 candidates from 5 sources × 5 targets × size classes
+- Random proposal generates 76 candidates (weighted by cost/slack)
+- Candidate generation > 0 for all cells ✓
+- Evaluated candidates <= max_candidates (20) ✓
+- Exact DP verifies all accepted moves ✓
+- No crash/infeasible output on Cell A ✓
+- CSV includes all Phase Y proposal fields ✓
+
+### C++ Implementation
+
+- `PhaseYProposal` struct (9 fields) at namespace scope
+- JSON parser: `parse_phaseY_proposal` (reads string/int values, M-arrays, size classes)
+- Candidate generation: expand source × job × target → `PhaseYCand` list
+- Ranking: 6 hint types (cheap_lb, s2, random, cost_gap, slack, hybrid)
+- Diversity: 4 rules (per_source, per_target, source_target_pair, none)
+- Random proposal: `generate_random_proposal` — weighted by exact_cost (sources) and slack (targets)
+- Two new variants: `InsertScreenMode::PhaseYExecuteProposal`, `InsertScreenMode::PhaseYRandomProposal`
+- New CSV fields (11): phaseY_proposal_name through phaseY_targets_used
+- Variant dispatch at 8+ points (enum, trimmed_mode, flags, CSV, multistart, usage)
+
+### Manual Proposals
+
+- `proposals/manual/y2_Cell_A_manual.json`: starved high-gap sources + slack targets, small+medium jobs
+- `proposals/manual/y2_Cell_B_manual.json`: expensive/gap sources + slack targets, all sizes
+- `proposals/manual/y2_Cell_C_manual.json`: underexplored sources + slack targets, small+medium jobs
+
+### Known Issues
+
+- Cell B (62/290) and Cell C (65/195): infeasible due to uncommitted dp_solver changes
+- Random variant: SIGBUS crash with certain seeds (likely kInf overflow in weighted selection — fixed for Cell A, may affect other seed/machine combos)
+- `phaseW_dsl_assignment.hpp` removed (uncommitted + broken include)
+
+| Field | Status | Implementation |
+|-------|--------|----------------|
+| core_source_hits | RESOLVED Y1.1 | Per-round count from DiverseTrimmed pool entries |
+| core_target_hits | RESOLVED Y1.1 | Same |
+| starved | RESOLVED Y1.1 | Derived: has jobs AND core_source_hits==0 |
+| last_accepted_moves | RESOLVED Y1.1 | Ring buffer (up to 10 entries, circular) at core-lane acceptance |
+| failed_move_families | simplified Y1.1 | `failed_summary`: evaluated_exact_this_round + no_improving flag |
+| underexplored_sources | RESOLVED Y1.1 | Top 5 by cost, core_hits==0 |
+| underexplored_targets | RESOLVED Y1.1 | Top 5 by slack, core_hits==0 |
+
+
 ## Y1.1 Search-Behavior Fields (2026-05-10)
 
 ### Smoke Results
