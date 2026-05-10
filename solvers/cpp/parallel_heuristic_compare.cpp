@@ -2100,15 +2100,31 @@ static PhaseYProposal generate_random_proposal(
     std::vector<int> src_pool;
     {
         std::vector<double> weights;
-        for (int i = 0; i < avail_src; ++i)
-            weights.push_back(std::max(1.0, std::min(by_cost[static_cast<std::size_t>(i)].first, 10000.0)));
-        std::discrete_distribution<int> dist(weights.begin(), weights.end());
+        double total_w = 0.0;
+        for (int i = 0; i < avail_src; ++i) {
+            double w = std::max(1.0, std::min(by_cost[static_cast<std::size_t>(i)].first, 10000.0));
+            if (!std::isfinite(w) || w <= 0.0) w = 1.0;
+            weights.push_back(w);
+            total_w += w;
+        }
         std::set<int> seen;
-        for (int tries = 0; tries < ns * 10 && static_cast<int>(src_pool.size()) < ns; ++tries) {
-            int pick = by_cost[static_cast<std::size_t>(dist(rng))].second;
-            if (seen.count(pick)) continue;
-            seen.insert(pick);
-            src_pool.push_back(pick);
+        if (total_w > 0.0 && avail_src > 0) {
+            std::uniform_real_distribution<double> urd(0.0, total_w);
+            for (int tries = 0; tries < ns * 10 && static_cast<int>(src_pool.size()) < ns; ++tries) {
+                double dart = urd(rng);
+                double acc = 0.0;
+                for (int i = 0; i < avail_src; ++i) {
+                    acc += weights[static_cast<std::size_t>(i)];
+                    if (dart <= acc) {
+                        int pick = by_cost[static_cast<std::size_t>(i)].second;
+                        if (!seen.count(pick)) {
+                            seen.insert(pick);
+                            src_pool.push_back(pick);
+                        }
+                        break;
+                    }
+                }
+            }
         }
         if (src_pool.empty() && !by_cost.empty()) src_pool.push_back(by_cost[0].second);
     }
@@ -2116,21 +2132,36 @@ static PhaseYProposal generate_random_proposal(
 
     std::vector<std::pair<int,int>> by_slack;
     for (int h = 0; h < m; ++h)
-        by_slack.emplace_back(epsilon - machine_loads[static_cast<std::size_t>(h)], h);
+        by_slack.emplace_back(std::max(0, epsilon - machine_loads[static_cast<std::size_t>(h)]), h);
     std::sort(by_slack.begin(), by_slack.end(), std::greater<>());
     int nt = std::max(1, std::min(5, std::min(wanted, m)));
     std::vector<int> tgt_pool;
     {
         std::vector<int> weights_slack;
-        for (int i = 0; i < m; ++i)
-            weights_slack.push_back(std::max(1, by_slack[static_cast<std::size_t>(i)].first));
-        std::discrete_distribution<int> dist_s(weights_slack.begin(), weights_slack.end());
+        int64_t total_sw = 0;
+        for (int i = 0; i < m; ++i) {
+            int w = std::max(1, by_slack[static_cast<std::size_t>(i)].first);
+            weights_slack.push_back(w);
+            total_sw += w;
+        }
         std::set<int> seen;
-        for (int tries = 0; tries < nt * 10 && static_cast<int>(tgt_pool.size()) < nt; ++tries) {
-            int pick = by_slack[static_cast<std::size_t>(dist_s(rng))].second;
-            if (seen.count(pick)) continue;
-            seen.insert(pick);
-            tgt_pool.push_back(pick);
+        if (total_sw > 0 && m > 0) {
+            std::uniform_int_distribution<int> uid(0, static_cast<int>(total_sw - 1));
+            for (int tries = 0; tries < nt * 10 && static_cast<int>(tgt_pool.size()) < nt; ++tries) {
+                int dart = uid(rng);
+                int64_t acc = 0;
+                for (int i = 0; i < m; ++i) {
+                    acc += static_cast<int64_t>(weights_slack[static_cast<std::size_t>(i)]);
+                    if (dart < acc) {
+                        int pick = by_slack[static_cast<std::size_t>(i)].second;
+                        if (!seen.count(pick)) {
+                            seen.insert(pick);
+                            tgt_pool.push_back(pick);
+                        }
+                        break;
+                    }
+                }
+            }
         }
         if (tgt_pool.empty()) tgt_pool.push_back(by_slack[0].second);
     }
@@ -5914,6 +5945,18 @@ int main(int argc, char **argv)
             assignment = build_w2_g2_c1_topk_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
         else if (name == "hybrid_manual_price_tiebreak_dp")
             assignment = build_hybrid_manual_price_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "a1_rate_stratified_hybrid")
+            assignment = build_a1_rate_stratified_hybrid(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "a2_energy_first_lpt_complete")
+            assignment = build_a2_energy_first_lpt_complete(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "a3_three_strategy_portfolio")
+            assignment = build_a3_three_strategy_portfolio(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "a4_job_size_adaptive_hybrid")
+            assignment = build_a4_job_size_adaptive_hybrid(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "a5_lpt_energy_relocate")
+            assignment = build_a5_lpt_energy_relocate(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "a6_multistart_randomized_hybrid")
+            assignment = build_a6_multistart_randomized_hybrid(inst.jobs, inst.rates, clipped_prices, epsilon);
         else if (name == "dsl_config_dp") {
             const char *cfg_path = std::getenv("DSL_CONFIG_PATH");
             if (cfg_path && cfg_path[0] != '\0')
@@ -5940,6 +5983,7 @@ int main(int argc, char **argv)
         if (name.find("lpt_dp") == 0 || name.find("energy_rate_greedy_dp") == 0 ||
             name.find("hybrid_load_energy_dp") == 0 || name.find("hybrid_manual_price_tiebreak_dp") == 0 ||
             name.find("dsl_config_dp") == 0 ||
+            name.find("a1_") == 0 || name.find("a2_") == 0 || name.find("a3_") == 0 || name.find("a4_") == 0 || name.find("a5_") == 0 || name.find("a6_") == 0 ||
             name.find("w1_") == 0 ||
             name.find("w15_") == 0 || name.find("w2_") == 0 || name.find("w4_") == 0)
             optimizer = "greedy_esr";
@@ -6026,6 +6070,11 @@ int main(int argc, char **argv)
         variant != "hybrid_load_energy_dp" &&
         variant != "hybrid_manual_price_tiebreak_dp" &&
         variant != "dsl_config_dp" &&
+        variant != "a1_rate_stratified_hybrid" &&
+        variant != "a2_energy_first_lpt_complete" &&
+        variant != "a3_three_strategy_portfolio" &&
+        variant != "a4_job_size_adaptive_hybrid" &&
+        variant != "a5_lpt_energy_relocate" &&
         variant != "w1_rate_class_water_filling_dp" &&
         variant != "w15_hybrid_pw_tiebreak" &&
         variant != "w15_waterfill_pw_correction" &&

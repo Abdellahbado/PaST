@@ -12,7 +12,7 @@ endif()
 
 # Compiler flags
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
-  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG -march=native -ffast-math")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG   "-O0 -g -fsanitize=address,undefined")
 endif()
 if(MSVC)
@@ -116,6 +116,12 @@ add_executable(
   test_lb_hierarchy.cpp
 )
 
+add_executable(
+  rl_audit_eval
+  dp_solver.cpp
+  rl_audit_eval.cpp
+)
+
 # Warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
   target_compile_options(compare PRIVATE -Wall -Wextra -Wpedantic)
@@ -132,6 +138,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
   target_compile_options(phaseF_config_probe PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(phaseG_config_pricer PRIVATE -Wall -Wextra -Wpedantic)
   target_compile_options(test_lb_hierarchy PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(rl_audit_eval PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # LTO disabled: adds 2-5min link time for ~10% runtime benefit, not worth it during dev.

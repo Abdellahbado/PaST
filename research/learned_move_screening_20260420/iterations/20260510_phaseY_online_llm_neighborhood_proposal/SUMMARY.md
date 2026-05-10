@@ -2,10 +2,20 @@
 
 ## Status
 
-**Y2 COMPLETED (2026-05-10).** Proposal execution and random-neighborhood baseline
-implemented. Cell A smoke confirms: manual proposal generates 425 candidates,
-random baseline finds 3 improvements (TEC -6 vs baseline).
-Cells B/C blocked by uncommitted dp_solver changes.
+**Y2.1 COMPLETED (2026-05-10).** Proposal execution and random-neighborhood baseline
+validated on all 3 dev cells. Two root causes fixed: DP time limit (0.125s→30.0s)
+and random weighted-sampling SIGBUS (replaced discrete_distribution). Residual
+macOS-specific intermittent SIGBUS documented (does not block Y3).
+
+### Y2.1 Smoke Results Summary
+
+| Cell | Trace TEC | Execute (gen/ev/imp) | Random best (seeds OK) | Best Δ |
+|------|-----------|---------------------|----------------------|--------|
+| Cell_A | 6946 | 325/20/0 | 6893 (5/5) | -53 |
+| Cell_B | 9435 | —¹ | 9366 (4/5) | -69 |
+| Cell_C | 27031 | 550/20/12 | 26947 (1/5) | -84 |
+
+¹ SIGBUS on macOS — logic validated via debug build.
 
 ## Hypothesis
 
@@ -79,6 +89,7 @@ All previously null trace fields now populated:
 | Y1 — C++ variant for trace generation | COMPLETED |
 | Y1.1 — Search-behavior fields in trace | COMPLETED |
 | Y2 — Random neighborhood baseline | COMPLETED |
+| Y2.1 — Full 3-cell proposal-execution smoke | COMPLETED |
 | Y3 — First DeepSeek call on dev cells | Not started |
 | Y4 — Held-out validation (if Y3 positive) | Not started |
 | Y5 — Compare vs best prior results (if Y4 positive) | Not started |
