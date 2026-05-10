@@ -2,9 +2,10 @@
 
 ## Status
 
-**Y1 COMPLETED (2026-05-10).** C++ trace instrumentation done, trace-generation
-smoke passed on 3 dev cells. No DeepSeek calls, no proposal execution, no LLM
-vs random comparisons.
+**Y1.1 COMPLETED (2026-05-10).** Search-behavior trace fields populated:
+core_source_hits, core_target_hits, starved, underexplored_sources,
+underexplored_targets, last_accepted_moves, failed_summary.
+No DeepSeek calls, no proposal execution, no LLM vs random comparisons.
 
 ## Hypothesis
 
@@ -41,12 +42,32 @@ aggregate traces (Phase V).
 - Null fields documented: core_source_hits, core_target_hits,
   last_accepted_moves, failed_move_families, underexplored sources/targets
 
+## Y1.1 Deliverables
+
+All previously null trace fields now populated:
+
+| Field | Implementation |
+|-------|----------------|
+| core_source_hits | Per-round count from DiverseTrimmed pool entries |
+| core_target_hits | Same |
+| starved | Derived: has jobs AND core_source_hits==0 |
+| underexplored_sources | Top 5 by exact_cost, core_source_hits==0 |
+| underexplored_targets | Top 5 by slack, core_target_hits==0 |
+| last_accepted_moves | Circular ring buffer, up to 10 entries |
+| failed_summary | evaluated_exact_this_round + no_improving flag |
+
+- C++: `PhaseYAcceptedMove` struct, ring buffer, hit counters, 4 new params to trace function
+- Python: `--y1-1-trace-probe` subcommand validates all new fields
+- Token budget: ~3800 JSON tokens per trace (under 5000 limit)
+- TEC unchanged from Y1
+
 ## Pipeline
 
 | Step | Status |
 |------|--------|
 | Y0 — Trace format + state conditioning | COMPLETED |
 | Y1 — C++ variant for trace generation | COMPLETED |
+| Y1.1 — Search-behavior fields in trace | COMPLETED |
 | Y2 — Random neighborhood baseline | Not started |
 | Y3 — First DeepSeek call on dev cells | Not started |
 | Y4 — Held-out validation (if Y3 positive) | Not started |

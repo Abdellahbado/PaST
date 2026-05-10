@@ -2,14 +2,23 @@
 
 ## Active
 
-(none — Y1 complete)
+(none — Y1.1 complete)
 
 ## Resolved
 
-### B-Y0.0 — Trace format needs C++ instrumentation before Y1 [RESOLVED 2026-05-10]
+### B-Y0.0 — Trace format needs C++ instrumentation before Y1 [RESOLVED 2026-05-10, Y1]
 
 Added `phaseY_trace_probe` variant. Writes JSON + Markdown state traces at
 end of DiverseTrimmed local search. Smoke passed on 3 dev cells.
+
+### B-Y1.1 — Search-behavior fields were null [RESOLVED 2026-05-10, Y1.1]
+
+All previously null fields now populated:
+- core_source_hits, core_target_hits: per-round pool counters
+- starved: derived from core_source_hits==0 AND has jobs
+- underexplored_sources/targets: machines with 0 hits, sorted by cost/slack
+- last_accepted_moves: ring buffer of up to 10 moves with delta_tec
+- failed_summary: evaluated_exact_count + no_improving flag
 
 ## Anticipated
 

@@ -60,8 +60,17 @@ PaperInstance load_paper_instance(int instance_id, const std::string &data_dir)
     const std::string suffix = std::to_string(instance_id);
     PaperInstance inst;
     inst.jobs = read_values_as_int(data_dir + "/Data_p" + suffix + ".txt");
-    inst.prices = read_values_as_double(data_dir + "/Data_c" + suffix + ".txt");
-    inst.rates = read_values_as_double(data_dir + "/Data_e" + suffix + ".txt");
+    const bool published = (instance_id >= 1 && instance_id <= 90);
+    if (published)
+    {
+        inst.rates = read_values_as_double(data_dir + "/Data_c" + suffix + ".txt");
+        inst.prices = read_values_as_double(data_dir + "/Data_e" + suffix + ".txt");
+    }
+    else
+    {
+        inst.prices = read_values_as_double(data_dir + "/Data_c" + suffix + ".txt");
+        inst.rates = read_values_as_double(data_dir + "/Data_e" + suffix + ".txt");
+    }
     return inst;
 }
 
@@ -1790,6 +1799,15 @@ void run_noscreen_1move_diagnostic(
     }
 }
 
+struct PhaseYAcceptedMove {
+    int round;
+    int source;
+    int target;
+    int job_size;
+    double delta_tec;
+    bool was_exception;
+};
+
 static void write_phaseY_trace_json(
     const std::vector<std::vector<int>>& machine_jobs,
     const std::vector<int>& machine_loads,
@@ -1808,7 +1826,13 @@ static void write_phaseY_trace_json(
     const VndStats& stats,
     int no_hit_streak,
     bool had_shortlist_improvement,
-    const ExactCostCache& cache)
+    const ExactCostCache& cache,
+    const std::vector<int>& core_source_hits,
+    const std::vector<int>& core_target_hits,
+    int evaluated_exact_this_round,
+    int no_improving_this_round,
+    int ring_count,
+    const std::vector<PhaseYAcceptedMove>& last_accepted_moves)
 {
     std::string out_dir = "research/learned_move_screening_20260420/iterations/20260510_phaseY_online_llm_neighborhood_proposal/traces/generated";
     std::string mkdir_cmd = "mkdir -p " + out_dir;
@@ -1895,6 +1919,10 @@ static void write_phaseY_trace_json(
         int lg = large_jobs[static_cast<std::size_t>(h)];
         int rate_val = static_cast<int>(rates[static_cast<std::size_t>(h)]);
 
+        int src_hits = (h < static_cast<int>(core_source_hits.size())) ? core_source_hits[static_cast<std::size_t>(h)] : 0;
+        int tgt_hits = (h < static_cast<int>(core_target_hits.size())) ? core_target_hits[static_cast<std::size_t>(h)] : 0;
+        bool starved = (jc > 0 && src_hits == 0);
+
         f << "    {\"id\":\"M" << h << "\",\"jobs\":" << jc << ",\"load\":" << load
           << ",\"slack\":" << slack_val << ",\"load_pressure\":" << std::round(lp*1000.0)/1000.0
           << ",\"exact_cost\":" << std::round(ec*10.0)/10.0
@@ -1902,18 +1930,38 @@ static void write_phaseY_trace_json(
           << ",\"gap\":" << std::round(gap*10.0)/10.0
           << ",\"cost_density\":" << std::round(cd*1000.0)/1000.0
           << ",\"small_jobs\":" << sm << ",\"medium_jobs\":" << md << ",\"large_jobs\":" << lg
-          << ",\"core_source_hits\":null,\"core_target_hits\":null,\"rate\":" << rate_val
-          << ",\"starved\":null}";
+          << ",\"core_source_hits\":" << src_hits << ",\"core_target_hits\":" << tgt_hits << ",\"rate\":" << rate_val
+          << ",\"starved\":" << (starved ? "true" : "false") << "}";
         if (h < m - 1) f << ",";
         f << "\n";
     }
     f << "  ],\n\n";
 
     f << "  \"recent\": {\n";
-    f << "    \"last_accepted_moves\": [],\n";
-    f << "    \"note_last_accepted_moves\": \"not tracked in Y1 trace probe\",\n";
-    f << "    \"failed_move_families\": [],\n";
-    f << "    \"note_failed_move_families\": \"not tracked in Y1 trace probe\",\n";
+    f << "    \"last_accepted_moves\": [\n";
+    {
+        int start = std::max(0, ring_count - 10);
+        int display_count = std::min(ring_count, 10);
+        for (int mi = 0; mi < display_count; ++mi) {
+            int idx = (start + mi) % std::max(1, static_cast<int>(last_accepted_moves.size()));
+            if (idx < 0 || idx >= static_cast<int>(last_accepted_moves.size())) continue;
+            const auto& m = last_accepted_moves[static_cast<std::size_t>(idx)];
+            f << "      {\"round\":" << m.round
+              << ",\"source\":\"M" << m.source
+              << "\",\"target\":\"M" << m.target
+              << "\",\"job_size\":" << m.job_size
+              << ",\"delta_tec\":" << std::round(m.delta_tec*10.0)/10.0
+              << ",\"was_exception\":" << (m.was_exception ? "true" : "false") << "}";
+            if (mi < display_count - 1) f << ",";
+            f << "\n";
+        }
+    }
+    f << "    ],\n";
+    f << "    \"failed_summary\": {\n";
+    f << "      \"evaluated_exact_this_round\": " << evaluated_exact_this_round << ",\n";
+    f << "      \"no_improving_move_found\": " << (no_improving_this_round > 0 ? "true" : "false") << ",\n";
+    f << "      \"note\": \"only Y1.1 signal: whether evaluated candidates produced an improvement\"\n";
+    f << "    },\n";
     f << "    \"core_shortlist_composition\": {\n";
     f << "      \"distinct_sources_note\": \"not tracked per-round in trace probe\"\n";
     f << "    },\n";
@@ -1979,8 +2027,52 @@ static void write_phaseY_trace_json(
     }
     f << "    ],\n";
 
-    f << "    \"underexplored_sources\": [],\n";
-    f << "    \"note_underexplored\": \"core source/target hit counts not tracked in Y1 trace probe\",\n";
+    f << "    \"underexplored_sources\": [\n";
+    {
+        std::vector<std::pair<double,int>> ue_src;
+        for (int h = 0; h < m; ++h) {
+            int hits = (h < static_cast<int>(core_source_hits.size())) ? core_source_hits[static_cast<std::size_t>(h)] : 0;
+            if (hits == 0 && job_counts[static_cast<std::size_t>(h)] > 0)
+                ue_src.emplace_back(machine_exact_cost[static_cast<std::size_t>(h)], h);
+        }
+        std::sort(ue_src.begin(), ue_src.end(), std::greater<>());
+        int ue_n = std::min(5, static_cast<int>(ue_src.size()));
+        for (int i = 0; i < ue_n; ++i) {
+            int h = ue_src[static_cast<std::size_t>(i)].second;
+            f << "      {\"id\":\"M" << h << "\",\"exact_cost\":" << std::round(machine_exact_cost[static_cast<std::size_t>(h)]*10.0)/10.0
+              << ",\"gap\":" << std::round(source_gap[static_cast<std::size_t>(h)]*10.0)/10.0
+              << ",\"cost_density\":" << std::round(source_density[static_cast<std::size_t>(h)]*1000.0)/1000.0
+              << ",\"core_hits\":0}";
+            if (i < ue_n - 1) f << ",";
+            f << "\n";
+        }
+    }
+    f << "    ],\n";
+    f << "    \"underexplored_targets\": [\n";
+    {
+        std::vector<std::pair<int,int>> ue_tgt;
+        for (int h = 0; h < m; ++h) {
+            int hits = (h < static_cast<int>(core_target_hits.size())) ? core_target_hits[static_cast<std::size_t>(h)] : 0;
+            if (hits == 0) {
+                int slk = epsilon - machine_loads[static_cast<std::size_t>(h)];
+                ue_tgt.emplace_back(slk, h);
+            }
+        }
+        std::sort(ue_tgt.begin(), ue_tgt.end(), std::greater<>());
+        int ue_n = std::min(5, static_cast<int>(ue_tgt.size()));
+        for (int i = 0; i < ue_n; ++i) {
+            int h = ue_tgt[static_cast<std::size_t>(i)].second;
+            int slk = epsilon - machine_loads[static_cast<std::size_t>(h)];
+            double lp2 = (epsilon > 0) ? static_cast<double>(machine_loads[static_cast<std::size_t>(h)]) / static_cast<double>(epsilon) : 0.0;
+            f << "      {\"id\":\"M" << h << "\",\"slack\":" << slk
+              << ",\"load_pressure\":" << std::round(lp2*1000.0)/1000.0
+              << ",\"jobs\":" << job_counts[static_cast<std::size_t>(h)]
+              << ",\"core_hits\":0}";
+            if (i < ue_n - 1) f << ",";
+            f << "\n";
+        }
+    }
+    f << "    ],\n";
 
     int q1_sm = 0, q1_md = 0, q1_lg = 0, q1_n = 0;
     int q2_sm = 0, q2_md = 0, q2_lg = 0, q2_n = 0;
@@ -2066,6 +2158,9 @@ static void write_phaseY_trace_json(
             double gap = source_gap[static_cast<std::size_t>(h)];
             double cd = (load > 0) ? ec / static_cast<double>(load) : 0.0;
             int rate_val = static_cast<int>(rates[static_cast<std::size_t>(h)]);
+            int src_hits_md = (h < static_cast<int>(core_source_hits.size())) ? core_source_hits[static_cast<std::size_t>(h)] : 0;
+            int tgt_hits_md = (h < static_cast<int>(core_target_hits.size())) ? core_target_hits[static_cast<std::size_t>(h)] : 0;
+            std::string starved_md = (job_counts[static_cast<std::size_t>(h)] > 0 && src_hits_md == 0) ? "yes" : "no";
             fm << "| M" << h << " | " << job_counts[static_cast<std::size_t>(h)]
                << " | " << load << " | " << slack_val
                << " | " << std::fixed << std::setprecision(2) << lp
@@ -2076,7 +2171,7 @@ static void write_phaseY_trace_json(
                << " | " << small_jobs[static_cast<std::size_t>(h)]
                << " | " << medium_jobs[static_cast<std::size_t>(h)]
                << " | " << large_jobs[static_cast<std::size_t>(h)]
-               << " | ? | ? | " << rate_val << " | ? |\n";
+               << " | " << src_hits_md << " | " << tgt_hits_md << " | " << rate_val << " | " << starved_md << " |\n";
         }
         fm << "\n## Candidate Pool Summary\n\n";
         fm << "### Top Sources by Cost\n";
@@ -2098,6 +2193,77 @@ static void write_phaseY_trace_json(
             double lp2 = (epsilon > 0) ? static_cast<double>(machine_loads[static_cast<std::size_t>(h)]) / static_cast<double>(epsilon) : 0.0;
             fm << "| M" << h << " | " << slk << " | " << std::fixed << std::setprecision(2) << lp2
                << " | " << job_counts[static_cast<std::size_t>(h)] << " |\n";
+        }
+        fm << "\n### Underexplored Sources (core_hits=0)\n";
+        {
+            std::vector<std::pair<double,int>> ue_src;
+            for (int h = 0; h < m; ++h) {
+                int hits = (h < static_cast<int>(core_source_hits.size())) ? core_source_hits[static_cast<std::size_t>(h)] : 0;
+                if (hits == 0 && job_counts[static_cast<std::size_t>(h)] > 0)
+                    ue_src.emplace_back(machine_exact_cost[static_cast<std::size_t>(h)], h);
+            }
+            std::sort(ue_src.begin(), ue_src.end(), std::greater<>());
+            if (!ue_src.empty()) {
+                fm << "| M | EC | Gap | CD | Jobs |\n";
+                fm << "|:--|----:|----:|-----:|-----:|\n";
+                for (int i = 0; i < std::min(5, static_cast<int>(ue_src.size())); ++i) {
+                    int h = ue_src[static_cast<std::size_t>(i)].second;
+                    fm << "| M" << h << " | " << std::fixed << std::setprecision(1) << machine_exact_cost[static_cast<std::size_t>(h)]
+                       << " | " << std::fixed << std::setprecision(1) << source_gap[static_cast<std::size_t>(h)]
+                       << " | " << std::fixed << std::setprecision(3) << source_density[static_cast<std::size_t>(h)]
+                       << " | " << job_counts[static_cast<std::size_t>(h)] << " |\n";
+                }
+            } else {
+                fm << "(all non-empty machines reached by current shortlist)\n";
+            }
+        }
+        fm << "\n### Underexplored Targets (core_hits=0)\n";
+        {
+            std::vector<std::pair<int,int>> ue_tgt;
+            for (int h = 0; h < m; ++h) {
+                int hits = (h < static_cast<int>(core_target_hits.size())) ? core_target_hits[static_cast<std::size_t>(h)] : 0;
+                if (hits == 0) {
+                    int slk = epsilon - machine_loads[static_cast<std::size_t>(h)];
+                    ue_tgt.emplace_back(slk, h);
+                }
+            }
+            std::sort(ue_tgt.begin(), ue_tgt.end(), std::greater<>());
+            if (!ue_tgt.empty()) {
+                fm << "| M | Slack | LP | Jobs |\n";
+                fm << "|:--|:-----:|----:|-----:|\n";
+                for (int i = 0; i < std::min(5, static_cast<int>(ue_tgt.size())); ++i) {
+                    int h = ue_tgt[static_cast<std::size_t>(i)].second;
+                    int slk = epsilon - machine_loads[static_cast<std::size_t>(h)];
+                    double lp2 = (epsilon > 0) ? static_cast<double>(machine_loads[static_cast<std::size_t>(h)]) / static_cast<double>(epsilon) : 0.0;
+                    fm << "| M" << h << " | " << slk << " | " << std::fixed << std::setprecision(2) << lp2
+                       << " | " << job_counts[static_cast<std::size_t>(h)] << " |\n";
+                }
+            } else {
+                fm << "(all machines targeted by current shortlist)\n";
+            }
+        }
+        fm << "\n### Last Accepted Moves\n";
+        {
+            int total_pushes = ring_count;
+            int size = static_cast<int>(last_accepted_moves.size());
+            int display_count = std::min(total_pushes, 10);
+            int oldest_logical = total_pushes - display_count;
+            if (display_count > 0) {
+                fm << "| # | Round | Source | Target | Size | Δ TEC | Exc? |\n";
+                fm << "|--:|:-----:|--------|--------|:----:|------:|:----:|\n";
+                for (int mi = 0; mi < display_count; ++mi) {
+                    int push_order = oldest_logical + mi;
+                    int buf_idx = push_order % std::max(1, size);
+                    const auto& m = last_accepted_moves[static_cast<std::size_t>(buf_idx)];
+                    fm << "| " << (mi+1) << " | " << m.round
+                       << " | M" << m.source << " | M" << m.target
+                       << " | " << m.job_size
+                       << " | " << std::fixed << std::setprecision(1) << m.delta_tec
+                       << " | " << (m.was_exception ? "yes" : "no") << " |\n";
+                }
+            } else {
+                fm << "(no moves accepted yet)\n";
+            }
         }
         fm << "\n**Note**: Trace generated by phaseY_trace_probe at first DiverseTrimmed stagnation.\n";
         fm.close();
@@ -2248,6 +2414,13 @@ void run_insert_inter_screened_redesign(
             phaseY_instance_guard = g_audit_instance_id;
         }
     }
+
+    static std::vector<int> phaseY_source_hits;
+    static std::vector<int> phaseY_target_hits;
+    static std::vector<PhaseYAcceptedMove> phaseY_ring;
+    static int phaseY_ring_count = 0;
+    static int phaseY_last_evaluated_exact = 0;
+    static int phaseY_last_no_improving = 0;
 
     for (int round = 0; round < max_rounds; ++round)
     {
@@ -2574,6 +2747,15 @@ void run_insert_inter_screened_redesign(
             }
         }
 
+        if (is_phaseY_trace_probe) {
+            phaseY_source_hits.assign(static_cast<std::size_t>(m), 0);
+            phaseY_target_hits.assign(static_cast<std::size_t>(m), 0);
+            for (const auto& c : pool) {
+                if (c.a >= 0 && c.a < m) ++phaseY_source_hits[static_cast<std::size_t>(c.a)];
+                if (c.b >= 0 && c.b < m) ++phaseY_target_hits[static_cast<std::size_t>(c.b)];
+            }
+        }
+
         if (pool.empty())
         {
             stats.stop_reason = "no_improving_move";
@@ -2804,11 +2986,33 @@ void run_insert_inter_screened_redesign(
                     machine_exact_cost[static_cast<std::size_t>(c.b)] = new_b;
                     ++stats.accepted_insert_inter;
                     improved = true;
+
+                    if (is_phaseY_trace_probe) {
+                        PhaseYAcceptedMove m;
+                        m.round = round;
+                        m.source = c.a;
+                        m.target = c.b;
+                        m.job_size = p;
+                        m.delta_tec = old_ab - new_ab;
+                        m.was_exception = false;
+                        const int idx = phaseY_ring_count % 10;
+                        if (phaseY_ring_count < 10)
+                            phaseY_ring.push_back(m);
+                        else
+                            phaseY_ring[static_cast<std::size_t>(idx)] = m;
+                        ++phaseY_ring_count;
+                    }
                 }
             }
         }
 
         bool had_shortlist_improvement = improved;
+
+        if (is_phaseY_trace_probe) {
+            phaseY_last_evaluated_exact = evaluated_exact_this_round;
+            phaseY_last_no_improving = improved ? 0 : 1;
+        }
+
         if (is_exception_mode)
         {
             if (is_score_escape_sampler)
@@ -3361,7 +3565,10 @@ void run_insert_inter_screened_redesign(
                         machine_lb_cur, source_gap, source_lb, source_density,
                         rates, prices, epsilon, m, round, g_audit_instance_id,
                         current_tec, stats, phaseY_consecutive_no_hit,
-                        had_shortlist_improvement, cache);
+                        had_shortlist_improvement, cache,
+                        phaseY_source_hits, phaseY_target_hits,
+                        evaluated_exact_this_round, phaseY_last_no_improving,
+                        phaseY_ring_count, phaseY_ring);
                     return;
                 }
                 continue;
@@ -3397,7 +3604,10 @@ void run_insert_inter_screened_redesign(
             lb_cur, gap_cur, src_lb, src_dens,
             rates, prices, epsilon, m, max_rounds - 1, g_audit_instance_id,
             total_ec, stats, phaseY_consecutive_no_hit,
-            false, cache);
+            false, cache,
+            phaseY_source_hits, phaseY_target_hits,
+            phaseY_last_evaluated_exact, phaseY_last_no_improving,
+            phaseY_ring_count, phaseY_ring);
     }
 }
 
@@ -5139,6 +5349,8 @@ int main(int argc, char **argv)
             assignment = build_w2_g2_c5_twopass_refine(inst.jobs, inst.rates, clipped_prices, epsilon);
         else if (name == "w4_c1_relocate_only" || name == "w4_c1_op6_combined")
             assignment = build_w2_g2_c1_topk_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "hybrid_manual_price_tiebreak_dp")
+            assignment = build_hybrid_manual_price_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
         else
             assignment = build_lpt_greedy_assignment(inst.jobs, inst.rates, clipped_prices, epsilon);
 
@@ -5156,7 +5368,8 @@ int main(int argc, char **argv)
             optimizer = "greedy_dp";
         // All LLM assignment policies use fast ESR (DP over fixed sequence)
         if (name.find("lpt_dp") == 0 || name.find("energy_rate_greedy_dp") == 0 ||
-            name.find("hybrid_load_energy_dp") == 0 || name.find("w1_") == 0 ||
+            name.find("hybrid_load_energy_dp") == 0 || name.find("hybrid_manual_price_tiebreak_dp") == 0 ||
+            name.find("w1_") == 0 ||
             name.find("w15_") == 0 || name.find("w2_") == 0 || name.find("w4_") == 0)
             optimizer = "greedy_esr";
         r = evaluate_variant(
@@ -5238,6 +5451,7 @@ int main(int argc, char **argv)
         variant != "lpt_dp" &&
         variant != "energy_rate_greedy_dp" &&
         variant != "hybrid_load_energy_dp" &&
+        variant != "hybrid_manual_price_tiebreak_dp" &&
         variant != "w1_rate_class_water_filling_dp" &&
         variant != "w15_hybrid_pw_tiebreak" &&
         variant != "w15_waterfill_pw_correction" &&

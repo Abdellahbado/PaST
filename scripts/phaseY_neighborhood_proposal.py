@@ -90,12 +90,13 @@ def _estimate_tokens(obj, indent=0):
     return len(s) // 4
 
 
-def cmd_y1_trace_probe(args):
+def cmd_y1_trace_probe(args, y1_1=False):
     """Run phaseY_trace_probe on dev cells, save CSV, verify traces."""
     _ensure_dirs()
 
+    stage_label = "Y1.1" if y1_1 else "Y1"
     print("=" * 60)
-    print("Phase Y1 — Trace Probe Smoke")
+    print(f"Phase {stage_label} — Trace Probe Smoke")
     print("=" * 60)
 
     results = []
@@ -169,6 +170,18 @@ def cmd_y1_trace_probe(args):
                                 print(f"      all_machines: OK ({m_count}/{expected_m})")
                             else:
                                 print(f"      all_machines: MISSING ({m_count}/{expected_m})")
+                            if y1_1:
+                                nz_src = sum(1 for mm in machines if mm.get("core_source_hits", 0) > 0)
+                                nz_tgt = sum(1 for mm in machines if mm.get("core_target_hits", 0) > 0)
+                                n_starved = sum(1 for mm in machines if mm.get("starved") == True)
+                                nz_src_hits = sum(1 for mm in machines if mm.get("core_source_hits") is not None and mm.get("core_source_hits") > 0)
+                                moves = trace.get("recent", {}).get("last_accepted_moves", [])
+                                ue_src = trace.get("candidate_pools", {}).get("underexplored_sources", [])
+                                ue_tgt = trace.get("candidate_pools", {}).get("underexplored_targets", [])
+                                failed = trace.get("recent", {}).get("failed_summary", {})
+                                print(f"      Y1.1: src_hits>0={nz_src_hits}  tgt_hits>0={nz_tgt}  starved={n_starved}")
+                                print(f"      Y1.1: accepted_moves={len(moves)}  ue_src={len(ue_src)}  ue_tgt={len(ue_tgt)}")
+                                print(f"      Y1.1: failed={failed}")
                         except (json.JSONDecodeError, KeyError) as e:
                             print(f"    Trace parse error: {e}")
                             row["trace_error"] = str(e)[:100]
@@ -181,7 +194,7 @@ def cmd_y1_trace_probe(args):
         results.append(row)
 
     # Save raw CSV
-    raw_path = EVAL_DIR / "y1_trace_probe_raw.csv"
+    raw_path = EVAL_DIR / ("y1_1_trace_probe_raw.csv" if y1_1 else "y1_trace_probe_raw.csv")
     fieldnames = [
         "cell_label", "instance_id", "epsilon", "returncode", "runtime_sec",
         "tec_total", "stop_reason", "accepted_insert_inter", "rounds",
@@ -195,9 +208,9 @@ def cmd_y1_trace_probe(args):
     print(f"\nCSV saved: {raw_path}")
 
     # Write results note
-    note_path = NOTES_DIR / "phaseY1_trace_probe_results.md"
+    note_path = NOTES_DIR / ("phaseY1_1_trace_probe_results.md" if y1_1 else "phaseY1_trace_probe_results.md")
     with open(note_path, "w") as f:
-        f.write("# Phase Y1 — Trace Probe Results\n\n")
+        f.write(f"# Phase {stage_label} — Trace Probe Results\n\n")
         f.write("## Summary\n\n")
         f.write("| Cell | Inst/Eps | TEC | Stop Reason | Runtime | Machines | Tokens | OK? |\n")
         f.write("|------|----------|-----|-------------|---------|----------|--------|-----|\n")
@@ -247,10 +260,12 @@ def main():
     parser = argparse.ArgumentParser(description="Phase Y orchestration")
     parser.add_argument("--y1-trace-probe", action="store_true",
                         help="Run Phase Y1 trace probe on dev cells")
+    parser.add_argument("--y1-1-trace-probe", action="store_true",
+                        help="Run Phase Y1.1 trace probe on dev cells (with search-behavior fields)")
     args = parser.parse_args()
 
-    if args.y1_trace_probe:
-        sys.exit(cmd_y1_trace_probe(args))
+    if args.y1_trace_probe or args.y1_1_trace_probe:
+        sys.exit(cmd_y1_trace_probe(args, y1_1=args.y1_1_trace_probe))
 
     parser.print_help()
     sys.exit(1)

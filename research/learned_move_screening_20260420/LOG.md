@@ -1559,8 +1559,51 @@ Top random policy c000 (seed 100): mean TEC=14254.3, beats example on 2/3 cells.
 - `eval/x3_random_campaign_aggregate.csv`
 - `policies/random_campaign/x3_campaign_*.json` (20 policies)
 
+## 2026-05-10 — Phase Y1.1 search-behavior fields added to trace
+
+### Attempt
+
+Populate the previously-null search-behavior fields in the Phase Y state trace
+so the LLM sees solver dynamics, not just static machine costs. Add:
+core_source_hits, core_target_hits, starved, underexplored_sources,
+underexplored_targets, last_accepted_moves (ring buffer), and failed_summary.
+
+### Result
+
+- Added `PhaseYAcceptedMove` struct at namespace scope
+- Added `phaseY_source_hits`, `phaseY_target_hits`, `phaseY_ring`,
+  `phaseY_ring_count`, `phaseY_last_evaluated_exact`, `phaseY_last_no_improving`
+  static trackers in the DiverseTrimmed loop
+- Pool hit counting after shortlist construction (per-round)
+- Ring buffer push on core-lane acceptance with delta_tec
+- `write_phaseY_trace_json` extended with 5 new params (hits, eval_count,
+  no_improving, ring_count, ring)
+- `failed_summary` replaces `failed_move_families` note
+- Updated MD output with all new fields (underexplored tables, accepted moves
+  table, starved column)
+
+Smoke results (all 3 dev cells pass):
+
+| Cell | TEC | Tokens | src>0 | tgt>0 | starved | moves | ue_src | ue_tgt |
+|------|-----|--------|-------|-------|---------|-------|--------|--------|
+| Cell_A | 6946 | 3800 | 5 | 3 | 12 | 5 | 5 | 5 |
+| Cell_B | 9435 | 3766 | 5 | 3 | 4 | 5 | 4 | 5 |
+| Cell_C | 27031 | 3874 | 5 | 3 | 20 | 5 | 5 | 5 |
+
+TEC unchanged from Y1 — instrumentation only.
+Token budget: ~3800 JSON tokens (under 5000 limit).
+
+### Evidence
+
+- `solvers/cpp/parallel_heuristic_compare.cpp` — PhaseYAcceptedMove, hit counters,
+  ring buffer, extended trace function
+- `scripts/phaseY_neighborhood_proposal.py` — `--y1-1-trace-probe` subcommand
+- `traces/generated/trace_Cell_A_r4.json`, `trace_Cell_B_r4.json`, `trace_Cell_C_r4.json`
+- `eval/y1_1_trace_probe_raw.csv`
+- `notes/phaseY1_1_trace_probe_results.md`
+
 ### Conclusion
 
-X3 complete. Case B implies X4 interactive LLM must show it can find good
-policies faster/more reliably than brute-force random search. The example_policy
-and best random policy provide strong baselines.
+Phase Y1.1 complete. All trace fields now populated. No blocked fields remain.
+Ready for Y2 (random neighborhood baseline) or Y3 (first DeepSeek call).
+Do NOT call DeepSeek until instructed.

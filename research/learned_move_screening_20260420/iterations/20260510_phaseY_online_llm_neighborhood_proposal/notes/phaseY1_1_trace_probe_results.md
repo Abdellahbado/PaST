@@ -1,12 +1,12 @@
-# Phase Y1 — Trace Probe Results
+# Phase Y1.1 — Trace Probe Results
 
 ## Summary
 
 | Cell | Inst/Eps | TEC | Stop Reason | Runtime | Machines | Tokens | OK? |
 |------|----------|-----|-------------|---------|----------|--------|-----|
-| Cell_A | 61/347 | 6946.000000 | max_rounds | 8.52s | 25 | 3800 | YES |
-| Cell_B | 62/290 | 9435.000000 | max_rounds | 36.78s | 25 | 3766 | YES |
-| Cell_C | 65/195 | 27031.000000 | max_rounds | 6.09s | 25 | 3874 | YES |
+| Cell_A | 61/347 | 6946.000000 | max_rounds | 8.46s | 25 | 3800 | YES |
+| Cell_B | 62/290 | 9435.000000 | max_rounds | 37.63s | 25 | 3766 | YES |
+| Cell_C | 65/195 | 27031.000000 | max_rounds | 6.8s | 25 | 3874 | YES |
 
 ## Smoke Checks
 
