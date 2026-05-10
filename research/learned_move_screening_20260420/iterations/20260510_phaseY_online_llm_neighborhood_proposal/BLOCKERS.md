@@ -2,12 +2,16 @@
 
 ## Active
 
-### B-Y0.0 — Trace format needs C++ instrumentation before Y1 [PLANNED, not blocking]
+(none — Y1 complete)
 
-The existing solver CSV output does not include per-round machine state
-snapshots. Phase Y requires new C++ logging at stagnation points to produce
-the state trace. This is scoped for Y1 implementation — no blocker for Y0
-design.
+## Resolved
+
+### B-Y0.0 — Trace format needs C++ instrumentation before Y1 [RESOLVED 2026-05-10]
+
+Added `phaseY_trace_probe` variant. Writes JSON + Markdown state traces at
+end of DiverseTrimmed local search. Smoke passed on 3 dev cells.
+
+## Anticipated
 
 ### B-Y0.1 — C++ variant for neighborhood evaluation not yet designed [PLANNED]
 
@@ -19,8 +23,6 @@ candidate triples from source/target constraints. Scoped for Y1.
 Random baseline uses same format with weighted random machine selection.
 Must verify that the same initial state is used for both LLM and random.
 Scoped for Y2.
-
-## Anticipated
 
 ### B-Y0.3 — DeepSeek overfitting to specific machine IDs on dev cells
 

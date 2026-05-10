@@ -112,6 +112,8 @@ struct Assignment
     std::vector<int> machine_loads;
 };
 
+#include "phaseW_assignment_policies.hpp"
+
 Assignment build_lpt_greedy_assignment(
     const std::vector<int> &jobs,
     const std::vector<double> &rates,
@@ -882,7 +884,8 @@ enum class InsertScreenMode
     ExceptionLaneRefined2,
     ExceptionLaneRefined3,
     ScoreEscapeSampler,
-    PhaseXPolicyJson
+    PhaseXPolicyJson,
+    PhaseYTraceProbe
 };
 
 static int g_random_exception_seed = 42;
@@ -1787,6 +1790,322 @@ void run_noscreen_1move_diagnostic(
     }
 }
 
+static void write_phaseY_trace_json(
+    const std::vector<std::vector<int>>& machine_jobs,
+    const std::vector<int>& machine_loads,
+    const std::vector<double>& machine_exact_cost,
+    const std::vector<double>& machine_lb_cur,
+    const std::vector<double>& source_gap,
+    const std::vector<double>& source_lb,
+    const std::vector<double>& source_density,
+    const std::vector<double>& rates,
+    const std::vector<double>& prices,
+    int epsilon,
+    int m,
+    int round,
+    int instance_id,
+    double current_tec,
+    const VndStats& stats,
+    int no_hit_streak,
+    bool had_shortlist_improvement,
+    const ExactCostCache& cache)
+{
+    std::string out_dir = "research/learned_move_screening_20260420/iterations/20260510_phaseY_online_llm_neighborhood_proposal/traces/generated";
+    std::string mkdir_cmd = "mkdir -p " + out_dir;
+    std::system(mkdir_cmd.c_str());
+
+    std::string cell_label = "Cell_unknown";
+    if (instance_id == 61) cell_label = "Cell_A";
+    else if (instance_id == 62) cell_label = "Cell_B";
+    else if (instance_id == 65) cell_label = "Cell_C";
+    else cell_label = "Cell_" + std::to_string(instance_id);
+
+    std::string fname = out_dir + "/trace_" + cell_label + "_r" + std::to_string(round) + ".json";
+    std::ofstream f(fname);
+    if (!f.is_open()) return;
+
+    std::vector<int> small_jobs(static_cast<std::size_t>(m), 0);
+    std::vector<int> medium_jobs(static_cast<std::size_t>(m), 0);
+    std::vector<int> large_jobs(static_cast<std::size_t>(m), 0);
+    std::vector<int> job_counts(static_cast<std::size_t>(m), 0);
+    int total_jobs = 0;
+    for (int h = 0; h < m; ++h) {
+        job_counts[static_cast<std::size_t>(h)] = static_cast<int>(machine_jobs[static_cast<std::size_t>(h)].size());
+        total_jobs += job_counts[static_cast<std::size_t>(h)];
+        for (int p : machine_jobs[static_cast<std::size_t>(h)]) {
+            if (p <= 4) ++small_jobs[static_cast<std::size_t>(h)];
+            else if (p <= 8) ++medium_jobs[static_cast<std::size_t>(h)];
+            else ++large_jobs[static_cast<std::size_t>(h)];
+        }
+    }
+
+    std::vector<std::pair<double,int>> cost_sorted;
+    for (int h = 0; h < m; ++h)
+        cost_sorted.emplace_back(machine_exact_cost[static_cast<std::size_t>(h)], h);
+    std::sort(cost_sorted.begin(), cost_sorted.end());
+    std::vector<int> cost_quartile(static_cast<std::size_t>(m), 0);
+    for (std::size_t i = 0; i < cost_sorted.size(); ++i) {
+        double frac = static_cast<double>(i) / static_cast<double>(std::max<std::size_t>(1, cost_sorted.size()-1));
+        cost_quartile[static_cast<std::size_t>(cost_sorted[i].second)] = (frac < 0.25) ? 1 : (frac < 0.50) ? 2 : (frac < 0.75) ? 3 : 4;
+    }
+
+    std::string regime_str = (epsilon < 250) ? "tight" : (epsilon <= 350) ? "medium" : "loose";
+
+    f << "{\n";
+    f << "  \"trace_id\": \"" << cell_label << "_r" << round << "\",\n";
+    f << "  \"cell_label\": \"" << cell_label << "\",\n";
+    f << "  \"round\": " << round << ",\n";
+    f << "  \"timestamp\": \"generated\",\n\n";
+
+    f << "  \"regime\": {\n";
+    f << "    \"cell_label\": \"" << cell_label << "\",\n";
+    f << "    \"epsilon\": " << epsilon << ",\n";
+    f << "    \"num_machines\": " << m << ",\n";
+    f << "    \"total_jobs\": " << total_jobs << ",\n";
+    f << "    \"epsilon_regime\": \"" << regime_str << "\",\n";
+    f << "    \"job_size_range\": [1, 12],\n";
+    f << "    \"episode_epsilon_progression\": [" << epsilon << "]\n";
+    f << "  },\n\n";
+
+    f << "  \"snapshot\": {\n";
+    f << "    \"current_tec\": " << current_tec << ",\n";
+    f << "    \"best_tec_episode\": " << current_tec << ",\n";
+    f << "    \"tec_improvement_last_n_rounds\": 0.0,\n";
+    f << "    \"no_hit_streak\": " << no_hit_streak << ",\n";
+    f << "    \"total_rounds_completed\": " << (round+1) << ",\n";
+    f << "    \"total_accepted_moves_so_far\": " << stats.accepted_insert_inter << ",\n";
+    f << "    \"exact_dp_evals_so_far\": " << (cache.hits + cache.misses) << ",\n";
+    f << "    \"core_lane_stagnation_active\": true,\n";
+    f << "    \"exception_lane_active\": false,\n";
+    f << "    \"stop_reason_guard\": \"none\"\n";
+    f << "  },\n\n";
+
+    f << "  \"machines\": [\n";
+    for (int h = 0; h < m; ++h) {
+        int load = machine_loads[static_cast<std::size_t>(h)];
+        int slack_val = epsilon - load;
+        double lp = (epsilon > 0) ? static_cast<double>(load) / static_cast<double>(epsilon) : 0.0;
+        double ec = machine_exact_cost[static_cast<std::size_t>(h)];
+        double rlb = machine_lb_cur[static_cast<std::size_t>(h)];
+        double gap = source_gap[static_cast<std::size_t>(h)];
+        double cd = (load > 0) ? ec / static_cast<double>(load) : 0.0;
+        int jc = job_counts[static_cast<std::size_t>(h)];
+        int sm = small_jobs[static_cast<std::size_t>(h)];
+        int md = medium_jobs[static_cast<std::size_t>(h)];
+        int lg = large_jobs[static_cast<std::size_t>(h)];
+        int rate_val = static_cast<int>(rates[static_cast<std::size_t>(h)]);
+
+        f << "    {\"id\":\"M" << h << "\",\"jobs\":" << jc << ",\"load\":" << load
+          << ",\"slack\":" << slack_val << ",\"load_pressure\":" << std::round(lp*1000.0)/1000.0
+          << ",\"exact_cost\":" << std::round(ec*10.0)/10.0
+          << ",\"relaxed_lb\":" << std::round(rlb*10.0)/10.0
+          << ",\"gap\":" << std::round(gap*10.0)/10.0
+          << ",\"cost_density\":" << std::round(cd*1000.0)/1000.0
+          << ",\"small_jobs\":" << sm << ",\"medium_jobs\":" << md << ",\"large_jobs\":" << lg
+          << ",\"core_source_hits\":null,\"core_target_hits\":null,\"rate\":" << rate_val
+          << ",\"starved\":null}";
+        if (h < m - 1) f << ",";
+        f << "\n";
+    }
+    f << "  ],\n\n";
+
+    f << "  \"recent\": {\n";
+    f << "    \"last_accepted_moves\": [],\n";
+    f << "    \"note_last_accepted_moves\": \"not tracked in Y1 trace probe\",\n";
+    f << "    \"failed_move_families\": [],\n";
+    f << "    \"note_failed_move_families\": \"not tracked in Y1 trace probe\",\n";
+    f << "    \"core_shortlist_composition\": {\n";
+    f << "      \"distinct_sources_note\": \"not tracked per-round in trace probe\"\n";
+    f << "    },\n";
+    f << "    \"outside_pool_composition\": {\n";
+    f << "      \"total_candidates\": " << stats.outside_pool_distinct_src << ",\n";
+    f << "      \"distinct_sources\": " << stats.outside_pool_distinct_src << ",\n";
+    f << "      \"distinct_targets\": " << stats.outside_pool_distinct_tgt << ",\n";
+    f << "      \"source_coverage\": " << (m > 0 ? static_cast<double>(stats.outside_pool_distinct_src) / static_cast<double>(m) : 0.0) << "\n";
+    f << "    },\n";
+    f << "    \"next_round_budget\": {\n";
+    f << "      \"core_budget\": 14\n";
+    f << "    }\n";
+    f << "  },\n\n";
+
+    std::vector<std::pair<double,int>> by_cost;
+    for (int h = 0; h < m; ++h)
+        by_cost.emplace_back(machine_exact_cost[static_cast<std::size_t>(h)], h);
+    std::sort(by_cost.begin(), by_cost.end(), std::greater<>());
+
+    f << "  \"candidate_pools\": {\n";
+    f << "    \"top_sources_by_cost\": [\n";
+    for (int i = 0; i < std::min(5, m); ++i) {
+        int h = by_cost[static_cast<std::size_t>(i)].second;
+        f << "      {\"id\":\"M" << h << "\",\"exact_cost\":" << std::round(machine_exact_cost[static_cast<std::size_t>(h)]*10.0)/10.0
+          << ",\"gap\":" << std::round(source_gap[static_cast<std::size_t>(h)]*10.0)/10.0
+          << ",\"cost_density\":" << std::round(source_density[static_cast<std::size_t>(h)]*1000.0)/1000.0
+          << ",\"jobs\":" << job_counts[static_cast<std::size_t>(h)] << "}";
+        if (i < std::min(5,m)-1) f << ",";
+        f << "\n";
+    }
+    f << "    ],\n";
+
+    std::vector<std::pair<double,int>> by_gap;
+    for (int h = 0; h < m; ++h)
+        by_gap.emplace_back(source_gap[static_cast<std::size_t>(h)], h);
+    std::sort(by_gap.begin(), by_gap.end(), std::greater<>());
+
+    f << "    \"top_sources_by_gap\": [\n";
+    for (int i = 0; i < std::min(5, m); ++i) {
+        int h = by_gap[static_cast<std::size_t>(i)].second;
+        f << "      {\"id\":\"M" << h << "\",\"gap\":" << std::round(source_gap[static_cast<std::size_t>(h)]*10.0)/10.0
+          << ",\"exact_cost\":" << std::round(machine_exact_cost[static_cast<std::size_t>(h)]*10.0)/10.0 << "}";
+        if (i < std::min(5,m)-1) f << ",";
+        f << "\n";
+    }
+    f << "    ],\n";
+
+    std::vector<std::pair<int,int>> by_slack;
+    for (int h = 0; h < m; ++h)
+        by_slack.emplace_back(epsilon - machine_loads[static_cast<std::size_t>(h)], h);
+    std::sort(by_slack.begin(), by_slack.end(), std::greater<>());
+
+    f << "    \"top_targets_by_slack\": [\n";
+    for (int i = 0; i < std::min(5, m); ++i) {
+        int h = by_slack[static_cast<std::size_t>(i)].second;
+        int slk = epsilon - machine_loads[static_cast<std::size_t>(h)];
+        double lp2 = (epsilon > 0) ? static_cast<double>(machine_loads[static_cast<std::size_t>(h)]) / static_cast<double>(epsilon) : 0.0;
+        f << "      {\"id\":\"M" << h << "\",\"slack\":" << slk
+          << ",\"load_pressure\":" << std::round(lp2*1000.0)/1000.0
+          << ",\"jobs\":" << job_counts[static_cast<std::size_t>(h)] << "}";
+        if (i < std::min(5,m)-1) f << ",";
+        f << "\n";
+    }
+    f << "    ],\n";
+
+    f << "    \"underexplored_sources\": [],\n";
+    f << "    \"note_underexplored\": \"core source/target hit counts not tracked in Y1 trace probe\",\n";
+
+    int q1_sm = 0, q1_md = 0, q1_lg = 0, q1_n = 0;
+    int q2_sm = 0, q2_md = 0, q2_lg = 0, q2_n = 0;
+    int q3_sm = 0, q3_md = 0, q3_lg = 0, q3_n = 0;
+    int q4_sm = 0, q4_md = 0, q4_lg = 0, q4_n = 0;
+    for (int h = 0; h < m; ++h) {
+        int q = cost_quartile[static_cast<std::size_t>(h)];
+        int* s = (q==1)?&q1_sm:(q==2)?&q2_sm:(q==3)?&q3_sm:&q4_sm;
+        int* md = (q==1)?&q1_md:(q==2)?&q2_md:(q==3)?&q3_md:&q4_md;
+        int* l = (q==1)?&q1_lg:(q==2)?&q2_lg:(q==3)?&q3_lg:&q4_lg;
+        int* n = (q==1)?&q1_n:(q==2)?&q2_n:(q==3)?&q3_n:&q4_n;
+        *s += small_jobs[static_cast<std::size_t>(h)];
+        *md += medium_jobs[static_cast<std::size_t>(h)];
+        *l += large_jobs[static_cast<std::size_t>(h)];
+        *n += job_counts[static_cast<std::size_t>(h)];
+    }
+    auto pct = [](int part, int total) { return total > 0 ? static_cast<int>(std::round(static_cast<double>(part)*100.0/static_cast<double>(total))) : 0; };
+    f << "    \"job_size_by_cost_quartile\": {\n";
+    f << "      \"q4_highest\": {\"small_pct\":" << pct(q4_sm, q4_n) << ",\"medium_pct\":" << pct(q4_md, q4_n) << ",\"large_pct\":" << pct(q4_lg, q4_n) << "},\n";
+    f << "      \"q3\": {\"small_pct\":" << pct(q3_sm, q3_n) << ",\"medium_pct\":" << pct(q3_md, q3_n) << ",\"large_pct\":" << pct(q3_lg, q3_n) << "},\n";
+    f << "      \"q2\": {\"small_pct\":" << pct(q2_sm, q2_n) << ",\"medium_pct\":" << pct(q2_md, q2_n) << ",\"large_pct\":" << pct(q2_lg, q2_n) << "},\n";
+    f << "      \"q1_lowest\": {\"small_pct\":" << pct(q1_sm, q1_n) << ",\"medium_pct\":" << pct(q1_md, q1_n) << ",\"large_pct\":" << pct(q1_lg, q1_n) << "}\n";
+    f << "    }\n";
+    f << "  },\n\n";
+
+    f << "  \"prior_arms\": {\n";
+    if (instance_id == 61) {
+        f << "    \"trimmed\": 6884,\n";
+        f << "    \"llm_exception\": 6869,\n";
+        f << "    \"random_best\": 6852,\n";
+        f << "    \"score_escape\": 6884,\n";
+        f << "    \"phaseX_random_best\": 6884,\n";
+        f << "    \"phaseX_llm_best\": 6884\n";
+    } else if (instance_id == 62) {
+        f << "    \"trimmed\": 9687,\n";
+        f << "    \"llm_exception\": 9455,\n";
+        f << "    \"random_best\": 9583,\n";
+        f << "    \"score_escape\": 9484,\n";
+        f << "    \"phaseX_random_best\": 9495,\n";
+        f << "    \"phaseX_llm_best\": 9495\n";
+    } else if (instance_id == 65) {
+        f << "    \"trimmed\": 27031,\n";
+        f << "    \"llm_exception\": 26926,\n";
+        f << "    \"random_best\": 26262,\n";
+        f << "    \"score_escape\": 26470,\n";
+        f << "    \"phaseX_random_best\": 26263,\n";
+        f << "    \"phaseX_llm_best\": 26478\n";
+    } else {
+        f << "    \"note\": \"no prior results for this cell\"\n";
+    }
+    f << "  }\n";
+    f << "}\n";
+    f.close();
+
+    std::string md_fname = out_dir + "/trace_" + cell_label + "_r" + std::to_string(round) + ".md";
+    std::ofstream fm(md_fname);
+    if (fm.is_open()) {
+        fm << "# Phase Y Trace — " << cell_label << ", Round " << round << "\n\n";
+        fm << "| Field | Value |\n";
+        fm << "|-------|-------|\n";
+        fm << "| trace_id | " << cell_label << "_r" << round << " |\n";
+        fm << "| cell_label | " << cell_label << " |\n";
+        fm << "| round | " << round << " |\n";
+        fm << "| epsilon | " << epsilon << " |\n";
+        fm << "| num_machines | " << m << " |\n";
+        fm << "| total_jobs | " << total_jobs << " |\n";
+        fm << "| epsilon_regime | " << regime_str << " |\n";
+        fm << "| current_tec | " << std::round(current_tec*10.0)/10.0 << " |\n";
+        fm << "| no_hit_streak | " << no_hit_streak << " |\n";
+        fm << "| total_accepted_moves_so_far | " << stats.accepted_insert_inter << " |\n";
+        fm << "| core_lane_stagnation_active | true |\n";
+        fm << "| exception_lane_active | false |\n\n";
+
+        fm << "## Machine State Table\n\n";
+        fm << "| M | J | L | S | LP | EC | RLB | Gap | CD | s | m | l | CS | CT | Rate | SL |\n";
+        fm << "|:--|--:|--:|--:|----:|----:|----:|----:|-----:|--:|--:|--:|--:|--:|----:|--:|\n";
+        for (int h = 0; h < m; ++h) {
+            int load = machine_loads[static_cast<std::size_t>(h)];
+            int slack_val = epsilon - load;
+            double lp = (epsilon > 0) ? static_cast<double>(load) / static_cast<double>(epsilon) : 0.0;
+            double ec = machine_exact_cost[static_cast<std::size_t>(h)];
+            double rlb = machine_lb_cur[static_cast<std::size_t>(h)];
+            double gap = source_gap[static_cast<std::size_t>(h)];
+            double cd = (load > 0) ? ec / static_cast<double>(load) : 0.0;
+            int rate_val = static_cast<int>(rates[static_cast<std::size_t>(h)]);
+            fm << "| M" << h << " | " << job_counts[static_cast<std::size_t>(h)]
+               << " | " << load << " | " << slack_val
+               << " | " << std::fixed << std::setprecision(2) << lp
+               << " | " << std::fixed << std::setprecision(1) << ec
+               << " | " << std::fixed << std::setprecision(1) << rlb
+               << " | " << std::fixed << std::setprecision(1) << gap
+               << " | " << std::fixed << std::setprecision(3) << cd
+               << " | " << small_jobs[static_cast<std::size_t>(h)]
+               << " | " << medium_jobs[static_cast<std::size_t>(h)]
+               << " | " << large_jobs[static_cast<std::size_t>(h)]
+               << " | ? | ? | " << rate_val << " | ? |\n";
+        }
+        fm << "\n## Candidate Pool Summary\n\n";
+        fm << "### Top Sources by Cost\n";
+        fm << "| M | EC | Gap | CD | Jobs |\n";
+        fm << "|:--|----:|----:|-----:|-----:|\n";
+        for (int i = 0; i < std::min(5, m); ++i) {
+            int h = by_cost[static_cast<std::size_t>(i)].second;
+            fm << "| M" << h << " | " << std::fixed << std::setprecision(1) << machine_exact_cost[static_cast<std::size_t>(h)]
+               << " | " << std::fixed << std::setprecision(1) << source_gap[static_cast<std::size_t>(h)]
+               << " | " << std::fixed << std::setprecision(3) << source_density[static_cast<std::size_t>(h)]
+               << " | " << job_counts[static_cast<std::size_t>(h)] << " |\n";
+        }
+        fm << "\n### Top Targets by Slack\n";
+        fm << "| M | Slack | LP | Jobs |\n";
+        fm << "|:--|:-----:|----:|-----:|\n";
+        for (int i = 0; i < std::min(5, m); ++i) {
+            int h = by_slack[static_cast<std::size_t>(i)].second;
+            int slk = epsilon - machine_loads[static_cast<std::size_t>(h)];
+            double lp2 = (epsilon > 0) ? static_cast<double>(machine_loads[static_cast<std::size_t>(h)]) / static_cast<double>(epsilon) : 0.0;
+            fm << "| M" << h << " | " << slk << " | " << std::fixed << std::setprecision(2) << lp2
+               << " | " << job_counts[static_cast<std::size_t>(h)] << " |\n";
+        }
+        fm << "\n**Note**: Trace generated by phaseY_trace_probe at first DiverseTrimmed stagnation.\n";
+        fm.close();
+    }
+
+    std::cout << "[phaseY_trace_probe] Trace written to " << fname << "\n";
+}
+
 void run_insert_inter_screened_redesign(
     std::vector<std::vector<int>> &machine_jobs,
     std::vector<int> &machine_loads,
@@ -1859,7 +2178,7 @@ void run_insert_inter_screened_redesign(
          mode == InsertScreenMode::ExceptionLaneRefined3 ||
          mode == InsertScreenMode::ScoreEscapeSampler ||
          mode == InsertScreenMode::PhaseXPolicyJson);
-    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler || mode == InsertScreenMode::PhaseXPolicyJson);
+    const bool is_trimmed_mode = (mode == InsertScreenMode::DiverseTrimmed || mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler || mode == InsertScreenMode::PhaseXPolicyJson || mode == InsertScreenMode::PhaseYTraceProbe);
     const bool is_exception_mode = (mode == InsertScreenMode::ExceptionLaneLLM || mode == InsertScreenMode::ExceptionLaneRandom || mode == InsertScreenMode::ExceptionLaneRefined1 || mode == InsertScreenMode::ExceptionLaneRefined2 || mode == InsertScreenMode::ExceptionLaneRefined3 || mode == InsertScreenMode::ScoreEscapeSampler || mode == InsertScreenMode::PhaseXPolicyJson);
     const bool is_exception_random = (mode == InsertScreenMode::ExceptionLaneRandom);
     const bool is_refined1 = (mode == InsertScreenMode::ExceptionLaneRefined1);
@@ -1867,6 +2186,7 @@ void run_insert_inter_screened_redesign(
     const bool is_refined3 = (mode == InsertScreenMode::ExceptionLaneRefined3);
     const bool is_score_escape_sampler = (mode == InsertScreenMode::ScoreEscapeSampler);
     const bool is_phaseX_policy_json = (mode == InsertScreenMode::PhaseXPolicyJson);
+    const bool is_phaseY_trace_probe = (mode == InsertScreenMode::PhaseYTraceProbe);
     const bool is_budgeted_mode = (mode == InsertScreenMode::DiverseBudgeted);
     const bool is_dense_mode = (mode == InsertScreenMode::DenseLabeling);
 
@@ -1919,6 +2239,15 @@ void run_insert_inter_screened_redesign(
             return 280;
         return 32;
     }();
+
+    static int phaseY_consecutive_no_hit = 0;
+    static int phaseY_instance_guard = -1;
+    if (is_phaseY_trace_probe) {
+        if (phaseY_instance_guard != g_audit_instance_id) {
+            phaseY_consecutive_no_hit = 0;
+            phaseY_instance_guard = g_audit_instance_id;
+        }
+    }
 
     for (int round = 0; round < max_rounds; ++round)
     {
@@ -3022,12 +3351,54 @@ void run_insert_inter_screened_redesign(
 
         if (!improved)
         {
+            if (is_phaseY_trace_probe)
+            {
+                ++phaseY_consecutive_no_hit;
+                if (phaseY_consecutive_no_hit >= 2)
+                {
+                    stats.stop_reason = "phaseY_trace_written";
+                    write_phaseY_trace_json(machine_jobs, machine_loads, machine_exact_cost,
+                        machine_lb_cur, source_gap, source_lb, source_density,
+                        rates, prices, epsilon, m, round, g_audit_instance_id,
+                        current_tec, stats, phaseY_consecutive_no_hit,
+                        had_shortlist_improvement, cache);
+                    return;
+                }
+                continue;
+            }
             stats.stop_reason = "no_improving_move";
             return;
+        }
+        else
+        {
+            if (is_phaseY_trace_probe)
+                phaseY_consecutive_no_hit = 0;
         }
     }
 
     stats.stop_reason = "max_rounds";
+
+    if (is_phaseY_trace_probe)
+    {
+        std::vector<double> lb_cur(static_cast<std::size_t>(m), 0.0);
+        std::vector<double> gap_cur(static_cast<std::size_t>(m), 0.0);
+        std::vector<double> src_lb(static_cast<std::size_t>(m), 0.0);
+        std::vector<double> src_dens(static_cast<std::size_t>(m), 0.0);
+        double total_ec = 0.0;
+        for (int h = 0; h < m; ++h) {
+            lb_cur[static_cast<std::size_t>(h)] = fallback_slot_lb(machine_jobs[static_cast<std::size_t>(h)], prices, epsilon, rates[static_cast<std::size_t>(h)]);
+            gap_cur[static_cast<std::size_t>(h)] = std::max(0.0, machine_exact_cost[static_cast<std::size_t>(h)] - lb_cur[static_cast<std::size_t>(h)]);
+            src_lb[static_cast<std::size_t>(h)] = lb_cur[static_cast<std::size_t>(h)];
+            int load_h = machine_loads[static_cast<std::size_t>(h)];
+            src_dens[static_cast<std::size_t>(h)] = (load_h > 0) ? machine_exact_cost[static_cast<std::size_t>(h)] / static_cast<double>(load_h) : 0.0;
+            total_ec += machine_exact_cost[static_cast<std::size_t>(h)];
+        }
+        write_phaseY_trace_json(machine_jobs, machine_loads, machine_exact_cost,
+            lb_cur, gap_cur, src_lb, src_dens,
+            rates, prices, epsilon, m, max_rounds - 1, g_audit_instance_id,
+            total_ec, stats, phaseY_consecutive_no_hit,
+            false, cache);
+    }
 }
 
 VariantResult evaluate_history_repair_step(
@@ -3448,6 +3819,8 @@ VariantResult evaluate_variant(
         variant == "greedy_dp_local_search_relocate_multistart" ||
         variant == "greedy_dp_local_search_screened_swap" ||
         variant == "greedy_dp_local_search_priority_machines" ||
+        variant == "w4_c1_relocate_only" ||
+        variant == "w4_c1_op6_combined" ||
         variant == "vnd_exact_dp" ||
         variant == "vnd_exact_dp_insert_rank_v1" ||
         variant == "vnd_exact_dp_insert_rank_diverse" ||
@@ -3461,10 +3834,11 @@ VariantResult evaluate_variant(
          variant == "phaseS_refined3_coverage" ||
          variant == "phaseV_score_escape_sampler" ||
          variant == "phaseX_policy_json" ||
+         variant == "phaseY_trace_probe" ||
          variant == "phaseI_noscreen_diagnostic")
     {
         LocalSearchConfig cfg;
-        if (variant == "greedy_dp_local_search_relocate_only")
+        if (variant == "greedy_dp_local_search_relocate_only" || variant == "w4_c1_relocate_only")
         {
             cfg.enable_relocate = true;
             cfg.enable_swap = false;
@@ -3557,6 +3931,7 @@ VariantResult evaluate_variant(
                  variant == "phaseS_refined3_coverage" ||
                  variant == "phaseV_score_escape_sampler" ||
                  variant == "phaseX_policy_json" ||
+                 variant == "phaseY_trace_probe" ||
                  variant == "phaseI_noscreen_diagnostic")
         {
              VndStats insert_stats;
@@ -3582,6 +3957,7 @@ VariantResult evaluate_variant(
                 (variant == "phaseS_refined3_coverage") ? InsertScreenMode::ExceptionLaneRefined3 :
                 (variant == "phaseV_score_escape_sampler") ? InsertScreenMode::ScoreEscapeSampler :
                 (variant == "phaseX_policy_json") ? InsertScreenMode::PhaseXPolicyJson :
+                (variant == "phaseY_trace_probe") ? InsertScreenMode::PhaseYTraceProbe :
                 InsertScreenMode::DenseLabeling,
                 ls_cache,
                 insert_stats,
@@ -3668,6 +4044,111 @@ VariantResult evaluate_variant(
             if (out.accepted_moves <= 0)
                 out.dominant_improvement_move = "none";
         }
+        else if (variant == "w4_c1_op6_combined")
+        {
+            // W4 Operator 6: Combined two-step repair (200 DP budget)
+            // Step 0: initial DP evaluation of c1 assignment
+            for (int h = 0; h < m; ++h) {
+                const auto &jobs_h = jobs_by_machine[static_cast<std::size_t>(h)];
+                const double c = exact_machine_cost_cached(
+                    jobs_h, prices, epsilon, rates[static_cast<std::size_t>(h)],
+                    per_machine_dp_limit_sec, ls_cache);
+                if (!(c < kInf * 0.5)) {
+                    out.feasible = false;
+                    return out;
+                }
+                out.machine_exact_cost[static_cast<std::size_t>(h)] = c;
+                out.tec_total += c;
+            }
+            dp_calls_before_local = ls_cache.misses;
+
+            // Step 1: relieve worst overload (most loaded → underloaded)
+            // Step 2: activate worst underuse (overloaded → least loaded)
+            long long total_p = 0;
+            for (int h = 0; h < m; ++h) total_p += loads[h];
+            double L_avg = (double)total_p / m;
+            int budget = 200;
+            bool improved_step1 = false;
+
+            // Step 1: move job from most-overloaded to underloaded
+            int src = 0;
+            for (int h = 1; h < m; ++h)
+                if (loads[h] > loads[src]) src = h;
+            for (int job_idx = (int)jobs_by_machine[src].size() - 1; job_idx >= 0 && budget > 0; --job_idx) {
+                int p = jobs_by_machine[src][job_idx];
+                for (int dst = 0; dst < m && budget > 0; ++dst) {
+                    if (dst == src) continue;
+                    if (loads[dst] + p > epsilon) continue;
+                    if (loads[dst] >= L_avg) continue;
+                    // Try move
+                    std::vector<std::vector<int>> new_jbm = jobs_by_machine;
+                    std::vector<int> new_loads = loads;
+                    new_jbm[src].erase(new_jbm[src].begin() + job_idx);
+                    new_jbm[dst].push_back(p);
+                    new_loads[src] -= p;
+                    new_loads[dst] += p;
+                    double new_tec = 0.0;
+                    for (int h = 0; h < m; ++h) {
+                        double c = exact_machine_cost_cached(
+                            new_jbm[h], prices, epsilon, rates[h],
+                            per_machine_dp_limit_sec, ls_cache);
+                        if (c >= kInf * 0.5) { new_tec = kInf; break; }
+                        new_tec += c;
+                    }
+                    budget--;
+                    if (new_tec < out.tec_total) {
+                        out.tec_total = new_tec;
+                        jobs_by_machine = new_jbm;
+                        loads = new_loads;
+                        improved_step1 = true;
+                        out.accepted_relocate_moves++;
+                        out.accepted_moves++;
+                        goto step2;
+                    }
+                }
+            }
+            step2:
+            // Step 2: fill most-underloaded machine from overloaded
+            {
+                int dst = 0;
+                for (int h = 1; h < m; ++h)
+                    if (loads[h] < loads[dst] || (loads[h] == loads[dst] && h < dst)) dst = h;
+                for (int src2 = 0; src2 < m && budget > 0; ++src2) {
+                    if (src2 == dst) continue;
+                    if (loads[src2] <= L_avg) continue;
+                    for (int job_idx = (int)jobs_by_machine[src2].size() - 1; job_idx >= 0 && budget > 0; --job_idx) {
+                        int p = jobs_by_machine[src2][job_idx];
+                        if (loads[dst] + p > epsilon) continue;
+                        std::vector<std::vector<int>> new_jbm = jobs_by_machine;
+                        std::vector<int> new_loads = loads;
+                        new_jbm[src2].erase(new_jbm[src2].begin() + job_idx);
+                        new_jbm[dst].push_back(p);
+                        new_loads[src2] -= p;
+                        new_loads[dst] += p;
+                        double new_tec = 0.0;
+                        for (int h = 0; h < m; ++h) {
+                            double c = exact_machine_cost_cached(
+                                new_jbm[h], prices, epsilon, rates[h],
+                                per_machine_dp_limit_sec, ls_cache);
+                            if (c >= kInf * 0.5) { new_tec = kInf; break; }
+                            new_tec += c;
+                        }
+                        budget--;
+                        if (new_tec < out.tec_total) {
+                            out.tec_total = new_tec;
+                            jobs_by_machine = new_jbm;
+                            loads = new_loads;
+                            out.accepted_relocate_moves++;
+                            out.accepted_moves++;
+                            break;
+                        }
+                    }
+                }
+            }
+            out.evaluated_relocate_moves = 200 - budget;
+            out.stop_reason = "budget_exhausted";
+            out.dominant_improvement_move = (out.accepted_moves > 0) ? "relocate" : "none";
+        }
         else
         {
             LocalSearchStats ls_stats;
@@ -3740,6 +4221,7 @@ VariantResult evaluate_variant(
                  variant == "phaseS_refined3_coverage" ||
                  variant == "phaseV_score_escape_sampler" ||
                  variant == "phaseX_policy_json" ||
+                 variant == "phaseY_trace_probe" ||
                  variant == "phaseI_noscreen_diagnostic")
         {
             machine_cost = out.machine_exact_cost[static_cast<std::size_t>(h)];
@@ -3887,7 +4369,7 @@ int main(int argc, char **argv)
         std::cerr << "Usage:\n"
                   << "  parallel_heuristic_compare paper-instance <instance_id> <epsilon> <variant> [data_dir] [per_machine_dp_limit_sec] [ls_time_cap_sec] [ls_max_rounds] [ls_max_moves_per_round]\n"
                   << "  parallel_heuristic_compare paper-history-chain <instance_id> <epsilon_start> <epsilon_end> <variant> [data_dir] [per_machine_dp_limit_sec] [ls_time_cap_sec] [ls_max_rounds] [ls_max_moves_per_round]\n"
-                   << "Variants: greedy_esr | greedy_dp | dp_guided_assignment_dp | greedy_dp_local_search | greedy_dp_local_search_relocate_only | greedy_dp_local_search_relocate_multistart | greedy_dp_local_search_screened_swap | greedy_dp_local_search_priority_machines | vnd_exact_dp | vnd_exact_dp_insert_rank_v1 | vnd_exact_dp_insert_rank_diverse | vnd_exact_dp_insert_rank_diverse_trimmed | vnd_exact_dp_insert_rank_diverse_budgeted | vnd_exact_dp_insert_rank_dense_labeling | phaseS_llm_exception_lane | phaseS_random_exception_lane | phaseS_refined1_stratified | phaseS_refined2_anticore | phaseS_refined3_coverage | phaseV_score_escape_sampler | phaseX_policy_json | phaseI_noscreen_diagnostic | stageL1_dataset_logging | stageL15_dense_labeling | stageO_synthetic_dense_logging | history_repair_dp_ranked | history_repair_dp_ranked_relocate | history_repair_priority_displaced | history_repair_priority_displaced_relocate | all\n";
+                   << "Variants: greedy_esr | greedy_dp | dp_guided_assignment_dp | greedy_dp_local_search | greedy_dp_local_search_relocate_only | greedy_dp_local_search_relocate_multistart | greedy_dp_local_search_screened_swap | greedy_dp_local_search_priority_machines | vnd_exact_dp | vnd_exact_dp_insert_rank_v1 | vnd_exact_dp_insert_rank_diverse | vnd_exact_dp_insert_rank_diverse_trimmed | vnd_exact_dp_insert_rank_diverse_budgeted | vnd_exact_dp_insert_rank_dense_labeling | phaseS_llm_exception_lane | phaseS_random_exception_lane | phaseS_refined1_stratified | phaseS_refined2_anticore | phaseS_refined3_coverage | phaseV_score_escape_sampler | phaseX_policy_json | phaseY_trace_probe | phaseI_noscreen_diagnostic | stageL1_dataset_logging | stageL15_dense_labeling | stageO_synthetic_dense_logging | history_repair_dp_ranked | history_repair_dp_ranked_relocate | history_repair_priority_displaced | history_repair_priority_displaced_relocate | all\n";
         return 1;
     }
 
@@ -4414,10 +4896,12 @@ int main(int argc, char **argv)
             name == "phaseS_refined2_anticore" ||
             name == "phaseS_refined3_coverage" ||
             name == "phaseV_score_escape_sampler" ||
-            name == "phaseX_policy_json")
+            name == "phaseX_policy_json" ||
+            name == "phaseY_trace_probe")
         {
             const auto t0 = std::chrono::steady_clock::now();
-            const int starts = 4;
+            const bool is_trace_probe = (name == "phaseY_trace_probe");
+            const int starts = is_trace_probe ? 1 : 4;
             const int rcl_size = 3;
             VariantResult best;
             best.variant = name;
@@ -4425,6 +4909,7 @@ int main(int argc, char **argv)
 
             for (int s = 0; s < starts; ++s)
             {
+                g_audit_instance_id = instance_id;
                 std::mt19937_64 rng(static_cast<std::uint64_t>(instance_id) * 2000003ULL +
                                     static_cast<std::uint64_t>(epsilon) * 11003ULL +
                                     static_cast<std::uint64_t>(s + 17));
@@ -4616,6 +5101,44 @@ int main(int argc, char **argv)
         Assignment assignment;
         if (name == "dp_guided_assignment_dp")
             assignment = build_dp_guided_assignment(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "lpt_dp")
+            assignment = build_pure_lpt_assignment(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "energy_rate_greedy_dp")
+            assignment = build_energy_rate_greedy_assignment(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "hybrid_load_energy_dp")
+            assignment = build_hybrid_load_energy_assignment(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w1_rate_class_water_filling_dp")
+            assignment = build_w1_rate_class_water_filling(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w15_hybrid_pw_tiebreak")
+            assignment = build_hybrid_pw_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w15_waterfill_pw_correction")
+            assignment = build_waterfill_pw_correction(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g1_c0_combined")
+            assignment = build_w2_g1_c0_combined_waterfill_hybrid_pw(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g1_c1_profile_gated")
+            assignment = build_w2_g1_c1_profile_gated_selector(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g1_c2_multiround_wf_correction")
+            assignment = build_w2_g1_c2_multiround_waterfill_correction(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g1_c3_slacksafe_hybrid_pwm")
+            assignment = build_w2_g1_c3_slacksafe_hybrid_pwm(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g1_c4_pwm_adaptive_insert")
+            assignment = build_w2_g1_c4_pwm_adaptive_insertion(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g1_c5_multipass_portfolio")
+            assignment = build_w2_g1_c5_multipass_portfolio(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g2_c0_adaptive_tiebreak")
+            assignment = build_w2_g2_c0_adaptive_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g2_c1_topk_tiebreak")
+            assignment = build_w2_g2_c1_topk_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g2_c2_energy_gated_pwm")
+            assignment = build_w2_g2_c2_energy_gated_pwm(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g2_c3_staged_alpha_pwm")
+            assignment = build_w2_g2_c3_staged_alpha_pwm(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g2_c4_late_pwm_only")
+            assignment = build_w2_g2_c4_late_pwm_only(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w2_g2_c5_twopass_refine")
+            assignment = build_w2_g2_c5_twopass_refine(inst.jobs, inst.rates, clipped_prices, epsilon);
+        else if (name == "w4_c1_relocate_only" || name == "w4_c1_op6_combined")
+            assignment = build_w2_g2_c1_topk_tiebreak(inst.jobs, inst.rates, clipped_prices, epsilon);
         else
             assignment = build_lpt_greedy_assignment(inst.jobs, inst.rates, clipped_prices, epsilon);
 
@@ -4631,6 +5154,11 @@ int main(int argc, char **argv)
         std::string optimizer = name;
         if (name == "dp_guided_assignment_dp")
             optimizer = "greedy_dp";
+        // All LLM assignment policies use fast ESR (DP over fixed sequence)
+        if (name.find("lpt_dp") == 0 || name.find("energy_rate_greedy_dp") == 0 ||
+            name.find("hybrid_load_energy_dp") == 0 || name.find("w1_") == 0 ||
+            name.find("w15_") == 0 || name.find("w2_") == 0 || name.find("w4_") == 0)
+            optimizer = "greedy_esr";
         r = evaluate_variant(
             assignment,
             inst.rates,
@@ -4669,6 +5197,7 @@ int main(int argc, char **argv)
         run_variant("phaseS_refined3_coverage");
         run_variant("phaseV_score_escape_sampler");
         run_variant("phaseX_policy_json");
+        run_variant("phaseY_trace_probe");
         run_variant("stageL1_dataset_logging");
         run_variant("stageL15_dense_labeling");
         run_variant("stageO_synthetic_dense_logging");
@@ -4696,6 +5225,7 @@ int main(int argc, char **argv)
         variant != "phaseS_refined3_coverage" &&
         variant != "phaseV_score_escape_sampler" &&
         variant != "phaseX_policy_json" &&
+        variant != "phaseY_trace_probe" &&
         variant != "phaseI_noscreen_diagnostic" &&
         variant != "stageL1_dataset_logging" &&
         variant != "stageL15_dense_labeling" &&
@@ -4703,7 +5233,28 @@ int main(int argc, char **argv)
         variant != "history_repair_dp_ranked" &&
         variant != "history_repair_dp_ranked_relocate" &&
         variant != "history_repair_priority_displaced" &&
-        variant != "history_repair_priority_displaced_relocate")
+        variant != "history_repair_priority_displaced_relocate" &&
+        // Phase W assignment policies
+        variant != "lpt_dp" &&
+        variant != "energy_rate_greedy_dp" &&
+        variant != "hybrid_load_energy_dp" &&
+        variant != "w1_rate_class_water_filling_dp" &&
+        variant != "w15_hybrid_pw_tiebreak" &&
+        variant != "w15_waterfill_pw_correction" &&
+        variant != "w2_g1_c0_combined" &&
+        variant != "w2_g1_c1_profile_gated" &&
+        variant != "w2_g1_c2_multiround_wf_correction" &&
+        variant != "w2_g1_c3_slacksafe_hybrid_pwm" &&
+        variant != "w2_g1_c4_pwm_adaptive_insert" &&
+        variant != "w2_g1_c5_multipass_portfolio" &&
+        variant != "w2_g2_c0_adaptive_tiebreak" &&
+        variant != "w2_g2_c1_topk_tiebreak" &&
+        variant != "w2_g2_c2_energy_gated_pwm" &&
+        variant != "w2_g2_c3_staged_alpha_pwm" &&
+        variant != "w2_g2_c4_late_pwm_only" &&
+        variant != "w2_g2_c5_twopass_refine" &&
+        variant != "w4_c1_relocate_only" &&
+        variant != "w4_c1_op6_combined")
     {
         std::cerr << "Unsupported variant: " << variant << "\n";
         return 1;

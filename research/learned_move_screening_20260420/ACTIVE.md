@@ -2,7 +2,7 @@
 
 Current active iteration:
 
-- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/` — **PHASE Y ACTIVE** (initialized, not yet implemented).
+- `iterations/20260510_phaseY_online_llm_neighborhood_proposal/` — **PHASE Y ACTIVE** (Y1 complete).
 
 Previous iterations (archived):
 
@@ -14,15 +14,11 @@ Current state:
 
 - Phase S: exception-lane architecture + exact-DP verification validated.
 - Phase V: runtime-LLM operators stopped — LLM C++ code too fragile.
-- Phase X: interactive LLM policy DSL repair stopped — LLM at 20th percentile
-  vs random best-of-5 under equal budget. DSL too flat.
-- Phase Y: newly initialized. LLM sees **concrete schedule state** and proposes
-  **bounded neighborhoods** (specific source/target/move lists), not code or
-  policy parameters. Exact DP verifies. Random neighborhoods as baseline.
+- Phase X: interactive LLM policy DSL repair stopped — LLM at 20th percentile.
+- Phase Y: Y1 trace instrumentation complete. C++ `phaseY_trace_probe` variant
+  writes JSON + Markdown state traces at DiverseTrimmed stagnation. Smoke passed
+  on 3 dev cells (~3300 tokens each, all machines present).
 
-Phase Y hypothesis:
-LLM's diagnostic strength (validated across S, U, V, X) is best tested when
-the LLM makes instance-specific decisions from concrete state, rather than
-designing reusable artifacts from aggregate statistics.
+Next: Phase Y2 (random neighborhood baseline) or Y3 (first DeepSeek call).
 
-Next: Phase Y0 — trace format design.
+Do NOT call DeepSeek until instructed.

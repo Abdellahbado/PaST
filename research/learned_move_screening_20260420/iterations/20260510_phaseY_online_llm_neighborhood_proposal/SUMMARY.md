@@ -2,8 +2,9 @@
 
 ## Status
 
-**Y0 COMPLETED (2026-05-10).** Trace and proposal schema designed. No
-DeepSeek calls, no C++ implementation, no experiments.
+**Y1 COMPLETED (2026-05-10).** C++ trace instrumentation done, trace-generation
+smoke passed on 3 dev cells. No DeepSeek calls, no proposal execution, no LLM
+vs random comparisons.
 
 ## Hypothesis
 
@@ -27,12 +28,25 @@ aggregate traces (Phase V).
   (17 questions across trace sufficiency, proposal executability,
   fairness, overfitting risk, implementation feasibility)
 
+## Y1 Deliverables
+
+- C++: `phaseY_trace_probe` variant (`InsertScreenMode::PhaseYTraceProbe`)
+  - 1-start DiverseTrimmed core lane with trace generation
+  - `write_phaseY_trace_json` helper: JSON + Markdown output
+  - Trace written at end of local search (max_rounds or stagnation)
+- `scripts/phaseY_neighborhood_proposal.py` with `--y1-trace-probe`
+- Smoke on 3 dev cells: all produce valid traces (~3300 tokens each)
+- Trace fields: regime, snapshot, machine state (17 columns, all machines),
+  candidate pools (top sources/targets, job size quartiles), prior arms
+- Null fields documented: core_source_hits, core_target_hits,
+  last_accepted_moves, failed_move_families, underexplored sources/targets
+
 ## Pipeline
 
 | Step | Status |
 |------|--------|
 | Y0 — Trace format + state conditioning | COMPLETED |
-| Y1 — C++ variant for neighborhood evaluation | Not started |
+| Y1 — C++ variant for trace generation | COMPLETED |
 | Y2 — Random neighborhood baseline | Not started |
 | Y3 — First DeepSeek call on dev cells | Not started |
 | Y4 — Held-out validation (if Y3 positive) | Not started |

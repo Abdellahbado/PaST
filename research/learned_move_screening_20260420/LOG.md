@@ -1317,6 +1317,52 @@ Complete X2: create Python orchestration script and run full smoke on 3 dev cell
 X2 complete. Phase X generic policy runner is functional. Ready for X3 (fast dev
 evaluation with more policies) and X4 (5-round interactive LLM loop).
 
+## 2026-05-10 — Phase Y1 trace instrumentation and smoke completed
+
+### Attempt
+
+Add bounded C++ instrumentation that snapshots the current schedule state at
+stagnation points, writes Phase Y state traces (JSON + Markdown), and smoke-
+tests on 3 dev cells.
+
+### Result
+
+- Added `phaseY_trace_probe` variant (`InsertScreenMode::PhaseYTraceProbe`):
+  1-start DiverseTrimmed core lane with trace generation at end of local search.
+- Added `write_phaseY_trace_json` (314 lines): JSON + Markdown trace output
+  with 6 sections (metadata, regime, snapshot, machines, pools, prior arms).
+- Added `scripts/phaseY_neighborhood_proposal.py` with `--y1-trace-probe`.
+- Smoke on 3 dev cells: all produce valid traces.
+
+| Cell | TEC | Runtime | Machines | Tokens |
+|------|-----|---------|----------|--------|
+| Cell_A (61/347) | 6946.0 | 8.2s | 25 | 3299 |
+| Cell_B (62/290) | 9435.0 | 35.6s | 25 | 3297 |
+| Cell_C (65/195) | 27031.0 | 5.0s | 25 | 3365 |
+
+Trace fields included: exact cost, relaxed LB, gap, cost_density, processing
+time histogram (s/m/l), machine rate, prior arm results, candidate pool
+summaries (top sources by cost/gap, top targets by slack, job size by cost
+quartile).
+
+Fields not yet tracked (null): core_source_hits, core_target_hits,
+last_accepted_moves, failed_move_families, underexplored sources/targets.
+Deferred to Y1.1 if needed.
+
+### Evidence
+
+- `solvers/cpp/parallel_heuristic_compare.cpp` — PhaseYTraceProbe + trace function
+- `scripts/phaseY_neighborhood_proposal.py` — Y1 trace probe orchestration
+- `traces/generated/trace_Cell_A_r4.json`, `trace_Cell_B_r4.json`, `trace_Cell_C_r4.json`
+- `eval/y1_trace_probe_raw.csv`
+- `notes/phaseY1_trace_probe_results.md`
+
+### Conclusion
+
+Phase Y1 complete. Trace generation works on all 3 dev cells. Ready for Y2
+(random neighborhood baseline) or Y3 (first DeepSeek call). Do NOT call
+DeepSeek until instructed.
+
 ## 2026-05-10 — Phase Y0 trace and proposal schema designed
 
 ### Attempt
