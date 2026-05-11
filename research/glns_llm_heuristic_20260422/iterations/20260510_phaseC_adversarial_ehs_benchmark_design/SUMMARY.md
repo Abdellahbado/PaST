@@ -1,32 +1,37 @@
 # Phase C Summary
 
-**Status**: C3 smoke complete. Gate INCONCLUSIVE (baseline arms broken by instance-size caps).
+**Status**: C3-Regular repaired complete. Gate FAIL.
 
-## Completed
-- C0-C1: Protocol + schema
-- C2: Random + human generators, LLM prompt, DeepSeek call (8/8 valid families)
-- C3-Scalability (Track B): LLM giant family correctly identified EHS non-interruptibility
-- C3-Regular (Track A): EHS time-limit fix, 18 instances, 30s/90s eval
+**Branch**: LLM-guided adversarial benchmark design for EHS.
 
-## C3-Regular Results
+## C3-Regular Repaired Results (18 instances, n≤150, T≤200, 30s/90s)
+
+### Generation Quality
+
+| Arm | Instances | Evaluable | Pairs | Rate |
+|-----|----------|-----------|-------|------|
+| llm | 6 | 6 | 12 | 100% |
+| random | 6 | 6 | 12 | 100% |
+| human | 6 | 6 | 12 | 100% |
+
+All arms had 100% generation quality after repaired generation with feasibility enforcement.
+
+### Adversarial Yield
 
 | Arm | Evaluable | High-Yield | Rate |
 |-----|----------|------------|------|
-| LLM | 6/6 | 5 | 83% |
-| Random | 1/6 | 1 | 100% |
-| Human | 0/6 | 0 | N/A |
+| human | 6 | 6 | **100%** |
+| llm | 6 | 5 | 83% |
+| random | 6 | 4 | 67% |
 
-**Gate: INCONCLUSIVE** — only 1/12 non-LLM instances evaluable. Cannot compare arms.
+### Gate: FAIL
+Human sweep families beat LLM on adversarial yield (100% > 83%).
 
-## LLM Strengths
-- 6/6 instances evaluable vs 1/12 for baselines (robustness across caps)
-- `asgh_trajectory_conflict`: 3/3 high-yield, clear front growth from short→long budget
-- `es_local_optima_trap_extreme_rates`: 2/3 high-yield, mechanism-targeted
+Human advantage is structural: uniform p_j=(1,10) allows many khat iterations within budget, producing large front-size growth (Δfs +7 to +33). This is a property of the sweep design, not an adversarial insight about EHS weaknesses.
 
-## Infrastructure Fix
-- EHS `run_ehs()` now respects time_limit during SGH construction (cooperative deadline checks)
+LLM families correctly targeted mechanisms (A-SGH lock-in, ES exploration tension) but the yield metric favors families that produce many schedules within a time budget, which is trivially achieved by small, uniform processing times.
 
-## Recommended Next
-- Regenerate random families with built-in T≤200 constraint
-- Evaluate human instances first (fastest)
-- OR accept qualitative LLM > random evidence from mechanism-aware design
+## Recommendation
+- LLM mechanism-aware design shows qualitative sophistication but doesn't beat simple parameter sweeps on front-size growth yield
+- Consider whether front-size growth is the right adversarial metric, or whether mechanism-matching qualitative evidence matters
+- Do not proceed to C4/C5 full campaign with current yield metric

@@ -1,59 +1,58 @@
 # Phase C Results
 
-## C0-C1: Protocol + Schema — COMPLETED 2026-05-10
-
-## C2: Baseline Generators + LLM Prompt — COMPLETED 2026-05-10
+## C0-C2: Protocol, Schema, Generators — COMPLETED 2026-05-10
 
 ## C3: Smoke Pilot — COMPLETED 2026-05-10
 
-### C3A: DeepSeek LLM Families ✅
-- 8/8 families valid, $0.01 cost
-- Each targets a distinct EHS failure mechanism
-
-### C3B: Family Selection ✅
-- 2 LLM + 2 random + 2 human families selected
-
-### C3-Smoke (original, truncated) ⚠️
-- 8/36 EHS runs completed. Human and most random not evaluated.
-- Discovered EHS time-limit bug.
+### C3-Scalability (Track B) ✅
+- LLM `first_khat_dominance_giant` (n=800+) correctly identified non-interruptible SGH construction.
+- Side diagnostic. Not counted in main yield metric.
 
 ### EHS Time-Limit Fix ✅
-- Added cooperative deadline checks in `split_greedy_heuristic()` (every 5 jobs)
-- Added pre-operation checks before exchange and ESR
-- `run_ehs()` sets/clears deadline
-- Overrun reduced from 5× budget to ≤40% for capped instances
+- Cooperative deadline checks in `glns/paper_heuristics.py`: every 5 jobs in SGH, at duration class boundaries, before post-SGH operations.
+- Overrun ≤40% for capped instances.
 
-### C3-Scalability (Track B) ✅
-- LLM `first_khat_dominance_giant` family (n=800+) correctly identified non-interruptible SGH construction
-- Documented in `notes/c3_scalability_first_khat_diagnostic.md`
+### C3-Regular Repaired (Track A) ✅
+- 18 instances (6 per arm), n≤150, T≤200, 30s/90s budgets
+- All 18 instances feasible and evaluable (100% generation quality)
+- 36/36 EHS runs completed
 
-### C3-Regular (Track A) ✅
-- 18 instances: LLM (6), random (6), human (6)
-- n≤150, T≤200 caps
-- Budgets: 30s / 90s
+**Adversarial Yield Results:**
 
-**LLM arm (6/6 evaluable, 5/6 high-yield)**:
-- `asgh_trajectory_conflict`: 3/3 high-yield — fs growth +3, +6, +6
-- `es_local_optima_trap_extreme_rates`: 2/3 high-yield — fs growth +3, 1→2 (very_slow)
+| Arm | High-Yield | Rate | Mechanism Match |
+|-----|-----------|------|-----------------|
+| human | 6/6 | 100% | Tight/loose epsilon trivially produce front growth |
+| llm | 5/6 | 83% | A-SGH lock-in (3/3 HIGH), ES tension (2/3 HIGH) |
+| random | 4/6 | 67% | Small instances saturate quickly (2 saturated) |
 
-**Random arm (1/6 evaluable)**:
-- random_000: 3/3 infeasible (bimodal jobs too large for T≤200)
-- random_001: 1 evaluable (very_slow_single_point), 2 incomplete
+**Gate: FAIL** — Human sweep families (100%) beat LLM (83%) on adversarial yield.
 
-**Human arm (0/6 evaluable)**:
-- All 6 instances: eval incomplete (timeout before reaching them)
+Human advantage is structural: uniform p_j=(1,10) processing times allow many khat iterations, producing large Δfs (+7 to +33). This is a property of the sweep design rather than adversarial insight.
 
-### Gate: INCONCLUSIVE
-- Cannot compare arms when 11/18 non-LLM instances couldn't be evaluated
-- LLM demonstrates strong mechanism targeting (5/6 high-yield, interpretable scaling)
-- But fair comparison requires redesigning baseline arms for capped evaluation scale
+LLM families show mechanism-aware targeting (A-SGH lock-in confirmed on 3/3 instances, ES tension on 2/3), but the raw front-size-growth metric favors simple small-instance designs.
 
-## Key Artifacts
-- `glns/paper_heuristics.py` — EHS time-limit fix (cooperative deadline)
-- `families/llm_families.json` — 8 valid LLM family specs
+Random families at 67% confirm the metric is sensitive to instance size/structure, not mechanism specificity.
+
+## Artifacts
+
+### Code
+- `glns/paper_heuristics.py` — EHS cooperative deadline fix
+- `scripts/_c3_repaired.py` — C3-Regular repaired pipeline
+- `scripts/phaseC_adversarial_family_generation.py` — family generation + validation
+- `scripts/phaseC3_smoke_pilot.py` — full C3 pipeline
+
+### Data
+- `eval/c3_regular_repaired_raw.csv` — 36 EHS runs
+- `eval/c3_regular_repaired_summary.csv` — 18 instance-level summary
+- `families/llm_families.json` — 8 LLM family specs
 - `families/random_families.json` — 8 random family specs
 - `families/human_sweep_families.json` — 8 human family specs
-- `eval/c3_regular_raw.csv` — 36 EHS eval rows
-- `eval/c3_regular_summary.csv` — 18 instance-level summary rows
-- `notes/c3_regular_decision.md` — C3-Regular gate decision
+
+### Notes
+- `notes/c3_regular_repaired_decision.md` — Gate decision
 - `notes/c3_scalability_first_khat_diagnostic.md` — Scalability note
+- `notes/c3_regular_decision.md` — Original C3-Regular decision (pre-repair)
+
+### Generated Instances
+- `generated_instances/c3_regular/` — original 18 instances
+- `generated_instances/c3_repair/` — repaired 12 baseline instances
