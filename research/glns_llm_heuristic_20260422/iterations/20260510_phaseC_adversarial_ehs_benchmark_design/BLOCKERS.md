@@ -2,22 +2,29 @@
 
 ## Active Blockers
 
-### B-C3.3: Baseline arms broken by instance-size caps
-Random and human family generators were designed for larger parameter ranges. Capping T≤200 and n≤150 for fair C3-Regular evaluation made random_000 instances infeasible and random_001 instances too slow. Human instances weren't reached before eval timeout. Only 1/12 non-LLM instances were evaluable vs 6/6 for LLM.
+None. C4 validation complete.
 
-**Fix**: Regenerate random families with T≤200 constraint built-in, or use different random families that naturally fit the eval scale. Evaluate human instances first (they're fastest).
+## C4 Observations
 
-### B-C3.2: Giant LLM instances unevaluable — RESOLVED
-LLM's `first_khat_dominance_giant` family (n=800+) correctly identified a real EHS weakness but is ineligible for C3-Regular yield comparison. Documented in C3-Scalability note.
+- **Budget too short for mechanism discrimination**: All 60 instances timed out on 30s short budget. Δfs differences reflect epsilon granularity, not adversarial stress. Consider 60s/120s for any follow-up.
+- **NT-MC-HY gap (25% vs 50%)**: LLM mechanism families M1, M3, M4 got 0/5 mechanism confirmation. Operational rules may be too strict, or mechanisms too subtle at 30s.
 
 ## Resolved Blockers
 
+### B-C3.3: Baseline arms broken by instance-size caps — RESOLVED
+Regenerated random/human families with T≤200 constraint.
+
+### B-C3.2: Giant LLM instances unevaluable — RESOLVED
+Documented in C3-Scalability note.
+
 ### B-C3.1: EHS time-limit enforcement — RESOLVED
-Added cooperative deadline checks (`_EHS_DEADLINE`) in `split_greedy_heuristic()` (every 5 jobs), `assignment_history_sgh()`, and before post-SGH operations. `run_ehs()` now sets and clears the deadline. Overruns reduced from 5× budget to ≤40% of budget for n≤150, T≤200.
+Cooperative deadline checks in `glns/paper_heuristics.py`.
 
 ### B-C3.0: DeepSeek API unreachable via Python requests — RESOLVED
-Resolved by using `curl` via `subprocess.run()`.
+curl via subprocess.
 
-## Potential Concerns
-- C3-Regular comparison is inconclusive due to baseline arms being broken by instance-size caps
-- Full campaign would need 8+ hours of EHS runtime even with T≤200
+## Potential Concerns (for C5 or thesis)
+
+- Budget re-calibration needed for mechanism-rich evaluation
+- NT-MC-HY operational rules need refinement
+- C5 full campaign would require 8+ hours of EHS runtime
