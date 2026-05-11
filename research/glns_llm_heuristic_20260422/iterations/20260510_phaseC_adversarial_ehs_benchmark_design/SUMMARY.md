@@ -1,38 +1,26 @@
 # Phase C Summary
 
-**Status**: C0-C2 complete. Ready for C3 smoke pilot (DeepSeek call pending).
+**Status**: C3 smoke complete (truncated). Gate INCONCLUSIVE.
 
 **Branch**: LLM-guided adversarial benchmark design for EHS.
 
-**Core hypothesis**: LLM can design structured BPMSTP instance families that
-expose EHS weaknesses more efficiently than random or human parameter sweeps.
-
 ## Completed
+- C0-C1: Protocol + schema
+- C2: Random + human generators, LLM prompt
+- C3A: DeepSeek call — 8/8 families valid
+- C3B: Family selection (2+2+2)
+- C3C: Instance generation (18 instances, all feasible)
+- C3D: EHS evaluation — 8/36 runs completed (truncated)
+- C3E: Arm comparison — LLM 100% yield vs random 17% (indicative only)
 
-### C0: Protocol
-- EXPERIMENT_PROTOCOL.md with full C0-C4 phase structure, decision gates.
+## Key Finding
+`run_ehs()` does NOT respect `time_limit_seconds` during SGH construction. First khat can exceed budget by 5×. This blocks reliable adversarial evaluation.
 
-### C1: Schema
-- `families/family_schema.json` with 13 required fields, type enums,
-  sanity constraints, rejection conditions.
-
-### C2: Generators
-- **Random**: 8 families (`families/random_families.json`). Uniform sampling
-  of legal parameter ranges. All validated (0 errors).
-- **Human sweep**: 8 families (`families/human_sweep_families.json`).
-  Fixed parameter sweeps over epsilon tightness, price volatility, job
-  size distribution, machine density. All validated (0 errors).
-- **LLM prompt**: `prompts/call1_llm_family_designer.md`. Full EHS pipeline
-  description, B6 closure evidence, 8 target mechanisms, schema docs,
-  examples of valid/invalid families.
-- **Validation script**: `scripts/phaseC_adversarial_family_generation.py`
-  with `--generate-random-families`, `--generate-human-sweep-families`,
-  `--validate-family-file` subcommands.
-
-## Next
-- C3: First DeepSeek call to generate LLM families (`call1_llm_family_designer.md`)
-- C3 smoke pilot: 2 LLM + 2 random + 2 human families, 3 instances each,
-  EHS at 60s + 300s budgets.
+## Recommended Next
+1. Add per-iteration time checks inside SGH construction loop
+2. Cap T ≤ 300 for smoke instances
+3. Re-run smoke with 30s/120s budgets
+4. OR: accept that incomplete smoke is sufficient evidence to proceed
 
 ## Gate
-After smoke, decide based on diagnostic yield whether to proceed to full campaign.
+**INCONCLUSIVE** — insufficient EHS runs for arm comparison. But LLM 100% yield vs 17% random is directionally supportive.

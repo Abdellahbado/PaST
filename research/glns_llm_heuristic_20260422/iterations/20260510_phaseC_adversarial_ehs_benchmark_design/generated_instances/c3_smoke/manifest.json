@@ -1,0 +1,182 @@
+{
+  "n_instances": 18,
+  "n_feasible": 18,
+  "families": {
+    "llm": [
+      {
+        "family_name": "first_khat_dominance_giant",
+        "mechanism": "first_khat_dominance"
+      },
+      {
+        "family_name": "asgh_trajectory_conflict",
+        "mechanism": "asgh_lock_in"
+      }
+    ],
+    "random": [
+      {
+        "family_name": "random_000",
+        "mechanism": "load_imbalance"
+      },
+      {
+        "family_name": "random_001",
+        "mechanism": "epsilon_skip"
+      }
+    ],
+    "human": [
+      {
+        "family_name": "human_tight_epsilon",
+        "mechanism": "first_khat_dominance"
+      },
+      {
+        "family_name": "human_loose_epsilon",
+        "mechanism": "epsilon_skip"
+      }
+    ]
+  },
+  "instances": [
+    {
+      "id": "c3_first_khat_dominance_giant_1000",
+      "n": 843,
+      "m": 36,
+      "T": 853,
+      "sum_p": 29546,
+      "feasible": true
+    },
+    {
+      "id": "c3_first_khat_dominance_giant_1017",
+      "n": 813,
+      "m": 44,
+      "T": 786,
+      "sum_p": 28904,
+      "feasible": true
+    },
+    {
+      "id": "c3_first_khat_dominance_giant_1034",
+      "n": 827,
+      "m": 40,
+      "T": 816,
+      "sum_p": 28215,
+      "feasible": true
+    },
+    {
+      "id": "c3_asgh_trajectory_conflict_30000",
+      "n": 119,
+      "m": 11,
+      "T": 213,
+      "sum_p": 1457,
+      "feasible": true
+    },
+    {
+      "id": "c3_asgh_trajectory_conflict_30017",
+      "n": 82,
+      "m": 12,
+      "T": 233,
+      "sum_p": 1003,
+      "feasible": true
+    },
+    {
+      "id": "c3_asgh_trajectory_conflict_30034",
+      "n": 112,
+      "m": 10,
+      "T": 240,
+      "sum_p": 1396,
+      "feasible": true
+    },
+    {
+      "id": "c3_random_000_10000",
+      "n": 207,
+      "m": 6,
+      "T": 737,
+      "sum_p": 2756,
+      "feasible": true
+    },
+    {
+      "id": "c3_random_000_10017",
+      "n": 163,
+      "m": 6,
+      "T": 753,
+      "sum_p": 2062,
+      "feasible": true
+    },
+    {
+      "id": "c3_random_000_10034",
+      "n": 212,
+      "m": 6,
+      "T": 777,
+      "sum_p": 2884,
+      "feasible": true
+    },
+    {
+      "id": "c3_random_001_10100",
+      "n": 162,
+      "m": 21,
+      "T": 556,
+      "sum_p": 1856,
+      "feasible": true
+    },
+    {
+      "id": "c3_random_001_10117",
+      "n": 163,
+      "m": 21,
+      "T": 444,
+      "sum_p": 1933,
+      "feasible": true
+    },
+    {
+      "id": "c3_random_001_10134",
+      "n": 162,
+      "m": 24,
+      "T": 425,
+      "sum_p": 1939,
+      "feasible": true
+    },
+    {
+      "id": "c3_human_tight_epsilon_20000",
+      "n": 87,
+      "m": 10,
+      "T": 245,
+      "sum_p": 516,
+      "feasible": true
+    },
+    {
+      "id": "c3_human_tight_epsilon_20017",
+      "n": 100,
+      "m": 9,
+      "T": 192,
+      "sum_p": 573,
+      "feasible": true
+    },
+    {
+      "id": "c3_human_tight_epsilon_20034",
+      "n": 107,
+      "m": 10,
+      "T": 197,
+      "sum_p": 555,
+      "feasible": true
+    },
+    {
+      "id": "c3_human_loose_epsilon_20100",
+      "n": 76,
+      "m": 10,
+      "T": 237,
+      "sum_p": 437,
+      "feasible": true
+    },
+    {
+      "id": "c3_human_loose_epsilon_20117",
+      "n": 62,
+      "m": 9,
+      "T": 162,
+      "sum_p": 309,
+      "feasible": true
+    },
+    {
+      "id": "c3_human_loose_epsilon_20134",
+      "n": 110,
+      "m": 8,
+      "T": 160,
+      "sum_p": 592,
+      "feasible": true
+    }
+  ]
+}

@@ -1,0 +1,470 @@
+{
+  "generator": "human_sweep",
+  "generator_description": "Fixed parameter sweeps over epsilon tightness, price volatility, job size distribution, and machine density. 8 families, each targeting a specific EHS mechanism.",
+  "n_families": 8,
+  "families": [
+    {
+      "family_name": "human_tight_epsilon",
+      "hypothesis": "Tight epsilon (small cmax decrements) forces many khat iterations. SGH construction dominates per-khat cost, making EHS slow to converge. Under short budget (60s), EHS may explore only 1-2 khats, leaving most of the front unexplored.",
+      "description": "Tight epsilon \u2248 0.5 * max(p_j). Moderate n/m. EHS must descend through many small cmax steps, each paying full SGH+A-SGH+R-ES cost.",
+      "n_jobs_range": {
+        "min": 60,
+        "max": 120
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 12
+      },
+      "horizon_T_range": {
+        "min": 150,
+        "max": 250
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.5,
+          "high": 3.0
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_start": 0.3,
+        "peak_end": 0.6,
+        "peak_multiplier": 2.0,
+        "base_price": 1.0
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "first_khat_dominance",
+      "expected_EHS_failure_mechanism_evidence": "B6.13 run28: first khat dominates (100-400s). B6.17b: short-budget gap 12.9-71.6% at 120s.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 300,
+        "n_per_machine_min": 5
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "human_loose_epsilon",
+      "hypothesis": "Loose epsilon (large cmax decrements) means few khat iterations. If epsilon is too coarse, EHS skips intermediate cmax values worth exploring, producing sparse fronts. Under long budget, the sparse front still leaves gaps.",
+      "description": "Loose epsilon \u2248 2 * max(p_j). Wide spacing between khats. EHS may skip valuable cmax-energetic tradeoff points, producing a sparse or gappy Pareto front.",
+      "n_jobs_range": {
+        "min": 60,
+        "max": 120
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 12
+      },
+      "horizon_T_range": {
+        "min": 150,
+        "max": 250
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.5,
+          "high": 3.0
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_start": 0.3,
+        "peak_end": 0.6,
+        "peak_multiplier": 2.0,
+        "base_price": 1.0
+      },
+      "epsilon_regime": "loose",
+      "expected_EHS_failure_mechanism": "epsilon_skip",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: epsilon=LB derived step size controls khat count. Loose epsilon means fewer khats, potentially skipping intermediate tradeoff points.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 300,
+        "n_per_machine_min": 5
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20100,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "human_high_price_volatility",
+      "hypothesis": "High TOU price volatility creates sharp energy-vs-cmax tradeoffs. SGH construction may make over-optimistic energy decisions at khat=T that degrade during descent. ES non-empty local improvements may trap the solver in high-energy regions.",
+      "description": "TOU profile with extreme variance: prices range from 0.2 to 5.0 within horizon. Sharp peaks create energy holes that SGH construction exploits but that R-ES cannot escape.",
+      "n_jobs_range": {
+        "min": 50,
+        "max": 100
+      },
+      "m_machines_range": {
+        "min": 6,
+        "max": 15
+      },
+      "horizon_T_range": {
+        "min": 120,
+        "max": 300
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 2,
+          "high": 15
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.3,
+          "high": 4.0
+        }
+      },
+      "TOU_price_profile_type": "high_variance",
+      "TOU_price_profile_params": {
+        "base_price": 0.5,
+        "noise_range": 3.0,
+        "variance": "high"
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "es_exploration_tension",
+      "expected_EHS_failure_mechanism_evidence": "B6.4b: ES non-empty improves 36.6% of khats. When TOU is volatile, ES may find local improvements that prevent better reinsertion moves.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 250,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20200,
+        "expected_seed_variance": "high"
+      }
+    },
+    {
+      "family_name": "human_low_price_volatility",
+      "hypothesis": "Low TOU price volatility means energy cost is dominated by machine assignment rather than scheduling. EHS's sophisticated per-machine resequencing (R-ES reinsertion at 1.81s/khat) becomes wasted effort since any assignment is nearly energy-equivalent.",
+      "description": "TOU price nearly flat (variance minimal). Energy minimization reduces almost entirely to machine assignment. R-ES reinsertion's scheduling refinement is wasted.",
+      "n_jobs_range": {
+        "min": 50,
+        "max": 150
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 20
+      },
+      "horizon_T_range": {
+        "min": 200,
+        "max": 400
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 20
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "step",
+        "params": {
+          "low_rate": 0.5,
+          "high_rate": 3.0,
+          "step_fraction": 0.5
+        }
+      },
+      "TOU_price_profile_type": "low_variance",
+      "TOU_price_profile_params": {
+        "base_price": 1.0,
+        "noise_range": 0.2,
+        "variance": "low"
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "res_reinsertion_starvation",
+      "expected_EHS_failure_mechanism_evidence": "B6.4b: R-ES reinsertion improves only 1.4% of khats. With flat prices, scheduling refinement has near-zero value. Reinsertion cost (1.81s/khat) is pure waste.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 250,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20300,
+        "expected_seed_variance": "low"
+      }
+    },
+    {
+      "family_name": "human_many_small_jobs",
+      "hypothesis": "Many small jobs (n high, p_j small) produce a dense combinatorial space. SGH construction dominates runtime (O(n*m*khat)). A-SGH must evaluate many possible assignments per job. EHS may timeout without completing even the first khat under short budget.",
+      "description": "High job count (n\u2265200), small processing times (p_j \u2264 5). SGH cost scales with n*m. First khat may exceed 60s budget.",
+      "n_jobs_range": {
+        "min": 200,
+        "max": 400
+      },
+      "m_machines_range": {
+        "min": 10,
+        "max": 20
+      },
+      "horizon_T_range": {
+        "min": 200,
+        "max": 400
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 5
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.5,
+          "high": 3.0
+        }
+      },
+      "TOU_price_profile_type": "dual_peak",
+      "TOU_price_profile_params": {
+        "peak1_start": 0.2,
+        "peak1_end": 0.35,
+        "peak2_start": 0.65,
+        "peak2_end": 0.8,
+        "peak_multiplier": 1.8,
+        "base_price": 1.0
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "short_budget_pressure",
+      "expected_EHS_failure_mechanism_evidence": "B6.13 run28: first khat dominates. B6.17b: EHS at 120s reaches only 12.9% on large instances. Many small jobs maximize SGH construction cost.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 200,
+        "n_per_machine_min": 10
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20400,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "human_mixed_job_sizes",
+      "hypothesis": "Bimodal job sizes (small + large) create assignment tension: large jobs dominate load balance, small jobs provide energy flexibility. SGH myopic assignment may misplace large jobs early, and A-SGH retention locks them in. R-ES reinsertion cannot relocate large jobs efficiently.",
+      "description": "Bimodal processing times: 50% small (p_j=2-5), 50% large (p_j=15-25). Large jobs are hard to reinsert; small jobs create combinatorial explosion for ES.",
+      "n_jobs_range": {
+        "min": 80,
+        "max": 150
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 15
+      },
+      "horizon_T_range": {
+        "min": 200,
+        "max": 400
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "small_low": 2,
+          "small_high": 5,
+          "large_low": 15,
+          "large_high": 25,
+          "small_fraction": 0.5
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "step",
+        "params": {
+          "low_rate": 0.5,
+          "high_rate": 3.0,
+          "step_fraction": 0.6
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_start": 0.3,
+        "peak_end": 0.6,
+        "peak_multiplier": 2.0,
+        "base_price": 1.0
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "asgh_lock_in",
+      "expected_EHS_failure_mechanism_evidence": "B6.11: A-SGH keeps 96-98% of jobs. Released jobs repair back. Bimodal jobs create structurally different optimal assignments at different khats \u2014 A-SGH retention becomes a liability.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 400,
+        "n_per_machine_min": 5
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20500,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "human_many_machines_sparse",
+      "hypothesis": "Many machines with few jobs each creates assignment combinatorial search without obvious structure. ES moves span many machines. SGH assignment quality may be poor because each machine sees too few jobs for meaningful load balancing.",
+      "description": "High machine count (m\u226520), moderate job count (n). Low job-per-machine ratio means each machine has few jobs. SGH may assign suboptimally due to limited per-machine information.",
+      "n_jobs_range": {
+        "min": 60,
+        "max": 120
+      },
+      "m_machines_range": {
+        "min": 20,
+        "max": 35
+      },
+      "horizon_T_range": {
+        "min": 100,
+        "max": 200
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 2,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "exponential",
+        "params": {
+          "scale": 1.0,
+          "max": 4.0
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_start": 0.3,
+        "peak_end": 0.6,
+        "peak_multiplier": 1.8,
+        "base_price": 1.0
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "front_coverage_gap",
+      "expected_EHS_failure_mechanism_evidence": "Many machines + few jobs = each khat produces a narrow energy range. Combined with moderate TOU, EHS front may be sparse.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 120,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20600,
+        "expected_seed_variance": "high"
+      }
+    },
+    {
+      "family_name": "human_few_machines_dense",
+      "hypothesis": "Few machines with many jobs each makes machine-level energy and load optimization critical. SGH assignment quality is crucial because each job placement has large impact. ES non-empty becomes combinatorially expensive (O(n*m) per khat). R-ES reinsertion may be valuable but too slow to activate.",
+      "description": "Low machine count (m=4-6), high job count. Dense per-machine assignments. ES neighborhood is large. R-ES reinsertion is valuable but bottlenecked.",
+      "n_jobs_range": {
+        "min": 150,
+        "max": 300
+      },
+      "m_machines_range": {
+        "min": 4,
+        "max": 8
+      },
+      "horizon_T_range": {
+        "min": 400,
+        "max": 600
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.5,
+          "high": 3.5
+        }
+      },
+      "TOU_price_profile_type": "dual_peak",
+      "TOU_price_profile_params": {
+        "peak1_start": 0.25,
+        "peak1_end": 0.4,
+        "peak2_start": 0.6,
+        "peak2_end": 0.75,
+        "peak_multiplier": 1.6,
+        "base_price": 1.0
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "load_imbalance",
+      "expected_EHS_failure_mechanism_evidence": "Few machines + many jobs = load balance critical. SGH may fail to balance load across heterogeneous machine rates. Cmax inflation from poor assignment is hard for R-ES to repair.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 300,
+        "n_per_machine_min": 20
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2 * m"
+      ],
+      "seed_behavior": {
+        "base_seed": 20700,
+        "expected_seed_variance": "medium"
+      }
+    }
+  ]
+}

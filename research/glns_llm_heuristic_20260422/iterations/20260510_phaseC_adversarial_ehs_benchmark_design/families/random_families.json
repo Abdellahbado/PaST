@@ -1,0 +1,484 @@
+{
+  "generator": "random",
+  "generator_seed": 42,
+  "generator_description": "Uniform sample of legal parameter ranges from family_schema.json",
+  "n_families": 8,
+  "families": [
+    {
+      "family_name": "random_000",
+      "hypothesis": "Very heterogeneous machine rates (range 2.7/0.41) cause SGH to concentrate all jobs on cheap machines, inflating cmax at constant energy.",
+      "description": "Randomly generated family #0: n=[160,222], m=[6,6], T=[728,786], bimodal processing, uniform machine rates, single_peak TOU, loose epsilon.",
+      "n_jobs_range": {
+        "min": 160,
+        "max": 222
+      },
+      "m_machines_range": {
+        "min": 6,
+        "max": 6
+      },
+      "horizon_T_range": {
+        "min": 728,
+        "max": 786
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "small_low": 1,
+          "small_high": 4,
+          "large_low": 15,
+          "large_high": 24,
+          "small_fraction": 0.33
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.41,
+          "high": 2.7
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_start": 0.3,
+        "peak_end": 0.6,
+        "peak_multiplier": 2.52,
+        "base_price": 1.62
+      },
+      "epsilon_regime": "loose",
+      "expected_EHS_failure_mechanism": "load_imbalance",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 191,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_001",
+      "hypothesis": "Coarse epsilon spacing relative to energy rate differences means EHS skips epsilons worth exploring. PROFILE designed with narrow price levels and wide machine rate differences.",
+      "description": "Randomly generated family #1: n=[162,163], m=[10,24], T=[366,588], bimodal processing, uniform machine rates, low_variance TOU, tight epsilon.",
+      "n_jobs_range": {
+        "min": 162,
+        "max": 163
+      },
+      "m_machines_range": {
+        "min": 10,
+        "max": 24
+      },
+      "horizon_T_range": {
+        "min": 366,
+        "max": 588
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "small_low": 3,
+          "small_high": 7,
+          "large_low": 12,
+          "large_high": 20,
+          "small_fraction": 0.36
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 0.41,
+          "high": 2.29
+        }
+      },
+      "TOU_price_profile_type": "low_variance",
+      "TOU_price_profile_params": {
+        "base_price": 1.71,
+        "noise_range": 0.3,
+        "variance": "low"
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "epsilon_skip",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 162,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10100,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_002",
+      "hypothesis": "A-SGH 96% job retention may lock EHS into suboptimal trajectories when khat\u2192khat-1 optimal assignments are structurally different. Instance designed with job sizes that force spread changes at each khat.",
+      "description": "Randomly generated family #2: n=[233,253], m=[20,23], T=[331,566], exponential_truncated processing, exponential machine rates, dual_peak TOU, medium epsilon.",
+      "n_jobs_range": {
+        "min": 233,
+        "max": 253
+      },
+      "m_machines_range": {
+        "min": 20,
+        "max": 23
+      },
+      "horizon_T_range": {
+        "min": 331,
+        "max": 566
+      },
+      "processing_time_distribution": {
+        "type": "exponential_truncated",
+        "params": {
+          "scale": 7.0,
+          "max": 30
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "exponential",
+        "params": {
+          "scale": 0.79,
+          "max": 5.0
+        }
+      },
+      "TOU_price_profile_type": "dual_peak",
+      "TOU_price_profile_params": {
+        "peak1_start": 0.2,
+        "peak1_end": 0.35,
+        "peak2_start": 0.65,
+        "peak2_end": 0.8,
+        "peak_multiplier": 1.69,
+        "base_price": 0.59
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "asgh_lock_in",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 243,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10200,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_003",
+      "hypothesis": "ES non-empty local improvements (36.6% rate) may prevent R-ES from escaping to better regions. Instance with heterogeneous energy rates and sharp TOU peaks to induce exploration trap.",
+      "description": "Randomly generated family #3: n=[214,285], m=[10,13], T=[399,630], normal_truncated processing, uniform machine rates, dual_peak TOU, loose epsilon.",
+      "n_jobs_range": {
+        "min": 214,
+        "max": 285
+      },
+      "m_machines_range": {
+        "min": 10,
+        "max": 13
+      },
+      "horizon_T_range": {
+        "min": 399,
+        "max": 630
+      },
+      "processing_time_distribution": {
+        "type": "normal_truncated",
+        "params": {
+          "mean": 9.4,
+          "std": 2.4,
+          "min": 1,
+          "max": 30
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1.1,
+          "high": 4.11
+        }
+      },
+      "TOU_price_profile_type": "dual_peak",
+      "TOU_price_profile_params": {
+        "peak1_start": 0.2,
+        "peak1_end": 0.35,
+        "peak2_start": 0.65,
+        "peak2_end": 0.8,
+        "peak_multiplier": 1.59,
+        "base_price": 1.72
+      },
+      "epsilon_regime": "loose",
+      "expected_EHS_failure_mechanism": "es_exploration_tension",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 249,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10300,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_004",
+      "hypothesis": "Very heterogeneous machine rates (range ?/?) cause SGH to concentrate all jobs on cheap machines, inflating cmax at constant energy.",
+      "description": "Randomly generated family #4: n=[214,283], m=[8,22], T=[253,508], bimodal processing, step machine rates, low_variance TOU, medium epsilon.",
+      "n_jobs_range": {
+        "min": 214,
+        "max": 283
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 22
+      },
+      "horizon_T_range": {
+        "min": 253,
+        "max": 508
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "small_low": 3,
+          "small_high": 6,
+          "large_low": 10,
+          "large_high": 19,
+          "small_fraction": 0.63
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "step",
+        "params": {
+          "low_rate": 0.35,
+          "high_rate": 3.83,
+          "step_fraction": 0.53
+        }
+      },
+      "TOU_price_profile_type": "low_variance",
+      "TOU_price_profile_params": {
+        "base_price": 0.93,
+        "noise_range": 0.3,
+        "variance": "low"
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "load_imbalance",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 248,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10400,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_005",
+      "hypothesis": "At n\u2248186, m\u224819, first khat cost dominates EHS budget. Instance sized to make SGH construction at khat=T the runtime bottleneck, leaving no time for multi-khat descent.",
+      "description": "Randomly generated family #5: n=[169,204], m=[17,21], T=[241,589], bimodal processing, step machine rates, monotonic_decreasing TOU, tight epsilon.",
+      "n_jobs_range": {
+        "min": 169,
+        "max": 204
+      },
+      "m_machines_range": {
+        "min": 17,
+        "max": 21
+      },
+      "horizon_T_range": {
+        "min": 241,
+        "max": 589
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "small_low": 3,
+          "small_high": 8,
+          "large_low": 14,
+          "large_high": 20,
+          "small_fraction": 0.6
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "step",
+        "params": {
+          "low_rate": 0.55,
+          "high_rate": 3.99,
+          "step_fraction": 0.36
+        }
+      },
+      "TOU_price_profile_type": "monotonic_decreasing",
+      "TOU_price_profile_params": {
+        "start_price": 2.0,
+        "end_price": 0.3
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "first_khat_dominance",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 186,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10500,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_006",
+      "hypothesis": "Discontinuous energy-vs-cmax Pareto region from step-function TOU and bimodal jobs. EHS front may miss intermediate points.",
+      "description": "Randomly generated family #6: n=[101,275], m=[6,10], T=[469,758], normal_truncated processing, exponential machine rates, single_peak TOU, loose epsilon.",
+      "n_jobs_range": {
+        "min": 101,
+        "max": 275
+      },
+      "m_machines_range": {
+        "min": 6,
+        "max": 10
+      },
+      "horizon_T_range": {
+        "min": 469,
+        "max": 758
+      },
+      "processing_time_distribution": {
+        "type": "normal_truncated",
+        "params": {
+          "mean": 9.2,
+          "std": 2.5,
+          "min": 1,
+          "max": 30
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "exponential",
+        "params": {
+          "scale": 0.88,
+          "max": 5.0
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_start": 0.3,
+        "peak_end": 0.6,
+        "peak_multiplier": 1.49,
+        "base_price": 1.86
+      },
+      "epsilon_regime": "loose",
+      "expected_EHS_failure_mechanism": "front_coverage_gap",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 188,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10600,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "random_007",
+      "hypothesis": "ES non-empty local improvements (36.6% rate) may prevent R-ES from escaping to better regions. Instance with heterogeneous energy rates and sharp TOU peaks to induce exploration trap.",
+      "description": "Randomly generated family #7: n=[176,287], m=[13,16], T=[368,509], bimodal processing, exponential machine rates, high_variance TOU, loose epsilon.",
+      "n_jobs_range": {
+        "min": 176,
+        "max": 287
+      },
+      "m_machines_range": {
+        "min": 13,
+        "max": 16
+      },
+      "horizon_T_range": {
+        "min": 368,
+        "max": 509
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "small_low": 2,
+          "small_high": 4,
+          "large_low": 15,
+          "large_high": 20,
+          "small_fraction": 0.69
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "exponential",
+        "params": {
+          "scale": 1.87,
+          "max": 5.0
+        }
+      },
+      "TOU_price_profile_type": "high_variance",
+      "TOU_price_profile_params": {
+        "base_price": 2.18,
+        "noise_range": 1.5,
+        "variance": "high"
+      },
+      "epsilon_regime": "loose",
+      "expected_EHS_failure_mechanism": "es_exploration_tension",
+      "expected_EHS_failure_mechanism_evidence": "B6 evidence: random assignment, no targeted mechanism prediction.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 231,
+        "n_per_machine_min": 2
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m * T (obviously infeasible)",
+        "all e[h] equal (no energy rate differentiation)",
+        "all ct[t] equal (flat price, no TOU)",
+        "n < 2 * m (degenerate: too few jobs)"
+      ],
+      "seed_behavior": {
+        "base_seed": 10700,
+        "expected_seed_variance": "medium"
+      }
+    }
+  ]
+}

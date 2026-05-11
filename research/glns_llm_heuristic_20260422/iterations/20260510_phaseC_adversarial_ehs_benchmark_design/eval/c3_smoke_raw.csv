@@ -1,0 +1,37 @@
+instance_id,arm,family_name,expected_mechanism,n,m,T,sum_p,feasible_instance,budget,feasible_ehs,front_size,runtime_s,timeout,deepest_cmax,best_energy,shallowest_cmax,toy_hv,error
+c3_first_khat_dominance_giant_1000,llm,first_khat_dominance_giant,first_khat_dominance,843,36,853,29546,True,short,False,0,0,True,-1,inf,-1,0,"TOO_LARGE: n>300, SGH construction exceeds smoke budget"
+c3_first_khat_dominance_giant_1000,llm,first_khat_dominance_giant,first_khat_dominance,843,36,853,29546,True,long,False,0,0,True,-1,inf,-1,0,"TOO_LARGE: n>300, SGH construction exceeds smoke budget"
+c3_first_khat_dominance_giant_1017,llm,first_khat_dominance_giant,first_khat_dominance,813,44,786,28904,True,short,False,0,0,True,-1,inf,-1,0,"TOO_LARGE: n>300, SGH construction exceeds smoke budget"
+c3_first_khat_dominance_giant_1017,llm,first_khat_dominance_giant,first_khat_dominance,813,44,786,28904,True,long,False,0,0,True,-1,inf,-1,0,"TOO_LARGE: n>300, SGH construction exceeds smoke budget"
+c3_first_khat_dominance_giant_1034,llm,first_khat_dominance_giant,first_khat_dominance,827,40,816,28215,True,short,False,0,0,True,-1,inf,-1,0,"TOO_LARGE: n>300, SGH construction exceeds smoke budget"
+c3_first_khat_dominance_giant_1034,llm,first_khat_dominance_giant,first_khat_dominance,827,40,816,28215,True,long,False,0,0,True,-1,inf,-1,0,"TOO_LARGE: n>300, SGH construction exceeds smoke budget"
+c3_asgh_trajectory_conflict_30000,llm,asgh_trajectory_conflict,asgh_lock_in,119,11,213,1457,True,short,True,5,31.6,True,209,745.04524,213,0,
+c3_asgh_trajectory_conflict_30000,llm,asgh_trajectory_conflict,asgh_lock_in,119,11,213,1457,True,long,True,8,88.9,True,206,745.04524,213,0,
+c3_asgh_trajectory_conflict_30017,llm,asgh_trajectory_conflict,asgh_lock_in,82,12,233,1003,True,short,True,1,54.5,True,233,398.2863999999998,233,0,
+c3_asgh_trajectory_conflict_30017,llm,asgh_trajectory_conflict,asgh_lock_in,82,12,233,1003,True,long,True,3,71.4,True,231,398.2863999999998,233,0,
+c3_asgh_trajectory_conflict_30034,llm,asgh_trajectory_conflict,asgh_lock_in,112,10,240,1396,True,short,True,8,33.0,True,233,712.5701200000003,240,0,
+c3_asgh_trajectory_conflict_30034,llm,asgh_trajectory_conflict,asgh_lock_in,112,10,240,1396,True,long,True,12,73.3,True,228,712.5701200000003,240,0,
+c3_random_000_10000,random,random_000,load_imbalance,207,6,737,2756,True,short,True,1,154.7,True,737,7300.714307710003,737,0,
+c3_random_000_10000,random,random_000,load_imbalance,207,6,737,2756,True,long,True,1,159.8,True,737,7300.714307710003,737,0,
+c3_random_000_10017,random,random_000,load_imbalance,163,6,753,2062,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_000_10017,random,random_000,load_imbalance,163,6,753,2062,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_000_10034,random,random_000,load_imbalance,212,6,777,2884,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_000_10034,random,random_000,load_imbalance,212,6,777,2884,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_001_10100,random,random_001,epsilon_skip,162,21,556,1856,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_001_10100,random,random_001,epsilon_skip,162,21,556,1856,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_001_10117,random,random_001,epsilon_skip,163,21,444,1933,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_001_10117,random,random_001,epsilon_skip,163,21,444,1933,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_001_10134,random,random_001,epsilon_skip,162,24,425,1939,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_random_001_10134,random,random_001,epsilon_skip,162,24,425,1939,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_tight_epsilon_20000,human,human_tight_epsilon,first_khat_dominance,87,10,245,516,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_tight_epsilon_20000,human,human_tight_epsilon,first_khat_dominance,87,10,245,516,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_tight_epsilon_20017,human,human_tight_epsilon,first_khat_dominance,100,9,192,573,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_tight_epsilon_20017,human,human_tight_epsilon,first_khat_dominance,100,9,192,573,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_tight_epsilon_20034,human,human_tight_epsilon,first_khat_dominance,107,10,197,555,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_tight_epsilon_20034,human,human_tight_epsilon,first_khat_dominance,107,10,197,555,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_loose_epsilon_20100,human,human_loose_epsilon,epsilon_skip,76,10,237,437,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_loose_epsilon_20100,human,human_loose_epsilon,epsilon_skip,76,10,237,437,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_loose_epsilon_20117,human,human_loose_epsilon,epsilon_skip,62,9,162,309,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_loose_epsilon_20117,human,human_loose_epsilon,epsilon_skip,62,9,162,309,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_loose_epsilon_20134,human,human_loose_epsilon,epsilon_skip,110,8,160,592,True,short,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
+c3_human_loose_epsilon_20134,human,human_loose_epsilon,epsilon_skip,110,8,160,592,True,long,False,0,0,True,-1,inf,-1,0,NOT_EVALUATED: smoke truncated due to time constraints
