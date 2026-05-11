@@ -1,0 +1,103 @@
+{
+  "arms": {
+    "llm_l2": {
+      "n_families": 4,
+      "n_instances": 20,
+      "n_feasible": 20,
+      "families": [
+        "hybrid_M1_tight_hetero_rates_firstkhat_dom",
+        "hybrid_M2_tight_steprates_asghlock",
+        "hybrid_M3_narrowrates_reinsert_starve",
+        "hybrid_M4_dualpeak_exploration_tension"
+      ],
+      "instances": [
+        "c4v_hybrid_M1_tight_hetero_rates_firstkhat_dom_180000",
+        "c4v_hybrid_M1_tight_hetero_rates_firstkhat_dom_180001",
+        "c4v_hybrid_M1_tight_hetero_rates_firstkhat_dom_180002",
+        "c4v_hybrid_M1_tight_hetero_rates_firstkhat_dom_180003",
+        "c4v_hybrid_M1_tight_hetero_rates_firstkhat_dom_180004",
+        "c4v_hybrid_M2_tight_steprates_asghlock_180000",
+        "c4v_hybrid_M2_tight_steprates_asghlock_180001",
+        "c4v_hybrid_M2_tight_steprates_asghlock_180002",
+        "c4v_hybrid_M2_tight_steprates_asghlock_180003",
+        "c4v_hybrid_M2_tight_steprates_asghlock_180004",
+        "c4v_hybrid_M3_narrowrates_reinsert_starve_180000",
+        "c4v_hybrid_M3_narrowrates_reinsert_starve_180001",
+        "c4v_hybrid_M3_narrowrates_reinsert_starve_180002",
+        "c4v_hybrid_M3_narrowrates_reinsert_starve_180003",
+        "c4v_hybrid_M3_narrowrates_reinsert_starve_180004",
+        "c4v_hybrid_M4_dualpeak_exploration_tension_180000",
+        "c4v_hybrid_M4_dualpeak_exploration_tension_180001",
+        "c4v_hybrid_M4_dualpeak_exploration_tension_180002",
+        "c4v_hybrid_M4_dualpeak_exploration_tension_180003",
+        "c4v_hybrid_M4_dualpeak_exploration_tension_180004"
+      ]
+    },
+    "human": {
+      "n_families": 4,
+      "n_instances": 20,
+      "n_feasible": 20,
+      "families": [
+        "human_tight_epsilon",
+        "human_loose_epsilon",
+        "human_mixed_job_sizes",
+        "human_many_machines_sparse"
+      ],
+      "instances": [
+        "c4v_human_tight_epsilon_120000",
+        "c4v_human_tight_epsilon_120001",
+        "c4v_human_tight_epsilon_120002",
+        "c4v_human_tight_epsilon_120003",
+        "c4v_human_tight_epsilon_120004",
+        "c4v_human_loose_epsilon_120000",
+        "c4v_human_loose_epsilon_120001",
+        "c4v_human_loose_epsilon_120002",
+        "c4v_human_loose_epsilon_120003",
+        "c4v_human_loose_epsilon_120004",
+        "c4v_human_mixed_job_sizes_120000",
+        "c4v_human_mixed_job_sizes_120001",
+        "c4v_human_mixed_job_sizes_120002",
+        "c4v_human_mixed_job_sizes_120003",
+        "c4v_human_mixed_job_sizes_120004",
+        "c4v_human_many_machines_sparse_120000",
+        "c4v_human_many_machines_sparse_120001",
+        "c4v_human_many_machines_sparse_120002",
+        "c4v_human_many_machines_sparse_120003",
+        "c4v_human_many_machines_sparse_120004"
+      ]
+    },
+    "random": {
+      "n_families": 4,
+      "n_instances": 20,
+      "n_feasible": 15,
+      "families": [
+        "random_000",
+        "random_001",
+        "random_002",
+        "random_003"
+      ],
+      "instances": [
+        "c4v_random_000_110000",
+        "c4v_random_000_110001",
+        "c4v_random_000_110002",
+        "c4v_random_000_110003",
+        "c4v_random_000_110004",
+        "c4v_random_001_110000",
+        "c4v_random_001_110001",
+        "c4v_random_001_110002",
+        "c4v_random_001_110003",
+        "c4v_random_001_110004",
+        "c4v_random_002_110000",
+        "c4v_random_002_110001",
+        "c4v_random_002_110002",
+        "c4v_random_002_110003",
+        "c4v_random_002_110004",
+        "c4v_random_003_110000",
+        "c4v_random_003_110001",
+        "c4v_random_003_110002",
+        "c4v_random_003_110003",
+        "c4v_random_003_110004"
+      ]
+    }
+  }
+}

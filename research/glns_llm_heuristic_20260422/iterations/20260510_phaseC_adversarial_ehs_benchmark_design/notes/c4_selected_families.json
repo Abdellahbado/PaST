@@ -1,0 +1,46 @@
+{
+  "validation": "C4",
+  "date": "2026-05-11",
+  "frozen": true,
+  "n_families_per_arm": 4,
+  "instances_per_family": 5,
+  "total_instances": 60,
+  "short_budget": 30,
+  "long_budget": 90,
+  "caps": {
+    "n_max": 150,
+    "T_max": 200
+  },
+  "arms": {
+    "llm_l2": {
+      "source": "families/llm_counter_sweep_families.json",
+      "base_seed_offset": 180000,
+      "families": [
+        "hybrid_M1_tight_hetero_rates_firstkhat_dom",
+        "hybrid_M2_tight_steprates_asghlock",
+        "hybrid_M3_narrowrates_reinsert_starve",
+        "hybrid_M4_dualpeak_exploration_tension"
+      ]
+    },
+    "human": {
+      "source": "families/human_sweep_families.json",
+      "base_seed_offset": 120000,
+      "families": [
+        "human_tight_epsilon",
+        "human_loose_epsilon",
+        "human_mixed_job_sizes",
+        "human_many_machines_sparse"
+      ]
+    },
+    "random": {
+      "source": "families/random_families.json",
+      "base_seed_offset": 110000,
+      "families": [
+        "random_000",
+        "random_001",
+        "random_002",
+        "random_003"
+      ]
+    }
+  }
+}

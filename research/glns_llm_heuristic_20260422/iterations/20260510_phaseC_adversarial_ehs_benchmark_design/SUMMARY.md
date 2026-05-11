@@ -1,45 +1,43 @@
 # Phase C Summary
 
-**Status**: C3-L2 counter-sweep complete. Gate STRONG.
+**Status**: C4 validation complete. Gate MODERATE.
 
 **Branch**: LLM-guided adversarial benchmark design for EHS.
 
-## C3-Regular Repaired (for reference)
+## C3-L2 Counter-Sweep (2026-05-10)
 
-Human sweep won (100% yield) > LLM Call1 (83%) on front-size growth metric.
-Human advantage: uniform p_j=(1,10) + tight/loose epsilon → many khats → large Δfs.
+DeepSeek Call 2: hybrid families combining human-sweep front-growth with mechanism stress.
+**Gate: STRONG** (100% HY, Δfs_mean=19.5 > human=15.2, 6 instances).
 
-## C3-L2 Counter-Sweep: DeepSeek Call 2
+## C4 Validation (2026-05-11)
 
-### Method
-- Showed DeepSeek the C3-Regular failure and asked it to design hybrid families
-  combining human-sweep front-growth ingredients with mechanism-specific stress
-- 5 families generated (output truncated at 16000 tokens, 3 missing)
-- Evaluated 2 best families (hybrid_M1: first_khat_dominance, hybrid_M2: asgh_lock_in)
+Fresh instances, 4× families, 5 per family = 60 total.
 
-### Results
+| Arm | HY% | Mean Δfs | MC% | NT-MC-HY% |
+|-----|-----|----------|-----|-----------|
+| **LLM L2** | **100%** | **20.4** | **25%** | **25%** |
+| Human sweep | 100% | 38.2 | 50% | 50% |
+| Random | 93% | 2.6 | 0% | 0% |
 
-| Arm | Instances | High-Yield | Rate | Mean Δfs | Median Δfs |
-|-----|----------|------------|------|----------|------------|
-| **LLM Call2 (L2)** | **6** | **6** | **100%** | **19.5** | **10** |
-| human (C3) | 6 | 6 | 100% | 15.2 | 13 |
-| LLM Call1 (C3) | 6 | 5 | 83% | 2.8 | 3 |
-| random (C3) | 6 | 4 | 67% | 8.5 | 5 |
+**Gate: MODERATE** — LLM ties human on HY rate but loses on NT-MC-HY.
 
-### Gate: STRONG
-LLM Call2 ≥ human sweep on yield rate (100%) AND beats on mean front growth (19.5 > 15.2).
+### What transferred
+- HY rate held at 100% across 4× more families (2→4 families, 6→20 instances)
+- LLM M2 (asgh_lock_in): 5/5 NT-MC-HY — only family with perfect mechanism confirmation
+- Generation quality: 100% vs Random 75%
 
-### Mechanism Confirmation
-- M1 hybrid (tight epsilon + heterogeneous rates): 3/3 HIGH, Δfs +7 to +66
-- M2 hybrid (tight epsilon + step machine rates): 3/3 HIGH, Δfs +9 to +17
-- Both hybrid families successfully combined sweep-layer front growth with mechanism-specific stress
+### What didn't
+- LLM M1, M3, M4 got 0/5 mechanism confirmation — subtle mechanisms at 30s budget
+- Human loose_epsilon Δfs +50 to +116 swamps LLM raw Δfs — structural epsilon advantage
+- All 60 instances timed out at 30s — budget too short for mechanism discrimination
+
+### Decision
+- Transfer confirmed on HY rate but mechanism specificity weakened
+- LLM shows qualitative advantage (1 family with perfect mechanism match vs 2 for human)
+- Budget re-calibration (longer short budget?) needed for better mechanism discrimination
+- MODERATE gate: strong enough for exploratory thesis chapter, but C5 full campaign is optional
 
 ## Key Artifacts
-- `responses/call2_counter_sweep_raw.md` — DeepSeek Call 2 response
-- `families/llm_counter_sweep_families.json` — 5 valid family specs
-- `eval/c3_l2_counter_sweep_raw.csv` — 12 EHS runs
-- `notes/c3_l2_counter_sweep_decision.md` — gate decision
-- `notes/c3_l2_deepseek_counter_sweep_evidence.md` — evidence pack sent to DeepSeek
-
-## Next
-- C4 gate decision: full campaign justified?
+- C3-L2: `families/llm_counter_sweep_families.json`, `eval/c3_l2_counter_sweep_raw.csv`
+- C4: `eval/c4_validation_raw.csv`, `notes/c4_validation_decision.md`
+- Scripts: `_c4_validation.py`, `_c4_eval_sequential.py`, `_c4_metrics_decision.py`
