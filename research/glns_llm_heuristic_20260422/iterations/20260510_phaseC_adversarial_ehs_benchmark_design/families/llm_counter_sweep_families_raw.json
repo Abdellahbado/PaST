@@ -1,0 +1,333 @@
+{
+  "generator": "deepseek_v4_pro",
+  "generator_call": "call2_counter_sweep",
+  "generator_description": "Second-generation LLM-designed adversarial families \u2014 counter-sweep design.",
+  "n_families": 5,
+  "families": [
+    {
+      "family_name": "hybrid_M1_tight_hetero_rates_firstkhat_dom",
+      "hypothesis": "Tight epsilon yields many khats; uniform small jobs enable rapid SGH construction; heterogeneous machine rates slow each khat's convergence, making early khats produce disproportionately large front growth while still accumulating many non-dominated points, resulting in larger \u0394fs than homogeneous-sweep because the rate spread forces exploration of diverse load distributions early on.",
+      "description": "Uniform processing times 1-10, tight epsilon, dual-peak TOU, and machine rates uniformly distributed in [0.5, 1.5].",
+      "mechanism_layer": "M1 (first_khat_dominance): heterogeneous rates cause the first few epsilon levels to explore a wide range of non-dominated solutions before budget constraints limit later refinement.",
+      "sweep_layer": "uniform small p_j, tight epsilon, moderate n/m.",
+      "expected_delta_fs": 25,
+      "n_jobs_range": {
+        "min": 40,
+        "max": 100
+      },
+      "m_machines_range": {
+        "min": 6,
+        "max": 10
+      },
+      "horizon_T_range": {
+        "min": 140,
+        "max": 180
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "min_rate": 0.5,
+          "max_rate": 1.5
+        }
+      },
+      "TOU_price_profile_type": "dual_peak",
+      "TOU_price_profile_params": {
+        "peak1_fraction": 0.25,
+        "peak2_fraction": 0.75,
+        "peak_price": 10,
+        "offpeak_price": 1
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "M1",
+      "expected_EHS_failure_mechanism_evidence": "In pure sweep with homogeneous rates, each khat adds similar growth. Here the slow rate-driven exploration in early khats adds more unique points per khat, boosting total \u0394fs beyond the sweep baseline.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 100,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 80000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "hybrid_M2_tight_steprates_asghlock",
+      "hypothesis": "Uniform small jobs allow many khats; step machine rates (half cheap, half expensive) create A-SGH lock-in on cheap machines initially; as epsilon tightens, the lock-in breaks, forcing extensive re-optimization that generates many new non-dominated solutions, leading to larger front growth than pure tight-epsilon sweep which converges more smoothly.",
+      "description": "Uniform p 1-10, tight epsilon, single-peak TOU, machine rates step: 50% at 0.8, 50% at 1.2.",
+      "mechanism_layer": "M2 (asgh_lock_in): step rates make early A-SGH assignments 'cheap-machine' dominated; subsequent tight epsilon forces recovery, creating a burst of new front points.",
+      "sweep_layer": "uniform small p_j, tight epsilon.",
+      "expected_delta_fs": 28,
+      "n_jobs_range": {
+        "min": 50,
+        "max": 120
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 12
+      },
+      "horizon_T_range": {
+        "min": 140,
+        "max": 180
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 2,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "step",
+        "params": {
+          "levels": [
+            0.8,
+            1.2
+          ],
+          "proportions": [
+            0.5,
+            0.5
+          ]
+        }
+      },
+      "TOU_price_profile_type": "single_peak",
+      "TOU_price_profile_params": {
+        "peak_fraction": 0.5,
+        "peak_price": 8,
+        "offpeak_price": 1
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "M2",
+      "expected_EHS_failure_mechanism_evidence": "The lock-in and later breaking phase creates a two-stage front expansion: early cheap-biased points and later diverse rebalanced points, significantly growing the non-dominated set beyond a uniform-rate sweep.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 100,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 80000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "hybrid_M3_narrowrates_reinsert_starve",
+      "hypothesis": "Very narrow machine rate spread makes ES extremely efficient, eliminating reschedule/reinsertion overhead and allowing the maximum possible number of khat iterations within the budget. Combined with tight epsilon and small jobs, this yields a huge number of non-dominated points, far surpassing the human sweep because no time is wasted on reinsertion.",
+      "description": "Bimodal small processing times (70% 1-3, 30% 7-10), tight epsilon, low-variance TOU, machine rates uniform [0.95, 1.05].",
+      "mechanism_layer": "M3 (res_reinsertion_starvation): near-homogeneous rates make ES solve each khat optimally without needing reinsertion, maximizing khat throughput.",
+      "sweep_layer": "small processing times, tight epsilon, moderate n/m.",
+      "expected_delta_fs": 35,
+      "n_jobs_range": {
+        "min": 60,
+        "max": 140
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 12
+      },
+      "horizon_T_range": {
+        "min": 160,
+        "max": 200
+      },
+      "processing_time_distribution": {
+        "type": "bimodal",
+        "params": {
+          "modes": [
+            [
+              1,
+              3
+            ],
+            [
+              7,
+              10
+            ]
+          ],
+          "weights": [
+            0.7,
+            0.3
+          ]
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "min_rate": 0.95,
+          "max_rate": 1.05
+        }
+      },
+      "TOU_price_profile_type": "low_variance",
+      "TOU_price_profile_params": {
+        "min_price": 1.0,
+        "max_price": 1.5,
+        "distribution": "uniform"
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "M3",
+      "expected_EHS_failure_mechanism_evidence": "Reinsertion starvation ensures that computational effort is entirely spent on generating new epsilon levels, causing the number of khats (and hence front points) to far exceed any configuration that includes reinsertion steps.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 100,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 80000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "hybrid_M4_dualpeak_exploration_tension",
+      "hypothesis": "Sharp dual-peak TOU creates two distinct attractive load windows; ES easily finds local optima in each peak but cannot globally balance across them without expensive re-exploration. This tension forces EHS to generate many intermediate non-dominated solutions as it slowly shifts load, expanding the front more than a smooth TOU would.",
+      "description": "Uniform p 1-10, tight epsilon, sharp dual-peak TOU (peaks at 0.25 and 0.75 with price 10, offpeak 1), machine rates moderate spread [0.7, 1.3].",
+      "mechanism_layer": "M4 (es_exploration_tension): dual-peak induces local energy minima that ES cycles between, producing a diverse set of energy-makespan trade-offs.",
+      "sweep_layer": "uniform small p_j, tight epsilon.",
+      "expected_delta_fs": 30,
+      "n_jobs_range": {
+        "min": 50,
+        "max": 100
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 12
+      },
+      "horizon_T_range": {
+        "min": 140,
+        "max": 180
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 10
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "min_rate": 0.7,
+          "max_rate": 1.3
+        }
+      },
+      "TOU_price_profile_type": "dual_peak",
+      "TOU_price_profile_params": {
+        "peak1_fraction": 0.25,
+        "peak2_fraction": 0.75,
+        "peak_price": 10,
+        "offpeak_price": 1
+      },
+      "epsilon_regime": "tight",
+      "expected_EHS_failure_mechanism": "M4",
+      "expected_EHS_failure_mechanism_evidence": "The double-peak landscape traps ES into exploring many local Pareto points; compared to a single-peak sweep, this yields a significantly larger front as EHS must 'fill in' the gap between peak-centric solutions.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 100,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 80000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "family_name": "hybrid_M5_looseeps_stepTOU_coverage_gap",
+      "hypothesis": "Loose epsilon combined with a step-function TOU forces EHS to jump between coarse Cmax levels, yet the multi-tier pricing ensures each Cmax jump comes with multiple energy-cost combinations, resulting in a front that grows substantially in the energy dimension per khat. This exceeds the front growth of a plain loose-epsilon sweep because the step TOU creates richer non-dominated clusters.",
+      "description": "Uniform p 1-8, loose epsilon, step TOU with 4 levels (prices 1,5,2,10 at T/4 intervals), machine rates [0.8,1.2].",
+      "mechanism_layer": "M5 (front_coverage_gap): coarse epsilon skips intermediate Cmax values, but step pricing creates multiple energy points per Cmax level, enhancing front density.",
+      "sweep_layer": "small uniform p_j, loose epsilon, many machines for energy diversity.",
+      "expected_delta_fs": 20,
+      "n_jobs_range": {
+        "min": 50,
+        "max": 100
+      },
+      "m_machines_range": {
+        "min": 10,
+        "max": 15
+      },
+      "horizon_T_range": {
+        "min": 130,
+        "max": 170
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 8
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "uniform",
+        "params": {
+          "min_rate": 0.8,
+          "max_rate": 1.2
+        }
+      },
+      "TOU_price_profile_type": "step_function",
+      "TOU_price_profile_params": {
+        "breakpoints_fraction": [
+          0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "prices": [
+          1,
+          5,
+          2,
+          10
+        ]
+      },
+      "epsilon_regime": "loose",
+      "expected_EHS_failure_mechanism": "M5",
+      "expected_EHS_failure_mechanism_evidence": "In a pure loose-epsilon sweep with smooth TOU, each khat may add only one or two points. Here, the step TOU forces multiple energy-cost trade-offs at each Cmax jump, multiplying the front growth per khat.",
+      "generated_instances_count": 8,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 100,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 80000,
+        "expected_seed_variance": "medium"
+      }
+    }
+  ]
+}
