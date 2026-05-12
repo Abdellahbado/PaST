@@ -84,42 +84,44 @@ Total cost: $0.0178.
 - `notes/c3_l2_counter_sweep_decision.md`
 - `notes/c3_l2_deepseek_counter_sweep_evidence.md`
 
-## C4: Validation — COMPLETED 2026-05-11
+## C4: Validation + Literature Baseline — COMPLETED 2026-05-11
 
-- Validation on fresh instances (no C3/C3-L2 seed reuse)
-- 12 families × 5 = 60 instances, n≤150, T≤200, 30s/90s
-- 120 EHS runs (2.6h total)
+### C4 Validation (12 families × 5 = 60 instances)
 
-**Results (60 instances):**
+| Arm | HY% | Mean Δfs | MC% | NT-MC-HY% |
+|-----|-----|----------|-----|-----------|
+| LLM L2 | 100% | 20.4 | 25% | 25% |
+| agent_manual_sweep | 100% | 38.2 | 50% | 50% |
+| Random | 93% | 2.6 | 0% | 0% |
 
-| Arm | N | Feasible | Evaluable | HY | HY% | Mean Δfs | MC% | NT-MC-HY% |
-|-----|---|----------|-----------|----|-----|----------|-----|-----------|
-| **LLM L2** | **20** | **20** | **20** | **20** | **100%** | **20.4** | **25%** | **25%** |
-| Human sweep | 20 | 20 | 20 | 20 | 100% | 38.2 | 50% | 50% |
-| Random | 20 | 15 | 15 | 14 | 93% | 2.6 | 0% | 0% |
+**Gate: MODERATE** — LLM ties on HY but loses NT-MC-HY.
+LLM M2 (asgh_lock_in) confirmed mechanism on 5/5 instances.
 
-**Gate: MODERATE** — LLM ties human on HY rate (100% vs 100%) but loses on NT-MC-HY (25% vs 50%).
+### C4-Lit: Literature Baseline (framing revision)
 
-### Key findings
-- **LLM Call2 transfer confirmed**: HY rate held at 100% across 4× more families (from 2→4 families, 6→20 instances)
-- **LLM M2 (asgh_lock_in)** confirmed mechanism on all 5/5 instances — the only family achieving 5/5 NT-MC-HY
-- **LLM M1, M3, M4** had 0/5 mechanism confirmation — mechanisms too subtle for operational rules at 30s budget
-- **Human loose_epsilon** produced massive Δfs (+50 to +116) via coarse epsilon → many khats → large growth — purely structural
-- **Human many_machines_sparse and mixed_job_sizes** got 5/5 NT-MC-HY each — nontrivial mechanism families
-- **Random** 75% generation quality (5 infeasible), 93% HY but tiny Δfs (mean=2.6) — saturating instances
-- **All 60 instances timed out on short budget** — Δfs metric dominated by budget truncation
+**Naming revision**: `human` renominated to `agent_manual_sweep` (internal control).
+Main baselines are now literature-derived generators.
 
-### Caveat
-The 30s budget was too short for all arms. Δfs differences reflect epsilon granularity
-(how many khats fit in the time window), not necessarily adversarial mechanism stress.
+| Arm (main) | HY% | Mean Δfs |
+|------------|-----|----------|
+| **LLM Call2** | **100%** | **20.4** |
+| Literature (Wang+Anghi) | 88% | 2.4 |
+| Random (schema) | 93% | 2.6 |
+
+| Arm (internal) | HY% | Mean Δfs |
+|----------------|-----|----------|
+| agent_manual_sweep | 100% | 38.2 |
+
+**Gate: STRONG** — LLM beats literature on HY rate (100% vs 88%) and Δfs (20.4 vs 2.4).
+
+### Literature baseline breakdown
+- **Wang medium-scale** (p_j~U[1,4], e∈{1,2,3}, c_t∈{1,2,3,4}): 15/20 HY (75%), mean Δfs=4.2
+- **Anghinolfi VLS capped** (p_j~U[1,12], e~U[1,6], c_t~U[1,8]): 20/20 HY (100%), mean Δfs=0.6
 
 ### Artifacts
-- `notes/c4_validation_design.md` — design doc with mechanism rules
-- `notes/c4_selected_families.json` — frozen family selection
-- `generated_instances/c4_validation/` — 60 instances
-- `eval/c4_validation_raw.csv` — 120 EHS runs
-- `eval/c4_validation_summary.csv` — 60 instance summaries
-- `notes/c4_validation_decision.md` — gate decision
-- `scripts/_c4_validation.py` — generation script
-- `scripts/_c4_eval_sequential.py` — evaluation script
-- `scripts/_c4_metrics_decision.py` — metrics + decision script
+- `families/literature_generators.json` — Wang + Anghinolfi generator specs
+- `generated_instances/c4_literature_baseline/` — 40 instances
+- `eval/c4_literature_baseline_raw.csv` — 80 EHS runs
+- `eval/c4_literature_baseline_summary.csv` — 40 instance summaries
+- `notes/c4_literature_baseline_decision.md` — gate decision
+- `scripts/_c4_literature_baseline.py` — full pipeline script

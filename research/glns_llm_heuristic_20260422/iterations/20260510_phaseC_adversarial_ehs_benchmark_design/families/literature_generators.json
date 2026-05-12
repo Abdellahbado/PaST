@@ -1,0 +1,127 @@
+{
+  "description": "Literature-derived benchmark generators for Phase C baseline comparison.",
+  "date": "2026-05-11",
+  "generators": [
+    {
+      "generator": "wang_mls_generator",
+      "source": "Wang et al. (2018) Journal of Cleaner Production 193; Gaggero et al. (2023) EJOR 311. Instances 31-60 (medium-scale).",
+      "hypothesis": "Medium-scale instances from the published benchmark family. p_j small (1-4), discrete machine rates and TOU prices, standard literature parameter ranges.",
+      "description": "Medium-scale Wang benchmark family, n in {30, 60, 100, 150}, capped T to 200 for Phase C compatibility.",
+      "family_name": "wang_literature_medium",
+      "n_jobs_range": {
+        "min": 30,
+        "max": 150
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 25
+      },
+      "horizon_T_range": {
+        "min": 100,
+        "max": 200
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 4
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "discrete_uniform",
+        "params": {
+          "values": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "TOU_price_profile_type": "discrete_uniform",
+      "TOU_price_profile_params": {
+        "values": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "mixed",
+      "expected_EHS_failure_mechanism_evidence": "Published benchmark family. Medium-scale instances designed to test solver scalability.",
+      "generated_instances_count": 20,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 100,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 500000,
+        "expected_seed_variance": "medium"
+      }
+    },
+    {
+      "generator": "anghinolfi_vls_capped",
+      "source": "Anghinolfi et al. (2021); Gaggero et al. (2023) EJOR 311. Instances 61-90 (large-scale). CAPPED for Phase C compatibility.",
+      "hypothesis": "Capped VLS-style instances. Larger p_j spread (1-12), more machines, richer TOU, but n/T capped for Phase C evaluation budget.",
+      "description": "CAPPED VLS variant: n=60-150, m=8-25, T=100-200, p_j~U[1,12], e_h~U[1,6], c_t~U[1,8]. NOT the original VLS benchmark.",
+      "family_name": "anghinolfi_vls_capped",
+      "n_jobs_range": {
+        "min": 60,
+        "max": 150
+      },
+      "m_machines_range": {
+        "min": 8,
+        "max": 25
+      },
+      "horizon_T_range": {
+        "min": 100,
+        "max": 200
+      },
+      "processing_time_distribution": {
+        "type": "uniform",
+        "params": {
+          "low": 1,
+          "high": 12
+        }
+      },
+      "machine_rate_distribution": {
+        "type": "continuous_uniform",
+        "params": {
+          "min_rate": 1.0,
+          "max_rate": 6.0
+        }
+      },
+      "TOU_price_profile_type": "continuous_uniform",
+      "TOU_price_profile_params": {
+        "min_price": 1.0,
+        "max_price": 8.0
+      },
+      "epsilon_regime": "medium",
+      "expected_EHS_failure_mechanism": "mixed",
+      "expected_EHS_failure_mechanism_evidence": "Larger p_j spread and wider e/c ranges than Wang. Should produce more diverse and harder scheduling problems.",
+      "generated_instances_count": 20,
+      "validity_constraints": {
+        "feasibility_guarantee": true,
+        "min_total_work": 150,
+        "n_per_machine_min": 3
+      },
+      "rejection_conditions": [
+        "sum(p_j) > m*T",
+        "all e[h] equal",
+        "all ct[t] equal",
+        "n < 2*m"
+      ],
+      "seed_behavior": {
+        "base_seed": 510000,
+        "expected_seed_variance": "medium"
+      }
+    }
+  ]
+}

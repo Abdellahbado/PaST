@@ -1,0 +1,16 @@
+{
+  "purpose": "C4 Literature baseline validation",
+  "date": "2026-05-11",
+  "generators": [
+    "wang_mls_generator",
+    "anghinolfi_vls_capped"
+  ],
+  "source": "families/literature_generators.json",
+  "n_instances_per_generator": 20,
+  "total_instances": 40,
+  "n_feasible": 40,
+  "budgets": {
+    "short": 30,
+    "long": 90
+  }
+}
