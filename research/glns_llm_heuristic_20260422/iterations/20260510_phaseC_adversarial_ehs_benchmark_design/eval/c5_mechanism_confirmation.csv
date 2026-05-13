@@ -1,0 +1,28 @@
+instance_id,arm,family_name,expected_mechanism,fs_30,fs_120,fs_300,delta_fs_120_300,persistent_hard,mechanism_confirmed,mc_reason,nontrivial_mc
+c5_agent_manual_sweep_human_mixed_job_sizes_230000,agent_manual_sweep,human_mixed_job_sizes,asgh_lock_in,4,16,45,29,True,True,fs=4-16-45 d30_120=12 rt_m=124s,True
+c5_agent_manual_sweep_human_mixed_job_sizes_230001,agent_manual_sweep,human_mixed_job_sizes,asgh_lock_in,4,17,71,54,True,True,fs=4-17-71 d30_120=13 rt_m=122s,True
+c5_agent_manual_sweep_human_mixed_job_sizes_230002,agent_manual_sweep,human_mixed_job_sizes,asgh_lock_in,4,15,32,17,True,True,fs=4-15-32 d30_120=11 rt_m=126s,True
+c5_agent_manual_sweep_human_tight_epsilon_220000,agent_manual_sweep,human_tight_epsilon,first_khat_dominance,12,48,113,65,True,False,to_s=True fs_s=12 d30_120=36,False
+c5_agent_manual_sweep_human_tight_epsilon_220001,agent_manual_sweep,human_tight_epsilon,first_khat_dominance,39,125,124,-1,False,False,to_s=True fs_s=39 d30_120=86,False
+c5_agent_manual_sweep_human_tight_epsilon_220002,agent_manual_sweep,human_tight_epsilon,first_khat_dominance,21,88,121,33,True,False,to_s=True fs_s=21 d30_120=67,False
+c5_literature_anghinolfi_vls_capped_550000,literature,anghinolfi_vls_capped,mixed,1,1,1,0,False,False,persist=False d120_300=0,False
+c5_literature_anghinolfi_vls_capped_550001,literature,anghinolfi_vls_capped,mixed,1,1,6,5,False,False,persist=False d120_300=5,False
+c5_literature_anghinolfi_vls_capped_550002,literature,anghinolfi_vls_capped,mixed,1,1,2,1,False,False,persist=False d120_300=1,False
+c5_literature_wang_literature_medium_540000,literature,wang_literature_medium,mixed,1,4,13,9,False,False,persist=False d120_300=9,False
+c5_literature_wang_literature_medium_540001,literature,wang_literature_medium,mixed,1,2,2,0,False,False,persist=False d120_300=0,False
+c5_literature_wang_literature_medium_540002,literature,wang_literature_medium,mixed,33,35,39,4,False,False,persist=False d120_300=4,False
+c5_llm_l2_hybrid_M1_tight_hetero_rates_firstkhat_dom_290000,llm_l2,hybrid_M1_tight_hetero_rates_firstkhat_dom,first_khat_dominance,7,13,85,72,True,False,to_s=True fs_s=7 d30_120=6,False
+c5_llm_l2_hybrid_M1_tight_hetero_rates_firstkhat_dom_290001,llm_l2,hybrid_M1_tight_hetero_rates_firstkhat_dom,first_khat_dominance,19,94,94,0,True,False,to_s=True fs_s=19 d30_120=75,False
+c5_llm_l2_hybrid_M1_tight_hetero_rates_firstkhat_dom_290002,llm_l2,hybrid_M1_tight_hetero_rates_firstkhat_dom,first_khat_dominance,10,87,86,-1,False,False,to_s=True fs_s=10 d30_120=77,False
+c5_llm_l2_hybrid_M2_tight_steprates_asghlock_280000,llm_l2,hybrid_M2_tight_steprates_asghlock,asgh_lock_in,19,64,61,-3,False,False,fs=19-64-61 d30_120=45 rt_m=82s,False
+c5_llm_l2_hybrid_M2_tight_steprates_asghlock_280001,llm_l2,hybrid_M2_tight_steprates_asghlock,asgh_lock_in,1,26,63,37,True,True,fs=1-26-63 d30_120=25 rt_m=121s,True
+c5_llm_l2_hybrid_M2_tight_steprates_asghlock_280002,llm_l2,hybrid_M2_tight_steprates_asghlock,asgh_lock_in,5,31,81,50,True,True,fs=5-31-81 d30_120=26 rt_m=121s,True
+c5_random_random_004_210000,random,random_004,load_imbalance,1,3,6,3,False,False,dc_l=200 T=200,False
+c5_random_random_004_210001,random,random_004,load_imbalance,1,1,2,1,False,False,dc_l=200 T=200,False
+c5_random_random_004_210002,random,random_004,load_imbalance,1,1,2,1,False,False,dc_l=200 T=200,False
+c5_random_random_005_220000,random,random_005,first_khat_dominance,3,7,20,13,True,True,to_s=True fs_s=3 d30_120=4,True
+c5_random_random_005_220001,random,random_005,first_khat_dominance,4,9,21,12,True,False,to_s=True fs_s=4 d30_120=5,False
+c5_random_random_005_220002,random,random_005,first_khat_dominance,3,7,19,12,True,True,to_s=True fs_s=3 d30_120=4,True
+c5_simple_stress_simple_stress_tight_steprates_290000,simple_stress,simple_stress_tight_steprates,asgh_lock_in,12,19,19,0,True,False,fs=12-19-19 d30_120=7 rt_m=30s,False
+c5_simple_stress_simple_stress_tight_steprates_290001,simple_stress,simple_stress_tight_steprates,asgh_lock_in,17,17,18,1,False,False,fs=17-17-18 d30_120=0 rt_m=32s,False
+c5_simple_stress_simple_stress_tight_steprates_290002,simple_stress,simple_stress_tight_steprates,asgh_lock_in,19,18,20,2,False,False,fs=19-18-20 d30_120=-1 rt_m=26s,False

@@ -2,12 +2,14 @@
 
 ## Active Blockers
 
-None. C4 validation complete.
+None. C5 validation complete. Phase C research thread is closed.
 
-## C4 Observations
+## C5 Observations (2026-05-13)
 
-- **Budget too short for mechanism discrimination**: All 60 instances timed out on 30s short budget. Δfs differences reflect epsilon granularity, not adversarial stress. Consider 60s/120s for any follow-up.
-- **NT-MC-HY gap (25% vs 50%)**: LLM mechanism families M1, M3, M4 got 0/5 mechanism confirmation. Operational rules may be too strict, or mechanisms too subtle at 30s.
+- **Multi-budget confirms genuine difficulty**: LLM M2 family shows persistent A-SGH lock-in from 30s to 120s/300s.
+- **random_005 is a lucky configuration**: Tight epsilon + step rates from random generation. Shows the configuration space has high-leverage ingredients. Mitigating: LLM finds them more consistently.
+- **Literature baselines trivially fail**: Wang/Anghinolfi produce instances with tiny fronts at all budgets. Good for thesis framing.
+- **Agent_manual_sweep still leads**: 83% PH vs 67% LLM. Reported honestly as internal control.
 
 ## Resolved Blockers
 
@@ -23,8 +25,8 @@ Cooperative deadline checks in `glns/paper_heuristics.py`.
 ### B-C3.0: DeepSeek API unreachable via Python requests — RESOLVED
 curl via subprocess.
 
-## Potential Concerns (for C5 or thesis)
+### B-C4: Short budget too short for mechanism discrimination — RESOLVED by C5
+C5 added 120s/300s budgets. LLM M2 confirmed on 2/3 instances under persistent-hard metric.
 
-- Budget re-calibration needed for mechanism-rich evaluation
-- NT-MC-HY operational rules need refinement
-- C5 full campaign would require 8+ hours of EHS runtime
+### B-C4.2: NT-MC-HY gap between LLM and agent — RESOLVED
+Gap narrows under multi-budget metric (LLM 33% MC vs agent 50% MC at C5).

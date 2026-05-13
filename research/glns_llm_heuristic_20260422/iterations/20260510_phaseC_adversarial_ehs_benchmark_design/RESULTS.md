@@ -84,6 +84,62 @@ Total cost: $0.0178.
 - `notes/c3_l2_counter_sweep_decision.md`
 - `notes/c3_l2_deepseek_counter_sweep_evidence.md`
 
+## C5: Multi-Budget Robust Validation — COMPLETED 2026-05-13
+
+**27 instances × 3 budgets = 81 EHS runs (1.8h)**
+
+Test: Does LLM difficulty persist beyond 30s short-budget regime?
+Arms: LLM Call2 (M1+M2), Literature (Wang+Anghi), Random (004+005),
+       agent_manual_sweep (internal), simple_stress (non-LLM).
+
+### Main comparison (persistent-hard = difficulty from 30s→120s or further)
+
+| Arm | Persist% | MC% | d30-300 | d120-300 |
+|-----|----------|-----|---------|----------|
+| **LLM Call2** | **67%(4/6)** | **33%(2/6)** | **68.2** | **25.8** |
+| Literature | 0%(0/6) | 0%(0/6) | 4.2 | 3.2 |
+| Random | 50%(3/6) | 33%(2/6) | 9.5 | 7.0 |
+| Simple Stress | 33%(1/3) | 0%(0/3) | 3.0 | 1.0 |
+
+| Arm (internal) | Persist% | MC% |
+|----------------|----------|-----|
+| agent_manual_sweep | 83%(5/6) | 50%(3/6) |
+
+**Gate: STRONG**
+
+### Per-family results
+
+**hybrid_M2_tight_steprates_asghlock**: 2/3 PH, 2/3 MC, 2/3 NTM
+  d30-300: [+42, +62, +76], d120-300: [-3, +37, +50]
+
+**hybrid_M1_tight_hetero_rates_firstkhat_dom**: 2/3 PH, 0/3 MC
+  d30-300: [+78, +75, +76], d120-300: [+72, +0, -1]
+
+**human_mixed_job_sizes** (internal): 3/3 PH, 3/3 MC, 3/3 NTM
+  d30-300: [+41, +67, +28], d120-300: [+29, +54, +17]
+
+**random_005**: 3/3 PH, 2/3 MC (lucky random draw of tight epsilon + step rates)
+
+**Literature (Wang+Anghi)**: 0/6 PH. Trivial front growth at all budgets.
+
+### Key findings
+- LLM M2 difficulty persists to 120s/300s — NOT just a 30s artifact
+- LLM M2 has mechanism-confirmed A-SGH lock-in on 2/3 instances
+- Literature baselines are poor adversarial test instances (tiny fronts, saturate)
+- random_005 matches LLM per-family on PH (lucky configuration)
+- agent_manual_sweep still leads but margin narrows with multi-budget metric
+
+### Artifacts
+- `scripts/_c5_robust_validation.py` — full pipeline
+- `eval/c5_raw_runs.csv` — 81 EHS runs
+- `eval/c5_instance_summary.csv` — 27 instance summaries
+- `eval/c5_family_summary.csv` — per-family aggregation
+- `eval/c5_mechanism_confirmation.csv` — per-instance mechanism check
+- `families/c5_frozen_families.json` — frozen family selection
+- `C5_PROTOCOL.md` — evaluation protocol
+- `C5_RESULTS.md` — detailed results
+- `C5_DECISION.md` — gate decision + paper-safe claims
+
 ## C4: Validation + Literature Baseline — COMPLETED 2026-05-11
 
 ### C4 Validation (12 families × 5 = 60 instances)

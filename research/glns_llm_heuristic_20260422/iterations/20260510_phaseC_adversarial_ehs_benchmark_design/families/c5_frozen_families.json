@@ -1,0 +1,35 @@
+{
+  "validation": "C5",
+  "frozen": true,
+  "arms": {
+    "llm_l2": {
+      "families": [
+        "hybrid_M2_tight_steprates_asghlock",
+        "hybrid_M1_tight_hetero_rates_firstkhat_dom"
+      ]
+    },
+    "literature": {
+      "generators": [
+        "wang_mls_generator",
+        "anghinolfi_vls_capped"
+      ]
+    },
+    "random": {
+      "families": [
+        "random_004",
+        "random_005"
+      ]
+    },
+    "agent_manual_sweep": {
+      "families": [
+        "human_tight_epsilon",
+        "human_mixed_job_sizes"
+      ]
+    },
+    "simple_stress": {
+      "families": [
+        "simple_stress_tight_steprates"
+      ]
+    }
+  }
+}

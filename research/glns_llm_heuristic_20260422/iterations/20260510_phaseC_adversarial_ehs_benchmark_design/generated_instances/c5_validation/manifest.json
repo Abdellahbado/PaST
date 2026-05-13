@@ -1,0 +1,32 @@
+{
+  "purpose": "C5 Robust Multi-Budget Adversarial Validation",
+  "date": "2026-05-13",
+  "budgets": {
+    "short": 30,
+    "medium": 120,
+    "long": 300
+  },
+  "arms": {
+    "llm_l2": {
+      "n_instances": 6,
+      "n_feasible": 6
+    },
+    "literature": {
+      "n_instances": 6,
+      "n_feasible": 6
+    },
+    "random": {
+      "n_instances": 6,
+      "n_feasible": 6
+    },
+    "agent_manual_sweep": {
+      "n_instances": 6,
+      "n_feasible": 6
+    },
+    "simple_stress": {
+      "n_instances": 3,
+      "n_feasible": 3
+    }
+  },
+  "total_instances": 27
+}
