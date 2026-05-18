@@ -33,6 +33,7 @@ namespace dp
         std::vector<double> c_star;
         std::vector<double> c_start;
         std::vector<double> c_end;
+        MachineStateConfig config;
         double p_proc = 0.0;
         int early = 0;
         int late = 0;
@@ -54,6 +55,9 @@ namespace dp
     MachineStateConfig make_paper_nosby_config();
     MachineStateConfig make_paper_twosby_config();
     std::vector<double> build_proc_prefix(const std::vector<double> &prices, double p_proc);
+    // Stateless special case: free idling, no startup/shutdown costs, processing
+    // power = 1 so the prefix is the raw price prefix.
+    SPACESResult make_stateless_spaces(int T);
     SPACESResult compute_spaces(
         const std::vector<double> &prices,
         const MachineStateConfig &config,
@@ -89,7 +93,62 @@ namespace dp
         int T,
         const SPACESResult &spaces,
         int n_random = 50,
-        double known_lb = 0.0);
+        double known_lb = 0.0,
+        std::string *out_best_policy = nullptr,
+        int *out_finite_candidates = nullptr,
+        double *out_time_to_first_ub_sec = nullptr,
+        std::vector<int> *out_best_seq = nullptr);
+
+    // PLAN33: polish a given sequence with local search (swap hill climbing).
+    double polish_best_sequence_ub(
+        std::vector<int> &best_seq,
+        double best_ub,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        double time_budget_sec = 2.0);
+
+    // Compute a good upper bound by partitioning jobs across M parallel machines.
+    // Each machine independently schedules its subset via solve_fixed_sequence.
+    // Tries several load-balancing partition policies (LPT, SPT, alternating,
+    // round-robin, random). Returns first feasible total cost, or kInf.
+    double compute_parallel_initial_ub(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        int M,
+        int n_random = 50,
+        double known_lb = 0.0,
+        std::string *out_policy = nullptr,
+        int *out_machines_used = nullptr,
+        int *out_failed_machines = nullptr);
+
+    double guided_completion_ub(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        const std::vector<double> &completion_dp,
+        int completion_RW,
+        int completion_rw_scale,
+        int n_rollouts = 8,
+        int top_k = 4);
+
+    double completion_guided_beam_ub(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        const std::vector<double> &completion_dp,
+        int completion_RW,
+        int completion_rw_scale,
+        double known_ub = kInf,
+        int beam_width = 256,
+        double time_limit_sec = 30.0);
 
     // Relaxed DP lower bound: state = (t_end, remaining_work) only.
     // Drops the per-type job count constraint, allowing any job length at each step.
@@ -111,20 +170,266 @@ namespace dp
         double bin_pack_ub;
         int64_t states_reached = 0;
         int64_t states_expanded = 0;
+        std::vector<Segment> block_profile;
+        std::vector<Segment> merged_blocks;
         // Expose relaxed DP cost table for smart reconstruction
         std::vector<double> rdp;  // dp[(T+2) * RW], flattened 2D array
         int RW = 0;               // row width = total_rw + 1
         int block_count = 0;
         int merged_block_count = 0;
+        int merged_gcd_bad_count = 0;
+        int merged_local_unreachable_count = 0;
         std::string pack_solver = "default";
         std::string pack_external_status = "disabled";
         std::string pack_method = "none";
         std::string pack_outcome = "not_attempted";
+        std::string merged_caps_signature;
+        std::string merged_bad_caps_signature;
         double t_pack_external = 0.0;
         double t_pack_heuristic = 0.0;
         double t_pack_dfs = 0.0;
         double t_pack_block_dp = 0.0;
+        double t_pack_profile_recovery = 0.0;
+        double t_pack_merge_blocks = 0.0;
+        double t_pack_to_first_candidate = 0.0;
+        double t_pack_ffd_only = 0.0;
+        int step2_reached = 0;
+        int step2_produced_ub = 0;
+        // PLAN15 dense-unit diagnostics (forward-relax/profile split)
+        double t_dense_spaces_or_lb = 0.0;
+        double t_dense_profile_dp = 0.0;
+        double t_dense_profile_recovery = 0.0;
+        double t_dense_block_build = 0.0;
+        double t_dense_job_materialization = 0.0;
+        double t_dense_step2_pack = 0.0;
+        double t_dense_pre_step2_total = 0.0;
+        int pack_profiles_tried = 0;
+        int pack_co_optimal_profiles = 0;
+        double block_dp_state_space = 0.0;
+        double block_dp_total_compositions = 0.0;
+        double block_dp_total_comp_estimate = 0.0;
+        double block_dp_max_comp_estimate = 0.0;
+        double block_dp_max_compositions_per_block = 0.0;
+        std::string block_dp_status = "not_attempted";
+        int block_dp_timed_out = 0;
+        double beam_ub_for_exact_l2 = kInf;
+        double exact_l2_ub = kInf;
+        double t_exact_l2 = 0.0;
+        double exact_l2_nodes = 0.0;
+        int exact_l2_closed = 0;
+        int exact_l2_improved_over_beam = 0;
+        int exact_l2_beam_optimal_in_pool = 0;
+        std::string exact_l2_status = "not_attempted";
+        double profile_beam_base_width = 0.0;
+        double profile_beam_avg_width = 0.0;
+        double profile_beam_max_width = 0.0;
+        double profile_beam_states_considered = 0.0;
+        double profile_beam_states_kept = 0.0;
+        double profile_beam_pruned_over = 0.0;
+        double profile_beam_pruned_suffix = 0.0;
+        double profile_beam_pruned_discrepancy = 0.0;
+        int profile_beam_discrepancy_budget = 0;
+        int profile_beam_discrepancy_depth = 0;
+        std::string profile_beam_status = "not_attempted";
+        int profile_beam_timed_out = 0;
+        std::string profile_beam_key_multi_policy = "off";
+        int profile_beam_key_multi_max = 1;
+        double profile_beam_key_multi_score_eps = 0.0;
+        double profile_beam_key_multi_diversity_eps = 0.0;
+        // PLAN27 residual-aware + late ambiguity diagnostics
+        std::string profile_beam_score_policy = "default";
+        double profile_beam_residual_weight = 0.0;
+        double profile_beam_residual_mean_penalty = 0.0;
+        double profile_beam_residual_max_penalty = 0.0;
+        double profile_beam_late_frac = 0.0;
+        int profile_realization_hardest_first = 0;
+        int profile_realization_exact_suffix_prune = 0;
+        double t_pack_profile_beam = 0.0;
+        double t_pack_block_dp_exact = 0.0;
+        double profile_step2_ub = kInf;
+        double profile_beam_candidate_ub = kInf;
+        double profile_beam_plus_candidate_ub = kInf;
+        double profile_exact_candidate_ub = kInf;
+        int profile_beam_improved_over_step2 = 0;
+        int profile_exact_improved_over_step2 = 0;
+        std::string profile_incumbent_source = "auto";
+        double profile_incumbent_ub_for_exact = kInf;
+        std::string profile_selector_policy = "off";
+        std::string profile_selector_decision = "legacy";
+        std::string profile_selector_reason = "selector_disabled";
+        int profile_selector_has_one = 0;
+        int profile_selector_contiguous = 0;
+        int profile_selector_multiplicity = 0;
+        double profile_selector_semigroup_density = 0.0;
+        int profile_selector_hard_alarm = 0;
+        int profile_exact_primary_fallback_to_beam = 0;
+        std::string profile_exact_primary_status_before_fallback = "not_applicable";
+        std::string profile_step3_incumbent_mode = "not_applicable";
+        int dense_unit_fastpath_active = 0;
+        int count_based_ffd_active = 0;
+        int dense_unit_relax_fastpath_active = 0;
+        int dense_unit_energy_profile_active = 0;
+        int dense_unit_relax_fastpath_fallback = 0;
+        int dense_unit_energy_profile_fallback = 0;
+        std::string dense_unit_relax_mode = "none";
+        double ec_generated_patterns_total = 0.0;
+        double ec_generated_patterns_max_block = 0.0;
+        double ec_retained_patterns_total = 0.0;
+        double ec_retained_patterns_max_block = 0.0;
+        std::string ec_retained_patterns_signature;
+        double ec_time_completion = 0.0;
+        double ec_time_pattern_generation = 0.0;
+        double ec_time_exact_core = 0.0;
+        double ec_pruned_core_window = 0.0;
+        double ec_pruned_suffix = 0.0;
+        double ec_pruned_transition = 0.0;
+        double ec_pruned_bound = 0.0;
+        int ec_delta_used = -1;
+        int ec_fixed_blocks = 0;
+        int ec_two_phase_used = 0;
+        double ec_phase1_feasible_ub = kInf;
+        double ec_time_phase1 = 0.0;
+        // PLAN24: beam chosen counts for exact corridor
+        std::vector<std::vector<int>> profile_beam_chosen_counts;
+        std::vector<int> profile_beam_block_order;
+        // PLAN28: block-realizability diagnostics
+        int block_realiz_diag_active = 0;
+        int block_realiz_blocks_total = 0;
+        int block_realiz_bad_blocks = 0;
+        double block_realiz_bad_rate = 0.0;
+        int block_realiz_first_bad_block = -1;
+        double block_realiz_min_finite_patterns = 0.0;
+        double block_realiz_mean_finite_patterns = 0.0;
+        int block_realiz_base_path_survives = 0;
+        std::string block_realiz_base_reject_reason = "not_run";
+        double block_realiz_diag_time_sec = 0.0;
+        int block_realiz_diag_skipped = 0;
+        std::string block_realiz_diag_skip_reason;
+        // Per-block array (CSV-safe concatenation for raw output)
+        std::string block_realiz_per_block_payload;
+        // PLAN29: multi-view block reconstruction diagnostics
+        std::string block_view_policy = "baseline";
+        int block_view_original_blocks = 0;
+        int block_view_final_blocks = 0;
+        int block_view_removed_boundaries = 0;
+        int block_view_target_b = 0;
+        int block_view_price_preserve_used = 0;
+        int block_view_arith_adaptive_used = 0;
+        int block_view_selected = 0;
+        int block_view_eval_count = 0;
+        double block_view_best_ub = kInf;
+        double block_view_time_sec = 0.0;
     };
+
+    struct ExactDPDiagnostics
+    {
+        std::string mode = "none";
+        std::string variant = "p0";
+        double initial_ub = kInf;
+        double final_ub = kInf;
+        double elapsed_sec = 0.0;
+        double states_reached = 0.0;
+        double states_expanded = 0.0;
+        double pruned_bound = 0.0;
+        double pruned_relaxed = 0.0;
+        double pruned_completion = 0.0;
+        double pruned_type_aware = 0.0;
+        double pruned_dominance = 0.0;
+        int timed_out = 0;
+        int exhaustive = 0;
+        // PLAN24 corridor diagnostics
+        int corridor_enabled = 0;
+        int corridor_delta = 0;
+        double corridor_pruned = 0.0;
+        int corridor_infeasible = 0;
+        // PLAN24B corridor force-entry diagnostics
+        std::string stop_reason = "none";
+    };
+
+    ExactDPDiagnostics consume_last_exact_dp_diagnostics();
+
+    // PLAN24: beam-guided exact corridor
+    struct ExactCorridor
+    {
+        bool enabled = false;
+        int delta = 0;
+        std::vector<int> prefix_work;                // size = B+1
+        std::vector<std::vector<int>> prefix_counts; // size = B+1, each size K
+    };
+    void set_exact_corridor(const ExactCorridor &corridor);
+    void clear_exact_corridor();
+
+    // PLAN25/PLAN26: local corridor DP diagnostics
+    struct LocalCorridorDiag
+    {
+        int enabled = 0;
+        int delta = 0;
+        std::string status = "not_attempted";
+        int layers = 0;
+        int64_t states_seen = 0;
+        int states_kept_max = 0;
+        int64_t states_pruned = 0;
+        int64_t transitions_considered = 0;
+        int64_t transitions_kept = 0;
+        double time_sec = 0.0;
+        double best_ub = kInf;
+        int closed = 0;
+        std::string stop_reason = "none";
+        int memory_safe = 1;
+        // PLAN26 alignment / validation diagnostics
+        int beam_counts_size = 0;
+        int merged_blocks = 0;
+        int block_profile_blocks = 0;
+        int block_count_mismatch = 0;
+        int target_offset_l1 = 0;
+        int target_in_corridor = 0;
+        int base_candidates_finite = 0;
+        int empty_candidate_blocks = 0;
+        int first_empty_layer = -1;
+        int base_path_survives = 0;
+        double base_path_cost = kInf;
+        std::string base_path_reject_reason = "none";
+    };
+
+    double beam_corridor_local_dp(
+        const std::vector<int> &lengths,
+        const std::vector<int> &totals,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        const std::vector<Segment> &merged_seg,
+        const std::vector<std::vector<int>> &beam_chosen_counts,
+        const std::vector<int> &block_order,
+        double known_ub,
+        double time_limit_sec,
+        int delta,
+        LocalCorridorDiag &diag);
+
+    struct RelaxedTableResult
+    {
+        std::vector<double> rdp;
+        std::vector<double> off_rdp;
+        int RW = 0;
+        int rw_scale = 1;
+        double lb = kInf;
+    };
+
+    RelaxedTableResult compute_relaxed_dp_table(
+        const std::vector<int> &lengths,
+        int total_rw,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        RelaxationMode mode = RelaxationMode::Semigroup);
+
+    RelaxedTableResult compute_relaxed_completion_table(
+        const std::vector<int> &lengths,
+        int total_rw,
+        const std::vector<double> &prefix_proc,
+        int T,
+        const SPACESResult &spaces,
+        RelaxationMode mode = RelaxationMode::Semigroup);
+
     RelaxedDPResult solve_relaxed_dp_with_binpack(
         const std::vector<int> &lengths,
         const std::vector<int> &totals,
@@ -236,7 +541,10 @@ namespace dp
         double time_limit_sec = 300.0,
         const std::vector<double> *relaxed_dp = nullptr,
         int relaxed_RW = 0,
-        double relaxed_lb = kInf);
+        double relaxed_lb = kInf,
+        const std::vector<double> *completion_dp = nullptr,
+        int completion_RW = 0,
+        int completion_rw_scale = 1);
 
     // ── New LB hierarchy bounds ──────────────────────────────────────────
 

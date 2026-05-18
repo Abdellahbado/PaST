@@ -13,6 +13,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <unordered_set>
 
 namespace
 {
@@ -143,16 +144,276 @@ namespace
         bool use_exact_dp = true;
         bool profile_bounds = false; // true → compute all LB stages even if gap closes
         bool use_exact_guidance = false; // run semigroup DP only to guide sparse exact DP
+        bool use_feas_profile_pack = false; // run R_feas + recovered-profile packing before exact
+        bool adaptive_pipeline = true; // skip wasteful stages for known instance regimes
         // When both use_heuristics=false and use_relaxation_lb=false,
         // we get exact-DP-only (baseline).
     };
 
-    using Clock = std::chrono::steady_clock;
-    using Dur = std::chrono::duration<double>;
+using Clock = std::chrono::steady_clock;
+using Dur = std::chrono::duration<double>;
+
+static bool env_flag_exact(const char *name)
+{
+    const char *raw = std::getenv(name);
+    return raw && std::string(raw) == "1";
+}
+
+static int env_int_exact(const char *name, int fallback)
+{
+    const char *raw = std::getenv(name);
+    if (!raw || !*raw)
+        return fallback;
+    char *end = nullptr;
+    long v = std::strtol(raw, &end, 10);
+    if (end == raw)
+        return fallback;
+    if (v < std::numeric_limits<int>::min() || v > std::numeric_limits<int>::max())
+        return fallback;
+    return static_cast<int>(v);
+}
+
+static double env_double_exact(const char *name, double fallback)
+{
+    const char *raw = std::getenv(name);
+    if (!raw || !*raw)
+        return fallback;
+    char *end = nullptr;
+    double v = std::strtod(raw, &end);
+    if (end == raw)
+        return fallback;
+    return v;
+}
+
+static int64_t env_int64_exact(const char *name, int64_t fallback)
+{
+    const char *raw = std::getenv(name);
+    if (!raw || !*raw)
+        return fallback;
+    char *end = nullptr;
+    long long v = std::strtoll(raw, &end, 10);
+    if (end == raw)
+        return fallback;
+    return static_cast<int64_t>(v);
+}
+
+static std::string env_str_exact(const char *name)
+{
+    const char *raw = std::getenv(name);
+    return raw ? std::string(raw) : std::string();
+}
+
+static std::string to_lower_ascii_copy(std::string s)
+{
+    for (char &ch : s)
+    {
+        if (ch >= 'A' && ch <= 'Z')
+            ch = static_cast<char>(ch - 'A' + 'a');
+    }
+    return s;
+}
+
+static std::string canonical_exact_variant(std::string v)
+{
+    v = to_lower_ascii_copy(v);
+    if (v.empty() || v == "baseline")
+        return "p0";
+    if (v == "type" || v == "type_aware")
+        return "p1";
+    if (v == "ordering" || v == "inc_order")
+        return "p2";
+    if (v == "type_order" || v == "p1p2")
+        return "p3";
+    if (v == "p0" || v == "p1" || v == "p2" || v == "p3" || v == "p4")
+        return v;
+    return "p0";
+}
+
+static double completion_lookup(
+    const dp::RelaxedTableResult &tab,
+    const std::vector<double> &arr,
+    int T,
+    int t,
+    int rw)
+{
+    if (arr.empty() || tab.RW <= 0)
+        return dp::kInf;
+    if (t < 0)
+        t = 0;
+    if (t > T + 1)
+        t = T + 1;
+    int scaled_rw = tab.rw_scale > 1 ? rw / tab.rw_scale : rw;
+    if (scaled_rw < 0 || scaled_rw >= tab.RW)
+        return dp::kInf;
+    return arr[static_cast<std::size_t>(t) * tab.RW + scaled_rw];
+}
+
+static dp::RelaxedDPResult run_partial_binpack_stage(
+    const std::vector<int> &lens,
+    const std::vector<int> &tots,
+    const std::vector<double> &prefix,
+    int T,
+    const dp::SPACESResult &spaces)
+{
+    const int max_auto_tracked = env_int_exact("PAST_PARTIAL_MAX_TRACKED", 1);
+    const bool use_remainder_feas = !env_flag_exact("PAST_PARTIAL_DISABLE_REMAINDER_FEAS");
+    const int K = static_cast<int>(lens.size());
+    int trials = std::max(1, env_int_exact("PAST_PARTIAL_TRACKED_TRIALS", 1));
+
+    auto run_one = [&](std::vector<int> tracked) -> dp::RelaxedDPResult
+    {
+        return dp::solve_relaxed_dp_lb_partial_with_binpack(
+            lens, tots, prefix, T, spaces, std::move(tracked), max_auto_tracked, use_remainder_feas);
+    };
+
+    dp::RelaxedDPResult best = run_one({});
+    if (trials <= 1 || K <= 1)
+        return best;
+
+    std::vector<int> order(K);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](int a, int b)
+              {
+                  if (tots[a] != tots[b])
+                      return tots[a] < tots[b];
+                  if (lens[a] != lens[b])
+                      return lens[a] > lens[b];
+                  return a < b;
+              });
+
+    auto better = [](const dp::RelaxedDPResult &cand, const dp::RelaxedDPResult &cur) -> bool
+    {
+        const bool cand_pack = cand.pack_outcome == "feasible";
+        const bool cur_pack = cur.pack_outcome == "feasible";
+        if (cand_pack != cur_pack)
+            return cand_pack;
+        const bool cand_lb = std::isfinite(cand.lb) && cand.lb < dp::kInf * 0.5;
+        const bool cur_lb = std::isfinite(cur.lb) && cur.lb < dp::kInf * 0.5;
+        if (cand_lb != cur_lb)
+            return cand_lb;
+        if (cand_lb && cur_lb && std::fabs(cand.lb - cur.lb) > 1e-9)
+            return cand.lb > cur.lb;
+        const bool cand_ub = std::isfinite(cand.bin_pack_ub) && cand.bin_pack_ub < dp::kInf * 0.5;
+        const bool cur_ub = std::isfinite(cur.bin_pack_ub) && cur.bin_pack_ub < dp::kInf * 0.5;
+        if (cand_ub != cur_ub)
+            return cand_ub;
+        if (cand_ub && cur_ub && std::fabs(cand.bin_pack_ub - cur.bin_pack_ub) > 1e-9)
+            return cand.bin_pack_ub < cur.bin_pack_ub;
+        return false;
+    };
+
+    int tried = 0;
+    if (max_auto_tracked >= 2 && K >= 2)
+    {
+        for (int a = 0; a < K; ++a)
+        {
+            for (int b = a + 1; b < K; ++b)
+            {
+                if (++tried > trials)
+                    break;
+                auto cand = run_one({order[a], order[b]});
+                if (better(cand, best))
+                    best = std::move(cand);
+                if (best.pack_outcome == "feasible")
+                    break;
+            }
+            if (tried >= trials || best.pack_outcome == "feasible")
+                break;
+        }
+    }
+    else
+    {
+        for (int j : order)
+        {
+            if (++tried > trials)
+                break;
+            auto cand = run_one({j});
+            if (better(cand, best))
+                best = std::move(cand);
+            if (best.pack_outcome == "feasible")
+                break;
+        }
+    }
+    return best;
+}
 
     bool is_valid_relax_lb(double v)
     {
         return std::isfinite(v) && v < dp::kInf * 0.5;
+    }
+
+    bool use_suffix_completion_guidance()
+    {
+        const char *v = std::getenv("PAST_DISABLE_SUFFIX_COMPLETION");
+        if (!v)
+            return true;
+        std::string s(v);
+        return !(s == "1" || s == "true" || s == "TRUE" || s == "yes" || s == "YES");
+    }
+
+    bool use_guided_incumbent_only()
+    {
+        const char *v = std::getenv("PAST_GUIDED_UB_ONLY");
+        if (!v)
+            return false;
+        std::string s(v);
+        return (s == "1" || s == "true" || s == "TRUE" || s == "yes" || s == "YES");
+    }
+
+    bool use_beam_incumbent_only()
+    {
+        const char *v = std::getenv("PAST_BEAM_UB_ONLY");
+        if (!v)
+            return false;
+        std::string s(v);
+        return (s == "1" || s == "true" || s == "TRUE" || s == "yes" || s == "YES");
+    }
+
+    int beam_width_setting()
+    {
+        const char *v = std::getenv("PAST_BEAM_WIDTH");
+        if (!v)
+            return 256;
+        try
+        {
+            return std::max(1, std::stoi(std::string(v)));
+        }
+        catch (const std::exception &)
+        {
+            return 256;
+        }
+    }
+
+    bool adaptive_pipeline_enabled()
+    {
+        const char *v = std::getenv("PAST_DISABLE_ADAPTIVE_PIPELINE");
+        if (!v)
+            return true;
+        std::string s(v);
+        return !(s == "1" || s == "true" || s == "TRUE" || s == "yes" || s == "YES");
+    }
+
+    int adaptive_feas_k_min()
+    {
+        return env_int_exact("PAST_ADAPTIVE_FEAS_K_MIN", 5);
+    }
+
+    bool should_adaptive_jump_to_exact(
+        int K,
+        double ub,
+        const std::string &pack_outcome,
+        bool use_exact_shortcut,
+        bool exact_enabled,
+        bool adaptive_enabled,
+        bool profile_bounds)
+    {
+        if (!exact_enabled || use_exact_shortcut || !adaptive_enabled || profile_bounds)
+            return false;
+        if (K < adaptive_feas_k_min())
+            return false;
+        if (!(ub < dp::kInf * 0.5))
+            return false;
+        return pack_outcome == "feasible" || pack_outcome == "exact";
     }
 
     // ---------------------------------------------------------------------------
@@ -163,7 +424,8 @@ namespace
         const std::vector<double> &prices,
         const std::vector<int> &jobs,
         const std::string &machine_type,
-        const AblationConfig &ab)
+        const AblationConfig &ab,
+        double time_limit = -1.0)
     {
         auto t0_total = Clock::now();
 
@@ -188,11 +450,32 @@ namespace
 
         auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
         int T = (int)prices.size();
+        int total_rw = 0;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+            total_rw += lens[i] * tots[i];
 
         double ub = dp::kInf;
         double lb = 0.0;
+        bool timed_out = false;
         auto gap_closed = [&]()
         { return std::fabs(ub - lb) < 0.01; };
+        auto elapsed_sec = [&]()
+        { return Dur(Clock::now() - t0_total).count(); };
+        auto remaining_sec = [&]()
+        {
+            if (time_limit <= 0.0)
+                return 1.0e18;
+            return std::max(0.0, time_limit - elapsed_sec());
+        };
+        auto out_of_time = [&]()
+        {
+            if (time_limit > 0.0 && elapsed_sec() >= time_limit)
+            {
+                timed_out = true;
+                return true;
+            }
+            return false;
+        };
         auto should_stop = [&]()
         { return gap_closed() && !ab.profile_bounds; };
 
@@ -211,23 +494,322 @@ namespace
 
         double t_fwd_relax = 0, t_heuristic = 0, t_local_search = 0;
         double t_bwd_relax = 0, t_two_class = 0, t_exact = 0;
+        double t_feas_profile = 0;
+        dp::ExactDPDiagnostics exact_diag_row;
+        dp::LocalCorridorDiag local_corridor_diag;
+        auto should_replace_exact_diag = [](const dp::ExactDPDiagnostics &current_diag,
+                                            const dp::ExactDPDiagnostics &candidate_diag)
+        {
+            if (candidate_diag.mode.empty() || candidate_diag.mode == "none")
+                return false;
+            if (candidate_diag.mode.rfind("dense_skip_", 0) == 0 &&
+                current_diag.mode.rfind("sparse", 0) == 0)
+                return false;
+            return true;
+        };
+        std::string exact_incumbent_source = to_lower_ascii_copy(env_str_exact("PAST_EXACT_INCUMBENT_SOURCE"));
+        if (exact_incumbent_source.empty())
+            exact_incumbent_source = "auto";
+        std::string exact_variant_env = canonical_exact_variant(env_str_exact("PAST_EXACT_DP_VARIANT"));
+        std::string exact_variant_active = exact_variant_env;
         std::string step_reached = "none";
 
         // Per-step LB/UB tracking (for diagnostics)
         double lb_after_fwd = 0, lb_after_feas = 0, lb_after_fl = 0;
+        double lb_after_feas_profile = 0;
         double ub_after_fwd = dp::kInf, ub_after_heur = dp::kInf, ub_after_ls = dp::kInf;
+        double ub_after_feas_profile = dp::kInf;
         int64_t states_fwd_reached = 0, states_fwd_expanded = 0;
+        dp::RelaxedTableResult suffix_relax;
+        bool suffix_relax_ready = false;
+        auto ensure_suffix_relax = [&]()
+        {
+            if (suffix_relax_ready)
+                return;
+            suffix_relax = dp::compute_relaxed_completion_table(
+                lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+            suffix_relax_ready = true;
+        };
         double t_smart_recon = 0;
         std::string winner_detail = "none";
+        bool guided_incumbent_only = use_guided_incumbent_only();
+        bool beam_incumbent_only = use_beam_incumbent_only();
+        int beam_width = beam_width_setting();
+        bool enable_suffix_completion = use_suffix_completion_guidance();
+        bool adaptive_enabled = ab.adaptive_pipeline && adaptive_pipeline_enabled();
 
         // Declare fwd outside block so we can reuse rdp table in smart_reconstruct
         dp::RelaxedDPResult fwd;
+        dp::RelaxedDPResult partial_prof;
+        dp::RelaxedDPResult feas_prof;
+
+        // PLAN32: anytime initial UB diagnostics — declared early for goto safety
+        double anytime_initial_ub = dp::kInf;
+        std::string anytime_initial_ub_source = "none";
+        double anytime_time_to_first_ub = 0.0;
+        int anytime_initial_ub_valid = 0;
+        int anytime_ub_used_on_timeout = 0;
+
+        // PLAN32B: parallel initial UB diagnostics
+        double parallel_initial_ub = dp::kInf;
+        int parallel_initial_ub_valid = 0;
+        std::string parallel_initial_ub_policy = "none";
+        double parallel_initial_ub_time_sec = 0.0;
+        int parallel_initial_ub_machines_used = 0;
+        int parallel_initial_ub_failed_machines = 0;
+        int parallel_initial_ub_used_on_timeout = 0;
+        int initial_ub_lb_consistent = 1;
+        std::string initial_ub_rejected_reason;
+        std::string initial_ub_model_note = "single_machine";
+
+        // PLAN33: certified anytime hard-K prepass diagnostics
+        int cert_anytime_enabled = 0;
+        int cert_anytime_k_min = 0;
+        double cert_anytime_gap_stop_pct = 0.0;
+        int cert_anytime_triggered = 0;
+        int cert_anytime_stopped = 0;
+        double cert_anytime_initial_ub = 0.0;
+        double cert_anytime_lb = 0.0;
+        double cert_anytime_gap_pct = 0.0;
+        std::string cert_anytime_best_policy;
+        int cert_anytime_finite_candidates = 0;
+        double cert_anytime_time_to_first_ub = 0.0;
+        double cert_anytime_time_total = 0.0;
+        int cert_anytime_polish_used = 0;
+        double cert_anytime_ub_before_polish = 0.0;
+        double cert_anytime_ub_after_polish = 0.0;
+
+        // ── PLAN32/PLAN32C: anytime initial UB safety layer (runs BEFORE forward DP) ──
+        if (env_flag_exact("PAST_ANYTIME_INITIAL_UB"))
+        {
+            bool hardk_only = env_flag_exact("PAST_ANYTIME_HARDK_ONLY");
+            int K_env = static_cast<int>(lens.size());
+            if (!hardk_only || K_env >= 10)
+            {
+                auto t0_any = Clock::now();
+                int trials = std::max(1, env_int_exact("PAST_ANYTIME_INITIAL_UB_TRIALS", 75));
+                bool use_local_search = env_flag_exact("PAST_ANYTIME_INITIAL_UB_LOCAL_SEARCH");
+
+                double init_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces, trials, lb);
+
+                // PLAN32C: parallel initial UB — partition jobs across M machines.
+                // This is DIAGNOSTIC ONLY by default (changes the model from 1-machine to M-machine).
+                // To use as incumbent, set PAST_ANYTIME_PARALLEL_UB_OPT_IN=1.
+                bool parallel_opt_in = env_flag_exact("PAST_ANYTIME_PARALLEL_UB_OPT_IN");
+                int para_M = (parallel_opt_in || env_flag_exact("PAST_ANYTIME_PARALLEL_DIAGNOSTIC"))
+                                 ? env_int_exact("PAST_ANYTIME_PARALLEL_MACHINES", -1) : 0;
+                if (para_M <= 0 && (parallel_opt_in || env_flag_exact("PAST_ANYTIME_PARALLEL_DIAGNOSTIC")))
+                {
+                    int window = spaces.late > spaces.early ? (spaces.late - spaces.early + 1) : T;
+                    para_M = std::max(1, (total_rw + window - 1) / window);
+                    para_M = std::max(para_M, (int)std::ceil(total_rw / (0.7 * window)));
+                    if (para_M > 64) para_M = 64;
+                }
+
+                if (para_M >= 2)
+                {
+                    auto t0_para = Clock::now();
+                    std::string para_pol;
+                    int para_used = 0, para_failed = 0;
+                    double para_ub = dp::compute_parallel_initial_ub(
+                        lens, tots, prefix, T, spaces, para_M, trials, lb,
+                        &para_pol, &para_used, &para_failed);
+                    parallel_initial_ub_time_sec = Dur(Clock::now() - t0_para).count();
+
+                    if (para_ub < dp::kInf * 0.5)
+                    {
+                        parallel_initial_ub = para_ub;
+                        parallel_initial_ub_valid = 1;
+                        parallel_initial_ub_policy = para_pol;
+                        parallel_initial_ub_machines_used = para_used;
+                        parallel_initial_ub_failed_machines = para_failed;
+                        if (para_ub < init_ub && parallel_opt_in)
+                        {
+                            init_ub = para_ub;
+                            anytime_initial_ub_source = "parallel_" + para_pol;
+                        }
+                        // If not opt-in, note model mismatch but record diagnostic
+                        if (!parallel_opt_in)
+                            initial_ub_model_note = "parallel_diag_only_UB:" + std::to_string(static_cast<long long>(para_ub));
+                    }
+                }
+
+                if (use_local_search && init_ub < dp::kInf * 0.5)
+                {
+                    std::vector<int> all_jobs;
+                    for (std::size_t ji = 0; ji < lens.size(); ++ji)
+                        for (int j = 0; j < tots[ji]; ++j)
+                            all_jobs.push_back(lens[ji]);
+                    std::vector<int> seq = all_jobs;
+                    std::sort(seq.begin(), seq.end());
+                    double ls = dp::local_search_ub(seq, dp::solve_fixed_sequence(seq, prefix, T, spaces), prefix, T, spaces, 5, 2.0);
+                    if (ls < init_ub) init_ub = ls;
+                    std::sort(seq.begin(), seq.end(), std::greater<int>());
+                    ls = dp::local_search_ub(seq, dp::solve_fixed_sequence(seq, prefix, T, spaces), prefix, T, spaces, 5, 2.0);
+                    if (ls < init_ub) init_ub = ls;
+                }
+
+                anytime_time_to_first_ub = Dur(Clock::now() - t0_any).count();
+
+                if (init_ub < dp::kInf * 0.5)
+                {
+                    anytime_initial_ub = init_ub;
+                    if (anytime_initial_ub_source.empty() || anytime_initial_ub_source == "none")
+                        anytime_initial_ub_source = use_local_search ? "portfolio_with_ls" : "portfolio";
+                    anytime_initial_ub_valid = 1;
+                    if (init_ub < ub)
+                    {
+                        ub = init_ub;
+                        if (winner_detail == "none")
+                            winner_detail = "anytime_initial_ub";
+                    }
+                }
+            }
+        }
+
+        // ── PLAN33: certified anytime hard-K prepass ──
+        if (env_flag_exact("PAST_CERT_ANYTIME_PREPASS"))
+        {
+            int K_env = static_cast<int>(lens.size());
+            int k_min = env_int_exact("PAST_CERT_ANYTIME_K_MIN", 10);
+            double gap_stop_pct = env_double_exact("PAST_CERT_ANYTIME_GAP_STOP_PCT", 0.1);
+            int cert_trials = env_int_exact("PAST_CERT_ANYTIME_TRIALS", 5);
+            int polish_en = env_int_exact("PAST_CERT_ANYTIME_POLISH", 1);
+
+            cert_anytime_enabled = 1;
+            cert_anytime_k_min = k_min;
+            cert_anytime_gap_stop_pct = gap_stop_pct;
+
+            if (K_env >= k_min)
+            {
+                cert_anytime_triggered = 1;
+                auto t0_cert = Clock::now();
+
+                // Phase 1: compute initial UB with enhanced diagnostics
+                std::string best_policy;
+                int finite_candidates = 0;
+                double time_to_first_ub = 0.0;
+                std::vector<int> best_seq;
+                double cert_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces,
+                    cert_trials, lb, &best_policy, &finite_candidates,
+                    &time_to_first_ub, &best_seq);
+                cert_anytime_ub_before_polish = cert_ub;
+                cert_anytime_best_policy = best_policy;
+                cert_anytime_finite_candidates = finite_candidates;
+                cert_anytime_time_to_first_ub = time_to_first_ub;
+
+                // Phase 2: polish the best sequence if feasible
+                if (polish_en && cert_ub < dp::kInf * 0.5 && !best_seq.empty())
+                {
+                    double polished = dp::polish_best_sequence_ub(
+                        best_seq, cert_ub, prefix, T, spaces, 5.0);
+                    if (polished < cert_ub - 1e-6)
+                    {
+                        cert_ub = polished;
+                        cert_anytime_polish_used = 1;
+                    }
+                }
+                cert_anytime_ub_after_polish = cert_ub;
+
+                // Phase 2.5: fallback — if cert prepass found no finite UB but
+                // the anytime block did, borrow the anytime UB
+                if (!(cert_ub < dp::kInf * 0.5) && anytime_initial_ub_valid &&
+                    anytime_initial_ub < dp::kInf * 0.5)
+                {
+                    cert_ub = anytime_initial_ub;
+                    cert_anytime_ub_before_polish = anytime_initial_ub;
+                    cert_anytime_ub_after_polish = anytime_initial_ub;
+                    cert_anytime_best_policy = "fallback_" + anytime_initial_ub_source;
+                    cert_anytime_finite_candidates = 0;
+                    cert_anytime_time_to_first_ub = 0.0;
+                    cert_anytime_polish_used = 0;
+                }
+
+                cert_anytime_initial_ub = cert_ub;
+                cert_anytime_time_total = Dur(Clock::now() - t0_cert).count();
+
+                // Set incumbent from prepass for forward DP to use
+                if (cert_ub < dp::kInf * 0.5 && cert_ub < ub)
+                {
+                    ub = cert_ub;
+                    if (winner_detail == "none")
+                        winner_detail = "cert_anytime_prepass";
+                    anytime_initial_ub = cert_ub;
+                    anytime_initial_ub_valid = 1;
+                    anytime_initial_ub_source = best_policy;
+                    anytime_time_to_first_ub = time_to_first_ub;
+                }
+            }
+        }
 
         // --- Step 1: Forward relaxed DP with bin-packing (LB + UB) ---
         if (ab.use_relaxation_lb || ab.use_heuristics || ab.use_exact_guidance)
         {
+            // PLAN32B: if anytime_initial_ub_only is set, skip heavy DP
+            // and return the anytime UB immediately (debug/Phase B mode).
+            if (env_flag_exact("PAST_ANYTIME_INITIAL_UB_ONLY") &&
+                (anytime_initial_ub_valid || parallel_initial_ub_valid))
+            {
+                if (step_reached == "anytime_initial_ub" || step_reached == "none")
+                    step_reached = "anytime_fallback";
+                goto done;
+            }
+
             auto t0 = Clock::now();
-            fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+
+            // PLAN33: compute semigroup LB first for early gap-stop
+            bool plan33_lb_done = false;
+            if (cert_anytime_triggered && ub < dp::kInf * 0.5)
+            {
+                auto fwd_tab = dp::compute_relaxed_dp_table(
+                    lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+                double semigroup_lb = fwd_tab.lb;
+                fwd.lb = semigroup_lb;
+                fwd.rdp = std::move(fwd_tab.rdp);
+                fwd.RW = fwd_tab.RW;
+                fwd.bin_pack_ub = dp::kInf;
+                if (ab.use_relaxation_lb && semigroup_lb > lb)
+                    lb = semigroup_lb;
+                plan33_lb_done = true;
+
+                // PLAN33 gap-stop check
+                if (lb > 0)
+                {
+                    double cert_gap = 100.0 * (ub - lb) / lb;
+                    cert_anytime_gap_pct = cert_gap;
+                    cert_anytime_lb = lb;
+                    if (cert_gap <= cert_anytime_gap_stop_pct)
+                    {
+                        cert_anytime_stopped = 1;
+                        winner_detail = "cert_anytime_prepass";
+                        step_reached = "cert_anytime_prepass";
+                        t_fwd_relax = Dur(Clock::now() - t0).count();
+                        lb_after_fwd = lb;
+                        ub_after_fwd = ub;
+                        goto done;
+                    }
+                }
+            }
+
+            // Full forward DP (bin-packing + profiles)
+            if (env_flag_exact("PAST_FWD_LB_ONLY") && !plan33_lb_done)
+            {
+                auto fwd_tab = dp::compute_relaxed_dp_table(
+                    lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+                fwd.lb = fwd_tab.lb;
+                fwd.rdp = std::move(fwd_tab.rdp);
+                fwd.RW = fwd_tab.RW;
+                fwd.bin_pack_ub = dp::kInf;
+            }
+            else if (!plan33_lb_done)
+            {
+                fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+            }
+            else
+            {
+                // PLAN33 computed LB; now compute full pack if gap was too large
+                fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+            }
             t_fwd_relax = Dur(Clock::now() - t0).count();
             if (ab.use_relaxation_lb)
                 lb = fwd.lb;
@@ -240,23 +822,123 @@ namespace
                                : "fwd_relax";
             lb_after_fwd = lb;
             ub_after_fwd = ub;
-            if (!ab.use_exact_guidance && should_stop())
+
+            if (should_stop())
             {
                 winner_detail = (fwd.pack_method != "none")
                                     ? ("fwd_relax:" + fwd.pack_method)
                                     : "fwd_relax";
                 goto done;
             }
+            if (should_adaptive_jump_to_exact(
+                    static_cast<int>(lens.size()), ub, fwd.pack_outcome,
+                    use_exact_shortcut, ab.use_exact_dp, adaptive_enabled, ab.profile_bounds))
+                goto exact_dp;
+            if (out_of_time())
+                goto done;
+
+            // PLAN33: certified anytime gap-stop — early exit if gap <= threshold
+            if (cert_anytime_triggered && ub < dp::kInf * 0.5 && lb > 0)
+            {
+                double cert_gap = 100.0 * (ub - lb) / lb;
+                cert_anytime_gap_pct = cert_gap;
+                cert_anytime_lb = lb;
+                if (cert_gap <= cert_anytime_gap_stop_pct)
+                {
+                    cert_anytime_stopped = 1;
+                    winner_detail = "cert_anytime_prepass";
+                    step_reached = "cert_anytime_prepass";
+                    goto done;
+                }
+            }
+        }
+
+        if (env_flag_exact("PAST_PARTIAL_BINPACK_STAGE"))
+        {
+            auto t0 = Clock::now();
+            partial_prof = run_partial_binpack_stage(lens, tots, prefix, T, spaces);
+            t_two_class = Dur(Clock::now() - t0).count();
+            if (is_valid_relax_lb(partial_prof.lb) && partial_prof.lb > lb)
+                lb = partial_prof.lb;
+            if (partial_prof.bin_pack_ub < ub)
+                ub = partial_prof.bin_pack_ub;
+            step_reached = "partial_profile";
+            if (should_stop())
+            {
+                winner_detail = (partial_prof.pack_method != "none")
+                                    ? ("partial_profile:" + partial_prof.pack_method)
+                                    : "partial_profile";
+                goto done;
+            }
+            if (should_adaptive_jump_to_exact(
+                    static_cast<int>(lens.size()), ub, partial_prof.pack_outcome,
+                    use_exact_shortcut, ab.use_exact_dp, adaptive_enabled, ab.profile_bounds))
+                goto exact_dp;
+            if (out_of_time())
+                goto done;
+        }
+
+        // --- Optional clean escalation: R_feas + recovered-profile packing ---
+        // Used for the policy study that compares:
+        //   semi -> fixed-profile certifier -> exact
+        // against
+        //   semi -> fixed-profile certifier -> feas -> fixed-profile certifier -> exact
+        if (ab.use_feas_profile_pack)
+        {
+            auto t0 = Clock::now();
+            feas_prof = dp::solve_relaxed_dp_lb_feas_with_binpack(lens, tots, prefix, T, spaces);
+            t_feas_profile = Dur(Clock::now() - t0).count();
+            if (is_valid_relax_lb(feas_prof.lb) && feas_prof.lb > lb)
+                lb = feas_prof.lb;
+            if (feas_prof.bin_pack_ub < ub)
+                ub = feas_prof.bin_pack_ub;
+            lb_after_feas_profile = lb;
+            ub_after_feas_profile = ub;
+            step_reached = "feas_profile";
+            if (should_stop())
+            {
+                winner_detail = (feas_prof.pack_method != "none")
+                                    ? ("feas_profile:" + feas_prof.pack_method)
+                                    : "feas_profile";
+                goto done;
+            }
+            if (should_adaptive_jump_to_exact(
+                    static_cast<int>(lens.size()), ub, feas_prof.pack_outcome,
+                    use_exact_shortcut, ab.use_exact_dp, adaptive_enabled, ab.profile_bounds))
+                goto exact_dp;
+            if (out_of_time())
+                goto done;
         }
 
         if (use_exact_shortcut)
             goto exact_dp;
 
-        // --- Step 2: Heuristic UB (SPT/LPT/alternating/K!/random) ---
+        // --- Step 2: Incumbent builder ---
         if (ab.use_heuristics)
         {
             auto t0 = Clock::now();
-            double heur_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces, 50, lb);
+            double heur_ub = dp::kInf;
+            if (beam_incumbent_only)
+            {
+                if (enable_suffix_completion)
+                    ensure_suffix_relax();
+                heur_ub = dp::completion_guided_beam_ub(
+                    lens, tots, prefix, T, spaces,
+                    suffix_relax.rdp, suffix_relax.RW, suffix_relax.rw_scale,
+                    ub, beam_width, std::min(remaining_sec(), 30.0));
+            }
+            else if (guided_incumbent_only)
+            {
+                if (enable_suffix_completion)
+                    ensure_suffix_relax();
+                heur_ub = dp::guided_completion_ub(
+                    lens, tots, prefix, T, spaces,
+                    suffix_relax.rdp, suffix_relax.RW, suffix_relax.rw_scale);
+            }
+            else
+            {
+                heur_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces, 50, lb);
+            }
             t_heuristic = Dur(Clock::now() - t0).count();
             if (heur_ub < ub)
                 ub = heur_ub;
@@ -267,10 +949,12 @@ namespace
                 winner_detail = "heuristic_ub";
                 goto done;
             }
+            if (out_of_time())
+                goto done;
         }
 
-        // --- Step 3: Local search from SPT + LPT ---
-        if (ab.use_heuristics)
+        // --- Legacy incumbent polish: local search from SPT + LPT ---
+        if (ab.use_heuristics && !guided_incumbent_only && !beam_incumbent_only)
         {
             auto t0 = Clock::now();
             std::vector<int> all_jobs;
@@ -298,6 +982,8 @@ namespace
                 winner_detail = "local_search";
                 goto done;
             }
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 4: R_feas LB (transition-feasibility filter) ---
@@ -315,6 +1001,8 @@ namespace
                 winner_detail = "r_feas";
                 goto done;
             }
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 4.5: R_partial LB (partial count-vector tracking) ---
@@ -333,6 +1021,8 @@ namespace
                 winner_detail = "r_partial";
                 goto done;
             }
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 5: R_feas+Lagr LB (combined bound) ---
@@ -351,6 +1041,8 @@ namespace
                 winner_detail = "r_feas_lagr";
                 goto done;
             }
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 5.5: Smart reconstruction (count-aware search on relaxed DP table) ---
@@ -364,7 +1056,7 @@ namespace
             t_smart_recon = Dur(Clock::now() - t0).count();
             if (sr_cost < ub)
                 ub = sr_cost;
-            if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
+            if (sr_cost < dp::kInf && std::fabs(sr_cost - lb) < 0.01)
                 lb = ub; // proven optimal
             step_reached = "smart_recon";
             if (should_stop())
@@ -372,6 +1064,8 @@ namespace
                 winner_detail = "smart_recon";
                 goto done;
             }
+            if (out_of_time())
+                goto done;
         }
 
         // --- Step 6+7: Exact DP ---
@@ -380,7 +1074,109 @@ namespace
     exact_dp:
         {
             auto t0 = Clock::now();
-            double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub);
+            (void)dp::consume_last_exact_dp_diagnostics();
+            double exact_budget = remaining_sec();
+            if (exact_budget <= 0.0)
+            {
+                timed_out = true;
+                goto done;
+            }
+            const std::string exact_guide_source = env_str_exact("PAST_EXACT_GUIDE_SOURCE");
+            const dp::RelaxedDPResult *guide = nullptr;
+            if (exact_guide_source == "feas" && !feas_prof.rdp.empty())
+                guide = &feas_prof;
+            else if (exact_guide_source == "partial" && !partial_prof.rdp.empty())
+                guide = &partial_prof;
+            else if (!fwd.rdp.empty() && (ab.use_relaxation_lb || ab.use_heuristics || ab.use_exact_guidance))
+                guide = &fwd;
+
+            auto choose_exact_initial_ub = [&](double fallback) -> double
+            {
+                auto finite = [](double v) -> bool
+                { return std::isfinite(v) && v < dp::kInf * 0.5; };
+                double i0 = fwd.profile_step2_ub;
+                double i1 = fwd.profile_exact_candidate_ub;
+                double i2 = fwd.profile_beam_candidate_ub;
+                double i3 = fwd.profile_beam_plus_candidate_ub;
+                double i4 = std::min(i1, i3);
+                double best_any = fallback;
+                if (finite(i0)) best_any = std::min(best_any, i0);
+                if (finite(i1)) best_any = std::min(best_any, i1);
+                if (finite(i2)) best_any = std::min(best_any, i2);
+                if (finite(i3)) best_any = std::min(best_any, i3);
+
+                auto pick = [&](const std::string &src) -> double
+                {
+                    if (src == "i0" || src == "quick") return i0;
+                    if (src == "i1" || src == "exact_step3") return i1;
+                    if (src == "i2" || src == "beam") return i2;
+                    if (src == "i3" || src == "beam_plus") return i3;
+                    if (src == "i4" || src == "best_step3") return i4;
+                    return best_any;
+                };
+
+                double chosen = pick(exact_incumbent_source);
+                if (!finite(chosen))
+                {
+                    if (finite(i0))
+                        chosen = i0;
+                    else
+                        chosen = best_any;
+                }
+                return chosen;
+            };
+
+            ub = choose_exact_initial_ub(ub);
+            const std::vector<double> *guided_rdp = guide ? &guide->rdp : nullptr;
+            int guided_RW = guide ? guide->RW : 0;
+            double guided_lb = guide ? guide->lb : dp::kInf;
+            if (enable_suffix_completion)
+                ensure_suffix_relax();
+
+            // PLAN24: set up beam-guided exact corridor if enabled
+            bool corridor_enabled = env_flag_exact("PAST_EXACT_CORRIDOR_ENABLE");
+            int corridor_delta = env_int_exact("PAST_EXACT_CORRIDOR_DELTA", 0);
+            std::string corridor_source = env_str_exact("PAST_EXACT_CORRIDOR_SOURCE");
+            if (corridor_source.empty()) corridor_source = "profile_beam";
+            dp::ExactCorridor corridor;
+            if (corridor_enabled && corridor_source == "profile_beam" &&
+                !fwd.profile_beam_chosen_counts.empty())
+            {
+                int B = static_cast<int>(fwd.profile_beam_chosen_counts.size());
+                int K = static_cast<int>(lens.size());
+                corridor.enabled = true;
+                corridor.delta = corridor_delta;
+                corridor.prefix_work.assign(B + 1, 0);
+                corridor.prefix_counts.assign(B + 1, std::vector<int>(K, 0));
+                // Use block_order if available, otherwise assume identity
+                const std::vector<int> &order = fwd.profile_beam_block_order;
+                bool use_order = (static_cast<int>(order.size()) == B);
+                for (int pos = 0; pos < B; ++pos)
+                {
+                    int bi = use_order ? order[pos] : pos;
+                    corridor.prefix_work[pos + 1] = corridor.prefix_work[pos];
+                    // merged block lengths are not stored in fwd; approximate using chosen_counts * lengths
+                    for (int j = 0; j < K; ++j)
+                        corridor.prefix_work[pos + 1] += fwd.profile_beam_chosen_counts[bi][j] * lens[j];
+                    for (int j = 0; j < K; ++j)
+                        corridor.prefix_counts[pos + 1][j] = corridor.prefix_counts[pos][j] + fwd.profile_beam_chosen_counts[bi][j];
+                }
+                dp::set_exact_corridor(corridor);
+            }
+            else
+            {
+                dp::clear_exact_corridor();
+            }
+
+            double exact = dp::solve_sparse_exact_multiset_dp(
+                lens, tots, prefix, T, spaces, ub, exact_budget,
+                guided_rdp, guided_RW, guided_lb,
+                enable_suffix_completion ? &suffix_relax.rdp : nullptr,
+                enable_suffix_completion ? suffix_relax.RW : 0,
+                enable_suffix_completion ? suffix_relax.rw_scale : 1);
+            exact_diag_row = dp::consume_last_exact_dp_diagnostics();
+            if (!exact_diag_row.variant.empty())
+                exact_variant_active = exact_diag_row.variant;
             if (exact < dp::kInf)
             {
                 if (exact < ub)
@@ -389,14 +1185,19 @@ namespace
             }
             if (!gap_closed())
             {
-                const std::vector<double> *guided_rdp =
-                    (!fwd.rdp.empty() && (ab.use_relaxation_lb || ab.use_heuristics || ab.use_exact_guidance))
-                        ? &fwd.rdp
-                        : nullptr;
-                int guided_RW = guided_rdp ? fwd.RW : 0;
-                double guided_lb = guided_rdp ? fwd.lb : dp::kInf;
-                exact = dp::solve_sparse_exact_multiset_dp(
-                    lens, tots, prefix, T, spaces, ub, 300.0, guided_rdp, guided_RW, guided_lb);
+                double dense_budget = remaining_sec();
+                if (dense_budget <= 0.0)
+                {
+                    timed_out = true;
+                    t_exact = Dur(Clock::now() - t0).count();
+                    goto done;
+                }
+                exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub, dense_budget);
+                dp::ExactDPDiagnostics dense_diag = dp::consume_last_exact_dp_diagnostics();
+                if (should_replace_exact_diag(exact_diag_row, dense_diag))
+                    exact_diag_row = dense_diag;
+                if (!dense_diag.variant.empty())
+                    exact_variant_active = dense_diag.variant;
                 if (exact < dp::kInf)
                 {
                     if (exact < ub)
@@ -404,12 +1205,87 @@ namespace
                     lb = ub;
                 }
             }
+
+            // PLAN25/PLAN26: local corridor DP
+            if (env_flag_exact("PAST_BEAM_CORRIDOR_LOCAL_DP"))
+            {
+                auto t0_local = Clock::now();
+                int local_delta = env_int_exact("PAST_BEAM_CORRIDOR_LOCAL_DELTA", 1);
+                double local_budget = env_int_exact("PAST_BEAM_CORRIDOR_LOCAL_TIME_LIMIT", 300);
+                // Use exact merged blocks from pack_recovered_blocks
+                std::vector<dp::Segment> merged_seg = fwd.merged_blocks;
+                if (merged_seg.empty() && !fwd.block_profile.empty())
+                {
+                    // Fallback reconstruction if merged_blocks not populated
+                    merged_seg.push_back(fwd.block_profile[0]);
+                    for (size_t i = 1; i < fwd.block_profile.size(); ++i)
+                    {
+                        dp::Segment &last = merged_seg.back();
+                        if (fwd.block_profile[i].start <= last.start + last.length)
+                        {
+                            int new_end = std::max(last.start + last.length,
+                                                   fwd.block_profile[i].start + fwd.block_profile[i].length);
+                            last.length = new_end - last.start;
+                        }
+                        else
+                        {
+                            merged_seg.push_back(fwd.block_profile[i]);
+                        }
+                    }
+                }
+                double local_ub = dp::beam_corridor_local_dp(
+                    lens, tots, prefix, T, spaces, merged_seg,
+                    fwd.profile_beam_chosen_counts,
+                    fwd.profile_beam_block_order,
+                    ub, local_budget, local_delta, local_corridor_diag);
+                if (local_ub < ub)
+                {
+                    ub = local_ub;
+                    // Do NOT set lb=ub; local corridor is exact only inside the corridor
+                }
+                local_corridor_diag.time_sec = Dur(Clock::now() - t0_local).count();
+            }
+
             t_exact = Dur(Clock::now() - t0).count();
             step_reached = "exact";
             winner_detail = "exact";
+            dp::clear_exact_corridor();
         }
 
     done:
+        // PLAN32C: anytime fallback on timeout — only use models consistent with current LB
+        if (env_flag_exact("PAST_ANYTIME_RETURN_ON_TIMEOUT") &&
+            timed_out && !(ub < dp::kInf * 0.5))
+        {
+            // Prefer parallel UB only if opted in AND model-consistent with LB
+            bool parallel_opt_in = env_flag_exact("PAST_ANYTIME_PARALLEL_UB_OPT_IN");
+            if (parallel_initial_ub_valid && parallel_opt_in)
+            {
+                ub = parallel_initial_ub;
+                winner_detail = "anytime_parallel_fallback";
+                step_reached = "anytime_parallel_fallback";
+                parallel_initial_ub_used_on_timeout = 1;
+                initial_ub_model_note = "parallel_machines_used_on_timeout";
+            }
+            else if (anytime_initial_ub_valid)
+            {
+                ub = anytime_initial_ub;
+                winner_detail = "anytime_fallback";
+                step_reached = "anytime_fallback";
+                anytime_ub_used_on_timeout = 1;
+            }
+        }
+
+        // PLAN32C: LB-consistency guard — reject any UB that violates known LB
+        if (ub < dp::kInf * 0.5 && lb > 0 && ub < lb - 1.0)
+        {
+            initial_ub_lb_consistent = 0;
+            initial_ub_rejected_reason = "UB_below_LB_ub_" + std::to_string(static_cast<long long>(ub))
+                                       + "_lb_" + std::to_string(static_cast<long long>(lb));
+            ub = dp::kInf;
+            if (winner_detail.find("anytime") != std::string::npos)
+                winner_detail = "anytime_rejected_ub_below_lb";
+        }
         bool feasible = (ub < dp::kInf * 0.5);
         bool proven_optimal = feasible && gap_closed();
         double elapsed = Dur(Clock::now() - t0_total).count();
@@ -418,15 +1294,63 @@ namespace
             winner_detail = step_reached;
 
         std::ostringstream row;
-        row << instance_id << ","
-            << (int)jobs.size() << ","
-            << prices.size() << ","
+            int step1_decided = 0;
+            int step2_decided = 0;
+            int step3_decided = 0;
+            int step4_decided = 0;
+            if (winner_detail == "exact" || step_reached == "exact")
+            {
+                step4_decided = 1;
+            }
+            else if (fwd.pack_method == "profile_repair_beam")
+            {
+                step3_decided = 1;
+            }
+            else if (fwd.pack_method == "ffd" ||
+                     fwd.pack_method == "ffd_count" ||
+                     fwd.pack_method == "bfd" ||
+                     fwd.pack_method == "ffi" ||
+                     fwd.pack_method == "bfi" ||
+                     fwd.pack_method == "random_ff" ||
+                     fwd.pack_method == "random_bf")
+            {
+                step2_decided = 1;
+            }
+            else if (fwd.pack_method == "profile_realization_dp_exact" ||
+                     fwd.pack_method == "block_dp_exact")
+            {
+                step3_decided = 1;
+            }
+            else if (fwd.pack_method != "none")
+            {
+                step3_decided = 1;
+            }
+            else
+            {
+                step1_decided = 1;
+            }
+
+            int exact_dp_used = (step4_decided || t_exact > 0.0) ? 1 : 0;
+            int exact_l2_mainline_used =
+                (fwd.pack_method == "block_repair_exact_level2_archival" ||
+                 fwd.pack_method == "block_repair_exact_level2")
+                    ? 1
+                    : 0;
+
+            dp::ExactDPDiagnostics exact_diag =
+                (exact_dp_used ? exact_diag_row : dp::ExactDPDiagnostics{});
+            if (exact_dp_used && exact_diag.variant.empty())
+                exact_diag.variant = exact_variant_active;
+
+            row << instance_id << ","
+                << (int)jobs.size() << ","
+                << prices.size() << ","
             << std::fixed << std::setprecision(6) << (feasible ? ub : -1.0) << ","
             << std::fixed << std::setprecision(6) << (feasible ? lb : -1.0) << ","
             << std::fixed << std::setprecision(4) << gap_pct << ","
             << (feasible ? 1 : 0) << ","
             << (proven_optimal ? 1 : 0) << ","
-            << 0 << ","
+            << (timed_out ? 1 : 0) << ","
             << std::fixed << std::setprecision(4) << elapsed << ","
             << std::fixed << std::setprecision(4) << t_spaces << ","
             << std::fixed << std::setprecision(4) << t_fwd_relax << ","
@@ -434,6 +1358,7 @@ namespace
             << std::fixed << std::setprecision(4) << t_local_search << ","
             << std::fixed << std::setprecision(4) << t_bwd_relax << ","
             << std::fixed << std::setprecision(4) << t_two_class << ","
+            << std::fixed << std::setprecision(4) << t_feas_profile << ","
             << std::fixed << std::setprecision(4) << t_smart_recon << ","
             << std::fixed << std::setprecision(4) << t_exact << ","
             << step_reached << ","
@@ -441,9 +1366,11 @@ namespace
             << std::fixed << std::setprecision(6) << lb_after_fwd << ","
             << std::fixed << std::setprecision(6) << lb_after_feas << ","
             << std::fixed << std::setprecision(6) << lb_after_fl << ","
+            << std::fixed << std::setprecision(6) << lb_after_feas_profile << ","
             << std::fixed << std::setprecision(6) << ub_after_fwd << ","
             << std::fixed << std::setprecision(6) << ub_after_heur << ","
             << std::fixed << std::setprecision(6) << ub_after_ls << ","
+            << std::fixed << std::setprecision(6) << ub_after_feas_profile << ","
             << states_fwd_reached << ","
             << states_fwd_expanded << ","
             << winner_detail << ","
@@ -456,7 +1383,235 @@ namespace
             << std::fixed << std::setprecision(4) << fwd.t_pack_external << ","
             << std::fixed << std::setprecision(4) << fwd.t_pack_heuristic << ","
             << std::fixed << std::setprecision(4) << fwd.t_pack_dfs << ","
-            << std::fixed << std::setprecision(4) << fwd.t_pack_block_dp;
+            << std::fixed << std::setprecision(4) << fwd.t_pack_block_dp << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_profile_recovery << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_merge_blocks << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_to_first_candidate << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_ffd_only << ","
+            << fwd.step2_reached << ","
+            << fwd.step2_produced_ub << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_spaces_or_lb << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_profile_dp << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_profile_recovery << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_block_build << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_job_materialization << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_step2_pack << ","
+            << std::fixed << std::setprecision(4) << fwd.t_dense_pre_step2_total << ","
+            << fwd.pack_profiles_tried << ","
+            << fwd.pack_co_optimal_profiles << ","
+            << std::fixed << std::setprecision(0) << fwd.block_dp_state_space << ","
+            << std::fixed << std::setprecision(0) << fwd.block_dp_total_compositions << ","
+            << std::fixed << std::setprecision(0) << fwd.block_dp_total_comp_estimate << ","
+            << std::fixed << std::setprecision(0) << fwd.block_dp_max_comp_estimate << ","
+            << std::fixed << std::setprecision(0) << fwd.block_dp_max_compositions_per_block << ","
+            << fwd.block_dp_status << ","
+            << fwd.block_dp_timed_out << ","
+            << std::fixed << std::setprecision(6) << fwd.beam_ub_for_exact_l2 << ","
+            << std::fixed << std::setprecision(6) << fwd.exact_l2_ub << ","
+            << std::fixed << std::setprecision(4) << fwd.t_exact_l2 << ","
+            << std::fixed << std::setprecision(0) << fwd.exact_l2_nodes << ","
+            << fwd.exact_l2_closed << ","
+            << fwd.exact_l2_improved_over_beam << ","
+            << fwd.exact_l2_beam_optimal_in_pool << ","
+            << fwd.exact_l2_status << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_base_width << ","
+            << std::fixed << std::setprecision(1) << fwd.profile_beam_avg_width << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_max_width << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_states_considered << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_states_kept << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_pruned_over << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_pruned_suffix << ","
+            << std::fixed << std::setprecision(0) << fwd.profile_beam_pruned_discrepancy << ","
+            << fwd.profile_beam_discrepancy_budget << ","
+            << fwd.profile_beam_discrepancy_depth << ","
+            << fwd.profile_beam_status << ","
+            << fwd.profile_beam_timed_out << ","
+            << fwd.profile_beam_key_multi_policy << ","
+            << fwd.profile_beam_key_multi_max << ","
+            << std::fixed << std::setprecision(4) << fwd.profile_beam_key_multi_score_eps << ","
+            << std::fixed << std::setprecision(4) << fwd.profile_beam_key_multi_diversity_eps << ","
+            << fwd.profile_beam_score_policy << ","
+            << std::fixed << std::setprecision(4) << fwd.profile_beam_residual_weight << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_beam_residual_mean_penalty << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_beam_residual_max_penalty << ","
+            << std::fixed << std::setprecision(4) << fwd.profile_beam_late_frac << ","
+            << fwd.profile_realization_hardest_first << ","
+            << fwd.profile_realization_exact_suffix_prune << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_profile_beam << ","
+            << std::fixed << std::setprecision(4) << fwd.t_pack_block_dp_exact << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_step2_ub << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_beam_candidate_ub << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_beam_plus_candidate_ub << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_exact_candidate_ub << ","
+            << fwd.profile_beam_improved_over_step2 << ","
+            << fwd.profile_exact_improved_over_step2 << ","
+            << fwd.profile_incumbent_source << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_incumbent_ub_for_exact << ","
+            << fwd.profile_selector_policy << ","
+            << fwd.profile_selector_decision << ","
+            << fwd.profile_selector_reason << ","
+            << fwd.profile_selector_has_one << ","
+            << fwd.profile_selector_contiguous << ","
+            << fwd.profile_selector_multiplicity << ","
+            << std::fixed << std::setprecision(6) << fwd.profile_selector_semigroup_density << ","
+            << fwd.profile_selector_hard_alarm << ","
+            << fwd.profile_exact_primary_fallback_to_beam << ","
+            << fwd.profile_exact_primary_status_before_fallback << ","
+            << fwd.profile_step3_incumbent_mode << ","
+            << fwd.dense_unit_fastpath_active << ","
+            << fwd.count_based_ffd_active << ","
+            << fwd.dense_unit_relax_fastpath_active << ","
+            << fwd.dense_unit_energy_profile_active << ","
+            << fwd.dense_unit_relax_fastpath_fallback << ","
+            << fwd.dense_unit_energy_profile_fallback << ","
+            << fwd.dense_unit_relax_mode << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_generated_patterns_total << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_generated_patterns_max_block << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_retained_patterns_total << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_retained_patterns_max_block << ","
+            << fwd.ec_retained_patterns_signature << ","
+            << std::fixed << std::setprecision(4) << fwd.ec_time_completion << ","
+            << std::fixed << std::setprecision(4) << fwd.ec_time_pattern_generation << ","
+            << std::fixed << std::setprecision(4) << fwd.ec_time_exact_core << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_pruned_core_window << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_pruned_suffix << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_pruned_transition << ","
+            << std::fixed << std::setprecision(0) << fwd.ec_pruned_bound << ","
+            << fwd.ec_delta_used << ","
+            << fwd.ec_fixed_blocks << ","
+            << fwd.ec_two_phase_used << ","
+            << std::fixed << std::setprecision(6) << fwd.ec_phase1_feasible_ub << ","
+            << std::fixed << std::setprecision(4) << fwd.ec_time_phase1 << ","
+            << exact_incumbent_source << ","
+            << exact_diag.variant << ","
+            << exact_diag.mode << ","
+            << std::fixed << std::setprecision(6) << exact_diag.initial_ub << ","
+            << std::fixed << std::setprecision(6) << exact_diag.final_ub << ","
+            << std::fixed << std::setprecision(4) << exact_diag.elapsed_sec << ","
+            << std::fixed << std::setprecision(0) << exact_diag.states_reached << ","
+            << std::fixed << std::setprecision(0) << exact_diag.states_expanded << ","
+            << std::fixed << std::setprecision(0) << exact_diag.pruned_bound << ","
+            << std::fixed << std::setprecision(0) << exact_diag.pruned_relaxed << ","
+            << std::fixed << std::setprecision(0) << exact_diag.pruned_completion << ","
+            << std::fixed << std::setprecision(0) << exact_diag.pruned_type_aware << ","
+            << std::fixed << std::setprecision(0) << exact_diag.pruned_dominance << ","
+            << exact_diag.timed_out << ","
+            << exact_diag.exhaustive << ","
+            << exact_diag.corridor_enabled << ","
+            << exact_diag.corridor_delta << ","
+            << std::fixed << std::setprecision(0) << exact_diag.corridor_pruned << ","
+            << exact_diag.corridor_infeasible << ","
+            << (env_flag_exact("PAST_EXACT_CORRIDOR_FORCE_ENTRY") ? "1" : "0") << ","
+            << env_int64_exact("PAST_EXACT_CORRIDOR_MAX_STATES", 50000000LL) << ","
+            << env_int_exact("PAST_EXACT_CORRIDOR_TIME_LIMIT", 300) << ","
+            << exact_diag.stop_reason << ","
+            << local_corridor_diag.enabled << ","
+            << local_corridor_diag.delta << ","
+            << local_corridor_diag.status << ","
+            << local_corridor_diag.layers << ","
+            << std::fixed << std::setprecision(0) << local_corridor_diag.states_seen << ","
+            << local_corridor_diag.states_kept_max << ","
+            << std::fixed << std::setprecision(0) << local_corridor_diag.states_pruned << ","
+            << std::fixed << std::setprecision(0) << local_corridor_diag.transitions_considered << ","
+            << std::fixed << std::setprecision(0) << local_corridor_diag.transitions_kept << ","
+            << std::fixed << std::setprecision(4) << local_corridor_diag.time_sec << ","
+            << std::fixed << std::setprecision(6) << local_corridor_diag.best_ub << ","
+            << local_corridor_diag.closed << ","
+            << local_corridor_diag.stop_reason << ","
+            << local_corridor_diag.memory_safe << ","
+            << local_corridor_diag.beam_counts_size << ","
+            << local_corridor_diag.merged_blocks << ","
+            << local_corridor_diag.block_count_mismatch << ","
+            << local_corridor_diag.target_offset_l1 << ","
+            << local_corridor_diag.target_in_corridor << ","
+            << local_corridor_diag.base_candidates_finite << ","
+            << local_corridor_diag.empty_candidate_blocks << ","
+            << local_corridor_diag.first_empty_layer << ","
+            << local_corridor_diag.base_path_survives << ","
+            << std::fixed << std::setprecision(4) << local_corridor_diag.base_path_cost << ","
+            << local_corridor_diag.base_path_reject_reason << ","
+            << step1_decided << ","
+            << step2_decided << ","
+            << step3_decided << ","
+            << step4_decided << ","
+            << exact_dp_used << ","
+            << exact_l2_mainline_used << ","
+            // PLAN28: block-realizability diagnostics
+            << fwd.block_realiz_diag_active << ","
+            << fwd.block_realiz_blocks_total << ","
+            << fwd.block_realiz_bad_blocks << ","
+            << std::fixed << std::setprecision(4) << fwd.block_realiz_bad_rate << ","
+            << fwd.block_realiz_first_bad_block << ","
+            << std::fixed << std::setprecision(1) << fwd.block_realiz_min_finite_patterns << ","
+            << std::fixed << std::setprecision(1) << fwd.block_realiz_mean_finite_patterns << ","
+            << fwd.block_realiz_base_path_survives << ","
+            << fwd.block_realiz_base_reject_reason << ","
+            << std::fixed << std::setprecision(4) << fwd.block_realiz_diag_time_sec << ","
+            << fwd.block_realiz_diag_skipped << ","
+            << fwd.block_realiz_diag_skip_reason << ","
+            << fwd.block_realiz_per_block_payload << ","
+            // PLAN29: block-view reconstruction diagnostics
+            << fwd.block_view_policy << ","
+            << fwd.block_view_original_blocks << ","
+            << fwd.block_view_final_blocks << ","
+            << fwd.block_view_removed_boundaries << ","
+            << fwd.block_view_target_b << ","
+            << fwd.block_view_price_preserve_used << ","
+            << fwd.block_view_arith_adaptive_used << ","
+            << fwd.block_view_selected << ","
+            << fwd.block_view_eval_count << ","
+            << std::fixed << std::setprecision(6) << fwd.block_view_best_ub << ","
+            << std::fixed << std::setprecision(4) << fwd.block_view_time_sec << ","
+            // PLAN32: anytime UB diagnostics
+            << std::fixed << std::setprecision(6) << anytime_initial_ub << ","
+            << anytime_initial_ub_source << ","
+            << std::fixed << std::setprecision(4) << anytime_time_to_first_ub << ","
+            << anytime_initial_ub_valid << ","
+            << anytime_ub_used_on_timeout << ","
+            // PLAN32B: parallel initial UB diagnostics
+            << std::fixed << std::setprecision(6) << parallel_initial_ub << ","
+            << parallel_initial_ub_valid << ","
+            << parallel_initial_ub_policy << ","
+            << std::fixed << std::setprecision(4) << parallel_initial_ub_time_sec << ","
+            << parallel_initial_ub_machines_used << ","
+            << parallel_initial_ub_failed_machines << ","
+            << parallel_initial_ub_used_on_timeout << ","
+            // PLAN32C: LB-consistency guard
+            << initial_ub_lb_consistent << ","
+            << initial_ub_rejected_reason << ","
+            << initial_ub_model_note << ","
+            // PLAN33: certified anytime hard-K prepass
+            << cert_anytime_enabled << ","
+            << cert_anytime_k_min << ","
+            << std::fixed << std::setprecision(4) << cert_anytime_gap_stop_pct << ","
+            << cert_anytime_triggered << ","
+            << cert_anytime_stopped << ","
+            << std::fixed << std::setprecision(6) << cert_anytime_initial_ub << ","
+            << std::fixed << std::setprecision(6) << cert_anytime_lb << ","
+            << std::fixed << std::setprecision(6) << cert_anytime_gap_pct << ","
+            << cert_anytime_best_policy << ","
+            << cert_anytime_finite_candidates << ","
+            << std::fixed << std::setprecision(4) << cert_anytime_time_to_first_ub << ","
+            << std::fixed << std::setprecision(4) << cert_anytime_time_total << ","
+            << cert_anytime_polish_used << ","
+            << std::fixed << std::setprecision(6) << cert_anytime_ub_before_polish << ","
+            << std::fixed << std::setprecision(6) << cert_anytime_ub_after_polish << ","
+            << feas_prof.block_count << ","
+            << feas_prof.merged_block_count << ","
+            << feas_prof.pack_solver << ","
+            << feas_prof.pack_external_status << ","
+            << feas_prof.pack_method << ","
+            << feas_prof.pack_outcome << ","
+            << std::fixed << std::setprecision(4) << feas_prof.t_pack_external << ","
+            << std::fixed << std::setprecision(4) << feas_prof.t_pack_heuristic << ","
+            << std::fixed << std::setprecision(4) << feas_prof.t_pack_dfs << ","
+            << std::fixed << std::setprecision(4) << feas_prof.t_pack_block_dp << ","
+            << std::fixed << std::setprecision(4) << feas_prof.t_pack_profile_recovery << ","
+            << feas_prof.pack_profiles_tried << ","
+            << feas_prof.pack_co_optimal_profiles << ","
+            << std::fixed << std::setprecision(0) << feas_prof.block_dp_state_space << ","
+            << std::fixed << std::setprecision(0) << feas_prof.block_dp_total_compositions << ","
+            << feas_prof.block_dp_status;
         return row.str();
     }
 
@@ -537,10 +1692,44 @@ namespace
             use_exact_shortcut = true;
 
         int64_t states_fwd_reached = 0, states_fwd_expanded = 0;
+        bool enable_suffix_completion = use_suffix_completion_guidance();
+        bool guided_incumbent_only = use_guided_incumbent_only();
+        bool beam_incumbent_only = use_beam_incumbent_only();
+        int beam_width = beam_width_setting();
+        bool adaptive_enabled = adaptive_pipeline_enabled();
+        int total_rw = 0;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+            total_rw += lens[i] * tots[i];
+        dp::RelaxedTableResult suffix_relax;
+        dp::RelaxedDPResult partial_prof;
+        dp::RelaxedDPResult feas_guide_prof;
+        bool suffix_relax_ready = false;
+        bool skip_generic_incumbent = false;
+        auto ensure_suffix_relax = [&]()
+        {
+            if (suffix_relax_ready)
+                return;
+            suffix_relax = dp::compute_relaxed_completion_table(
+                lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+            suffix_relax_ready = true;
+        };
 
         // --- Step 1: Forward relaxed DP with bin-packing (single pass) ---
         // Gets both LB and bin-pack UB from one DP computation.
-        auto fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+        dp::RelaxedDPResult fwd;
+        if (env_flag_exact("PAST_FWD_LB_ONLY"))
+        {
+            auto fwd_tab = dp::compute_relaxed_dp_table(
+                lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+            fwd.lb = fwd_tab.lb;
+            fwd.rdp = std::move(fwd_tab.rdp);
+            fwd.RW = fwd_tab.RW;
+            fwd.bin_pack_ub = dp::kInf;
+        }
+        else
+        {
+            fwd = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+        }
         lb = fwd.lb;
         if (fwd.bin_pack_ub < ub)
             ub = fwd.bin_pack_ub;
@@ -548,17 +1737,69 @@ namespace
         states_fwd_expanded = fwd.states_expanded;
         if (gap_closed())
             goto done;
+        if (should_adaptive_jump_to_exact(
+                static_cast<int>(lens.size()), ub, fwd.pack_outcome,
+                use_exact_shortcut, true, adaptive_enabled, false))
+            goto exact_dp;
+        if (!use_exact_shortcut && tiny_gap_for_exact())
+            goto exact_dp;
         if (out_of_time())
             goto done;
+
+        if (env_flag_exact("PAST_PARTIAL_BINPACK_STAGE"))
+        {
+            partial_prof = run_partial_binpack_stage(lens, tots, prefix, T, spaces);
+            if (is_valid_relax_lb(partial_prof.lb) && partial_prof.lb > lb)
+                lb = partial_prof.lb;
+            if (partial_prof.bin_pack_ub < ub)
+                ub = partial_prof.bin_pack_ub;
+            if (gap_closed())
+                goto done;
+            if (should_adaptive_jump_to_exact(
+                    static_cast<int>(lens.size()), ub, partial_prof.pack_outcome,
+                    use_exact_shortcut, true, adaptive_enabled, false))
+                goto exact_dp;
+            if (!use_exact_shortcut && tiny_gap_for_exact())
+                goto exact_dp;
+            if (out_of_time())
+                goto done;
+        }
+
+        skip_generic_incumbent =
+            env_flag_exact("PAST_SKIP_HEUR_IF_PARTIAL_UB") &&
+            partial_prof.bin_pack_ub < dp::kInf * 0.5;
 
         // If NC is small, skip Steps 2-5 (expensive heuristics) and go straight
         // to Step 6 (exact DP) which will solve it quickly.
         if (use_exact_shortcut)
             goto exact_dp;
+        if (skip_generic_incumbent)
+            goto exact_dp;
 
-        // --- Step 2: Heuristic UB (SPT/LPT/alternating/K! perms/random) ---
+        // --- Step 2: Incumbent builder ---
         {
-            double heur_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces, 50, lb);
+            double heur_ub = dp::kInf;
+            if (beam_incumbent_only)
+            {
+                if (enable_suffix_completion)
+                    ensure_suffix_relax();
+                heur_ub = dp::completion_guided_beam_ub(
+                    lens, tots, prefix, T, spaces,
+                    suffix_relax.rdp, suffix_relax.RW, suffix_relax.rw_scale,
+                    ub, beam_width, std::min(remaining_sec(), 30.0));
+            }
+            else if (guided_incumbent_only)
+            {
+                if (enable_suffix_completion)
+                    ensure_suffix_relax();
+                heur_ub = dp::guided_completion_ub(
+                    lens, tots, prefix, T, spaces,
+                    suffix_relax.rdp, suffix_relax.RW, suffix_relax.rw_scale);
+            }
+            else
+            {
+                heur_ub = dp::compute_initial_ub(lens, tots, prefix, T, spaces, 50, lb);
+            }
             if (heur_ub < ub)
                 ub = heur_ub;
             if (gap_closed())
@@ -569,7 +1810,8 @@ namespace
                 goto done;
         }
 
-        // --- Step 3: Local search from SPT + LPT ---
+        // --- Legacy incumbent polish: local search from SPT + LPT ---
+        if (!guided_incumbent_only && !beam_incumbent_only)
         {
             std::vector<int> all_jobs;
             for (std::size_t i = 0; i < lens.size(); ++i)
@@ -631,6 +1873,23 @@ namespace
                 goto done;
         }
 
+        if (env_flag_exact("PAST_FEAS_GUIDE_STAGE"))
+        {
+            const char *old = std::getenv("PAST_FEAS_LB_ONLY");
+            setenv("PAST_FEAS_LB_ONLY", "1", 1);
+            feas_guide_prof = dp::solve_relaxed_dp_lb_feas_with_binpack(lens, tots, prefix, T, spaces);
+            if (old && *old)
+                setenv("PAST_FEAS_LB_ONLY", old, 1);
+            else
+                unsetenv("PAST_FEAS_LB_ONLY");
+            if (is_valid_relax_lb(feas_guide_prof.lb) && feas_guide_prof.lb > lb)
+                lb = feas_guide_prof.lb;
+            if (gap_closed())
+                goto done;
+            if (out_of_time())
+                goto done;
+        }
+
         // --- Step 5: R_feas+Lagr LB (combined bound) ---
         {
             double budget = std::min(10.0, remaining_sec());
@@ -641,9 +1900,9 @@ namespace
                     lb = lb_fl;
                 if (gap_closed())
                     goto done;
-                if (out_of_time())
-                    goto done;
-            }
+            if (out_of_time())
+                goto done;
+        }
             else
             {
                 timed_out = true;
@@ -666,7 +1925,7 @@ namespace
                 ub, budget);
             if (sr_cost < ub)
                 ub = sr_cost;
-            if (sr_cost < dp::kInf && std::fabs(sr_cost - ub) < 0.01)
+            if (sr_cost < dp::kInf && std::fabs(sr_cost - lb) < 0.01)
                 lb = ub; // proven optimal
             if (gap_closed())
                 goto done;
@@ -674,8 +1933,8 @@ namespace
                 goto done;
         }
 
-        // --- Step 6: Exact multiset DP (for small K, e.g., K=2 or K=3) ---
-        // Dense (t, c0, c1, ...) DP. Gives exact optimal = both LB and UB.
+        // --- Step 6: Sparse exact DP, guided by the forward semigroup table
+        // when available (default exact stage) ---
     exact_dp:
     {
         double budget = remaining_sec();
@@ -684,13 +1943,27 @@ namespace
             timed_out = true;
             goto done;
         }
-        double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub, budget);
+        if (enable_suffix_completion)
+            ensure_suffix_relax();
+        const std::string exact_guide_source = env_str_exact("PAST_EXACT_GUIDE_SOURCE");
+        const dp::RelaxedDPResult *guide = &fwd;
+        if (exact_guide_source == "feas" && !feas_guide_prof.rdp.empty())
+            guide = &feas_guide_prof;
+        if (exact_guide_source == "partial" && !partial_prof.rdp.empty())
+            guide = &partial_prof;
+        double exact = dp::solve_sparse_exact_multiset_dp(
+            lens, tots, prefix, T, spaces, ub, budget,
+            guide && !guide->rdp.empty() ? &guide->rdp : nullptr,
+            guide ? guide->RW : 0,
+            guide ? guide->lb : dp::kInf,
+            enable_suffix_completion ? &suffix_relax.rdp : nullptr,
+            enable_suffix_completion ? suffix_relax.RW : 0,
+            enable_suffix_completion ? suffix_relax.rw_scale : 1);
         if (exact < dp::kInf)
         {
-            // Exact DP completed: exact cost is both a valid UB and LB
             if (exact < ub)
                 ub = exact;
-            lb = ub; // proven optimal
+            lb = ub;
         }
     }
         if (gap_closed())
@@ -698,7 +1971,7 @@ namespace
         if (out_of_time())
             goto done;
 
-        // --- Step 7: Sparse exact DP (fallback for larger state spaces) ---
+        // --- Step 7: Dense exact multiset DP fallback ---
         {
             double budget = remaining_sec();
             if (budget <= 0.0)
@@ -706,8 +1979,7 @@ namespace
                 timed_out = true;
                 goto done;
             }
-            double exact = dp::solve_sparse_exact_multiset_dp(
-                lens, tots, prefix, T, spaces, ub, budget, &fwd.rdp, fwd.RW, fwd.lb);
+            double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, ub, budget);
             if (exact < dp::kInf)
             {
                 if (exact < ub)
@@ -995,10 +2267,11 @@ namespace
         if (exact_time_limit > 0.0)
         {
             auto t0 = Clock::now();
-            double exact = dp::solve_exact_multiset_dp(lens, tots, prefix, T, spaces, dp::kInf, exact_time_limit);
+            double exact = dp::solve_sparse_exact_multiset_dp(
+                lens, tots, prefix, T, spaces, dp::kInf, exact_time_limit);
             if (exact >= dp::kInf * 0.5)
             {
-                exact = dp::solve_sparse_exact_multiset_dp(
+                exact = dp::solve_exact_multiset_dp(
                     lens, tots, prefix, T, spaces, dp::kInf, exact_time_limit);
             }
             t_opt = Dur(Clock::now() - t0).count();
@@ -1059,18 +2332,46 @@ namespace
         auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
         int T = static_cast<int>(prices.size());
 
-        auto t0_semi = Clock::now();
-        auto semi = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
-        double t_semi_total = Dur(Clock::now() - t0_semi).count();
+        dp::RelaxedDPResult semi, feas, partial;
+        double t_semi_total = 0.0, t_feas_total = 0.0, t_partial_total = 0.0;
+        if (!env_flag_exact("PAST_RELAX_PACK_SKIP_SEMI"))
+        {
+            auto t0_semi = Clock::now();
+            semi = dp::solve_relaxed_dp_with_binpack(lens, tots, prefix, T, spaces);
+            t_semi_total = Dur(Clock::now() - t0_semi).count();
+        }
+        else
+        {
+            semi.lb = dp::kInf;
+            semi.bin_pack_ub = dp::kInf;
+            semi.pack_outcome = "skipped";
+        }
 
-        auto t0_feas = Clock::now();
-        auto feas = dp::solve_relaxed_dp_lb_feas_with_binpack(lens, tots, prefix, T, spaces);
-        double t_feas_total = Dur(Clock::now() - t0_feas).count();
+        if (!env_flag_exact("PAST_RELAX_PACK_SKIP_FEAS"))
+        {
+            auto t0_feas = Clock::now();
+            feas = dp::solve_relaxed_dp_lb_feas_with_binpack(lens, tots, prefix, T, spaces);
+            t_feas_total = Dur(Clock::now() - t0_feas).count();
+        }
+        else
+        {
+            feas.lb = dp::kInf;
+            feas.bin_pack_ub = dp::kInf;
+            feas.pack_outcome = "skipped";
+        }
 
-        auto t0_partial = Clock::now();
-        auto partial = dp::solve_relaxed_dp_lb_partial_with_binpack(
-            lens, tots, prefix, T, spaces, {}, 1, true);
-        double t_partial_total = Dur(Clock::now() - t0_partial).count();
+        if (!env_flag_exact("PAST_RELAX_PACK_SKIP_PARTIAL"))
+        {
+            auto t0_partial = Clock::now();
+            partial = run_partial_binpack_stage(lens, tots, prefix, T, spaces);
+            t_partial_total = Dur(Clock::now() - t0_partial).count();
+        }
+        else
+        {
+            partial.lb = dp::kInf;
+            partial.bin_pack_ub = dp::kInf;
+            partial.pack_outcome = "skipped";
+        }
 
         auto norm = [](double v) -> double
         {
@@ -1092,6 +2393,10 @@ namespace
             << semi.pack_method << ","
             << semi.block_count << ","
             << semi.merged_block_count << ","
+            << semi.merged_gcd_bad_count << ","
+            << semi.merged_local_unreachable_count << ","
+            << semi.merged_bad_caps_signature << ","
+            << semi.merged_caps_signature << ","
             << std::fixed << std::setprecision(4) << t_semi_total << ","
             << std::fixed << std::setprecision(4) << semi.t_pack_heuristic << ","
             << std::fixed << std::setprecision(4) << semi.t_pack_dfs << ","
@@ -1103,6 +2408,10 @@ namespace
             << feas.pack_method << ","
             << feas.block_count << ","
             << feas.merged_block_count << ","
+            << feas.merged_gcd_bad_count << ","
+            << feas.merged_local_unreachable_count << ","
+            << feas.merged_bad_caps_signature << ","
+            << feas.merged_caps_signature << ","
             << std::fixed << std::setprecision(4) << t_feas_total << ","
             << std::fixed << std::setprecision(4) << feas.t_pack_heuristic << ","
             << std::fixed << std::setprecision(4) << feas.t_pack_dfs << ","
@@ -1114,10 +2423,124 @@ namespace
             << partial.pack_method << ","
             << partial.block_count << ","
             << partial.merged_block_count << ","
+            << partial.merged_gcd_bad_count << ","
+            << partial.merged_local_unreachable_count << ","
+            << partial.merged_bad_caps_signature << ","
+            << partial.merged_caps_signature << ","
             << std::fixed << std::setprecision(4) << t_partial_total << ","
             << std::fixed << std::setprecision(4) << partial.t_pack_heuristic << ","
             << std::fixed << std::setprecision(4) << partial.t_pack_dfs << ","
             << std::fixed << std::setprecision(4) << partial.t_pack_block_dp;
+        return row.str();
+    }
+
+    std::string solve_completion_gap_profile(
+        const std::string &instance_id,
+        const std::vector<double> &prices,
+        const std::vector<int> &jobs,
+        const std::string &machine_type = "nosby")
+    {
+        std::map<int, int> cnt;
+        for (int p : jobs)
+            cnt[p]++;
+        std::vector<int> lens, tots;
+        for (auto &kv : cnt)
+        {
+            lens.push_back(kv.first);
+            tots.push_back(kv.second);
+        }
+
+        auto cfg = (machine_type == "twosby") ? dp::make_paper_twosby_config()
+                                              : dp::make_paper_nosby_config();
+        int mg = resolve_max_gap(cfg, prices, true);
+        auto spaces = dp::compute_spaces(prices, cfg, mg);
+        auto prefix = dp::build_proc_prefix(prices, spaces.p_proc);
+        int T = static_cast<int>(prices.size());
+        int total_rw = 0;
+        for (std::size_t i = 0; i < lens.size(); ++i)
+            total_rw += lens[i] * tots[i];
+
+        const std::string saved_mode = env_str_exact("PAST_BLOCK_REPAIR_COMPLETION_MODE");
+        auto restore_mode = [&]()
+        {
+            if (saved_mode.empty())
+                unsetenv("PAST_BLOCK_REPAIR_COMPLETION_MODE");
+            else
+                setenv("PAST_BLOCK_REPAIR_COMPLETION_MODE", saved_mode.c_str(), 1);
+        };
+
+        setenv("PAST_BLOCK_REPAIR_COMPLETION_MODE", "cheap", 1);
+        auto t0_cheap = Clock::now();
+        dp::RelaxedTableResult cheap = dp::compute_relaxed_completion_table(
+            lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+        double t_cheap = Dur(Clock::now() - t0_cheap).count();
+
+        setenv("PAST_BLOCK_REPAIR_COMPLETION_MODE", "direct", 1);
+        auto t0_direct = Clock::now();
+        dp::RelaxedTableResult direct = dp::compute_relaxed_completion_table(
+            lens, total_rw, prefix, T, spaces, dp::RelaxationMode::Semigroup);
+        double t_direct = Dur(Clock::now() - t0_direct).count();
+        restore_mode();
+
+        std::vector<int> sample_t = {0, spaces.early, T / 4, T / 2, (3 * T) / 4, spaces.late};
+        std::sort(sample_t.begin(), sample_t.end());
+        sample_t.erase(std::unique(sample_t.begin(), sample_t.end()), sample_t.end());
+        sample_t.erase(std::remove_if(sample_t.begin(), sample_t.end(), [&](int t)
+                                      { return t < 0 || t > T; }),
+                       sample_t.end());
+
+        std::vector<int> sample_rw = {total_rw, (3 * total_rw) / 4, total_rw / 2, total_rw / 4};
+        std::sort(sample_rw.begin(), sample_rw.end());
+        sample_rw.erase(std::unique(sample_rw.begin(), sample_rw.end()), sample_rw.end());
+        sample_rw.erase(std::remove_if(sample_rw.begin(), sample_rw.end(), [&](int rw)
+                                       { return rw < 0 || rw > total_rw; }),
+                        sample_rw.end());
+
+        double sum_cont_ratio = 0.0, sum_off_ratio = 0.0;
+        double max_cont_ratio = 0.0, max_off_ratio = 0.0;
+        int n_cont = 0, n_off = 0;
+        for (int t : sample_t)
+        {
+            for (int rw : sample_rw)
+            {
+                double cheap_cont = completion_lookup(cheap, cheap.rdp, T, t, rw);
+                double direct_cont = completion_lookup(direct, direct.rdp, T, t, rw);
+                if (cheap_cont > 0.0 && cheap_cont < dp::kInf && direct_cont < dp::kInf)
+                {
+                    double ratio = direct_cont / cheap_cont;
+                    sum_cont_ratio += ratio;
+                    max_cont_ratio = std::max(max_cont_ratio, ratio);
+                    ++n_cont;
+                }
+
+                double cheap_off = completion_lookup(cheap, cheap.off_rdp, T, t, rw);
+                double direct_off = completion_lookup(direct, direct.off_rdp, T, t, rw);
+                if (cheap_off > 0.0 && cheap_off < dp::kInf && direct_off < dp::kInf)
+                {
+                    double ratio = direct_off / cheap_off;
+                    sum_off_ratio += ratio;
+                    max_off_ratio = std::max(max_off_ratio, ratio);
+                    ++n_off;
+                }
+            }
+        }
+
+        std::ostringstream row;
+        row << instance_id << ","
+            << static_cast<int>(jobs.size()) << ","
+            << prices.size() << ","
+            << lens.size() << ","
+            << total_rw << ","
+            << mg << ","
+            << std::fixed << std::setprecision(6) << cheap.lb << ","
+            << std::fixed << std::setprecision(6) << direct.lb << ","
+            << (n_cont + n_off) << ","
+            << std::fixed << std::setprecision(6) << (n_cont ? (sum_cont_ratio / n_cont) : 0.0) << ","
+            << std::fixed << std::setprecision(6) << max_cont_ratio << ","
+            << std::fixed << std::setprecision(6) << (n_off ? (sum_off_ratio / n_off) : 0.0) << ","
+            << std::fixed << std::setprecision(6) << max_off_ratio << ","
+            << std::fixed << std::setprecision(4) << t_cheap << ","
+            << std::fixed << std::setprecision(4) << t_direct;
         return row.str();
     }
 
@@ -1323,23 +2746,31 @@ int main(int argc, char **argv)
     // -----------------------------------------------------------------------
     // MODE: ablation-stdin
     // Like solve-stdin, but accepts an ablation config as argv[2]:
-    //   "full"         — default (banded SPACES + full bound-and-refine)
+    //   "full"         — default adaptive pipeline (banded SPACES + regime-aware bound-and-refine)
+    //   "full_profile" — run the full pipeline without adaptive skipping and
+    //                    without the exact-shortcut, to profile stage
+    //                    contributions on a fixed policy
     //   "no_smart_recon" — full pipeline without Step 5.5
     //   "full_spaces"  — full O(h²) SPACES + full bound-and-refine
     //   "bounds_only"  — banded SPACES + heuristics + LB strengthening,
     //                    but no smart reconstruction or exact DP
     //   "bounds_profile" — same as bounds_only, but computes all LB stages
     //                      even when the forward stage already closes the gap
+    //   "step1_exact_guided" — semigroup recovery + profile realization
+    //                      (truncated/exact Step-3 DP modes) then semigroup-guided exact
+    //   "semi_feas_exact_guided" — Step 1, then R_feas recovered-profile
+    //                      packing/certification, then semigroup-guided exact
     //   "exact_only"   — banded SPACES + exact DP only (no heuristics/relaxations)
     //   "exact_guided_only" — semigroup DP only for sparse exact guidance, then exact DP
     //   "baseline"     — full O(h²) SPACES + exact DP only
     //
     // Output CSV has extra columns for per-step timing.
-    // Usage: cat instances.jsonl | stateful_compare ablation-stdin <config>
+    // Usage: cat instances.jsonl | stateful_compare ablation-stdin <config> [time_limit_sec]
     // -----------------------------------------------------------------------
     if (mode == "ablation-stdin")
     {
         std::string ab_mode = (argc > 2 ? argv[2] : "full");
+        double time_limit = (argc > 3 ? std::stod(argv[3]) : -1.0);
         AblationConfig ab;
         if (ab_mode == "full")
         {
@@ -1353,6 +2784,15 @@ int main(int argc, char **argv)
             ab.use_heuristics = true;
             ab.use_relaxation_lb = true;
             ab.use_smart_recon = false;
+        }
+        else if (ab_mode == "full_profile")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = true;
+            ab.use_relaxation_lb = true;
+            ab.profile_bounds = true;
+            ab.use_exact_shortcut = false;
+            ab.adaptive_pipeline = false;
         }
         else if (ab_mode == "full_spaces")
         {
@@ -1388,6 +2828,44 @@ int main(int argc, char **argv)
             ab.use_exact_dp = false;
             ab.profile_bounds = true;
         }
+        else if (ab_mode == "step1_exact_guided")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = true;
+            ab.use_smart_recon = false;
+            ab.use_exact_shortcut = true;
+            ab.use_exact_guidance = true;
+        }
+        else if (ab_mode == "step1_smart_exact_guided")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = true;
+            ab.use_smart_recon = true;
+            ab.use_exact_shortcut = false;
+            ab.use_exact_guidance = true;
+        }
+        else if (ab_mode == "semi_feas_exact_guided")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = true;
+            ab.use_smart_recon = false;
+            ab.use_exact_shortcut = false;
+            ab.use_exact_guidance = true;
+            ab.use_feas_profile_pack = true;
+        }
+        else if (ab_mode == "semi_feas_smart_exact_guided")
+        {
+            ab.use_banded_spaces = true;
+            ab.use_heuristics = false;
+            ab.use_relaxation_lb = true;
+            ab.use_smart_recon = true;
+            ab.use_exact_shortcut = false;
+            ab.use_exact_guidance = true;
+            ab.use_feas_profile_pack = true;
+        }
         else if (ab_mode == "exact_only")
         {
             ab.use_banded_spaces = true;
@@ -1416,10 +2894,32 @@ int main(int argc, char **argv)
 
         std::cout << "instance_id,n_jobs,horizon,ub,lb,gap_pct,feasible,is_optimal,"
                   << "timed_out,runtime_sec,t_spaces,t_fwd_relax,t_heuristic,"
-                  << "t_local_search,t_r_feas,t_r_feas_lagr,t_smart_recon,t_exact,"
-                  << "step_reached,max_gap,lb_after_fwd,lb_after_feas,lb_after_fl,ub_after_fwd,ub_after_heur,ub_after_ls,states_fwd_reached,states_fwd_expanded,"
+                  << "t_local_search,t_r_feas,t_r_feas_lagr,t_feas_profile,t_smart_recon,t_exact,"
+                  << "step_reached,max_gap,lb_after_fwd,lb_after_feas,lb_after_fl,lb_after_feas_profile,ub_after_fwd,ub_after_heur,ub_after_ls,ub_after_feas_profile,states_fwd_reached,states_fwd_expanded,"
                   << "winner_detail,fwd_block_count,fwd_merged_block_count,fwd_pack_solver,fwd_pack_external_status,fwd_pack_method,fwd_pack_outcome,"
-                  << "t_fwd_pack_external,t_fwd_pack_heuristic,t_fwd_pack_dfs,t_fwd_pack_block_dp\n";
+                  << "t_fwd_pack_external,t_fwd_pack_heuristic,t_fwd_pack_dfs,t_fwd_pack_block_dp,t_fwd_pack_profile_recovery,t_fwd_pack_merge_blocks,t_fwd_pack_to_first_candidate,t_fwd_pack_ffd_only,fwd_step2_reached,fwd_step2_produced_ub,t_dense_spaces_or_lb,t_dense_profile_dp,t_dense_profile_recovery,t_dense_block_build,t_dense_job_materialization,t_dense_step2_pack,t_dense_pre_step2_total,fwd_pack_profiles_tried,fwd_pack_co_optimal_profiles,fwd_block_dp_state_space,fwd_block_dp_total_compositions,fwd_block_dp_total_comp_estimate,fwd_block_dp_max_comp_estimate,fwd_block_dp_max_compositions_per_block,fwd_block_dp_status,fwd_block_dp_timed_out,"
+                  << "fwd_beam_ub_for_exact_l2,fwd_exact_l2_ub,fwd_exact_l2_time,fwd_exact_l2_nodes,fwd_exact_l2_closed,fwd_exact_l2_improved_over_beam,fwd_exact_l2_beam_optimal_in_pool,fwd_exact_l2_status,"
+                  << "fwd_profile_beam_base_width,fwd_profile_beam_avg_width,fwd_profile_beam_max_width,fwd_profile_beam_states_considered,fwd_profile_beam_states_kept,fwd_profile_beam_pruned_over,fwd_profile_beam_pruned_suffix,fwd_profile_beam_pruned_discrepancy,fwd_profile_beam_discrepancy_budget,fwd_profile_beam_discrepancy_depth,"
+                  << "fwd_profile_beam_status,fwd_profile_beam_timed_out,fwd_profile_beam_key_multi_policy,fwd_profile_beam_key_multi_max,fwd_profile_beam_key_multi_score_eps,fwd_profile_beam_key_multi_diversity_eps,fwd_profile_beam_score_policy,fwd_profile_beam_residual_weight,fwd_profile_beam_residual_mean_penalty,fwd_profile_beam_residual_max_penalty,fwd_profile_beam_late_frac,fwd_profile_realization_hardest_first,fwd_profile_realization_exact_suffix_prune,fwd_t_pack_profile_beam,fwd_t_pack_block_dp_exact,fwd_profile_step2_ub,fwd_profile_beam_candidate_ub,fwd_profile_beam_plus_candidate_ub,fwd_profile_exact_candidate_ub,fwd_profile_beam_improved_over_step2,fwd_profile_exact_improved_over_step2,fwd_profile_incumbent_source,fwd_profile_incumbent_ub_for_exact,fwd_profile_selector_policy,fwd_profile_selector_decision,fwd_profile_selector_reason,fwd_profile_selector_has_one,fwd_profile_selector_contiguous,fwd_profile_selector_multiplicity,fwd_profile_selector_semigroup_density,fwd_profile_selector_hard_alarm,fwd_profile_exact_primary_fallback_to_beam,fwd_profile_exact_primary_status_before_fallback,fwd_profile_step3_incumbent_mode,fwd_dense_unit_fastpath_active,fwd_count_based_ffd_active,fwd_dense_unit_relax_fastpath_active,fwd_dense_unit_energy_profile_active,fwd_dense_unit_relax_fastpath_fallback,fwd_dense_unit_energy_profile_fallback,fwd_dense_unit_relax_mode,"
+                  << "fwd_ec_generated_patterns_total,fwd_ec_generated_patterns_max_block,fwd_ec_retained_patterns_total,fwd_ec_retained_patterns_max_block,fwd_ec_retained_patterns_signature,fwd_ec_time_completion,fwd_ec_time_pattern_generation,fwd_ec_time_exact_core,fwd_ec_pruned_core_window,fwd_ec_pruned_suffix,fwd_ec_pruned_transition,fwd_ec_pruned_bound,fwd_ec_delta_used,fwd_ec_fixed_blocks,fwd_ec_two_phase_used,fwd_ec_phase1_feasible_ub,fwd_ec_time_phase1,"
+                   << "exact_incumbent_source,exact_diag_variant,exact_diag_mode,exact_diag_initial_ub,exact_diag_final_ub,exact_diag_elapsed,exact_diag_states_reached,exact_diag_states_expanded,exact_diag_pruned_bound,exact_diag_pruned_relaxed,exact_diag_pruned_completion,exact_diag_pruned_type_aware,exact_diag_pruned_dominance,exact_diag_timed_out,exact_diag_exhaustive,exact_diag_corridor_enabled,exact_diag_corridor_delta,exact_diag_corridor_pruned,exact_diag_corridor_infeasible,corridor_force_entry,corridor_max_states,corridor_time_limit,stop_reason,"
+                   << "local_corridor_enabled,local_corridor_delta,local_corridor_status,local_corridor_layers,local_corridor_states_seen,local_corridor_states_kept_max,local_corridor_states_pruned,local_corridor_transitions_considered,local_corridor_transitions_kept,local_corridor_time_sec,local_corridor_best_ub,local_corridor_closed,local_corridor_stop_reason,local_corridor_memory_safe,"
+                   << "local_corridor_beam_counts_size,local_corridor_merged_blocks,local_corridor_block_count_mismatch,local_corridor_target_offset_l1,local_corridor_target_in_corridor,local_corridor_base_candidates_finite,local_corridor_empty_candidate_blocks,local_corridor_first_empty_layer,local_corridor_base_path_survives,local_corridor_base_path_cost,local_corridor_base_path_reject_reason,"
+                   << "diag_step1_decided,diag_step2_decided,diag_step3_decided,diag_step4_decided,diag_exact_dp_used,diag_exact_l2_mainline_used,"
+                   // PLAN28: block-realizability diagnostics
+                   << "block_realiz_diag_active,block_realiz_blocks_total,block_realiz_bad_blocks,block_realiz_bad_rate,block_realiz_first_bad_block,block_realiz_min_finite_patterns,block_realiz_mean_finite_patterns,block_realiz_base_path_survives,block_realiz_base_reject_reason,block_realiz_diag_time_sec,block_realiz_diag_skipped,block_realiz_diag_skip_reason,block_realiz_per_block_payload,"
+                   // PLAN29: block-view reconstruction diagnostics
+                   << "block_view_policy,block_view_original_blocks,block_view_final_blocks,block_view_removed_boundaries,block_view_target_b,block_view_price_preserve_used,block_view_arith_adaptive_used,block_view_selected,block_view_eval_count,block_view_best_ub,block_view_time_sec,"
+                    // PLAN32: anytime UB diagnostics
+                    << "anytime_initial_ub,anytime_initial_ub_source,anytime_time_to_first_ub,anytime_initial_ub_valid,anytime_ub_used_on_timeout,"
+                    // PLAN32B: parallel initial UB diagnostics
+                    << "parallel_initial_ub,parallel_initial_ub_valid,parallel_initial_ub_policy,parallel_initial_ub_time_sec,parallel_initial_ub_machines_used,parallel_initial_ub_failed_machines,parallel_initial_ub_used_on_timeout,"
+                    // PLAN32C: LB-consistency guard
+                    << "initial_ub_lb_consistent,initial_ub_rejected_reason,initial_ub_model_note,"
+                    // PLAN33: certified anytime hard-K prepass
+                    << "cert_anytime_enabled,cert_anytime_k_min,cert_anytime_gap_stop_pct,cert_anytime_triggered,cert_anytime_stopped,cert_anytime_initial_ub,cert_anytime_lb,cert_anytime_gap_pct,cert_anytime_best_policy,cert_anytime_finite_candidates,cert_anytime_time_to_first_ub,cert_anytime_time_total,cert_anytime_polish_used,cert_anytime_ub_before_polish,cert_anytime_ub_after_polish,"
+                    << "feas_block_count,feas_merged_block_count,feas_pack_solver,feas_pack_external_status,feas_pack_method,feas_pack_outcome,"
+                  << "t_feas_pack_external,t_feas_pack_heuristic,t_feas_pack_dfs,t_feas_pack_block_dp,t_feas_pack_profile_recovery,feas_pack_profiles_tried,feas_pack_co_optimal_profiles,feas_block_dp_state_space,feas_block_dp_total_compositions,feas_block_dp_status\n";
         std::cout.flush();
 
         std::string line;
@@ -1438,7 +2938,7 @@ int main(int argc, char **argv)
                 std::cerr << "warn: skipping malformed line: " << line.substr(0, 80) << "\n";
                 continue;
             }
-            std::cout << solve_one_ablation(iid, prices, jobs, machine, ab) << "\n";
+            std::cout << solve_one_ablation(iid, prices, jobs, machine, ab, time_limit) << "\n";
             std::cout.flush();
         }
         return 0;
@@ -1560,7 +3060,7 @@ int main(int argc, char **argv)
     // MODE: relax-pack-stdin
     // Reads one JSON object per line and reports, for both semigroup and
     // R_feas, the recovered relaxed block profile and whether it can be packed
-    // by the exact fixed-block certifier.
+    // by the Step-3 exact profile-realization DP mode.
     //
     // Usage: cat instances.jsonl | stateful_compare relax-pack-stdin
     // Recommended env for paper-quality packability studies:
@@ -1570,9 +3070,9 @@ int main(int argc, char **argv)
     if (mode == "relax-pack-stdin")
     {
         std::cout << "instance_id,n_jobs,horizon,"
-                  << "lb_semi,ub_semi,semi_packable,semi_pack_outcome,semi_pack_method,semi_blocks,semi_merged_blocks,t_semi_total,t_semi_pack_heur,t_semi_pack_dfs,t_semi_pack_blockdp,"
-                  << "lb_feas,ub_feas,feas_packable,feas_pack_outcome,feas_pack_method,feas_blocks,feas_merged_blocks,t_feas_total,t_feas_pack_heur,t_feas_pack_dfs,t_feas_pack_blockdp,"
-                  << "lb_partial,ub_partial,partial_packable,partial_pack_outcome,partial_pack_method,partial_blocks,partial_merged_blocks,t_partial_total,t_partial_pack_heur,t_partial_pack_dfs,t_partial_pack_blockdp\n";
+                  << "lb_semi,ub_semi,semi_packable,semi_pack_outcome,semi_pack_method,semi_blocks,semi_merged_blocks,semi_gcd_bad,semi_local_bad,semi_bad_caps,semi_caps,t_semi_total,t_semi_pack_heur,t_semi_pack_dfs,t_semi_pack_blockdp,"
+                  << "lb_feas,ub_feas,feas_packable,feas_pack_outcome,feas_pack_method,feas_blocks,feas_merged_blocks,feas_gcd_bad,feas_local_bad,feas_bad_caps,feas_caps,t_feas_total,t_feas_pack_heur,t_feas_pack_dfs,t_feas_pack_blockdp,"
+                  << "lb_partial,ub_partial,partial_packable,partial_pack_outcome,partial_pack_method,partial_blocks,partial_merged_blocks,partial_gcd_bad,partial_local_bad,partial_bad_caps,partial_caps,t_partial_total,t_partial_pack_heur,t_partial_pack_dfs,t_partial_pack_blockdp\n";
         std::cout.flush();
 
         std::string line;
@@ -1592,6 +3092,42 @@ int main(int argc, char **argv)
                 continue;
             }
             std::cout << solve_relaxation_pack_profile(iid, prices, jobs, machine) << "\n";
+            std::cout.flush();
+        }
+        return 0;
+    }
+
+    // -----------------------------------------------------------------------
+    // MODE: completion-gap-stdin
+    // Reads one JSON object per line and compares the cheap completion guide
+    // with the direct backward semigroup completion guide on sampled states.
+    //
+    // Usage: cat instances.jsonl | stateful_compare completion-gap-stdin
+    // -----------------------------------------------------------------------
+    if (mode == "completion-gap-stdin")
+    {
+        std::cout << "instance_id,n_jobs,horizon,k_types,total_work,max_gap,"
+                  << "cheap_lb,direct_lb,sample_count,mean_cont_ratio,max_cont_ratio,"
+                  << "mean_off_ratio,max_off_ratio,t_cheap,t_direct\n";
+        std::cout.flush();
+
+        std::string line;
+        while (std::getline(std::cin, line))
+        {
+            if (line.empty() || line.front() != '{')
+                continue;
+            auto prices = json_parse_double_array(line, "prices");
+            auto jobs = json_parse_int_array(line, "jobs");
+            auto iid = json_parse_string(line, "instance_id");
+            auto machine = json_parse_string(line, "machine");
+            if (machine.empty())
+                machine = "nosby";
+            if (prices.empty() || jobs.empty())
+            {
+                std::cerr << "warn: skipping malformed line: " << line.substr(0, 80) << "\n";
+                continue;
+            }
+            std::cout << solve_completion_gap_profile(iid, prices, jobs, machine) << "\n";
             std::cout.flush();
         }
         return 0;
@@ -1744,8 +3280,10 @@ int main(int argc, char **argv)
               << "      reads JSONL from stdin, outputs the project lower-bound hierarchy\n"
               << "  stateful_compare relax-pack-stdin\n"
               << "      reads JSONL from stdin, outputs semigroup vs R_feas packability\n"
+              << "  stateful_compare completion-gap-stdin\n"
+              << "      reads JSONL from stdin, compares cheap vs direct completion guides\n"
               << "  stateful_compare ablation-stdin <config>\n"
-              << "      config: full | full_spaces | bounds_only | bounds_profile | exact_only | exact_guided_only | baseline\n"
+              << "      config: full | full_profile | full_spaces | step1_only | step1_exact_guided | semi_feas_exact_guided | bounds_only | bounds_profile | exact_only | exact_guided_only | baseline\n"
               << "      reads JSONL from stdin, outputs CSV with per-step timing\n"
               << "  stateful_compare benchmark [n_csv] [lambda_csv] [seeds_csv] [time_limit_sec]\n"
               << "      single-process sweep (parallel: use Python launcher instead)\n"

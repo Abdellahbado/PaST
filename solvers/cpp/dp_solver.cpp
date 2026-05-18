@@ -611,4 +611,318 @@ namespace dp
         return res;
     }
 
+    PricingResult solve_pricing_dp(
+        const std::vector<int> &lengths,
+        const std::vector<int> &max_counts,
+        const std::vector<double> &prefix,
+        int T,
+        const std::vector<double> &rewards,
+        double rate,
+        double sigma,
+        const PricingParams &params)
+    {
+        using Clock = std::chrono::steady_clock;
+        auto t_start = Clock::now();
+
+        const int K = static_cast<int>(lengths.size());
+        assert(K == static_cast<int>(max_counts.size()));
+        assert(K == static_cast<int>(rewards.size()));
+        assert((int)prefix.size() == T + 1);
+        assert(K <= 12 && "K must be <= 12 for stack arrays");
+
+        int32_t c_len[12], c_tot[12], c_rad[12];
+        int64_t c_inc[12];
+        int max_job_len = 0;
+        int64_t state_bound = 1;
+
+        for (int i = 0; i < K; ++i)
+        {
+            c_len[i] = lengths[i];
+            c_tot[i] = max_counts[i];
+            c_rad[i] = max_counts[i] + 1;
+            c_inc[i] = state_bound;
+            state_bound *= c_rad[i];
+            max_job_len = std::max(max_job_len, c_len[i]);
+        }
+
+        std::vector<StateMap *> layers(T + 1, nullptr);
+        for (int i = 0; i <= T; ++i)
+            layers[i] = new StateMap(64);
+
+        std::vector<double> prices(T);
+        for (int i = 0; i < T; ++i)
+            prices[i] = prefix[i + 1] - prefix[i];
+        std::vector<std::vector<double>> exact_slot_prefix(static_cast<std::size_t>(T) + 1);
+        exact_slot_prefix[static_cast<std::size_t>(T)] = std::vector<double>(1, 0.0);
+        for (int tt = 0; tt < T; ++tt)
+        {
+            std::vector<double> suffix(prices.begin() + tt, prices.end());
+            std::sort(suffix.begin(), suffix.end());
+            auto &pref = exact_slot_prefix[static_cast<std::size_t>(tt)];
+            pref.resize(suffix.size() + 1);
+            pref[0] = 0.0;
+            for (std::size_t i = 0; i < suffix.size(); ++i)
+                pref[i + 1] = pref[i] + suffix[i];
+        }
+
+        // Optimistic additional reduced-cost bound:
+        // for each exact added work w, take the best possible total reward among
+        // all jobs (ignoring which jobs are already used by the current state),
+        // then combine it with the cheapest remaining slots from time t.
+        std::vector<double> best_reward(static_cast<std::size_t>(T) + 1, -kInf);
+        best_reward[0] = 0.0;
+        for (int i = 0; i < K; ++i)
+        {
+            int qty = c_tot[i];
+            int chunk = 1;
+            while (qty > 0)
+            {
+                const int take = std::min(chunk, qty);
+                const int weight = c_len[i] * take;
+                const double reward = rewards[i] * static_cast<double>(take);
+                for (int w = T; w >= weight; --w)
+                {
+                    if (best_reward[static_cast<std::size_t>(w - weight)] <= -kInf * 0.5)
+                        continue;
+                    best_reward[static_cast<std::size_t>(w)] = std::max(
+                        best_reward[static_cast<std::size_t>(w)],
+                        best_reward[static_cast<std::size_t>(w - weight)] + reward);
+                }
+                qty -= take;
+                chunk <<= 1;
+            }
+        }
+
+        std::vector<double> best_extra_lb(static_cast<std::size_t>(T) + 1, 0.0);
+        for (int tt = 0; tt <= T; ++tt)
+        {
+            double best = 0.0; // choosing no extra jobs is always feasible
+            for (int w = 1; w <= T - tt; ++w)
+            {
+                if (best_reward[static_cast<std::size_t>(w)] <= -kInf * 0.5)
+                    continue;
+                const double slot_lb = rate * exact_slot_prefix[static_cast<std::size_t>(tt)][static_cast<std::size_t>(w)];
+                const double cand = slot_lb - best_reward[static_cast<std::size_t>(w)];
+                if (cand < best)
+                    best = cand;
+            }
+            best_extra_lb[static_cast<std::size_t>(tt)] = best;
+        }
+
+        // Reuse StateEntry fields:
+        //   cost = reduced cost without sigma
+        //   pen  = tie-break penalty
+        //   rw   = used work
+        //   jd   = jobs done
+        layers[0]->insert(0, StateEntry{0.0, 0, 0, 0});
+
+        ParentMap *pmap = nullptr;
+        if (params.track_schedule)
+            pmap = new ParentMap(4096);
+
+        double best_rc = kInf;
+        double best_rc_no_sigma = kInf;
+        int64_t best_pen = INT64_MAX;
+        int best_time = -1;
+        int64_t best_state = 0;
+        bool timed_out = false;
+        bool early_stop = false;
+        std::int64_t states_explored = 0;
+
+        const bool early = params.early_tie_break;
+        const double *pprefix = prefix.data();
+
+        auto elapsed_sec = [&]() -> double
+        {
+            auto dur = Clock::now() - t_start;
+            return std::chrono::duration<double>(dur).count();
+        };
+
+        auto decode_counts = [&](int64_t state) -> std::vector<int>
+        {
+            std::vector<int> counts(static_cast<std::size_t>(K), 0);
+            int64_t x = state;
+            for (int i = 0; i < K; ++i)
+            {
+                counts[static_cast<std::size_t>(i)] = static_cast<int>(x % c_rad[i]);
+                x /= c_rad[i];
+            }
+            return counts;
+        };
+
+        for (int tt = 0; tt <= T; ++tt)
+        {
+            if (params.time_limit > 0 && elapsed_sec() > params.time_limit)
+            {
+                timed_out = true;
+                break;
+            }
+
+            StateMap *layer = layers[tt];
+            if (!layer || layer->size() == 0)
+                continue;
+
+            if (params.max_states > 0 && (int64_t)layer->size() > params.max_states)
+            {
+                timed_out = true;
+                break;
+            }
+
+            layer->for_each([&](int64_t state, const StateEntry &sv)
+                            {
+            ++states_explored;
+            if (sv.jd <= 0) return;
+            const double cand_rc = sv.cost - sigma;
+            bool better = cand_rc < best_rc - kEps;
+            if (!better && std::fabs(cand_rc - best_rc) <= kEps) {
+                if (early) better = (sv.pen < best_pen) || (sv.pen == best_pen && tt < best_time);
+                else       better = (tt < best_time || best_time < 0);
+            }
+            if (better) {
+                best_rc = cand_rc;
+                best_rc_no_sigma = sv.cost;
+                best_pen = sv.pen;
+                best_time = tt;
+                best_state = state;
+                if (best_rc <= params.cutoff) early_stop = true;
+            } });
+
+            if (early_stop)
+                break;
+            if (tt == T)
+                continue;
+
+            StateMap *nlayer = layers[tt + 1];
+            layer->for_each([&](int64_t state, const StateEntry &sv)
+                            {
+            const double  c0 = sv.cost;
+            const int64_t p0 = sv.pen;
+            const int     uw = sv.rw;
+            const int     jd = sv.jd;
+
+            // If even the most optimistic continuation cannot reach the pricing
+            // cutoff, there is nothing useful below this state.
+            if (c0 + best_extra_lb[static_cast<std::size_t>(tt)] - sigma > params.cutoff + kEps)
+                return;
+
+            // Idle transition
+            {
+                auto idx = nlayer->lookup(state);
+                if (idx < 0) {
+                    nlayer->insert(state, {c0, p0, uw, jd});
+                    if (pmap) pmap->set((int64_t)(tt + 1) * state_bound + state, 0);
+                } else {
+                    StateEntry &prev = nlayer->val_at(idx);
+                    bool better = c0 < prev.cost - kEps;
+                    if (!better && std::fabs(c0 - prev.cost) <= kEps)
+                        better = early ? (p0 < prev.pen) : false;
+                    if (better) {
+                        prev = {c0, p0, uw, jd};
+                        if (pmap) pmap->set((int64_t)(tt + 1) * state_bound + state, 0);
+                    }
+                }
+            }
+
+            // Job transitions
+            int64_t x = state;
+            for (int i = 0; i < K; ++i) {
+                int32_t ui = static_cast<int32_t>(x % c_rad[i]);
+                x /= c_rad[i];
+                if (ui >= c_tot[i]) continue;
+                const int L = c_len[i];
+                const int end = tt + L;
+                if (end > T) continue;
+
+                const int64_t ns = state + c_inc[i];
+                const int nuw = uw + L;
+                const int njd = jd + 1;
+                const double cc = c0 + rate * (pprefix[end] - pprefix[tt]) - rewards[i];
+                const int64_t cp = p0 + (early ? tt : 0);
+
+                StateMap *tlayer = layers[end];
+                auto idx = tlayer->lookup(ns);
+                if (idx < 0) {
+                    tlayer->insert(ns, {cc, cp, nuw, njd});
+                    if (pmap) pmap->set((int64_t)end * state_bound + ns, static_cast<int32_t>(L));
+                } else {
+                    StateEntry &prev = tlayer->val_at(idx);
+                    bool better = cc < prev.cost - kEps;
+                    if (!better && std::fabs(cc - prev.cost) <= kEps)
+                        better = early ? (cp < prev.pen) : false;
+                    if (better) {
+                        prev = {cc, cp, nuw, njd};
+                        if (pmap) pmap->set((int64_t)end * state_bound + ns, static_cast<int32_t>(L));
+                    }
+                }
+            } });
+
+            int freed_t = tt - max_job_len;
+            if (freed_t >= 0 && layers[freed_t])
+            {
+                delete layers[freed_t];
+                layers[freed_t] = nullptr;
+            }
+        }
+
+        std::vector<Segment> segments;
+        if (params.track_schedule && pmap && best_time >= 0)
+        {
+            int cur_t = best_time;
+            int64_t cur_s = best_state;
+            while (cur_s != 0 || cur_t != 0)
+            {
+                int32_t L = pmap->get((int64_t)cur_t * state_bound + cur_s);
+                if (L == -2)
+                    break;
+                if (L > 0)
+                {
+                    segments.push_back({cur_t - L, L});
+                    int64_t x = cur_s;
+                    for (int i = 0; i < K; ++i)
+                    {
+                        int32_t ui = static_cast<int32_t>(x % c_rad[i]);
+                        x /= c_rad[i];
+                        if (c_len[i] == L && ui > 0)
+                        {
+                            cur_s -= c_inc[i];
+                            break;
+                        }
+                    }
+                    cur_t -= L;
+                }
+                else
+                {
+                    cur_t -= 1;
+                }
+            }
+            std::reverse(segments.begin(), segments.end());
+        }
+
+        for (int i = 0; i <= T; ++i)
+        {
+            delete layers[i];
+            layers[i] = nullptr;
+        }
+        delete pmap;
+
+        PricingResult res;
+        res.timed_out = timed_out;
+        res.states_explored = states_explored;
+        if (best_time >= 0 && best_rc < kInf * 0.5)
+        {
+            res.feasible = true;
+            res.negative = best_rc < -1e-9;
+            res.reduced_cost = best_rc;
+            res.reduced_cost_no_sigma = best_rc_no_sigma;
+            res.finish_time = best_time;
+            res.counts = decode_counts(best_state);
+            double reward_sum = 0.0;
+            for (int i = 0; i < K; ++i)
+                reward_sum += rewards[i] * static_cast<double>(res.counts[static_cast<std::size_t>(i)]);
+            res.energy_cost = (best_rc_no_sigma + reward_sum) / rate;
+            res.segments = std::move(segments);
+        }
+        return res;
+    }
+
 } // namespace dp

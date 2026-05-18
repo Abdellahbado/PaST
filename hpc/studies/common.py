@@ -36,6 +36,14 @@ EXTENSION_DATASETS = {
     "backup_realistic": "paperext_backup_realistic_202604",
     "k_boundary": "paperext_k_boundary_202604",
     "k_structure_boundary": "paperext_k_structure_boundary_202604",
+    "profile_nscale_2type": "paperext_profile_repair_nscale_2type_20260407",
+    "profile_nscale_2type_plus": "paperext_profile_repair_nscale_2type_plus_20260408",
+    "profile_lambda_2type": "paperext_profile_repair_lambda_2type_20260407",
+    "profile_ecrepeat_2type": "paperext_profile_repair_ecrepeat_2type_20260407",
+    "profile_smallk_nscale": "paperext_profile_repair_smallk_nscale_20260407",
+    "profile_smallk_nscale_plus": "paperext_profile_repair_smallk_nscale_plus_20260409",
+    "profile_largek_nscale": "paperext_profile_repair_largek_nscale_20260409",
+    "profile_collision_scale": "paperext_profile_repair_collision_scale_20260407",
 }
 
 
@@ -136,6 +144,54 @@ def write_csv(rows: list[dict], path: Path):
         writer.writerows(rows)
 
 
+def _parse_csv_stdout(stdout: str, meta: dict[str, tuple[str, str]]) -> list[dict]:
+    if isinstance(stdout, bytes):
+        stdout = stdout.decode("utf-8", errors="replace")
+    rows = []
+    header = None
+    for line in stdout.strip().splitlines():
+        if not line.strip():
+            continue
+        if header is None:
+            header = line.split(",")
+            continue
+        parts = line.split(",")
+        if len(parts) < len(header):
+            continue
+        row = dict(zip(header, parts))
+        section, dataset = meta.get(row["instance_id"], ("", ""))
+        row["section"] = section
+        row["dataset"] = dataset
+        rows.append(row)
+    return rows
+
+
+def _timeout_rows(
+    batch: list[tuple[str, str, str, dict]],
+    runtime_sec: float,
+    step: str = "outer_timeout",
+) -> list[dict]:
+    rows = []
+    for section, dataset, inst_id, _inst in batch:
+        rows.append(
+            {
+                "instance_id": inst_id,
+                "ub": "",
+                "lb": "",
+                "gap_pct": "",
+                "feasible": "0",
+                "is_optimal": "0",
+                "timed_out": "1",
+                "runtime_sec": f"{runtime_sec:.4f}",
+                "step_reached": step,
+                "winner_detail": step,
+                "section": section,
+                "dataset": dataset,
+            }
+        )
+    return rows
+
+
 def run_ablation_batch(
     batch: list[tuple[str, str, str, dict]],
     solver_path: Path,
@@ -163,34 +219,31 @@ def run_ablation_batch(
     if extra_env:
         env.update(extra_env)
 
-    proc = subprocess.run(
-        [str(solver_path), "ablation-stdin", ab_mode],
-        input="\n".join(lines) + "\n",
-        capture_output=True,
-        text=True,
-        timeout=max(int(time_limit * len(batch) + 300), 7200),
-        env=env,
-    )
+    outer_timeout = max(int((time_limit + 10) * len(batch) + 5), 60)
+    try:
+        proc = subprocess.run(
+            [str(solver_path), "ablation-stdin", ab_mode, str(time_limit)],
+            input="\n".join(lines) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=outer_timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log(
+            f"  Outer timeout ({ab_mode}/{pack_solver}) after {outer_timeout}s on {len(batch)} instance(s)",
+            logfile,
+        )
+        if exc.stdout:
+            rows = _parse_csv_stdout(exc.stdout, meta)
+            seen = {row["instance_id"] for row in rows}
+            missing = [item for item in batch if item[2] not in seen]
+            rows.extend(_timeout_rows(missing, float(outer_timeout)))
+            return rows
+        return _timeout_rows(batch, float(outer_timeout))
     if proc.returncode != 0 and proc.stderr:
         log(f"  Solver stderr ({ab_mode}/{pack_solver}): {proc.stderr[:300]}", logfile)
-
-    rows = []
-    header = None
-    for line in proc.stdout.strip().splitlines():
-        if not line.strip():
-            continue
-        if header is None:
-            header = line.split(",")
-            continue
-        parts = line.split(",")
-        if len(parts) < len(header):
-            continue
-        row = dict(zip(header, parts))
-        section, dataset = meta.get(row["instance_id"], ("", ""))
-        row["section"] = section
-        row["dataset"] = dataset
-        rows.append(row)
-    return rows
+    return _parse_csv_stdout(proc.stdout, meta)
 
 
 def run_relaxation_batch(
@@ -211,33 +264,62 @@ def run_relaxation_batch(
         }
         lines.append(json.dumps(payload))
 
+    outer_timeout = max(int((time_limit + 10) * len(batch) + 5), 60)
     proc = subprocess.run(
         [str(solver_path), "relaxation-stdin", str(time_limit)],
         input="\n".join(lines) + "\n",
         capture_output=True,
         text=True,
-        timeout=max(int(time_limit * len(batch) + 300), 7200),
+        timeout=outer_timeout,
     )
     if proc.returncode != 0 and proc.stderr:
         log(f"  Solver stderr (relaxation study): {proc.stderr[:300]}", logfile)
+    return _parse_csv_stdout(proc.stdout, meta)
 
-    rows = []
-    header = None
-    for line in proc.stdout.strip().splitlines():
-        if not line.strip():
-            continue
-        if header is None:
-            header = line.split(",")
-            continue
-        parts = line.split(",")
-        if len(parts) < len(header):
-            continue
-        row = dict(zip(header, parts))
-        section, dataset = meta.get(row["instance_id"], ("", ""))
-        row["section"] = section
-        row["dataset"] = dataset
-        rows.append(row)
-    return rows
+
+def run_relax_pack_batch(
+    batch: list[tuple[str, str, str, dict]],
+    solver_path: Path,
+    logfile=None,
+) -> list[dict]:
+    lines = []
+    meta = {}
+    for section, dataset, inst_id, inst in batch:
+        meta[inst_id] = (section, dataset)
+        payload = {
+            "instance_id": inst_id,
+            "prices": inst["prices"],
+            "jobs": inst["jobs"],
+            "machine": inst["machine_type"],
+        }
+        lines.append(json.dumps(payload))
+
+    env = os.environ.copy()
+    env["PAST_RELAXED_BINPACK_ALLOW_SMALL_NC"] = "1"
+    env["PAST_RELAXED_BINPACK_NATIVE_FIRST"] = "1"
+
+    outer_timeout = max(int((600 + 10) * len(batch) + 5), 60)
+    try:
+        proc = subprocess.run(
+            [str(solver_path), "relax-pack-stdin"],
+            input="\n".join(lines) + "\n",
+            capture_output=True,
+            text=True,
+            timeout=outer_timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log(f"  Outer timeout (relax-pack) after {outer_timeout}s on {len(batch)} instance(s)", logfile)
+        if exc.stdout:
+            rows = _parse_csv_stdout(exc.stdout, meta)
+            seen = {row["instance_id"] for row in rows}
+            missing = [item for item in batch if item[2] not in seen]
+            rows.extend(_timeout_rows(missing, float(outer_timeout)))
+            return rows
+        return _timeout_rows(batch, float(outer_timeout))
+    if proc.returncode != 0 and proc.stderr:
+        log(f"  Solver stderr (relax-pack): {proc.stderr[:300]}", logfile)
+    return _parse_csv_stdout(proc.stdout, meta)
 
 
 def speedup_report(fast_rows: list[dict], slow_rows: list[dict]) -> tuple[float, float, float]:

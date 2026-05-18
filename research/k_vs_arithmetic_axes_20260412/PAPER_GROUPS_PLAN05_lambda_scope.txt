@@ -1,0 +1,1 @@
+Fallback rule triggered: Phase 2 all-family n<=1000 completed; Phase 3 run on 3 representative groups {1..10}, {3,5,6,7}, {8,10}.

@@ -155,6 +155,29 @@ namespace dp
         double known_ub = -1.0; // known upper bound; -1 = unused
     };
 
+    struct PricingResult
+    {
+        bool feasible = false;              // found a non-empty feasible pattern
+        bool negative = false;              // reduced cost < 0
+        double reduced_cost = kInf;         // includes sigma shift
+        double reduced_cost_no_sigma = kInf;
+        double energy_cost = kInf;          // original single-machine energy cost
+        int finish_time = 0;
+        bool timed_out = false;
+        std::int64_t states_explored = 0;
+        std::vector<int> counts;            // chosen type counts
+        std::vector<Segment> segments;      // empty unless tracked
+    };
+
+    struct PricingParams
+    {
+        double time_limit = -1.0;
+        bool track_schedule = false;
+        int64_t max_states = 0;
+        bool early_tie_break = true;
+        double cutoff = -1e-9;             // stop early if reduced cost reaches this threshold
+    };
+
     // ─────────────────────────────────────────────────────────────────────────────
     //  Main entry point
     //
@@ -169,5 +192,15 @@ namespace dp
         const std::vector<double> &prefix,
         int T,
         const DPParams &params = {});
+
+    PricingResult solve_pricing_dp(
+        const std::vector<int> &lengths,
+        const std::vector<int> &max_counts,
+        const std::vector<double> &prefix,
+        int T,
+        const std::vector<double> &rewards,
+        double rate,
+        double sigma,
+        const PricingParams &params = {});
 
 } // namespace dp

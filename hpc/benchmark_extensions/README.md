@@ -135,3 +135,24 @@ which uses the paper's `Experiments` runner on the formal dataset directory.
   `K`-boundary suites so one hard row does not block an entire subprocess.
 - If an instance exceeds the external subprocess cap, the runner records an
   `external_timeout` row and continues instead of aborting the whole suite.
+
+## Transition Policy Study
+
+The clean transition question
+
+- `semi -> exact fixed-block certifier -> guided exact`
+- versus
+- `semi -> exact fixed-block certifier -> feasible -> exact fixed-block certifier -> guided exact`
+
+is handled by:
+
+```bash
+bash hpc/run_policy_transition_study.sh
+bash hpc/benchmark_extensions/09_run_policy_transition.sh
+```
+
+This study reuses the saved benchmark-extension suites and writes results to:
+
+```text
+hpc/results_studies/policy_transition/
+```
